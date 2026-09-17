@@ -1,0 +1,6 @@
+{
+  "name": "ROFANI ELECTRONICS AND BOUTIQUE",
+  "description": "Comprehensive point of sale, inventory tracking, worker sales commission engine, financing & cash in/out management, attendance, expenses, and PDF reports system.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

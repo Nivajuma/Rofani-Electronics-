@@ -1,0 +1,162 @@
+{
+  "entities": {
+    "Product": {
+      "title": "Product",
+      "description": "Retail product inventory item shared across store devices",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 200 },
+        "sku": { "type": "string", "maxLength": 64 },
+        "barcode": { "type": "string", "maxLength": 64 },
+        "category": { "type": "string", "maxLength": 100 },
+        "subcategory": { "type": "string", "maxLength": 100 },
+        "sizeCapacity": { "type": "string", "maxLength": 100 },
+        "description": { "type": "string", "maxLength": 1000 },
+        "costPrice": { "type": "number" },
+        "sellingPrice": { "type": "number" },
+        "stockQuantity": { "type": "number" },
+        "minStockAlert": { "type": "number" },
+        "unit": { "type": "string", "maxLength": 50 },
+        "supplierId": { "type": "string", "maxLength": 128 },
+        "supplierName": { "type": "string", "maxLength": 200 },
+        "imageUrl": { "type": "string", "maxLength": 5000 },
+        "storeStock": { "type": "object" },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "name", "sellingPrice", "stockQuantity"]
+    },
+    "Transaction": {
+      "title": "Transaction",
+      "description": "Completed or partial sales orders and receipts",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "receiptNumber": { "type": "string", "maxLength": 64 },
+        "date": { "type": "string", "maxLength": 64 },
+        "items": { "type": "array" },
+        "subtotal": { "type": "number" },
+        "discountTotal": { "type": "number" },
+        "taxTotal": { "type": "number" },
+        "grandTotal": { "type": "number" },
+        "amountPaid": { "type": "number" },
+        "balanceDue": { "type": "number" },
+        "paymentStatus": { "type": "string", "maxLength": 30 },
+        "payments": { "type": "array" },
+        "customerId": { "type": "string", "maxLength": 128 },
+        "customerName": { "type": "string", "maxLength": 200 },
+        "customerPhone": { "type": "string", "maxLength": 50 },
+        "cashierName": { "type": "string", "maxLength": 200 },
+        "cashierId": { "type": "string", "maxLength": 128 },
+        "storeId": { "type": "string", "maxLength": 128 },
+        "storeName": { "type": "string", "maxLength": 200 },
+        "notes": { "type": "string", "maxLength": 1000 }
+      },
+      "required": ["id", "receiptNumber", "grandTotal", "cashierName"]
+    },
+    "Customer": {
+      "title": "Customer",
+      "description": "Retail customer record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 200 },
+        "phone": { "type": "string", "maxLength": 50 },
+        "email": { "type": "string", "maxLength": 200 },
+        "address": { "type": "string", "maxLength": 300 },
+        "totalPurchases": { "type": "number" },
+        "currentBalanceDue": { "type": "number" }
+      },
+      "required": ["id", "name", "phone"]
+    },
+    "Supplier": {
+      "title": "Supplier",
+      "description": "Supplier contact and order record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 200 },
+        "contactPerson": { "type": "string", "maxLength": 200 },
+        "phone": { "type": "string", "maxLength": 50 },
+        "email": { "type": "string", "maxLength": 200 },
+        "address": { "type": "string", "maxLength": 300 },
+        "totalSuppliedValue": { "type": "number" },
+        "currentBalanceDue": { "type": "number" }
+      },
+      "required": ["id", "name", "phone"]
+    },
+    "Expense": {
+      "title": "Expense",
+      "description": "Operating and store expense entry",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "date": { "type": "string", "maxLength": 64 },
+        "category": { "type": "string", "maxLength": 100 },
+        "description": { "type": "string", "maxLength": 500 },
+        "amount": { "type": "number" },
+        "paymentMethod": { "type": "string", "maxLength": 50 },
+        "recordedBy": { "type": "string", "maxLength": 200 }
+      },
+      "required": ["id", "date", "category", "amount", "recordedBy"]
+    },
+    "RestockRecord": {
+      "title": "RestockRecord",
+      "description": "Stock addition audit trail",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "productId": { "type": "string", "maxLength": 128 },
+        "productName": { "type": "string", "maxLength": 200 },
+        "quantityAdded": { "type": "number" },
+        "unitCost": { "type": "number" },
+        "totalCost": { "type": "number" },
+        "supplierName": { "type": "string", "maxLength": 200 },
+        "date": { "type": "string", "maxLength": 64 },
+        "receivedBy": { "type": "string", "maxLength": 200 }
+      },
+      "required": ["id", "productId", "quantityAdded", "totalCost"]
+    },
+    "SyncMetadata": {
+      "title": "SyncMetadata",
+      "description": "Store sync heartbeat and status",
+      "type": "object",
+      "properties": {
+        "lastSyncedAt": { "type": "string", "maxLength": 64 },
+        "itemCount": { "type": "number" },
+        "syncedBy": { "type": "string", "maxLength": 200 }
+      }
+    }
+  },
+  "firestore": {
+    "/products/{productId}": {
+      "schema": "Product",
+      "description": "Store product catalog synced live across all cashier mobile devices"
+    },
+    "/transactions/{transactionId}": {
+      "schema": "Transaction",
+      "description": "Completed point of sale transactions and receipts across all devices"
+    },
+    "/customers/{customerId}": {
+      "schema": "Customer",
+      "description": "Shared customer contact book and credit debts"
+    },
+    "/suppliers/{supplierId}": {
+      "schema": "Supplier",
+      "description": "Shared vendor list and payables"
+    },
+    "/expenses/{expenseId}": {
+      "schema": "Expense",
+      "description": "Store expenses recorded by staff"
+    },
+    "/restock_records/{recordId}": {
+      "schema": "RestockRecord",
+      "description": "Live stock replenishment logs"
+    },
+    "/meta/sync": {
+      "schema": "SyncMetadata",
+      "description": "Sync heartbeat check"
+    }
+  }
+}

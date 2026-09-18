@@ -23,7 +23,9 @@ import {
   Maximize2,
   ChevronUp,
   Users,
-  Plus
+  Plus,
+  Cloud,
+  RefreshCw
 } from 'lucide-react';
 import { User } from '../types';
 
@@ -43,6 +45,8 @@ interface PhoneDeviceFrameProps {
   onLockTerminal: () => void;
   onOpenStaffModal: () => void;
   onNewSale?: () => void;
+  onOpenCloudSync?: () => void;
+  cloudSyncStatus?: 'synced' | 'syncing' | 'offline' | 'error';
 }
 
 export const PhoneDeviceFrame: React.FC<PhoneDeviceFrameProps> = ({
@@ -61,6 +65,8 @@ export const PhoneDeviceFrame: React.FC<PhoneDeviceFrameProps> = ({
   onLockTerminal,
   onOpenStaffModal,
   onNewSale,
+  onOpenCloudSync,
+  cloudSyncStatus = 'synced',
 }) => {
   const [showMobileMoreMenu, setShowMobileMoreMenu] = useState(false);
   const [currentTime, setCurrentTime] = useState('09:41');
@@ -232,6 +238,18 @@ export const PhoneDeviceFrame: React.FC<PhoneDeviceFrameProps> = ({
           </div>
 
           <div className="flex items-center gap-1.5 shrink-0">
+            {/* Real-Time Cloud Sync Indicator */}
+            {onOpenCloudSync && (
+              <button
+                onClick={onOpenCloudSync}
+                className="p-1.5 bg-sky-950/80 hover:bg-sky-900 border border-sky-800/80 text-sky-300 rounded-lg text-[10px] font-bold flex items-center gap-1 shadow-sm"
+                title="Live Cloud Sync: Connected across all worker phones"
+              >
+                <Cloud className="w-3.5 h-3.5 text-sky-400" />
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              </button>
+            )}
+
             {/* Direct New Sale Button in Mobile Header */}
             <button
               id="btn-mobile-new-sale"
@@ -352,6 +370,24 @@ export const PhoneDeviceFrame: React.FC<PhoneDeviceFrameProps> = ({
                 <Settings className="w-4 h-4 text-purple-400" />
                 <span>KRA Settings</span>
               </button>
+
+              {onOpenCloudSync && (
+                <button
+                  onClick={() => {
+                    onOpenCloudSync();
+                    setShowMobileMoreMenu(false);
+                  }}
+                  className="col-span-2 p-2.5 rounded-xl border border-sky-700/60 bg-gradient-to-r from-sky-950 to-blue-950 text-sky-200 flex items-center justify-between font-bold"
+                >
+                  <div className="flex items-center gap-2">
+                    <Cloud className="w-4 h-4 text-sky-400" />
+                    <span>Real-Time Cloud Phone Sync</span>
+                  </div>
+                  <span className="text-[9px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-2 py-0.5 rounded-full font-mono">
+                    Multi-Device Active
+                  </span>
+                </button>
+              )}
             </div>
 
             <div className="pt-2 border-t border-slate-800 flex items-center justify-between text-[11px] text-slate-400">

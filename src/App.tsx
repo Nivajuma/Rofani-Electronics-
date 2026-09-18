@@ -33,7 +33,9 @@ import {
   Globe,
   Building2,
   Tag,
-  Plus
+  Plus,
+  Cloud,
+  RefreshCw
 } from 'lucide-react';
 import {
   Product,
@@ -98,6 +100,24 @@ import { OnlineOrdersManagerView } from './components/OnlineStore/OnlineOrdersMa
 import { CustomersSuppliersView } from './components/Contacts/CustomersSuppliersView';
 import { AIAssistantModal } from './components/AI/AIAssistantModal';
 import { AIAssistantWidget } from './components/AI/AIAssistantWidget';
+import { CloudSyncModal } from './components/CloudSync/CloudSyncModal';
+import {
+  subscribeToProducts,
+  saveProductToCloud,
+  deleteProductFromCloud,
+  bulkUploadProductsToCloud,
+  subscribeToTransactions,
+  saveTransactionToCloud,
+  subscribeToCustomers,
+  saveCustomerToCloud,
+  subscribeToSuppliers,
+  saveSupplierToCloud,
+  subscribeToExpenses,
+  saveExpenseToCloud,
+  subscribeToRestockRecords,
+  saveRestockRecordToCloud,
+} from './lib/cloudSync';
+import { testFirestoreConnection } from './lib/firebase';
 import { safeGetJSON, safeSetJSON } from './utils/safeStorage';
 import {
   getAllProductImagesFromIndexedDB,
@@ -148,6 +168,9 @@ export default function App() {
   const [isTerminalLocked, setIsTerminalLocked] = useState(false);
   const [showStaffModal, setShowStaffModal] = useState(false);
   const [showInstallModal, setShowInstallModal] = useState(false);
+  const [showCloudSyncModal, setShowCloudSyncModal] = useState(false);
+  const [cloudSyncStatus, setCloudSyncStatus] = useState<'synced' | 'syncing' | 'offline' | 'error'>('syncing');
+  const [lastSyncedTime, setLastSyncedTime] = useState<string | null>(null);
 
   // Application Persistent Collections State with localStorage sync
   const [products, setProducts] = useState<Product[]>(() => safeGetJSON('retail_pos_products', INITIAL_PRODUCTS));
@@ -360,6 +383,115 @@ export default function App() {
     safeSetJSON('retail_pos_active_user', currentUser);
   }, [currentUser]);
 
+  // Real-Time Firebase Firestore Cloud Synchronization Across All Mobile Phones & Devices
+  useEffect(() => {
+    let active = true;
+
+    // Test connection first
+    testFirestoreConnection().then((connected) => {
+      if (!active) return;
+      if (connected) {
+        setCloudSyncStatus('synced');
+        setLastSyncedTime(new Date().toLocaleTimeString());
+      } else {
+        setCloudSyncStatus('offline');
+      }
+    });
+
+    // 1. Subscribe to Products
+    const unsubProducts = subscribeToProducts(
+      (cloudProducts) => {
+        if (!active) return;
+        if (cloudProducts && cloudProducts.length > 0) {
+          setProducts(cloudProducts);
+        }
+        setCloudSyncStatus('synced');
+        setLastSyncedTime(new Date().toLocaleTimeString());
+      },
+      (error) => {
+        console.warn('Realtime product sync listener notice:', error.message);
+        if (active) setCloudSyncStatus('offline');
+      }
+    );
+
+    // 2. Subscribe to Transactions (Sales & Invoices)
+    const unsubTransactions = subscribeToTransactions(
+      (cloudTransactions) => {
+        if (!active) return;
+        if (cloudTransactions && cloudTransactions.length > 0) {
+          setTransactions(cloudTransactions);
+        }
+        setCloudSyncStatus('synced');
+        setLastSyncedTime(new Date().toLocaleTimeString());
+      },
+      (error) => {
+        console.warn('Realtime transaction sync notice:', error.message);
+      }
+    );
+
+    // 3. Subscribe to Customers
+    const unsubCustomers = subscribeToCustomers(
+      (cloudCustomers) => {
+        if (!active) return;
+        if (cloudCustomers && cloudCustomers.length > 0) {
+          setCustomers(cloudCustomers);
+        }
+      },
+      (error) => {
+        console.warn('Realtime customer sync notice:', error.message);
+      }
+    );
+
+    // 4. Subscribe to Suppliers
+    const unsubSuppliers = subscribeToSuppliers(
+      (cloudSuppliers) => {
+        if (!active) return;
+        if (cloudSuppliers && cloudSuppliers.length > 0) {
+          setSuppliers(cloudSuppliers);
+        }
+      },
+      (error) => {
+        console.warn('Realtime supplier sync notice:', error.message);
+      }
+    );
+
+    // 5. Subscribe to Expenses
+    const unsubExpenses = subscribeToExpenses(
+      (cloudExpenses) => {
+        if (!active) return;
+        if (cloudExpenses && cloudExpenses.length > 0) {
+          setExpenses(cloudExpenses);
+        }
+      },
+      (error) => {
+        console.warn('Realtime expense sync notice:', error.message);
+      }
+    );
+
+    // 6. Subscribe to Restock Records
+    const unsubRestock = subscribeToRestockRecords(
+      (cloudRestock) => {
+        if (!active) return;
+        if (cloudRestock && cloudRestock.length > 0) {
+          setRestockRecords(cloudRestock);
+        }
+      },
+      (error) => {
+        console.warn('Realtime restock sync notice:', error.message);
+      }
+    );
+
+    return () => {
+      active = false;
+      unsubProducts();
+      unsubTransactions();
+      unsubCustomers();
+      unsubSuppliers();
+      unsubExpenses();
+      unsubRestock();
+    };
+  }, []);
+
   // Barcode Scanner Activity & Staff Scans Audit Log State
   const [scanLogs, setScanLogs] = useState<BarcodeScanLog[]>(() =>
     safeGetJSON('retail_pos_barcode_scan_logs', INITIAL_BARCODE_SCAN_LOGS)
@@ -505,10 +637,16 @@ export default function App() {
     setTransactions((prev) => [tx, ...prev]);
     setProducts(updatedProducts);
     setCustomers(updatedCustomers);
+
+    // Real-Time Cloud Sync to Firestore for all connected worker mobile devices
+    saveTransactionToCloud(tx);
+    updatedProducts.forEach((p) => saveProductToCloud(p));
+    updatedCustomers.forEach((c) => saveCustomerToCloud(c));
   };
 
   const handleAddCustomer = (newCust: Customer) => {
     setCustomers((prev) => [...prev, newCust]);
+    saveCustomerToCloud(newCust);
   };
 
   const handleSaveCustomer = (cust: Customer) => {
@@ -521,6 +659,7 @@ export default function App() {
       }
       return [cust, ...prev];
     });
+    saveCustomerToCloud(cust);
   };
 
   const handleDeleteCustomer = (customerId: string) => {
@@ -537,6 +676,7 @@ export default function App() {
       }
       return [...prev, sup];
     });
+    saveSupplierToCloud(sup);
   };
 
   const handleDeleteSupplier = (supplierId: string) => {
@@ -657,6 +797,9 @@ export default function App() {
       }
       return [prod, ...prev];
     });
+
+    // Real-Time Cloud Sync to Firestore
+    saveProductToCloud(prod);
   };
 
   const handleBatchImportProducts = (importedProducts: Product[], replaceExisting: boolean) => {
@@ -679,11 +822,15 @@ export default function App() {
         return [...newUnique, ...prev];
       });
     }
+
+    // Sync imported products to Firestore cloud catalog
+    bulkUploadProductsToCloud(importedProducts);
   };
 
   const handleDeleteProduct = (productId: string) => {
     deleteProductImageFromIndexedDB(productId);
     setProducts((prev) => prev.filter((p) => p.id !== productId));
+    deleteProductFromCloud(productId);
   };
 
   const handleAddRestockRecord = (
@@ -715,20 +862,19 @@ export default function App() {
     };
 
     setRestockRecords((prev) => [newRestock, ...prev]);
+    saveRestockRecordToCloud(newRestock);
+
+    const updatedProd: Product = {
+      ...prod,
+      stockQuantity: prod.stockQuantity + quantityAdded,
+      costPrice: unitCost,
+      updatedAt: new Date().toISOString().slice(0, 10)
+    };
 
     setProducts((prev) =>
-      prev.map((p) => {
-        if (p.id === productId) {
-          return {
-            ...p,
-            stockQuantity: p.stockQuantity + quantityAdded,
-            costPrice: unitCost,
-            updatedAt: new Date().toISOString().slice(0, 10)
-          };
-        }
-        return p;
-      })
+      prev.map((p) => (p.id === productId ? updatedProd : p))
     );
+    saveProductToCloud(updatedProd);
 
     const restockExp: Expense = {
       id: `exp-rst-${Date.now()}`,
@@ -743,14 +889,17 @@ export default function App() {
       status: 'Paid'
     };
     setExpenses((prev) => [restockExp, ...prev]);
+    saveExpenseToCloud(restockExp);
   };
 
   const handleApplyStockAdjustment = (updatedProducts: Product[], _audit: StockCountAudit) => {
     setProducts(updatedProducts);
+    updatedProducts.forEach((p) => saveProductToCloud(p));
   };
 
   const handleAddExpense = (exp: Expense) => {
     setExpenses((prev) => [exp, ...prev]);
+    saveExpenseToCloud(exp);
   };
 
   const handleDeleteExpense = (expId: string) => {
@@ -1305,6 +1454,7 @@ export default function App() {
           onChangeFontScale={setFontScale}
           isSidebarCollapsed={isSidebarCollapsed}
           onToggleSidebar={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+          onOpenCloudSync={() => setShowCloudSyncModal(true)}
         />
       )}
     </>
@@ -1334,11 +1484,25 @@ export default function App() {
           onLockTerminal={() => setIsTerminalLocked(true)}
           onOpenStaffModal={() => setShowStaffModal(true)}
           onNewSale={handleGlobalNewSale}
+          onOpenCloudSync={() => setShowCloudSyncModal(true)}
+          cloudSyncStatus={cloudSyncStatus}
         >
           {renderActiveTabContent()}
         </PhoneDeviceFrame>
 
         {/* Modals in Phone Format Mode */}
+        <CloudSyncModal
+          isOpen={showCloudSyncModal}
+          onClose={() => setShowCloudSyncModal(false)}
+          products={products}
+          cloudSyncStatus={cloudSyncStatus}
+          lastSyncedTime={lastSyncedTime}
+          onSyncCatalogComplete={() => {
+            setCloudSyncStatus('synced');
+            setLastSyncedTime(new Date().toLocaleTimeString());
+          }}
+        />
+
         <PinLoginModal
           isOpen={isTerminalLocked}
           users={allUsers}
@@ -1653,6 +1817,24 @@ export default function App() {
             </div>
           </button>
 
+          {/* Cloud Sync & Multi-Phone Share Button in Sidebar */}
+          <button
+            onClick={() => setShowCloudSyncModal(true)}
+            title="Real-Time Cloud Synchronization & Multi-Phone Share"
+            className={`w-full flex items-center ${isSidebarCollapsed ? 'justify-center px-2' : 'justify-between px-3'} py-2.5 rounded-lg transition bg-gradient-to-r from-sky-950/80 to-blue-950/80 text-sky-200 border border-sky-800/60 hover:border-sky-500 hover:text-white shadow-sm`}
+          >
+            <div className="flex items-center gap-3">
+              <Cloud className="w-4 h-4 opacity-90 shrink-0 text-sky-400" />
+              {!isSidebarCollapsed && <span>Cloud Sync & Share</span>}
+            </div>
+            {!isSidebarCollapsed && (
+              <span className="text-[9px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-1.5 py-0.5 rounded-full font-mono flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                Live
+              </span>
+            )}
+          </button>
+
           {/* AI Worker Assistant & Onboarding Button */}
           <button
             onClick={() => setShowAiAssistantModal(true)}
@@ -1807,6 +1989,17 @@ export default function App() {
               <Plus className="w-4 h-4" />
               <ShoppingBag className="w-3.5 h-3.5" />
               <span>New Sale</span>
+            </button>
+
+            {/* Cloud Sync & Share Across Mobile Phones Button in Top Header */}
+            <button
+              onClick={() => setShowCloudSyncModal(true)}
+              title="Real-Time Cloud Synchronization & Share with Worker Mobile Phones"
+              className="px-3 py-2 bg-sky-50 hover:bg-sky-100 text-sky-800 rounded-xl border border-sky-200 transition flex items-center gap-1.5 text-xs font-bold shadow-sm"
+            >
+              <Cloud className="w-4 h-4 text-sky-600" />
+              <span className="hidden sm:inline">Cloud Sync & Share</span>
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" title="Cloud connection active" />
             </button>
 
             {/* AI Worker Assistant Button */}
@@ -1991,6 +2184,19 @@ export default function App() {
       <InstallPwaModal
         isOpen={showInstallModal}
         onClose={() => setShowInstallModal(false)}
+      />
+
+      {/* Cloud Sync & Real-Time Worker Phone Sharing Modal */}
+      <CloudSyncModal
+        isOpen={showCloudSyncModal}
+        onClose={() => setShowCloudSyncModal(false)}
+        products={products}
+        cloudSyncStatus={cloudSyncStatus}
+        lastSyncedTime={lastSyncedTime}
+        onSyncCatalogComplete={() => {
+          setCloudSyncStatus('synced');
+          setLastSyncedTime(new Date().toLocaleTimeString());
+        }}
       />
 
       {/* Multi-Store Branch Outlets & Inter-Store Stock Transfer Manager Modal */}

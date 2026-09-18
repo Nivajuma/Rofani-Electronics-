@@ -1,0 +1,79 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions for zero-trust data safety
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128;
+    }
+
+    // Products collection: All store staff devices read and sync products in real-time
+    match /products/{productId} {
+      allow get: if isValidId(productId);
+      allow list: if true;
+      allow create, update: if isValidId(productId)
+        && request.resource.data.name is string && request.resource.data.name.size() <= 200
+        && request.resource.data.sellingPrice is number
+        && request.resource.data.stockQuantity is number;
+      allow delete: if isValidId(productId);
+    }
+
+    // Transactions collection: Cashier sales receipts
+    match /transactions/{transactionId} {
+      allow get: if isValidId(transactionId);
+      allow list: if true;
+      allow create, update: if isValidId(transactionId)
+        && request.resource.data.grandTotal is number;
+      allow delete: if isValidId(transactionId);
+    }
+
+    // Customers collection
+    match /customers/{customerId} {
+      allow get: if isValidId(customerId);
+      allow list: if true;
+      allow create, update: if isValidId(customerId)
+        && request.resource.data.name is string && request.resource.data.name.size() <= 200;
+      allow delete: if isValidId(customerId);
+    }
+
+    // Suppliers collection
+    match /suppliers/{supplierId} {
+      allow get: if isValidId(supplierId);
+      allow list: if true;
+      allow create, update: if isValidId(supplierId)
+        && request.resource.data.name is string && request.resource.data.name.size() <= 200;
+      allow delete: if isValidId(supplierId);
+    }
+
+    // Expenses collection
+    match /expenses/{expenseId} {
+      allow get: if isValidId(expenseId);
+      allow list: if true;
+      allow create, update: if isValidId(expenseId)
+        && request.resource.data.amount is number;
+      allow delete: if isValidId(expenseId);
+    }
+
+    // Restock Records collection
+    match /restock_records/{recordId} {
+      allow get: if isValidId(recordId);
+      allow list: if true;
+      allow create, update: if isValidId(recordId)
+        && request.resource.data.quantityAdded is number;
+      allow delete: if isValidId(recordId);
+    }
+
+    // Meta collection for connection health checks
+    match /meta/{docId} {
+      allow get: if isValidId(docId);
+      allow list: if true;
+      allow write: if isValidId(docId);
+    }
+
+    match /test/{docId} {
+      allow get: if isValidId(docId);
+      allow list: if true;
+      allow write: if isValidId(docId);
+    }
+  }
+}

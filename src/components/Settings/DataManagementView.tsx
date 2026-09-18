@@ -24,7 +24,9 @@ import {
   PanelLeftClose,
   Maximize2,
   ExternalLink,
-  Sparkles
+  Sparkles,
+  Cloud,
+  Share2
 } from 'lucide-react';
 import { Product, Customer, Supplier, Transaction, Expense, AttendanceRecord, User } from '../../types';
 import { detectDuplicateProducts, deduplicateProducts } from '../../utils/deduplicate';
@@ -48,6 +50,7 @@ interface DataManagementViewProps {
   onChangeFontScale?: (scale: 'normal' | 'large') => void;
   isSidebarCollapsed?: boolean;
   onToggleSidebar?: () => void;
+  onOpenCloudSync?: () => void;
 }
 
 export const DataManagementView: React.FC<DataManagementViewProps> = ({
@@ -69,6 +72,7 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
   onChangeFontScale,
   isSidebarCollapsed = false,
   onToggleSidebar,
+  onOpenCloudSync,
 }) => {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -249,6 +253,38 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
           <span>{successMessage}</span>
         </div>
       )}
+
+      {/* Real-Time Cloud Synchronization & Worker Phone Sharing Highlight Card */}
+      <div className="bg-gradient-to-r from-sky-900/90 via-blue-900/90 to-indigo-900/90 border border-sky-500/40 rounded-2xl p-5 text-white shadow-lg flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+        <div className="flex items-start gap-3.5">
+          <div className="w-12 h-12 bg-sky-500/20 text-sky-300 rounded-xl flex items-center justify-center border border-sky-400/40 shrink-0">
+            <Cloud className="w-6 h-6 animate-pulse" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <h3 className="font-bold text-base text-white">Live Multi-Phone Cloud Synchronization</h3>
+              <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-[10px] px-2 py-0.5 rounded-full font-mono font-bold flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                Firebase Realtime Active
+              </span>
+            </div>
+            <p className="text-xs text-sky-200 mt-1 max-w-2xl">
+              All inventory, prices, sales, and stock counts automatically sync in real-time across every worker's phone or computer. Share the app URL or QR code with staff to keep everyone in sync.
+            </p>
+          </div>
+        </div>
+
+        {onOpenCloudSync && (
+          <button
+            type="button"
+            onClick={onOpenCloudSync}
+            className="px-4 py-2.5 bg-sky-500 hover:bg-sky-400 active:scale-95 text-slate-950 font-bold rounded-xl text-xs flex items-center gap-2 shadow-md transition shrink-0"
+          >
+            <Share2 className="w-4 h-4" />
+            <span>Open Sync & Share Hub</span>
+          </button>
+        )}
+      </div>
 
       {errorMessage && (
         <div className="bg-rose-900/60 border border-rose-500/50 text-rose-200 text-xs p-3.5 rounded-xl flex items-center justify-between font-medium">

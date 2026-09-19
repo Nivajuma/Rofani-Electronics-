@@ -136,7 +136,14 @@ export default function App() {
   const [fontScale, setFontScale] = useState<'normal' | 'large'>('normal');
 
   // Format Switcher State (Computer / Desktop vs Mobile Phone Frame)
-  const [deviceFormat, setDeviceFormat] = useState<'computer' | 'phone'>('computer');
+  const [deviceFormat, setDeviceFormat] = useState<'computer' | 'phone'>(() =>
+    safeGetJSON('retail_pos_device_format', 'computer')
+  );
+
+  useEffect(() => {
+    safeSetJSON('retail_pos_device_format', deviceFormat);
+  }, [deviceFormat]);
+
   const [phoneOrientation, setPhoneOrientation] = useState<'portrait' | 'landscape'>('portrait');
   const [phoneModel, setPhoneModel] = useState<'iphone15pro' | 'galaxyS24' | 'pixel8'>('iphone15pro');
 
@@ -1455,6 +1462,8 @@ export default function App() {
           isSidebarCollapsed={isSidebarCollapsed}
           onToggleSidebar={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
           onOpenCloudSync={() => setShowCloudSyncModal(true)}
+          deviceFormat={deviceFormat}
+          onChangeDeviceFormat={setDeviceFormat}
         />
       )}
     </>

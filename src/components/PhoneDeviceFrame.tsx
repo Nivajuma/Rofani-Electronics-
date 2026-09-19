@@ -89,28 +89,29 @@ export const PhoneDeviceFrame: React.FC<PhoneDeviceFrameProps> = ({
 
   const getFrameDimensions = () => {
     if (phoneModel === 'galaxyS24') {
-      return isLandscape ? 'w-[840px] h-[400px]' : 'w-[400px] h-[820px]';
+      return isLandscape ? 'w-[840px] max-w-[96vw] h-[400px] max-h-[85vh]' : 'w-[400px] max-w-[96vw] h-[820px] max-h-[85vh]';
     }
     if (phoneModel === 'pixel8') {
-      return isLandscape ? 'w-[820px] h-[390px]' : 'w-[390px] h-[800px]';
+      return isLandscape ? 'w-[820px] max-w-[96vw] h-[390px] max-h-[85vh]' : 'w-[390px] max-w-[96vw] h-[800px] max-h-[85vh]';
     }
     // Default iPhone 15 Pro
-    return isLandscape ? 'w-[860px] h-[420px]' : 'w-[420px] h-[850px]';
+    return isLandscape ? 'w-[860px] max-w-[96vw] h-[420px] max-h-[85vh]' : 'w-[420px] max-w-[96vw] h-[850px] max-h-[85vh]';
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col items-center py-4 px-2 sm:px-4 overflow-x-hidden selection:bg-blue-600 selection:text-white">
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col items-center py-4 px-2 sm:px-4 overflow-x-hidden selection:bg-blue-600 selection:text-white relative">
       {/* TOP CONTROL BAR TO SWITCH BETWEEN COMPUTER & MOBILE FORMAT */}
-      <div className="w-full max-w-5xl bg-slate-900 border border-slate-800 rounded-2xl p-3 mb-4 shadow-2xl flex flex-wrap items-center justify-between gap-3 shrink-0">
+      <div className="sticky top-2 z-50 w-full max-w-5xl bg-slate-900/95 backdrop-blur-md border border-slate-700/80 rounded-2xl p-3 mb-4 shadow-2xl flex flex-wrap items-center justify-between gap-3 shrink-0">
         <div className="flex items-center gap-3">
           <div className="flex items-center bg-slate-950 border border-slate-800 p-1 rounded-xl">
             <button
               onClick={onSwitchToComputer}
-              className="px-3 py-1.5 rounded-lg text-xs font-extrabold text-slate-400 hover:text-slate-200 transition flex items-center gap-1.5"
+              className="px-3.5 py-1.5 rounded-lg text-xs font-black text-slate-300 hover:text-white hover:bg-slate-800 transition flex items-center gap-1.5 cursor-pointer"
+              title="Switch to Full Computer Format (Widescreen Desktop)"
             >
               <Monitor className="w-4 h-4 text-blue-400" />
               <span className="hidden sm:inline">Computer Format (Desktop)</span>
-              <span className="sm:hidden">Computer</span>
+              <span className="sm:hidden">Full PC View</span>
             </button>
             <button
               className="px-3 py-1.5 rounded-lg text-xs font-extrabold bg-blue-600 text-white shadow-md flex items-center gap-1.5"
@@ -179,12 +180,14 @@ export const PhoneDeviceFrame: React.FC<PhoneDeviceFrameProps> = ({
             <Lock className="w-4 h-4" />
           </button>
 
-          {/* Exit Mobile Preview */}
+          {/* Exit Mobile Preview: Switch to Full Version */}
           <button
+            id="btn-top-switch-to-computer"
             onClick={onSwitchToComputer}
-            className="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded-xl text-xs font-extrabold transition flex items-center gap-1 shadow-md shadow-blue-600/20"
+            className="bg-blue-600 hover:bg-blue-500 text-white px-3.5 py-1.5 rounded-xl text-xs font-black transition flex items-center gap-1.5 shadow-md shadow-blue-600/30 cursor-pointer active:scale-95"
+            title="Switch to Full Computer Format (Widescreen Desktop)"
           >
-            <Monitor className="w-3.5 h-3.5" />
+            <Monitor className="w-4 h-4" />
             <span>Full PC View</span>
           </button>
         </div>
@@ -242,13 +245,24 @@ export const PhoneDeviceFrame: React.FC<PhoneDeviceFrameProps> = ({
             {onOpenCloudSync && (
               <button
                 onClick={onOpenCloudSync}
-                className="p-1.5 bg-sky-950/80 hover:bg-sky-900 border border-sky-800/80 text-sky-300 rounded-lg text-[10px] font-bold flex items-center gap-1 shadow-sm"
+                className="p-1.5 bg-sky-950/80 hover:bg-sky-900 border border-sky-800/80 text-sky-300 rounded-lg text-[10px] font-bold flex items-center gap-1 shadow-sm cursor-pointer"
                 title="Live Cloud Sync: Connected across all worker phones"
               >
                 <Cloud className="w-3.5 h-3.5 text-sky-400" />
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
               </button>
             )}
+
+            {/* Direct Switch to Full PC Version Button in Mobile Header */}
+            <button
+              id="btn-header-switch-to-computer"
+              onClick={onSwitchToComputer}
+              className="px-2 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-[10px] font-black flex items-center gap-1 shadow-sm active:scale-95 transition cursor-pointer"
+              title="Switch to Full Version (Computer / Desktop View)"
+            >
+              <Monitor className="w-3 h-3 text-blue-100" />
+              <span className="hidden xs:inline">Full PC</span>
+            </button>
 
             {/* Direct New Sale Button in Mobile Header */}
             <button
@@ -284,7 +298,7 @@ export const PhoneDeviceFrame: React.FC<PhoneDeviceFrameProps> = ({
 
             <button
               onClick={() => setShowMobileMoreMenu(!showMobileMoreMenu)}
-              className="p-1.5 bg-slate-800 text-slate-300 hover:text-white rounded-lg border border-slate-700"
+              className="p-1.5 bg-slate-800 text-slate-300 hover:text-white rounded-lg border border-slate-700 cursor-pointer"
               title="Mobile Quick Menu"
             >
               {showMobileMoreMenu ? <X className="w-4 h-4 text-rose-400" /> : <Menu className="w-4 h-4" />}
@@ -295,6 +309,34 @@ export const PhoneDeviceFrame: React.FC<PhoneDeviceFrameProps> = ({
         {/* MOBILE EXPANDED DROPDOWN MENU */}
         {showMobileMoreMenu && (
           <div className="bg-slate-900 border-b border-slate-800 p-3 space-y-2 text-xs shrink-0 z-40 animate-in slide-in-from-top duration-200">
+            {/* Primary Switch to Full Version Button inside Mobile Menu */}
+            <button
+              id="btn-menu-switch-to-full"
+              onClick={() => {
+                onSwitchToComputer();
+                setShowMobileMoreMenu(false);
+              }}
+              className="w-full p-2.5 rounded-xl border border-blue-500/70 bg-gradient-to-r from-blue-900 via-indigo-950 to-blue-950 text-white flex items-center justify-between font-bold shadow-md hover:border-blue-400 transition group active:scale-[0.99] cursor-pointer"
+            >
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center text-white shadow-sm shrink-0">
+                  <Monitor className="w-4 h-4" />
+                </div>
+                <div className="text-left">
+                  <div className="text-xs font-black text-white flex items-center gap-1.5">
+                    <span>Switch to Full Version</span>
+                    <span className="text-[9px] bg-blue-500/30 text-blue-200 border border-blue-400/40 px-1.5 py-0.2 rounded font-mono">
+                      Desktop View
+                    </span>
+                  </div>
+                  <div className="text-[10px] text-blue-200/80 font-normal">
+                    Open complete widescreen layout without phone frame
+                  </div>
+                </div>
+              </div>
+              <Maximize2 className="w-4 h-4 text-blue-300 group-hover:scale-110 transition shrink-0" />
+            </button>
+
             <div className="grid grid-cols-2 gap-2">
               <button
                 onClick={() => {
@@ -477,6 +519,19 @@ export const PhoneDeviceFrame: React.FC<PhoneDeviceFrameProps> = ({
         <div className="h-4 bg-slate-900 flex items-center justify-center shrink-0">
           <div className="w-32 h-1 bg-slate-600 rounded-full" />
         </div>
+      </div>
+
+      {/* FLOATING QUICK-SWITCH BUTTON: Always visible in mobile mode on any screen/device */}
+      <div className="fixed bottom-5 right-5 z-50">
+        <button
+          id="btn-floating-switch-to-computer"
+          onClick={onSwitchToComputer}
+          className="px-4 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-xs font-black rounded-full shadow-2xl shadow-blue-900/80 border border-blue-400/50 flex items-center gap-2 transition-all transform active:scale-95 hover:scale-105 cursor-pointer ring-2 ring-blue-500/40"
+          title="Exit phone mode and return to full PC version"
+        >
+          <Monitor className="w-4 h-4 text-blue-100" />
+          <span>Switch to Full Version</span>
+        </button>
       </div>
     </div>
   );

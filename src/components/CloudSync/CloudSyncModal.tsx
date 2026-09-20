@@ -18,13 +18,14 @@ import {
   Lock,
   KeyRound
 } from 'lucide-react';
-import { bulkUploadProductsToCloud } from '../../lib/cloudSync';
-import { Product } from '../../types';
+import { bulkUploadProductsToCloud, bulkUploadUsersToCloud } from '../../lib/cloudSync';
+import { Product, User } from '../../types';
 
 interface CloudSyncModalProps {
   isOpen: boolean;
   onClose: () => void;
   products: Product[];
+  allUsers?: User[];
   cloudSyncStatus?: 'synced' | 'syncing' | 'offline' | 'error';
   lastSyncedTime?: string | null;
   onTriggerSync?: () => void;
@@ -32,12 +33,15 @@ interface CloudSyncModalProps {
   masterPin?: string;
   requirePinOnStartup?: boolean;
   onLockNow?: () => void;
+  recoveryEmail?: string;
+  emergencyKey?: string;
 }
 
 export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
   isOpen,
   onClose,
   products,
+  allUsers = [],
   cloudSyncStatus = 'synced',
   lastSyncedTime = null,
   onTriggerSync,
@@ -45,6 +49,8 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
   masterPin = '1234',
   requirePinOnStartup = true,
   onLockNow,
+  recoveryEmail = 'NivaJuma@gmail.com',
+  emergencyKey = 'ROFANI-RESET-2026',
 }) => {
   const [copied, setCopied] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
@@ -68,7 +74,10 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
     setUploadMsg(null);
     try {
       const count = await bulkUploadProductsToCloud(products);
-      setUploadMsg(`Successfully published ${count} products to Cloud Firestore! All connected phones are now up to date.`);
+      if (allUsers && allUsers.length > 0) {
+        await bulkUploadUsersToCloud(allUsers);
+      }
+      setUploadMsg(`Successfully published ${count} products & ${allUsers.length} staff accounts to Cloud Firestore! All connected phones are now up to date.`);
       if (onTriggerSync) onTriggerSync();
       if (onSyncCatalogComplete) onSyncCatalogComplete();
     } catch (err) {
@@ -190,9 +199,9 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
                   <Lock className="w-3.5 h-3.5" />
                 </div>
                 <div>
-                  <div className="text-[11px] font-bold text-purple-200 flex items-center gap-1">
-                    <span>Protected by Store Master PIN:</span>
-                    <span className="font-mono bg-purple-900 px-1.5 py-0.2 rounded text-white">{masterPin}</span>
+                  <div className="text-[11px] font-bold text-purple-200 flex items-center gap-1.5">
+                    <span>Protected by Store Master Passcode</span>
+                    <span className="font-mono bg-purple-900/60 text-purple-300 text-[10px] px-1.5 py-0.5 rounded">●●●●</span>
                   </div>
                   <p className="text-[10px] text-slate-400">
                     {requirePinOnStartup ? 'App locks on load. Workers must enter PIN to enter.' : 'PIN protection on load is currently optional.'}
@@ -213,6 +222,14 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
                   <span>Lock Terminal</span>
                 </button>
               )}
+            </div>
+
+            {/* Admin Emergency Recovery Reminder */}
+            <div className="p-3 bg-slate-950/70 border border-slate-800 rounded-xl text-[11px] text-slate-400 flex items-center justify-between">
+              <div>
+                <span className="text-slate-300 font-semibold">Owner PIN Emergency Recovery:</span>{' '}
+                Registered to <span className="text-sky-300 font-mono">{recoveryEmail}</span>. Tap &quot;Forgot PIN?&quot; on the lock screen to reset.
+              </div>
             </div>
           </div>
 

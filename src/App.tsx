@@ -119,6 +119,10 @@ import {
   subscribeToStoreSecurity,
   saveStoreSecurityToCloud,
   StoreSecurityConfig,
+  subscribeToUsers,
+  saveUserToCloud,
+  deleteUserFromCloud,
+  bulkUploadUsersToCloud,
 } from './lib/cloudSync';
 import { testFirestoreConnection } from './lib/firebase';
 import { safeGetJSON, safeSetJSON } from './utils/safeStorage';
@@ -180,6 +184,12 @@ export default function App() {
   );
   const [masterPin, setMasterPin] = useState<string>(() =>
     safeGetJSON('retail_pos_master_pin', '1234')
+  );
+  const [ownerRecoveryEmail, setOwnerRecoveryEmail] = useState<string>(() =>
+    safeGetJSON('retail_pos_recovery_email', 'NivaJuma@gmail.com')
+  );
+  const [emergencyRecoveryKey, setEmergencyRecoveryKey] = useState<string>(() =>
+    safeGetJSON('retail_pos_emergency_key', 'ROFANI-RESET-2026')
   );
 
   const [showRoleSwitcher, setShowRoleSwitcher] = useState(false);
@@ -515,10 +525,37 @@ export default function App() {
             setMasterPin(securityConfig.masterPin);
             safeSetJSON('retail_pos_master_pin', securityConfig.masterPin);
           }
+          if (securityConfig.recoveryEmail) {
+            setOwnerRecoveryEmail(securityConfig.recoveryEmail);
+            safeSetJSON('retail_pos_recovery_email', securityConfig.recoveryEmail);
+          }
+          if (securityConfig.emergencyKey) {
+            setEmergencyRecoveryKey(securityConfig.emergencyKey);
+            safeSetJSON('retail_pos_emergency_key', securityConfig.emergencyKey);
+          }
         }
       },
       (error) => {
         console.warn('Realtime store security sync notice:', error?.message);
+      }
+    );
+
+    // 8. Subscribe to Users (Staff members & Worker Profiles)
+    const unsubUsers = subscribeToUsers(
+      (cloudUsers) => {
+        if (!active) return;
+        if (cloudUsers && cloudUsers.length > 0) {
+          setAllUsers(cloudUsers);
+          safeSetJSON('retail_pos_users', cloudUsers);
+        } else {
+          // If Firestore users collection is newly provisioned, upload current staff profiles to bootstrap cloud
+          bulkUploadUsersToCloud(allUsers).catch((err) => {
+            console.warn('Initial staff cloud upload notice:', err);
+          });
+        }
+      },
+      (error) => {
+        console.warn('Realtime staff users sync notice:', error?.message);
       }
     );
 
@@ -531,6 +568,7 @@ export default function App() {
       unsubExpenses();
       unsubRestock();
       unsubSecurity();
+      unsubUsers();
     };
   }, []);
 
@@ -555,6 +593,9 @@ export default function App() {
   // Worker & PIN Auth Handlers
   const handleAddUser = (newUser: User) => {
     setAllUsers((prev) => [...prev, newUser]);
+    saveUserToCloud(newUser).catch((err) =>
+      console.warn('Could not save user to cloud:', err)
+    );
   };
 
   const handleUpdateUser = (updatedUser: User) => {
@@ -562,6 +603,9 @@ export default function App() {
     if (currentUser.id === updatedUser.id) {
       setCurrentUser(updatedUser);
     }
+    saveUserToCloud(updatedUser).catch((err) =>
+      console.warn('Could not update user in cloud:', err)
+    );
   };
 
   const handleDeleteUser = (userId: string) => {
@@ -576,6 +620,9 @@ export default function App() {
         setCurrentUser(remainingUser);
       }
     }
+    deleteUserFromCloud(userId).catch((err) =>
+      console.warn('Could not delete user from cloud:', err)
+    );
   };
 
   const handleLoginSuccess = (user: User) => {
@@ -590,9 +637,32 @@ export default function App() {
       await saveStoreSecurityToCloud({
         requirePinOnStartup,
         masterPin: newPin,
+        recoveryEmail: ownerRecoveryEmail,
+        emergencyKey: emergencyRecoveryKey,
       });
     } catch (err) {
       console.warn('Could not sync master PIN to cloud:', err);
+    }
+  };
+
+  const handleResetAdminPin = async (newPin: string, targetUserId: string) => {
+    setAllUsers((prev) => {
+      const updated = prev.map((u) => (u.id === targetUserId ? { ...u, pin: newPin } : u));
+      safeSetJSON('retail_pos_users', updated);
+      return updated;
+    });
+
+    const target = allUsers.find((u) => u.id === targetUserId);
+    if (target) {
+      const updatedUser = { ...target, pin: newPin };
+      if (currentUser.id === targetUserId) {
+        setCurrentUser(updatedUser);
+      }
+      try {
+        await saveUserToCloud(updatedUser);
+      } catch (err) {
+        console.warn('Could not sync reset admin PIN to cloud:', err);
+      }
     }
   };
 
@@ -1570,6 +1640,7 @@ export default function App() {
           isOpen={showCloudSyncModal}
           onClose={() => setShowCloudSyncModal(false)}
           products={products}
+          allUsers={allUsers}
           cloudSyncStatus={cloudSyncStatus}
           lastSyncedTime={lastSyncedTime}
           onSyncCatalogComplete={() => {
@@ -1579,12 +1650,14 @@ export default function App() {
           masterPin={masterPin}
           requirePinOnStartup={requirePinOnStartup}
           onLockNow={() => setIsTerminalLocked(true)}
+          recoveryEmail={ownerRecoveryEmail}
+          emergencyKey={emergencyRecoveryKey}
         />
 
         <PinLoginModal
           isOpen={isTerminalLocked}
           users={allUsers}
-          currentUser={currentUser}
+          currentUser={null}
           onLoginSuccess={handleLoginSuccess}
           onClose={() => {
             if (!requirePinOnStartup) {
@@ -1594,6 +1667,10 @@ export default function App() {
           isMandatory={requirePinOnStartup}
           masterPin={masterPin}
           storeName={stores.find((s) => s.id === activeStoreId)?.name || 'ROFANI POS'}
+          recoveryEmail={ownerRecoveryEmail}
+          emergencyKey={emergencyRecoveryKey}
+          onResetAdminPin={handleResetAdminPin}
+          onResetMasterPin={handleUpdateMasterPin}
         />
 
         <StaffManagementModal
@@ -2249,7 +2326,7 @@ export default function App() {
       <PinLoginModal
         isOpen={isTerminalLocked}
         users={allUsers}
-        currentUser={currentUser}
+        currentUser={null}
         onLoginSuccess={handleLoginSuccess}
         onClose={() => {
           if (!requirePinOnStartup) {
@@ -2259,6 +2336,10 @@ export default function App() {
         isMandatory={requirePinOnStartup}
         masterPin={masterPin}
         storeName={stores.find((s) => s.id === activeStoreId)?.name || 'ROFANI POS'}
+        recoveryEmail={ownerRecoveryEmail}
+        emergencyKey={emergencyRecoveryKey}
+        onResetAdminPin={handleResetAdminPin}
+        onResetMasterPin={handleUpdateMasterPin}
       />
 
       {/* Staff Worker Credentials & PIN Generator Modal */}
@@ -2283,6 +2364,7 @@ export default function App() {
         isOpen={showCloudSyncModal}
         onClose={() => setShowCloudSyncModal(false)}
         products={products}
+        allUsers={allUsers}
         cloudSyncStatus={cloudSyncStatus}
         lastSyncedTime={lastSyncedTime}
         onSyncCatalogComplete={() => {
@@ -2292,6 +2374,8 @@ export default function App() {
         masterPin={masterPin}
         requirePinOnStartup={requirePinOnStartup}
         onLockNow={() => setIsTerminalLocked(true)}
+        recoveryEmail={ownerRecoveryEmail}
+        emergencyKey={emergencyRecoveryKey}
       />
 
       {/* Multi-Store Branch Outlets & Inter-Store Stock Transfer Manager Modal */}

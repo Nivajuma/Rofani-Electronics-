@@ -127,9 +127,30 @@
         "itemCount": { "type": "number" },
         "syncedBy": { "type": "string", "maxLength": 200 }
       }
+    },
+    "User": {
+      "title": "User",
+      "description": "Staff employee profile, assigned role, and login PIN",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 200 },
+        "role": { "type": "string", "maxLength": 50 },
+        "email": { "type": "string", "maxLength": 200 },
+        "pin": { "type": "string", "maxLength": 16 },
+        "phone": { "type": "string", "maxLength": 50 },
+        "status": { "type": "string", "maxLength": 20 },
+        "department": { "type": "string", "maxLength": 100 },
+        "commissionRate": { "type": "number" }
+      },
+      "required": ["id", "name", "role", "pin"]
     }
   },
   "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "Store staff members, permissions, and PIN credentials synced across all devices"
+    },
     "/products/{productId}": {
       "schema": "Product",
       "description": "Store product catalog synced live across all cashier mobile devices"

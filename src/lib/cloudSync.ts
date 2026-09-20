@@ -8,7 +8,7 @@ import {
   getDocs,
 } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from './firebase';
-import { Product, Transaction, Customer, Supplier, Expense, RestockRecord } from '../types';
+import { Product, Transaction, Customer, Supplier, Expense, RestockRecord, User } from '../types';
 
 // Sanitize helper to remove undefined values for Firestore compatibility
 export function cleanForFirestore<T extends Record<string, any>>(obj: T): T {
@@ -291,6 +291,8 @@ export interface StoreSecurityConfig {
   requirePinOnStartup: boolean;
   masterPin: string;
   storeName?: string;
+  recoveryEmail?: string;
+  emergencyKey?: string;
   updatedAt?: string;
 }
 
@@ -327,3 +329,70 @@ export async function saveStoreSecurityToCloud(config: StoreSecurityConfig): Pro
     throw error;
   }
 }
+
+// ---------------- USERS (STAFF & WORKERS) LIVE SYNC ----------------
+
+export function subscribeToUsers(
+  onUpdate: (users: User[]) => void,
+  onError?: (err: any) => void
+) {
+  const colRef = collection(db, 'users');
+  return onSnapshot(
+    colRef,
+    (snapshot) => {
+      if (!snapshot.empty) {
+        const loaded: User[] = [];
+        snapshot.forEach((d) => {
+          loaded.push({ id: d.id, ...d.data() } as User);
+        });
+        onUpdate(loaded);
+      }
+    },
+    (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'users');
+      if (onError) onError(error);
+    }
+  );
+}
+
+export async function saveUserToCloud(user: User): Promise<void> {
+  const path = `users/${user.id}`;
+  try {
+    const docRef = doc(db, 'users', user.id);
+    const cleaned = cleanForFirestore(user);
+    await setDoc(docRef, cleaned, { merge: true });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+    throw error;
+  }
+}
+
+export async function deleteUserFromCloud(userId: string): Promise<void> {
+  const path = `users/${userId}`;
+  try {
+    const docRef = doc(db, 'users', userId);
+    await deleteDoc(docRef);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+    throw error;
+  }
+}
+
+export async function bulkUploadUsersToCloud(users: User[]): Promise<number> {
+  try {
+    const batch = writeBatch(db);
+    let count = 0;
+    for (const u of users) {
+      const docRef = doc(db, 'users', u.id);
+      const cleaned = cleanForFirestore(u);
+      batch.set(docRef, cleaned, { merge: true });
+      count++;
+    }
+    await batch.commit();
+    return count;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, 'users/batch');
+    throw error;
+  }
+}
+

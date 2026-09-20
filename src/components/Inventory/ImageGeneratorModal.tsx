@@ -12,9 +12,19 @@ import {
   Download,
   AlertCircle,
   Camera,
-  Upload
+  Upload,
+  ShieldAlert,
+  CheckCircle2
 } from 'lucide-react';
 import { Product } from '../../types';
+import {
+  CATEGORY_IMAGE_POOLS,
+  getCategoryPool,
+  assignUniqueCatalogImages,
+  detectRepeatedItemPhotos,
+  normalizeImageUrl,
+  generateDistinctSeedUrl
+} from '../../utils/productImages';
 
 interface ImageGeneratorModalProps {
   isOpen: boolean;
@@ -24,41 +34,6 @@ interface ImageGeneratorModalProps {
   onBulkApplyImages?: (imageMap: Record<string, string>) => void;
   allProducts?: Product[];
 }
-
-// Curated high quality product photography presets by category keywords
-const STUDIO_PHOTO_PRESETS: Record<string, string[]> = {
-  electronics: [
-    'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=500&auto=format&fit=crop&q=80', // Headphones
-    'https://images.unsplash.com/photo-1546868871-7041f2a55e12?w=500&auto=format&fit=crop&q=80', // Smartwatch
-    'https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?w=500&auto=format&fit=crop&q=80', // Smartphone
-    'https://images.unsplash.com/photo-1496181133206-80ce9b88a853?w=500&auto=format&fit=crop&q=80', // Laptop
-    'https://images.unsplash.com/photo-1590658268037-6bf12165a8df?w=500&auto=format&fit=crop&q=80', // Earbuds
-  ],
-  boutique: [
-    'https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?w=500&auto=format&fit=crop&q=80', // Fashion dress
-    'https://images.unsplash.com/photo-1584917865442-de89df76afd3?w=500&auto=format&fit=crop&q=80', // Handbag
-    'https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=500&auto=format&fit=crop&q=80', // Red Sneakers
-    'https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=500&auto=format&fit=crop&q=80', // Watch
-    'https://images.unsplash.com/photo-1509631179647-0177331693ae?w=500&auto=format&fit=crop&q=80', // Apparel
-  ],
-  beverages: [
-    'https://images.unsplash.com/photo-1551024709-8f23befc6f87?w=500&auto=format&fit=crop&q=80', // Drink
-    'https://images.unsplash.com/photo-1622483767028-3f66f32aef97?w=500&auto=format&fit=crop&q=80', // Soft drink
-    'https://images.unsplash.com/photo-1513558161293-cdaf765ed2fd?w=500&auto=format&fit=crop&q=80', // Juice glass
-    'https://images.unsplash.com/photo-1544787219-7f47ccb76574?w=500&auto=format&fit=crop&q=80', // Coffee cup
-  ],
-  beauty: [
-    'https://images.unsplash.com/photo-1522337360788-8b13dee7a37e?w=500&auto=format&fit=crop&q=80', // Perfume bottle
-    'https://images.unsplash.com/photo-1598440947619-2c35fc9aa908?w=500&auto=format&fit=crop&q=80', // Skincare cream
-    'https://images.unsplash.com/photo-1526947425960-945c6e72858f?w=500&auto=format&fit=crop&q=80', // Hair care
-  ],
-  general: [
-    'https://images.unsplash.com/photo-1526170375885-4d8ecf77b99f?w=500&auto=format&fit=crop&q=80', // Vintage Camera
-    'https://images.unsplash.com/photo-1583394838336-acd977736f90?w=500&auto=format&fit=crop&q=80', // Headphones studio
-    'https://images.unsplash.com/photo-1560343090-f0409e92791a?w=500&auto=format&fit=crop&q=80', // Shoe box
-    'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=500&auto=format&fit=crop&q=80', // Audio
-  ]
-};
 
 export const ImageGeneratorModal: React.FC<ImageGeneratorModalProps> = ({
   isOpen,
@@ -77,9 +52,28 @@ export const ImageGeneratorModal: React.FC<ImageGeneratorModalProps> = ({
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatedOptions, setGeneratedOptions] = useState<string[]>([]);
   const [mode, setMode] = useState<'single' | 'bulk'>(product ? 'single' : 'bulk');
+  const [onlyMissingPhotos, setOnlyMissingPhotos] = useState(true);
 
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const galleryInputRef = useRef<HTMLInputElement>(null);
+
+  // Detect which photos are already in use across the catalog (excluding the current item being edited)
+  const usedPhotosMap = React.useMemo(() => {
+    const map = new Map<string, string>();
+    allProducts.forEach((p) => {
+      if (p.imageUrl && (!product || p.id !== product.id)) {
+        const norm = normalizeImageUrl(p.imageUrl);
+        if (norm) {
+          map.set(norm, p.name);
+        }
+      }
+    });
+    return map;
+  }, [allProducts, product]);
+
+  const existingRepeatedGroups = React.useMemo(() => {
+    return detectRepeatedItemPhotos(allProducts);
+  }, [allProducts]);
 
   const handlePhotoSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -140,66 +134,68 @@ export const ImageGeneratorModal: React.FC<ImageGeneratorModalProps> = ({
 
   if (!isOpen) return null;
 
-  // Auto detect product category category list
-  const catKey = product?.category?.toLowerCase() || '';
-  let defaultCategoryPhotos = STUDIO_PHOTO_PRESETS.general;
-  if (catKey.includes('electr') || catKey.includes('phone') || catKey.includes('audio') || catKey.includes('comput')) {
-    defaultCategoryPhotos = STUDIO_PHOTO_PRESETS.electronics;
-  } else if (catKey.includes('boutique') || catKey.includes('fash') || catKey.includes('cloth') || catKey.includes('wear')) {
-    defaultCategoryPhotos = STUDIO_PHOTO_PRESETS.boutique;
-  } else if (catKey.includes('bever') || catKey.includes('snack') || catKey.includes('food')) {
-    defaultCategoryPhotos = STUDIO_PHOTO_PRESETS.beverages;
-  } else if (catKey.includes('care') || catKey.includes('beaut') || catKey.includes('perfum')) {
-    defaultCategoryPhotos = STUDIO_PHOTO_PRESETS.beauty;
-  }
+  // Auto detect product category image pool using curated pools
+  const defaultCategoryPhotos = getCategoryPool(product?.category || '', product?.name || '');
 
-  // Generate AI Images Simulation / Unsplash Search
+  // Generate AI Images Simulation / Unsplash Search with non-repeating options
   const handleGenerateAiImages = () => {
     setIsGenerating(true);
     setTimeout(() => {
-      const keyword = encodeURIComponent(
-        product ? product.name.split(' ')[0] : 'product'
-      );
-      
-      // Dynamic studio seed URLs
-      const newOptions = [
-        `https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=500&auto=format&fit=crop&q=80`,
-        `https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=500&auto=format&fit=crop&q=80`,
-        `https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=500&auto=format&fit=crop&q=80`,
-        `https://images.unsplash.com/photo-1583394838336-acd977736f90?w=500&auto=format&fit=crop&q=80`,
-        ...defaultCategoryPhotos
-      ].slice(0, 6);
+      // Find candidate photos from category pool that are NOT used elsewhere in catalog
+      const pool = getCategoryPool(product?.category || '', product?.name || '');
+      const uniqueFromPool = pool.filter((url) => {
+        const norm = normalizeImageUrl(url);
+        return !usedPhotosMap.has(norm);
+      });
 
-      setGeneratedOptions(newOptions);
-      setSelectedImage(newOptions[0]);
+      // Distinct seed options
+      const seedOptions = [1, 2, 3, 4].map((s) =>
+        generateDistinctSeedUrl(
+          product?.category || 'Retail',
+          product?.name || 'Item',
+          `${product?.id || 'prod'}-${Date.now()}-${s}`
+        )
+      );
+
+      const candidateCombined = [
+        ...uniqueFromPool,
+        ...seedOptions,
+        ...pool
+      ];
+
+      // Deduplicate within the options list
+      const seen = new Set<string>();
+      const finalOptions: string[] = [];
+      for (const opt of candidateCombined) {
+        const n = normalizeImageUrl(opt);
+        if (!seen.has(n)) {
+          seen.add(n);
+          finalOptions.push(opt);
+        }
+        if (finalOptions.length >= 8) break;
+      }
+
+      setGeneratedOptions(finalOptions);
+      setSelectedImage(finalOptions[0] || '');
       setIsGenerating(false);
     }, 600);
   };
 
-  // Bulk generate images for all items in catalog without images
+  // Bulk generate non-repeating unique images for catalog
   const handleBulkGenerate = () => {
     if (!onBulkApplyImages) return;
     setIsGenerating(true);
 
     setTimeout(() => {
-      const imageMap: Record<string, string> = {};
-      allProducts.forEach((p, idx) => {
-        const cKey = p.category.toLowerCase();
-        let pool = STUDIO_PHOTO_PRESETS.general;
-        if (cKey.includes('electr') || cKey.includes('phone') || cKey.includes('laptop')) {
-          pool = STUDIO_PHOTO_PRESETS.electronics;
-        } else if (cKey.includes('boutique') || cKey.includes('fashion') || cKey.includes('dress')) {
-          pool = STUDIO_PHOTO_PRESETS.boutique;
-        } else if (cKey.includes('bever') || cKey.includes('snack')) {
-          pool = STUDIO_PHOTO_PRESETS.beverages;
-        } else if (cKey.includes('care') || cKey.includes('beauty')) {
-          pool = STUDIO_PHOTO_PRESETS.beauty;
-        }
-        const assigned = pool[idx % pool.length];
-        imageMap[p.id] = assigned;
-      });
+      // Filter items to process
+      const itemsToProcess = onlyMissingPhotos
+        ? allProducts.filter((p) => !p.imageUrl)
+        : allProducts;
 
-      onBulkApplyImages(imageMap);
+      // Assign unique images using the deduplication engine
+      const uniqueImageAssignments = assignUniqueCatalogImages(itemsToProcess, allProducts);
+
+      onBulkApplyImages(uniqueImageAssignments);
       setIsGenerating(false);
       onClose();
     }, 1000);
@@ -295,25 +291,59 @@ export const ImageGeneratorModal: React.FC<ImageGeneratorModalProps> = ({
                   <span className="font-mono font-bold text-white">{allProducts.length}</span>
                 </div>
                 <div className="flex items-center justify-between">
-                  <span>Target Photography Style:</span>
-                  <span className="font-semibold text-purple-400">Clean Studio E-Commerce</span>
+                  <span>Items Without Photos:</span>
+                  <span className="font-mono font-bold text-amber-400">
+                    {allProducts.filter((p) => !p.imageUrl).length}
+                  </span>
+                </div>
+                {existingRepeatedGroups.length > 0 && (
+                  <div className="flex items-center justify-between text-rose-400 bg-rose-950/40 p-2 rounded-xl border border-rose-900/50">
+                    <span className="flex items-center gap-1.5 font-semibold">
+                      <ShieldAlert className="w-3.5 h-3.5" />
+                      Repeated Photos Detected:
+                    </span>
+                    <span className="font-bold">
+                      {existingRepeatedGroups.reduce((acc, g) => acc + g.products.length, 0)} items share photos
+                    </span>
+                  </div>
+                )}
+                <div className="flex items-center justify-between">
+                  <span>Deduplication Algorithm:</span>
+                  <span className="font-semibold text-emerald-400 flex items-center gap-1">
+                    <CheckCircle2 className="w-3.5 h-3.5" /> 100% Unique Image Guarantee
+                  </span>
+                </div>
+                <div className="pt-2 border-t border-slate-800">
+                  <label className="flex items-center gap-2 cursor-pointer text-slate-300 hover:text-white">
+                    <input
+                      type="checkbox"
+                      checked={onlyMissingPhotos}
+                      onChange={(e) => setOnlyMissingPhotos(e.target.checked)}
+                      className="rounded accent-purple-600 w-4 h-4 cursor-pointer"
+                    />
+                    <span>Only generate for items missing photos (preserve custom ones)</span>
+                  </label>
                 </div>
               </div>
 
               <button
                 disabled={isGenerating || allProducts.length === 0}
                 onClick={handleBulkGenerate}
-                className="bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white font-extrabold px-8 py-3.5 rounded-2xl text-xs transition flex items-center justify-center gap-2 mx-auto shadow-xl shadow-purple-600/30"
+                className="bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white font-extrabold px-8 py-3.5 rounded-2xl text-xs transition flex items-center justify-center gap-2 mx-auto shadow-xl shadow-purple-600/30 cursor-pointer"
               >
                 {isGenerating ? (
                   <>
                     <RefreshCw className="w-4 h-4 animate-spin" />
-                    <span>Processing Catalog Images...</span>
+                    <span>Assigning Unique Photos to Catalog...</span>
                   </>
                 ) : (
                   <>
                     <Sparkles className="w-4 h-4" />
-                    <span>Auto-Assign Studio Images to All {allProducts.length} Items Now</span>
+                    <span>
+                      {onlyMissingPhotos
+                        ? `Auto-Assign Unique Photos to ${allProducts.filter((p) => !p.imageUrl).length} Items Without Photos`
+                        : `Reassign Unique Photos to All ${allProducts.length} Items (No Repetitions)`}
+                    </span>
                   </>
                 )}
               </button>
@@ -371,38 +401,78 @@ export const ImageGeneratorModal: React.FC<ImageGeneratorModalProps> = ({
 
               {/* Generated Image Gallery Picker */}
               <div className="space-y-2">
-                <label className="block text-xs font-semibold text-slate-300">
-                  Select Generated Studio Shot:
-                </label>
+                <div className="flex items-center justify-between">
+                  <label className="block text-xs font-semibold text-slate-300">
+                    Select Generated Studio Shot:
+                  </label>
+                  <span className="text-[11px] text-emerald-400 font-medium">
+                    ✨ Distinct photo recommendations
+                  </span>
+                </div>
+
                 <div className="grid grid-cols-3 sm:grid-cols-4 gap-3">
-                  {(generatedOptions.length > 0 ? generatedOptions : defaultCategoryPhotos).map((imgUrl, idx) => (
-                    <div
-                      key={idx}
-                      onClick={() => {
-                        setSelectedImage(imgUrl);
-                        setCustomUrlInput('');
-                      }}
-                      className={`group relative rounded-2xl overflow-hidden border-2 cursor-pointer aspect-square bg-slate-950 transition ${
-                        selectedImage === imgUrl && !customUrlInput
-                          ? 'border-purple-500 ring-2 ring-purple-500/40'
-                          : 'border-slate-800 hover:border-slate-600'
-                      }`}
-                    >
-                      <img
-                        src={imgUrl}
-                        alt={`Generated Option ${idx + 1}`}
-                        referrerPolicy="no-referrer"
-                        className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
-                      />
-                      {selectedImage === imgUrl && !customUrlInput && (
-                        <div className="absolute top-2 right-2 bg-purple-600 text-white p-1 rounded-full shadow">
-                          <Check className="w-3.5 h-3.5" />
-                        </div>
-                      )}
-                    </div>
-                  ))}
+                  {(generatedOptions.length > 0 ? generatedOptions : defaultCategoryPhotos).map((imgUrl, idx) => {
+                    const norm = normalizeImageUrl(imgUrl);
+                    const inUseByProduct = usedPhotosMap.get(norm);
+
+                    return (
+                      <div
+                        key={idx}
+                        onClick={() => {
+                          setSelectedImage(imgUrl);
+                          setCustomUrlInput('');
+                        }}
+                        className={`group relative rounded-2xl overflow-hidden border-2 cursor-pointer aspect-square bg-slate-950 transition ${
+                          selectedImage === imgUrl && !customUrlInput
+                            ? 'border-purple-500 ring-2 ring-purple-500/40'
+                            : inUseByProduct
+                            ? 'border-amber-700/60 hover:border-amber-500'
+                            : 'border-slate-800 hover:border-slate-600'
+                        }`}
+                      >
+                        <img
+                          src={imgUrl}
+                          alt={`Generated Option ${idx + 1}`}
+                          referrerPolicy="no-referrer"
+                          className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
+                        />
+                        {selectedImage === imgUrl && !customUrlInput && (
+                          <div className="absolute top-2 right-2 bg-purple-600 text-white p-1 rounded-full shadow">
+                            <Check className="w-3.5 h-3.5" />
+                          </div>
+                        )}
+                        {inUseByProduct && (
+                          <div className="absolute bottom-1.5 inset-x-1.5 bg-slate-950/90 text-amber-300 border border-amber-500/30 px-1 py-0.5 rounded text-[9px] truncate font-medium text-center shadow">
+                            In use: {inUseByProduct}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
+
+              {/* Warning if current choice is already used */}
+              {(() => {
+                const currentChoice = customUrlInput.trim() || selectedImage;
+                if (!currentChoice) return null;
+                const norm = normalizeImageUrl(currentChoice);
+                const duplicateOwner = usedPhotosMap.get(norm);
+                if (!duplicateOwner) return null;
+
+                return (
+                  <div className="p-3 bg-amber-950/60 border border-amber-800/80 rounded-2xl flex items-start gap-2.5 text-xs text-amber-200">
+                    <ShieldAlert className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                    <div>
+                      <span className="font-bold block">Repeated Photo Warning:</span>
+                      <span>
+                        This photo is already assigned to <strong className="text-white font-semibold">"{duplicateOwner}"</strong>.
+                        To ensure each product has a unique identity, consider picking an unused photo option above.
+                      </span>
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* Hidden Inputs for Camera & Phone Gallery */}
               <input

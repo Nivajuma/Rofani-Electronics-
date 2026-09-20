@@ -42,7 +42,8 @@ import {
   Gem,
   TrendingUp,
   DollarSign,
-  Award
+  Award,
+  ShieldAlert
 } from 'lucide-react';
 import { Product, Supplier, BarcodeScanLog, User, Transaction } from '../../types';
 import { generateAutoBarcode, printBarcodeLabels, printBatchBarcodes } from '../../utils/barcode';
@@ -54,6 +55,11 @@ import { detectDuplicateProducts, deduplicateProducts } from '../../utils/dedupl
 import { optimizeImageFile, optimizeImageDataUrl } from '../../utils/imageOptimizer';
 import { BarcodeScanHistoryModal, BarcodeScanHistoryView } from './BarcodeScanHistoryModal';
 import { computeProductsPerformance, computePerformanceSummary, ProductPerformanceInfo } from '../../utils/salesPerformance';
+import {
+  findConflictingProductWithImage,
+  detectRepeatedItemPhotos,
+  resolveRepeatedCatalogPhotos
+} from '../../utils/productImages';
 
 interface InventoryViewProps {
   products: Product[];
@@ -182,6 +188,41 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   const duplicateGroups = detectDuplicateProducts(products);
   const totalDuplicateItemsToDelete = duplicateGroups.reduce((acc, g) => acc + g.duplicateItems.length, 0);
   const totalStockToMerge = duplicateGroups.reduce((acc, g) => acc + g.totalStockToMerge, 0);
+
+  // Detect repeated photos across entire catalog
+  const repeatedPhotoGroups = React.useMemo(() => {
+    return detectRepeatedItemPhotos(products);
+  }, [products]);
+
+  const totalItemsWithRepeatedPhotos = repeatedPhotoGroups.reduce(
+    (acc, g) => acc + g.products.length,
+    0
+  );
+
+  const repeatedProductIds = React.useMemo(() => {
+    const ids = new Set<string>();
+    repeatedPhotoGroups.forEach((g) => {
+      g.products.forEach((p) => ids.add(p.id));
+    });
+    return ids;
+  }, [repeatedPhotoGroups]);
+
+  const handleFixAllRepeatedPhotos = () => {
+    const result = resolveRepeatedCatalogPhotos(products);
+    if (result.fixedItemsCount === 0) return;
+
+    if (onBatchImportProducts) {
+      onBatchImportProducts(result.updatedProducts, true);
+    } else {
+      result.updatedProducts.forEach((p) => {
+        onSaveProduct(p);
+      });
+    }
+
+    setAutoAddSuccessToast(
+      `✨ Reassigned ${result.fixedItemsCount} product photos with 100% unique studio photography!`
+    );
+  };
 
   const handleConfirmDeduplicate = () => {
     const result = deduplicateProducts(products);
@@ -1167,6 +1208,38 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
         </div>
       )}
 
+      {/* Repeated Photos Alert Banner */}
+      {totalItemsWithRepeatedPhotos > 0 && (
+        <div className="bg-gradient-to-r from-purple-950/90 via-slate-900 to-indigo-950/90 border border-purple-500/80 p-4 rounded-2xl shadow-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-purple-200">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 bg-purple-500/20 text-purple-400 rounded-xl border border-purple-500/40 shrink-0">
+              <ImageIcon className="w-5 h-5 text-purple-400" />
+            </div>
+            <div>
+              <h4 className="font-bold text-sm text-purple-100 flex items-center gap-2">
+                <span>Repeated Product Photos Detected</span>
+                <span className="bg-purple-500 text-white text-[10px] font-extrabold px-2 py-0.5 rounded-full">
+                  {repeatedPhotoGroups.length} photos shared across {totalItemsWithRepeatedPhotos} items
+                </span>
+              </h4>
+              <p className="text-xs text-purple-300/80 mt-0.5">
+                Multiple items are using identical stock photos. Reassign them automatically with distinct studio shots so every product has a unique photo!
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={handleFixAllRepeatedPhotos}
+              className="bg-purple-600 hover:bg-purple-500 text-white font-extrabold px-4 py-2.5 rounded-xl text-xs transition flex items-center gap-1.5 shadow-lg shadow-purple-600/20 cursor-pointer"
+            >
+              <Sparkles className="w-4 h-4" />
+              <span>Fix Repeated Photos (Make Unique)</span>
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Auto-Add AI Camera Success Toast Banner */}
       {autoAddSuccessToast && (
         <div className="bg-gradient-to-r from-emerald-950 via-slate-900 to-indigo-950 border border-emerald-500/80 p-4 rounded-2xl shadow-2xl flex items-center justify-between gap-3 text-emerald-300 font-extrabold text-xs animate-fadeIn">
@@ -1697,8 +1770,20 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                                                   alt={p.name}
                                                   referrerPolicy="no-referrer"
                                                   onClick={() => setPreviewImage({ url: p.imageUrl!, title: p.name })}
-                                                  className="w-10 h-10 rounded-xl object-cover border border-slate-700 shadow-sm cursor-pointer group-hover/thumb:border-sky-400 transition"
+                                                  className={`w-10 h-10 rounded-xl object-cover shadow-sm cursor-pointer group-hover/thumb:border-sky-400 transition ${
+                                                    repeatedProductIds.has(p.id)
+                                                      ? 'border-2 border-amber-500 ring-2 ring-amber-500/30'
+                                                      : 'border border-slate-700'
+                                                  }`}
                                                 />
+                                                {repeatedProductIds.has(p.id) && (
+                                                  <div
+                                                    title="Repeated Photo: This photo is shared by multiple items"
+                                                    className="absolute -top-1.5 -left-1.5 bg-amber-500 text-slate-950 p-0.5 rounded-full shadow-md z-10"
+                                                  >
+                                                    <ShieldAlert className="w-2.5 h-2.5" />
+                                                  </div>
+                                                )}
                                                 <button
                                                   type="button"
                                                   onClick={() => setPreviewImage({ url: p.imageUrl!, title: p.name })}
@@ -1866,8 +1951,20 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                               alt={p.name}
                               referrerPolicy="no-referrer"
                               onClick={() => setPreviewImage({ url: p.imageUrl!, title: p.name })}
-                              className="w-11 h-11 rounded-xl object-cover border border-slate-700 shadow-sm cursor-pointer group-hover/thumb:border-sky-400 group-hover/thumb:scale-105 transition duration-200"
+                              className={`w-11 h-11 rounded-xl object-cover shadow-sm cursor-pointer group-hover/thumb:border-sky-400 group-hover/thumb:scale-105 transition duration-200 ${
+                                repeatedProductIds.has(p.id)
+                                  ? 'border-2 border-amber-500 ring-2 ring-amber-500/30'
+                                  : 'border border-slate-700'
+                              }`}
                             />
+                            {repeatedProductIds.has(p.id) && (
+                              <div
+                                title="Repeated Photo: This photo is shared by multiple items"
+                                className="absolute -top-1.5 -left-1.5 bg-amber-500 text-slate-950 p-0.5 rounded-full shadow-md z-10"
+                              >
+                                <ShieldAlert className="w-3 h-3" />
+                              </div>
+                            )}
                             <button
                               type="button"
                               onClick={() => setPreviewImage({ url: p.imageUrl!, title: p.name })}
@@ -2721,6 +2818,23 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                               </button>
                             )}
                           </div>
+                          {(() => {
+                            if (!editingProduct.imageUrl) return null;
+                            const conflict = findConflictingProductWithImage(
+                              editingProduct.imageUrl,
+                              editingProduct.id,
+                              products
+                            );
+                            if (!conflict) return null;
+                            return (
+                              <div className="flex items-center gap-1.5 text-[11px] text-amber-400 bg-amber-950/40 border border-amber-800/60 px-2.5 py-1.5 rounded-lg mt-1">
+                                <ShieldAlert className="w-3.5 h-3.5 shrink-0 text-amber-400" />
+                                <span>
+                                  Repeated photo: Already used by <strong className="text-white font-medium">"{conflict.name}"</strong>
+                                </span>
+                              </div>
+                            );
+                          })()}
                         </div>
                       </div>
                     </div>

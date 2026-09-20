@@ -116,6 +116,9 @@ import {
   saveExpenseToCloud,
   subscribeToRestockRecords,
   saveRestockRecordToCloud,
+  subscribeToStoreSecurity,
+  saveStoreSecurityToCloud,
+  StoreSecurityConfig,
 } from './lib/cloudSync';
 import { testFirestoreConnection } from './lib/firebase';
 import { safeGetJSON, safeSetJSON } from './utils/safeStorage';
@@ -171,8 +174,19 @@ export default function App() {
 
   const [currentUser, setCurrentUser] = useState<User>(() => safeGetJSON('retail_pos_active_user', INITIAL_USERS[0]));
 
+  // Security Configuration (PIN Protection before sharing with anyone)
+  const [requirePinOnStartup, setRequirePinOnStartup] = useState<boolean>(() =>
+    safeGetJSON('retail_pos_require_pin_startup', true)
+  );
+  const [masterPin, setMasterPin] = useState<string>(() =>
+    safeGetJSON('retail_pos_master_pin', '1234')
+  );
+
   const [showRoleSwitcher, setShowRoleSwitcher] = useState(false);
-  const [isTerminalLocked, setIsTerminalLocked] = useState(false);
+  // If requirePinOnStartup is true, lock the terminal immediately on startup
+  const [isTerminalLocked, setIsTerminalLocked] = useState<boolean>(() =>
+    safeGetJSON('retail_pos_require_pin_startup', true)
+  );
   const [showStaffModal, setShowStaffModal] = useState(false);
   const [showInstallModal, setShowInstallModal] = useState(false);
   const [showCloudSyncModal, setShowCloudSyncModal] = useState(false);
@@ -488,6 +502,26 @@ export default function App() {
       }
     );
 
+    // 7. Subscribe to Store Security & Master PIN Config
+    const unsubSecurity = subscribeToStoreSecurity(
+      (securityConfig) => {
+        if (!active) return;
+        if (securityConfig) {
+          if (typeof securityConfig.requirePinOnStartup === 'boolean') {
+            setRequirePinOnStartup(securityConfig.requirePinOnStartup);
+            safeSetJSON('retail_pos_require_pin_startup', securityConfig.requirePinOnStartup);
+          }
+          if (securityConfig.masterPin) {
+            setMasterPin(securityConfig.masterPin);
+            safeSetJSON('retail_pos_master_pin', securityConfig.masterPin);
+          }
+        }
+      },
+      (error) => {
+        console.warn('Realtime store security sync notice:', error?.message);
+      }
+    );
+
     return () => {
       active = false;
       unsubProducts();
@@ -496,6 +530,7 @@ export default function App() {
       unsubSuppliers();
       unsubExpenses();
       unsubRestock();
+      unsubSecurity();
     };
   }, []);
 
@@ -546,6 +581,32 @@ export default function App() {
   const handleLoginSuccess = (user: User) => {
     setCurrentUser(user);
     setIsTerminalLocked(false);
+  };
+
+  const handleUpdateMasterPin = async (newPin: string) => {
+    setMasterPin(newPin);
+    safeSetJSON('retail_pos_master_pin', newPin);
+    try {
+      await saveStoreSecurityToCloud({
+        requirePinOnStartup,
+        masterPin: newPin,
+      });
+    } catch (err) {
+      console.warn('Could not sync master PIN to cloud:', err);
+    }
+  };
+
+  const handleToggleRequirePinOnStartup = async (require: boolean) => {
+    setRequirePinOnStartup(require);
+    safeSetJSON('retail_pos_require_pin_startup', require);
+    try {
+      await saveStoreSecurityToCloud({
+        requirePinOnStartup: require,
+        masterPin,
+      });
+    } catch (err) {
+      console.warn('Could not sync security settings to cloud:', err);
+    }
   };
 
   // Low stock counter
@@ -1464,6 +1525,11 @@ export default function App() {
           onOpenCloudSync={() => setShowCloudSyncModal(true)}
           deviceFormat={deviceFormat}
           onChangeDeviceFormat={setDeviceFormat}
+          requirePinOnStartup={requirePinOnStartup}
+          onToggleRequirePinOnStartup={handleToggleRequirePinOnStartup}
+          masterPin={masterPin}
+          onUpdateMasterPin={handleUpdateMasterPin}
+          onLockNow={() => setIsTerminalLocked(true)}
         />
       )}
     </>
@@ -1510,6 +1576,9 @@ export default function App() {
             setCloudSyncStatus('synced');
             setLastSyncedTime(new Date().toLocaleTimeString());
           }}
+          masterPin={masterPin}
+          requirePinOnStartup={requirePinOnStartup}
+          onLockNow={() => setIsTerminalLocked(true)}
         />
 
         <PinLoginModal
@@ -1517,7 +1586,14 @@ export default function App() {
           users={allUsers}
           currentUser={currentUser}
           onLoginSuccess={handleLoginSuccess}
-          onClose={() => setIsTerminalLocked(false)}
+          onClose={() => {
+            if (!requirePinOnStartup) {
+              setIsTerminalLocked(false);
+            }
+          }}
+          isMandatory={requirePinOnStartup}
+          masterPin={masterPin}
+          storeName={stores.find((s) => s.id === activeStoreId)?.name || 'ROFANI POS'}
         />
 
         <StaffManagementModal
@@ -2175,7 +2251,14 @@ export default function App() {
         users={allUsers}
         currentUser={currentUser}
         onLoginSuccess={handleLoginSuccess}
-        onClose={() => setIsTerminalLocked(false)}
+        onClose={() => {
+          if (!requirePinOnStartup) {
+            setIsTerminalLocked(false);
+          }
+        }}
+        isMandatory={requirePinOnStartup}
+        masterPin={masterPin}
+        storeName={stores.find((s) => s.id === activeStoreId)?.name || 'ROFANI POS'}
       />
 
       {/* Staff Worker Credentials & PIN Generator Modal */}
@@ -2206,6 +2289,9 @@ export default function App() {
           setCloudSyncStatus('synced');
           setLastSyncedTime(new Date().toLocaleTimeString());
         }}
+        masterPin={masterPin}
+        requirePinOnStartup={requirePinOnStartup}
+        onLockNow={() => setIsTerminalLocked(true)}
       />
 
       {/* Multi-Store Branch Outlets & Inter-Store Stock Transfer Manager Modal */}

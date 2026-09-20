@@ -14,7 +14,9 @@ import {
   UploadCloud,
   X,
   Radio,
-  QrCode
+  QrCode,
+  Lock,
+  KeyRound
 } from 'lucide-react';
 import { bulkUploadProductsToCloud } from '../../lib/cloudSync';
 import { Product } from '../../types';
@@ -27,6 +29,9 @@ interface CloudSyncModalProps {
   lastSyncedTime?: string | null;
   onTriggerSync?: () => void;
   onSyncCatalogComplete?: () => void;
+  masterPin?: string;
+  requirePinOnStartup?: boolean;
+  onLockNow?: () => void;
 }
 
 export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
@@ -37,6 +42,9 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
   lastSyncedTime = null,
   onTriggerSync,
   onSyncCatalogComplete,
+  masterPin = '1234',
+  requirePinOnStartup = true,
+  onLockNow,
 }) => {
   const [copied, setCopied] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
@@ -157,7 +165,7 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
 
             <div className="flex gap-2">
               <a
-                href={`https://wa.me/?text=${encodeURIComponent(`Here is our ROFANI POS store terminal link: ${appShareUrl}`)}`}
+                href={`https://wa.me/?text=${encodeURIComponent(`Here is our ROFANI POS store terminal link: ${appShareUrl}\nStore Master PIN: ${masterPin}`)}`}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white text-center py-2 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 shadow-sm"
@@ -173,6 +181,38 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
                 <ExternalLink className="w-3.5 h-3.5" />
                 <span>Test in New Tab</span>
               </button>
+            </div>
+
+            {/* Login PIN Protection Notice */}
+            <div className="p-3 bg-purple-950/40 border border-purple-800/40 rounded-xl flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-7 h-7 rounded-lg bg-purple-900/80 text-purple-300 flex items-center justify-center">
+                  <Lock className="w-3.5 h-3.5" />
+                </div>
+                <div>
+                  <div className="text-[11px] font-bold text-purple-200 flex items-center gap-1">
+                    <span>Protected by Store Master PIN:</span>
+                    <span className="font-mono bg-purple-900 px-1.5 py-0.2 rounded text-white">{masterPin}</span>
+                  </div>
+                  <p className="text-[10px] text-slate-400">
+                    {requirePinOnStartup ? 'App locks on load. Workers must enter PIN to enter.' : 'PIN protection on load is currently optional.'}
+                  </p>
+                </div>
+              </div>
+
+              {onLockNow && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onClose();
+                    onLockNow();
+                  }}
+                  className="px-2.5 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-lg text-[10px] font-bold transition shrink-0 flex items-center gap-1"
+                >
+                  <Lock className="w-3 h-3" />
+                  <span>Lock Terminal</span>
+                </button>
+              )}
             </div>
           </div>
 

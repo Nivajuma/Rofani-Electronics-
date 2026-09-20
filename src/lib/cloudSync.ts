@@ -284,3 +284,46 @@ export async function saveRestockRecordToCloud(rec: RestockRecord): Promise<void
     throw error;
   }
 }
+
+// ---------------- STORE SECURITY & PIN LIVE SYNC ----------------
+
+export interface StoreSecurityConfig {
+  requirePinOnStartup: boolean;
+  masterPin: string;
+  storeName?: string;
+  updatedAt?: string;
+}
+
+export function subscribeToStoreSecurity(
+  onUpdate: (config: StoreSecurityConfig) => void,
+  onError?: (err: any) => void
+) {
+  const docRef = doc(db, 'store_settings', 'security_config');
+  return onSnapshot(
+    docRef,
+    (snapshot) => {
+      if (snapshot.exists()) {
+        onUpdate(snapshot.data() as StoreSecurityConfig);
+      }
+    },
+    (error) => {
+      handleFirestoreError(error, OperationType.GET, 'store_settings/security_config');
+      if (onError) onError(error);
+    }
+  );
+}
+
+export async function saveStoreSecurityToCloud(config: StoreSecurityConfig): Promise<void> {
+  const path = 'store_settings/security_config';
+  try {
+    const docRef = doc(db, 'store_settings', 'security_config');
+    const cleaned = cleanForFirestore({
+      ...config,
+      updatedAt: new Date().toISOString(),
+    });
+    await setDoc(docRef, cleaned, { merge: true });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+    throw error;
+  }
+}

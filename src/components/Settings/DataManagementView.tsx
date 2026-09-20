@@ -27,7 +27,11 @@ import {
   Sparkles,
   Cloud,
   Share2,
-  Smartphone
+  Smartphone,
+  Lock,
+  KeyRound,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 import { Product, Customer, Supplier, Transaction, Expense, AttendanceRecord, User } from '../../types';
 import { detectDuplicateProducts, deduplicateProducts } from '../../utils/deduplicate';
@@ -54,6 +58,11 @@ interface DataManagementViewProps {
   onOpenCloudSync?: () => void;
   deviceFormat?: 'computer' | 'phone';
   onChangeDeviceFormat?: (format: 'computer' | 'phone') => void;
+  requirePinOnStartup?: boolean;
+  onToggleRequirePinOnStartup?: (require: boolean) => void;
+  masterPin?: string;
+  onUpdateMasterPin?: (newPin: string) => void;
+  onLockNow?: () => void;
 }
 
 export const DataManagementView: React.FC<DataManagementViewProps> = ({
@@ -78,9 +87,18 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
   onOpenCloudSync,
   deviceFormat = 'computer',
   onChangeDeviceFormat,
+  requirePinOnStartup = true,
+  onToggleRequirePinOnStartup,
+  masterPin = '1234',
+  onUpdateMasterPin,
+  onLockNow,
 }) => {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  // Store Master PIN edit state
+  const [inputMasterPin, setInputMasterPin] = useState(masterPin);
+  const [showMasterPin, setShowMasterPin] = useState(false);
 
   // Business settings state stored in local state for header/receipt customization
   const [storeName, setStoreName] = useState('ROFANI ELECTRONICS & BOUTIQUE');
@@ -568,6 +586,108 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
               <span>{isSavedSettings ? 'Settings Saved!' : 'Save Profile & Tax Settings'}</span>
             </button>
           </form>
+        </div>
+
+        {/* Terminal Login PIN & Sharing Security Card */}
+        <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-4">
+          <div className="flex items-center gap-2 border-b border-slate-100 pb-3">
+            <ShieldCheck className="w-5 h-5 text-purple-600" />
+            <div>
+              <h3 className="font-bold text-sm text-slate-800">Login PIN & Sharing Security</h3>
+              <p className="text-[11px] text-slate-400">Lock app with PIN before sharing with workers</p>
+            </div>
+          </div>
+
+          <div className="space-y-3.5 text-xs">
+            {/* Require PIN on Startup Toggle */}
+            <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="font-bold text-slate-800 flex items-center gap-1.5">
+                  <Lock className="w-4 h-4 text-purple-600" />
+                  <span>Require Login PIN on Startup</span>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={requirePinOnStartup}
+                    onChange={(e) => {
+                      onToggleRequirePinOnStartup?.(e.target.checked);
+                      triggerNotify(
+                        e.target.checked
+                          ? 'Login PIN required on app load enabled!'
+                          : 'PIN requirement on load disabled'
+                      );
+                    }}
+                    className="sr-only peer"
+                  />
+                  <div className="w-9 h-5 bg-slate-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-purple-600"></div>
+                </label>
+              </div>
+              <p className="text-[11px] text-slate-500 leading-relaxed">
+                When active, anyone opening the app or sharing link must enter a security PIN before accessing your store.
+              </p>
+            </div>
+
+            {/* Store Master PIN Settings */}
+            <div className="space-y-1.5">
+              <label className="block font-semibold text-slate-700">Store Master PIN Code</label>
+              <div className="flex items-center gap-2">
+                <div className="relative flex-1">
+                  <input
+                    type={showMasterPin ? 'text' : 'password'}
+                    maxLength={8}
+                    value={inputMasterPin}
+                    onChange={(e) => setInputMasterPin(e.target.value.replace(/[^0-9]/g, ''))}
+                    placeholder="e.g. 1234"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-900 font-mono font-bold tracking-widest text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 pr-10"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowMasterPin(!showMasterPin)}
+                    className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-600 transition"
+                  >
+                    {showMasterPin ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (inputMasterPin.length < 4) {
+                      setErrorMessage('Master PIN must be at least 4 digits.');
+                      return;
+                    }
+                    onUpdateMasterPin?.(inputMasterPin);
+                    triggerNotify(`Master Store PIN updated to: ${inputMasterPin}`);
+                  }}
+                  className="px-3.5 py-2 bg-purple-600 hover:bg-purple-500 text-white font-bold rounded-xl text-xs transition shadow-sm"
+                >
+                  Save PIN
+                </button>
+              </div>
+              <p className="text-[10px] text-slate-400">
+                Default: <span className="font-mono font-bold text-slate-600">{masterPin}</span>. Staff can also use their own individual worker PINs.
+              </p>
+            </div>
+
+            {/* Lock Now Button */}
+            {onLockNow && (
+              <div className="pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  id="btn-settings-lock-terminal"
+                  onClick={onLockNow}
+                  className="w-full py-2.5 px-3 bg-amber-500 hover:bg-amber-600 text-slate-950 font-black rounded-xl text-xs flex items-center justify-center gap-2 shadow-sm transition active:scale-95 cursor-pointer"
+                >
+                  <Lock className="w-4 h-4" />
+                  <span>Lock Terminal Now (Before Sharing)</span>
+                </button>
+                <p className="text-[10px] text-slate-400 text-center mt-1.5">
+                  Locks the screen instantly so you can pass your phone or computer safely.
+                </p>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 

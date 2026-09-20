@@ -63,6 +63,13 @@ service cloud.firestore {
       allow delete: if isValidId(recordId);
     }
 
+    // Store Settings & Master Security Configuration
+    match /store_settings/{settingId} {
+      allow get: if isValidId(settingId);
+      allow list: if true;
+      allow write: if isValidId(settingId);
+    }
+
     // Meta collection for connection health checks
     match /meta/{docId} {
       allow get: if isValidId(docId);

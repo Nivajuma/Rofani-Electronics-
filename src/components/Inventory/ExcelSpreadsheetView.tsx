@@ -24,13 +24,15 @@ import {
   Printer,
   Star,
   Zap,
-  Gem
+  Gem,
+  ShieldAlert
 } from 'lucide-react';
 import { Product, Supplier, Transaction } from '../../types';
 import { generateAutoBarcode, printBarcodeLabels, printBatchBarcodes } from '../../utils/barcode';
 import { calculateProfitMargin } from '../../utils/margin';
 import { ImageGeneratorModal } from './ImageGeneratorModal';
 import { computeProductsPerformance } from '../../utils/salesPerformance';
+import { detectRepeatedItemPhotos, resolveRepeatedCatalogPhotos } from '../../utils/productImages';
 
 interface ExcelSpreadsheetViewProps {
   products: Product[];
@@ -236,6 +238,32 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
     document.body.removeChild(link);
   };
 
+  // Detect repeated photos across inventory
+  const repeatedPhotoGroups = useMemo(() => {
+    return detectRepeatedItemPhotos(products);
+  }, [products]);
+
+  const repeatedProductIds = useMemo(() => {
+    const ids = new Set<string>();
+    repeatedPhotoGroups.forEach((g) => {
+      g.products.forEach((p) => ids.add(p.id));
+    });
+    return ids;
+  }, [repeatedPhotoGroups]);
+
+  const handleFixRepeatedPhotos = () => {
+    const result = resolveRepeatedCatalogPhotos(products);
+    if (result.fixedItemsCount === 0) return;
+
+    if (onBatchImportProducts) {
+      onBatchImportProducts(result.updatedProducts, true);
+    } else {
+      result.updatedProducts.forEach((p) => {
+        onSaveProduct(p);
+      });
+    }
+  };
+
   // Bulk Apply Generated Images
   const handleBulkImagesApplied = (imageMap: Record<string, string>) => {
     products.forEach((p) => {
@@ -300,6 +328,17 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
               <Sparkles className="w-4 h-4" />
               <span>AI Generate Images</span>
             </button>
+
+            {repeatedPhotoGroups.length > 0 && (
+              <button
+                onClick={handleFixRepeatedPhotos}
+                className="bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 font-bold px-3 py-1.5 rounded-xl text-xs transition flex items-center gap-1.5 shadow-md"
+                title="Replace duplicated stock photos with unique product shots"
+              >
+                <RefreshCw className="w-3.5 h-3.5 text-amber-400" />
+                <span>Fix Repeated Photos ({repeatedPhotoGroups.reduce((a, g) => a + g.products.length, 0)})</span>
+              </button>
+            )}
 
             <button
               onClick={handleExportCSV}
@@ -567,11 +606,24 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
                             src={p.imageUrl}
                             alt={p.name}
                             referrerPolicy="no-referrer"
-                            className="w-7 h-7 rounded-lg object-cover mx-auto border border-slate-700"
+                            className={`w-7 h-7 rounded-lg object-cover mx-auto border ${
+                              repeatedProductIds.has(p.id)
+                                ? 'border-amber-500 ring-1 ring-amber-500/50'
+                                : 'border-slate-700'
+                            }`}
                           />
                         ) : (
                           <div className="w-7 h-7 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center text-slate-500 mx-auto">
                             <ImageIcon className="w-3.5 h-3.5" />
+                          </div>
+                        )}
+
+                        {repeatedProductIds.has(p.id) && (
+                          <div
+                            title="Repeated Photo: This photo is shared with another item in catalog"
+                            className="absolute -bottom-1 -left-1 bg-amber-600 text-slate-950 p-0.5 rounded-full shadow"
+                          >
+                            <ShieldAlert className="w-2.5 h-2.5" />
                           </div>
                         )}
 

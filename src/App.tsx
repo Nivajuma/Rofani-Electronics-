@@ -124,7 +124,7 @@ import {
   deleteUserFromCloud,
   bulkUploadUsersToCloud,
 } from './lib/cloudSync';
-import { testFirestoreConnection } from './lib/firebase';
+import { testFirestoreConnection, isQuotaExceededError } from './lib/firebase';
 import { safeGetJSON, safeSetJSON } from './utils/safeStorage';
 import {
   getAllProductImagesFromIndexedDB,
@@ -200,7 +200,9 @@ export default function App() {
   const [showStaffModal, setShowStaffModal] = useState(false);
   const [showInstallModal, setShowInstallModal] = useState(false);
   const [showCloudSyncModal, setShowCloudSyncModal] = useState(false);
-  const [cloudSyncStatus, setCloudSyncStatus] = useState<'synced' | 'syncing' | 'offline' | 'error'>('syncing');
+  const [cloudSyncStatus, setCloudSyncStatus] = useState<'synced' | 'syncing' | 'offline' | 'error' | 'quota_exceeded'>('syncing');
+  const [isCloudQuotaExceeded, setIsCloudQuotaExceeded] = useState<boolean>(false);
+  const [showQuotaBanner, setShowQuotaBanner] = useState<boolean>(true);
   const [lastSyncedTime, setLastSyncedTime] = useState<string | null>(null);
 
   // Application Persistent Collections State with localStorage sync
@@ -418,6 +420,20 @@ export default function App() {
   useEffect(() => {
     let active = true;
 
+    const handleSyncError = (error: any, collectionName: string) => {
+      if (!active) return;
+      if (isQuotaExceededError(error)) {
+        setIsCloudQuotaExceeded(true);
+        setCloudSyncStatus('quota_exceeded');
+        console.warn(
+          `[Firestore Quota Notice] Free daily read units quota reached for ${collectionName}. POS operating seamlessly in offline local storage mode.`
+        );
+      } else {
+        setCloudSyncStatus('offline');
+        console.warn(`Realtime ${collectionName} sync notice:`, error?.message || error);
+      }
+    };
+
     // Test connection first
     testFirestoreConnection().then((connected) => {
       if (!active) return;
@@ -439,10 +455,7 @@ export default function App() {
         setCloudSyncStatus('synced');
         setLastSyncedTime(new Date().toLocaleTimeString());
       },
-      (error) => {
-        console.warn('Realtime product sync listener notice:', error.message);
-        if (active) setCloudSyncStatus('offline');
-      }
+      (error) => handleSyncError(error, 'products')
     );
 
     // 2. Subscribe to Transactions (Sales & Invoices)
@@ -455,9 +468,7 @@ export default function App() {
         setCloudSyncStatus('synced');
         setLastSyncedTime(new Date().toLocaleTimeString());
       },
-      (error) => {
-        console.warn('Realtime transaction sync notice:', error.message);
-      }
+      (error) => handleSyncError(error, 'transactions')
     );
 
     // 3. Subscribe to Customers
@@ -468,9 +479,7 @@ export default function App() {
           setCustomers(cloudCustomers);
         }
       },
-      (error) => {
-        console.warn('Realtime customer sync notice:', error.message);
-      }
+      (error) => handleSyncError(error, 'customers')
     );
 
     // 4. Subscribe to Suppliers
@@ -481,9 +490,7 @@ export default function App() {
           setSuppliers(cloudSuppliers);
         }
       },
-      (error) => {
-        console.warn('Realtime supplier sync notice:', error.message);
-      }
+      (error) => handleSyncError(error, 'suppliers')
     );
 
     // 5. Subscribe to Expenses
@@ -494,9 +501,7 @@ export default function App() {
           setExpenses(cloudExpenses);
         }
       },
-      (error) => {
-        console.warn('Realtime expense sync notice:', error.message);
-      }
+      (error) => handleSyncError(error, 'expenses')
     );
 
     // 6. Subscribe to Restock Records
@@ -507,9 +512,7 @@ export default function App() {
           setRestockRecords(cloudRestock);
         }
       },
-      (error) => {
-        console.warn('Realtime restock sync notice:', error.message);
-      }
+      (error) => handleSyncError(error, 'restock')
     );
 
     // 7. Subscribe to Store Security & Master PIN Config
@@ -535,9 +538,7 @@ export default function App() {
           }
         }
       },
-      (error) => {
-        console.warn('Realtime store security sync notice:', error?.message);
-      }
+      (error) => handleSyncError(error, 'security')
     );
 
     // 8. Subscribe to Users (Staff members & Worker Profiles)
@@ -554,9 +555,7 @@ export default function App() {
           });
         }
       },
-      (error) => {
-        console.warn('Realtime staff users sync notice:', error?.message);
-      }
+      (error) => handleSyncError(error, 'users')
     );
 
     return () => {
@@ -777,14 +776,19 @@ export default function App() {
     setCustomers(updatedCustomers);
 
     // Real-Time Cloud Sync to Firestore for all connected worker mobile devices
-    saveTransactionToCloud(tx);
-    updatedProducts.forEach((p) => saveProductToCloud(p));
-    updatedCustomers.forEach((c) => saveCustomerToCloud(c));
+    saveTransactionToCloud(tx).catch((err) => {
+      if (isQuotaExceededError(err)) {
+        setIsCloudQuotaExceeded(true);
+        setCloudSyncStatus('quota_exceeded');
+      }
+    });
+    updatedProducts.forEach((p) => saveProductToCloud(p).catch(() => {}));
+    updatedCustomers.forEach((c) => saveCustomerToCloud(c).catch(() => {}));
   };
 
   const handleAddCustomer = (newCust: Customer) => {
     setCustomers((prev) => [...prev, newCust]);
-    saveCustomerToCloud(newCust);
+    saveCustomerToCloud(newCust).catch(() => {});
   };
 
   const handleSaveCustomer = (cust: Customer) => {
@@ -797,7 +801,7 @@ export default function App() {
       }
       return [cust, ...prev];
     });
-    saveCustomerToCloud(cust);
+    saveCustomerToCloud(cust).catch(() => {});
   };
 
   const handleDeleteCustomer = (customerId: string) => {
@@ -814,7 +818,7 @@ export default function App() {
       }
       return [...prev, sup];
     });
-    saveSupplierToCloud(sup);
+    saveSupplierToCloud(sup).catch(() => {});
   };
 
   const handleDeleteSupplier = (supplierId: string) => {
@@ -937,7 +941,7 @@ export default function App() {
     });
 
     // Real-Time Cloud Sync to Firestore
-    saveProductToCloud(prod);
+    saveProductToCloud(prod).catch(() => {});
   };
 
   const handleBatchImportProducts = (importedProducts: Product[], replaceExisting: boolean) => {
@@ -962,13 +966,13 @@ export default function App() {
     }
 
     // Sync imported products to Firestore cloud catalog
-    bulkUploadProductsToCloud(importedProducts);
+    bulkUploadProductsToCloud(importedProducts).catch(() => {});
   };
 
   const handleDeleteProduct = (productId: string) => {
     deleteProductImageFromIndexedDB(productId);
     setProducts((prev) => prev.filter((p) => p.id !== productId));
-    deleteProductFromCloud(productId);
+    deleteProductFromCloud(productId).catch(() => {});
   };
 
   const handleAddRestockRecord = (
@@ -1000,7 +1004,7 @@ export default function App() {
     };
 
     setRestockRecords((prev) => [newRestock, ...prev]);
-    saveRestockRecordToCloud(newRestock);
+    saveRestockRecordToCloud(newRestock).catch(() => {});
 
     const updatedProd: Product = {
       ...prod,
@@ -1012,7 +1016,7 @@ export default function App() {
     setProducts((prev) =>
       prev.map((p) => (p.id === productId ? updatedProd : p))
     );
-    saveProductToCloud(updatedProd);
+    saveProductToCloud(updatedProd).catch(() => {});
 
     const restockExp: Expense = {
       id: `exp-rst-${Date.now()}`,
@@ -1027,17 +1031,17 @@ export default function App() {
       status: 'Paid'
     };
     setExpenses((prev) => [restockExp, ...prev]);
-    saveExpenseToCloud(restockExp);
+    saveExpenseToCloud(restockExp).catch(() => {});
   };
 
   const handleApplyStockAdjustment = (updatedProducts: Product[], _audit: StockCountAudit) => {
     setProducts(updatedProducts);
-    updatedProducts.forEach((p) => saveProductToCloud(p));
+    updatedProducts.forEach((p) => saveProductToCloud(p).catch(() => {}));
   };
 
   const handleAddExpense = (exp: Expense) => {
     setExpenses((prev) => [exp, ...prev]);
-    saveExpenseToCloud(exp);
+    saveExpenseToCloud(exp).catch(() => {});
   };
 
   const handleDeleteExpense = (expId: string) => {
@@ -1643,6 +1647,7 @@ export default function App() {
           allUsers={allUsers}
           cloudSyncStatus={cloudSyncStatus}
           lastSyncedTime={lastSyncedTime}
+          isQuotaExceeded={isCloudQuotaExceeded}
           onSyncCatalogComplete={() => {
             setCloudSyncStatus('synced');
             setLastSyncedTime(new Date().toLocaleTimeString());
@@ -2099,6 +2104,33 @@ export default function App() {
 
       {/* Main Container */}
       <main className="flex-1 flex flex-col min-w-0 overflow-hidden">
+        {/* Firestore Quota Notice Banner */}
+        {isCloudQuotaExceeded && showQuotaBanner && (
+          <div className="bg-amber-500 text-slate-950 px-5 py-2 text-xs font-semibold flex items-center justify-between shadow-sm z-30 shrink-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="flex items-center gap-1 bg-slate-950 text-amber-300 px-2 py-0.5 rounded text-[11px] font-bold">
+                <AlertTriangle className="w-3.5 h-3.5" /> Quota Notice
+              </span>
+              <span>
+                Firebase daily free read units limit reached. <strong>POS is operating safely in Offline Local Storage Mode</strong>. All transactions and inventory records are stored securely in local storage.
+              </span>
+              <button
+                onClick={() => setShowCloudSyncModal(true)}
+                className="underline font-extrabold text-slate-950 hover:text-black ml-1 cursor-pointer"
+              >
+                View Quota & Plan Details
+              </button>
+            </div>
+            <button
+              onClick={() => setShowQuotaBanner(false)}
+              className="text-slate-900 hover:text-black p-1 font-bold text-xs cursor-pointer ml-4"
+              title="Dismiss banner"
+            >
+              ✕
+            </button>
+          </div>
+        )}
+
         {/* Top Header Stats Bar */}
         <header className="h-20 bg-white border-b border-slate-200 flex items-center justify-between px-8 shrink-0 shadow-sm z-10">
           <div className="flex items-center gap-8">
@@ -2156,12 +2188,31 @@ export default function App() {
             {/* Cloud Sync & Share Across Mobile Phones Button in Top Header */}
             <button
               onClick={() => setShowCloudSyncModal(true)}
-              title="Real-Time Cloud Synchronization & Share with Worker Mobile Phones"
-              className="px-3 py-2 bg-sky-50 hover:bg-sky-100 text-sky-800 rounded-xl border border-sky-200 transition flex items-center gap-1.5 text-xs font-bold shadow-sm"
+              title={
+                cloudSyncStatus === 'quota_exceeded'
+                  ? 'Firestore Daily Quota Reached: Operating in Offline Local Storage Mode'
+                  : 'Real-Time Cloud Synchronization & Share with Worker Mobile Phones'
+              }
+              className={`px-3 py-2 rounded-xl border transition flex items-center gap-1.5 text-xs font-bold shadow-sm ${
+                cloudSyncStatus === 'quota_exceeded'
+                  ? 'bg-amber-50 hover:bg-amber-100 text-amber-950 border-amber-300'
+                  : 'bg-sky-50 hover:bg-sky-100 text-sky-800 border-sky-200'
+              }`}
             >
-              <Cloud className="w-4 h-4 text-sky-600" />
-              <span className="hidden sm:inline">Cloud Sync & Share</span>
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" title="Cloud connection active" />
+              <Cloud className={`w-4 h-4 ${cloudSyncStatus === 'quota_exceeded' ? 'text-amber-600' : 'text-sky-600'}`} />
+              <span className="hidden sm:inline">
+                {cloudSyncStatus === 'quota_exceeded' ? 'Cloud Quota (Local Mode)' : 'Cloud Sync & Share'}
+              </span>
+              <span
+                className={`w-2 h-2 rounded-full ${
+                  cloudSyncStatus === 'quota_exceeded'
+                    ? 'bg-amber-500'
+                    : cloudSyncStatus === 'offline'
+                    ? 'bg-slate-400'
+                    : 'bg-emerald-500 animate-pulse'
+                }`}
+                title={cloudSyncStatus === 'quota_exceeded' ? 'Local storage mode' : 'Cloud connection active'}
+              />
             </button>
 
             {/* AI Worker Assistant Button */}
@@ -2367,6 +2418,7 @@ export default function App() {
         allUsers={allUsers}
         cloudSyncStatus={cloudSyncStatus}
         lastSyncedTime={lastSyncedTime}
+        isQuotaExceeded={isCloudQuotaExceeded}
         onSyncCatalogComplete={() => {
           setCloudSyncStatus('synced');
           setLastSyncedTime(new Date().toLocaleTimeString());

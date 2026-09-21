@@ -11,6 +11,7 @@ import {
   ExternalLink,
   ShieldCheck,
   AlertCircle,
+  AlertTriangle,
   UploadCloud,
   X,
   Radio,
@@ -26,7 +27,8 @@ interface CloudSyncModalProps {
   onClose: () => void;
   products: Product[];
   allUsers?: User[];
-  cloudSyncStatus?: 'synced' | 'syncing' | 'offline' | 'error';
+  cloudSyncStatus?: 'synced' | 'syncing' | 'offline' | 'error' | 'quota_exceeded';
+  isQuotaExceeded?: boolean;
   lastSyncedTime?: string | null;
   onTriggerSync?: () => void;
   onSyncCatalogComplete?: () => void;
@@ -43,6 +45,7 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
   products,
   allUsers = [],
   cloudSyncStatus = 'synced',
+  isQuotaExceeded = false,
   lastSyncedTime = null,
   onTriggerSync,
   onSyncCatalogComplete,
@@ -117,16 +120,84 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
           </button>
         </div>
 
+        {/* Quota Exceeded Alert Banner */}
+        {(cloudSyncStatus === 'quota_exceeded' || isQuotaExceeded) && (
+          <div className="bg-amber-950/80 border border-amber-700/80 p-4 rounded-2xl space-y-3">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+              <div className="space-y-1.5">
+                <div className="text-xs font-bold text-amber-200 flex items-center gap-2">
+                  <span>Firestore Daily Read Quota Exceeded</span>
+                  <span className="bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[10px] px-2 py-0.5 rounded-full font-mono font-bold">
+                    Offline Local Storage Safe
+                  </span>
+                </div>
+                <p className="text-xs text-amber-200/90 leading-relaxed">
+                  The Google Cloud Firestore daily free read quota has been exceeded for today. <strong>Your store POS terminal remains fully functional in Offline / Local Storage Mode</strong>. All sales receipts, customer debts, worker loans, inventory, and PIN settings continue saving safely to this device.
+                </p>
+                <p className="text-[11px] text-amber-300/80">
+                  The free read quota automatically resets every day at midnight. To avoid quota limits and enable unlimited real-time sync across worker phones, upgrade to the Firebase Blaze (Pay-as-you-go) plan:
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-amber-900/60">
+              <a
+                href="https://console.firebase.google.com/project/isentropic-park-753sn/firestore/databases/ai-studio-retailstockmanag-35779e9e-08d0-4311-8158-8be055847014/data?openUpgradeDialog=true"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-slate-950 font-bold text-xs rounded-xl shadow transition flex items-center gap-1.5"
+              >
+                <ExternalLink className="w-3.5 h-3.5" />
+                <span>Open Firebase Upgrade Dialog</span>
+              </a>
+              <a
+                href="https://firebase.google.com/pricing#cloud-firestore"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs rounded-xl transition flex items-center gap-1"
+              >
+                <span>View Firebase Pricing & Quotas</span>
+              </a>
+            </div>
+          </div>
+        )}
+
         {/* Live Sync Status Banner */}
-        <div className="bg-gradient-to-r from-sky-950/90 to-blue-950/90 border border-sky-800/80 p-4 rounded-2xl flex items-center justify-between">
+        <div className={`p-4 rounded-2xl flex items-center justify-between border ${
+          cloudSyncStatus === 'quota_exceeded' || isQuotaExceeded
+            ? 'bg-amber-950/40 border-amber-800/60'
+            : cloudSyncStatus === 'offline'
+            ? 'bg-slate-950/80 border-slate-800'
+            : 'bg-gradient-to-r from-sky-950/90 to-blue-950/90 border-sky-800/80'
+        }`}>
           <div className="flex items-center gap-3">
-            <div className="w-3 h-3 rounded-full bg-emerald-400 animate-ping" />
+            <div className={`w-3 h-3 rounded-full ${
+              cloudSyncStatus === 'quota_exceeded' || isQuotaExceeded
+                ? 'bg-amber-400'
+                : cloudSyncStatus === 'offline'
+                ? 'bg-slate-500'
+                : 'bg-emerald-400 animate-ping'
+            }`} />
             <div>
-              <div className="text-xs font-bold text-sky-200 flex items-center gap-1.5">
-                <Radio className="w-4 h-4 text-emerald-400" /> Firebase Cloud Firestore Connected
+              <div className="text-xs font-bold text-slate-100 flex items-center gap-1.5">
+                <Radio className={`w-4 h-4 ${
+                  cloudSyncStatus === 'quota_exceeded' || isQuotaExceeded
+                    ? 'text-amber-400'
+                    : cloudSyncStatus === 'offline'
+                    ? 'text-slate-400'
+                    : 'text-emerald-400'
+                }`} />
+                {cloudSyncStatus === 'quota_exceeded' || isQuotaExceeded
+                  ? 'Firestore Quota Reached — Local Storage Mode Active'
+                  : cloudSyncStatus === 'offline'
+                  ? 'Cloud Sync Offline — Local Cache Safe'
+                  : 'Firebase Cloud Firestore Connected'}
               </div>
               <p className="text-[11px] text-slate-300">
-                {products.length} catalog products synced. Changes appear instantly across all devices.
+                {cloudSyncStatus === 'quota_exceeded' || isQuotaExceeded
+                  ? `${products.length} catalog items preserved locally. Sales and inventory remain 100% active.`
+                  : `${products.length} catalog products synced. Changes appear instantly across all devices.`}
               </p>
             </div>
           </div>

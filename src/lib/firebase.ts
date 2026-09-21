@@ -18,13 +18,27 @@ export async function testFirestoreConnection(): Promise<boolean> {
     await getDocFromServer(doc(db, 'test', 'connection'));
     return true;
   } catch (error) {
-    if (error instanceof Error && error.message.includes('the client is offline')) {
-      console.warn('[Firebase] Offline mode or connection pending. Local cache will be used.');
-      return false;
+    if (error instanceof Error) {
+      if (
+        error.message.includes('the client is offline') ||
+        error.message.includes('Quota') ||
+        error.message.includes('quota')
+      ) {
+        console.warn('[Firebase] Offline mode or quota limit reached. Local cache will be used.');
+        return false;
+      }
     }
-    // Connected or permission check response
-    return true;
+    return false;
   }
+}
+
+export function isQuotaExceededError(error: unknown): boolean {
+  const msg = error instanceof Error ? error.message : String(error);
+  return (
+    msg.includes('Quota limit exceeded') ||
+    msg.includes('Quota exceeded') ||
+    msg.includes('Free daily read units per project')
+  );
 }
 
 export enum OperationType {

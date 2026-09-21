@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Lock,
   KeyRound,
@@ -18,7 +18,11 @@ import {
   HelpCircle,
   Check,
   ArrowLeft,
-  Sparkles
+  Sparkles,
+  Search,
+  Users,
+  Filter,
+  X
 } from 'lucide-react';
 import { User, Role } from '../../types';
 
@@ -60,6 +64,11 @@ export const PinLoginModal: React.FC<PinLoginModalProps> = ({
   const [showPinText, setShowPinText] = useState<boolean>(false);
   const [loginMode, setLoginMode] = useState<'staff' | 'master'>('staff');
 
+  // Worker search and filter state for selecting workers easily
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [roleFilter, setRoleFilter] = useState<string>('all');
+  const [activeMobileTab, setActiveMobileTab] = useState<'workers' | 'keypad'>('workers');
+
   // Emergency Admin PIN Recovery State
   const [showRecoveryView, setShowRecoveryView] = useState<boolean>(false);
   const [recoveryMethod, setRecoveryMethod] = useState<'email' | 'key'>('email');
@@ -72,15 +81,39 @@ export const PinLoginModal: React.FC<PinLoginModalProps> = ({
   const [recoverySuccessNotice, setRecoverySuccessNotice] = useState<string>('');
   const [showAlternativeHelp, setShowAlternativeHelp] = useState<boolean>(false);
 
+  // Filtered workers list for fast selection
+  const filteredUsers = useMemo(() => {
+    return users.filter((u) => {
+      if (roleFilter !== 'all' && u.role !== roleFilter) return false;
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase();
+        const matchName = u.name?.toLowerCase().includes(q);
+        const matchRole = u.role?.toLowerCase().includes(q);
+        const matchEmail = u.email?.toLowerCase().includes(q);
+        return matchName || matchRole || matchEmail;
+      }
+      return true;
+    });
+  }, [users, searchQuery, roleFilter]);
+
   // Reset inputs and require clean staff selection whenever the lock screen opens
   useEffect(() => {
     if (isOpen) {
       if (isMandatory) {
         setSelectedUser(null);
+        setActiveMobileTab('workers');
+      } else if (currentUser) {
+        setSelectedUser(currentUser);
+        setActiveMobileTab('keypad');
+      } else {
+        setSelectedUser(null);
+        setActiveMobileTab('workers');
       }
       setPinInput('');
       setErrorMsg('');
       setLoginMode('staff');
+      setSearchQuery('');
+      setRoleFilter('all');
       setShowRecoveryView(false);
       setIsRecoveryVerified(false);
       setRecoveryIdentifier('');
@@ -88,7 +121,14 @@ export const PinLoginModal: React.FC<PinLoginModalProps> = ({
       setRecoveryError('');
       setRecoverySuccessNotice('');
     }
-  }, [isOpen, isMandatory]);
+  }, [isOpen, isMandatory, currentUser]);
+
+  const handleSelectUser = (user: User) => {
+    setSelectedUser(user);
+    setPinInput('');
+    setErrorMsg('');
+    setActiveMobileTab('keypad'); // On mobile screens, automatically transition to keypad
+  };
 
   const handleKeyPress = (num: string) => {
     if (loginMode === 'staff' && !selectedUser) {
@@ -266,8 +306,8 @@ export const PinLoginModal: React.FC<PinLoginModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-4">
-      <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-4xl shadow-2xl overflow-hidden min-h-[520px]">
+    <div className="fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-md overflow-y-auto p-2 sm:p-4 flex items-center justify-center min-h-screen">
+      <div className="my-auto bg-slate-900 border border-slate-800 rounded-2xl sm:rounded-3xl w-full max-w-4xl shadow-2xl overflow-hidden flex flex-col max-h-[96vh] sm:max-h-[92vh]">
         {showRecoveryView ? (
           /* ================= EMERGENCY ADMIN RECOVERY SCREEN ================= */
           <div className="p-6 sm:p-10 flex flex-col justify-between min-h-[520px]">
@@ -517,310 +557,460 @@ export const PinLoginModal: React.FC<PinLoginModalProps> = ({
           </div>
         ) : (
           /* ================= STANDARD PIN LOGIN SCREEN ================= */
-          <div className="grid grid-cols-1 md:grid-cols-12 min-h-[520px]">
-            {/* LEFT PANEL: STAFF ACCOUNT SELECTOR */}
-            <div className="md:col-span-5 bg-slate-950/60 border-b md:border-b-0 md:border-r border-slate-800 p-6 flex flex-col justify-between">
-              <div>
-                <div className="flex items-center gap-3 mb-5">
-                  <div className="w-10 h-10 rounded-2xl bg-sky-500/10 border border-sky-500/30 text-sky-400 flex items-center justify-center">
-                    <ShoppingBag className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <h3 className="font-black text-sm text-slate-100 tracking-wide uppercase">
-                      {storeName}
-                    </h3>
-                    <p className="text-[11px] text-slate-400">
-                      {isMandatory ? 'Security Passcode Protected' : 'Terminal Authentication'}
-                    </p>
-                  </div>
-                </div>
-
-                {/* Login Mode Selector Tabs */}
-                <div className="flex bg-slate-900 p-1 rounded-xl border border-slate-800 mb-4">
-                  <button
-                    onClick={() => {
-                      setLoginMode('staff');
-                      setPinInput('');
-                      setErrorMsg('');
-                    }}
-                    className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition cursor-pointer ${
-                      loginMode === 'staff'
-                        ? 'bg-sky-500 text-slate-950 shadow-sm'
-                        : 'text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    Staff PIN
-                  </button>
-                  <button
-                    onClick={() => {
-                      setLoginMode('master');
-                      setPinInput('');
-                      setErrorMsg('');
-                    }}
-                    className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition cursor-pointer ${
-                      loginMode === 'master'
-                        ? 'bg-purple-600 text-white shadow-sm'
-                        : 'text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    Master Store PIN
-                  </button>
-                </div>
-
-                {loginMode === 'master' ? (
-                  <div className="bg-purple-950/30 border border-purple-800/40 rounded-2xl p-4 space-y-2.5 text-xs text-purple-200">
-                    <div className="font-bold flex items-center gap-1.5 text-purple-300">
-                      <Lock className="w-4 h-4 text-purple-400" />
-                      Store Master Passcode
-                    </div>
-                    <p className="text-[11px] text-slate-400 leading-relaxed">
-                      For store managers and owners only. Enter the secure store master passcode to unlock this terminal with full administrator authority.
-                    </p>
-                    <div className="bg-purple-950/60 p-2.5 rounded-xl border border-purple-800/50 text-[11px] text-purple-300/90 flex items-center gap-2">
-                      <ShieldCheck className="w-4 h-4 text-purple-400 shrink-0" />
-                      <span>Master unlock provides complete administrative access.</span>
-                    </div>
-                  </div>
-                ) : (
-                  <>
-                    <div className="mb-2 flex items-center justify-between text-xs text-slate-400 font-semibold uppercase tracking-wider">
-                      <span>Select Your Account</span>
-                      <span className="text-[10px] text-sky-400 font-mono">{users.length} Active Staff</span>
-                    </div>
-
-                    {!selectedUser && (
-                      <div className="mb-2 px-3 py-2 bg-sky-950/40 border border-sky-800/50 rounded-xl text-[11px] text-sky-300 flex items-center gap-2">
-                        <UserIcon className="w-3.5 h-3.5 shrink-0 text-sky-400" />
-                        <span>Tap your name below to sign in:</span>
-                      </div>
-                    )}
-
-                    {/* Staff list cards */}
-                    <div className="space-y-1.5 max-h-[260px] overflow-y-auto pr-1">
-                      {users.map((u) => {
-                        const isSelected = selectedUser?.id === u.id;
-                        return (
-                          <button
-                            key={u.id}
-                            onClick={() => {
-                              setSelectedUser(u);
-                              setPinInput('');
-                              setErrorMsg('');
-                            }}
-                            className={`w-full text-left p-2.5 rounded-xl border transition flex items-center justify-between cursor-pointer ${
-                              isSelected
-                                ? 'bg-slate-800 border-sky-500 shadow-md shadow-sky-500/10 text-white ring-1 ring-sky-500'
-                                : 'bg-slate-900/60 border-slate-800 text-slate-300 hover:bg-slate-800/60 hover:border-slate-700'
-                            }`}
-                          >
-                            <div className="flex items-center gap-2.5">
-                              <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold text-xs ${
-                                isSelected ? 'bg-sky-500 text-slate-950' : 'bg-slate-800 text-slate-300'
-                              }`}>
-                                {u.name.charAt(0)}
-                              </div>
-                              <div>
-                                <div className="font-bold text-xs leading-tight">{u.name}</div>
-                                <div className="text-[10px] text-slate-400 mt-0.5 flex items-center gap-1">
-                                  <span className={`px-1.5 py-0.2 rounded border text-[9px] font-mono ${roleBadges[u.role] || 'bg-slate-800 text-slate-300 border-slate-700'}`}>
-                                    {u.role}
-                                  </span>
-                                </div>
-                              </div>
-                            </div>
-
-                            <div className="flex items-center gap-1.5">
-                              {isSelected ? (
-                                <CheckCircle2 className="w-4 h-4 text-sky-400" />
-                              ) : (
-                                <ChevronRight className="w-3.5 h-3.5 text-slate-600" />
-                              )}
-                            </div>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </>
-                )}
-              </div>
-
-              {/* Forgot PIN & Recovery Action Button */}
-              <div className="mt-4 pt-4 border-t border-slate-800 space-y-2">
+          <div className="flex flex-col flex-1 overflow-hidden">
+            {/* Mobile View Switcher (Only on screens < md) */}
+            <div className="md:hidden flex items-center justify-between bg-slate-950 border-b border-slate-800 px-3 py-2 shrink-0">
+              <div className="flex bg-slate-900 p-1 rounded-xl border border-slate-800 w-full gap-1">
                 <button
                   type="button"
-                  onClick={() => {
-                    setShowRecoveryView(true);
-                    setIsRecoveryVerified(false);
-                    setRecoveryIdentifier('');
-                    setRecoveryError('');
-                  }}
-                  className="w-full py-2 px-3 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition cursor-pointer"
+                  onClick={() => setActiveMobileTab('workers')}
+                  className={`flex-1 py-1.5 px-2 text-xs font-bold rounded-lg transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                    activeMobileTab === 'workers'
+                      ? 'bg-sky-500 text-slate-950 shadow-sm'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <Users className="w-3.5 h-3.5" />
+                  <span>1. Staff List ({filteredUsers.length})</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveMobileTab('keypad')}
+                  className={`flex-1 py-1.5 px-2 text-xs font-bold rounded-lg transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                    activeMobileTab === 'keypad'
+                      ? 'bg-sky-500 text-slate-950 shadow-sm'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
                 >
                   <KeyRound className="w-3.5 h-3.5" />
-                  <span>Forgot PIN? / Emergency Reset</span>
+                  <span>2. PIN Pad {selectedUser ? `(${selectedUser.name.split(' ')[0]})` : ''}</span>
                 </button>
-
-                <div className="flex items-center justify-between text-[11px] text-slate-500 px-1">
-                  <span className="flex items-center gap-1 text-slate-400">
-                    <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-                    Role-Based Shift Security
-                  </span>
-                  <span className="text-[10px] text-slate-500 font-mono">
-                    Terminal Locked
-                  </span>
-                </div>
               </div>
             </div>
 
-            {/* RIGHT PANEL: PIN PAD & DIGITS INPUT */}
-            <div className="md:col-span-7 p-6 sm:p-8 flex flex-col justify-between items-center text-center">
-              <div className="w-full max-w-sm space-y-4">
-                {/* Header for PIN Entry */}
+            {/* Main Split Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-12 flex-1 overflow-y-auto min-h-0">
+              {/* LEFT PANEL: STAFF ACCOUNT SELECTOR */}
+              <div
+                className={`md:col-span-5 bg-slate-950/60 border-b md:border-b-0 md:border-r border-slate-800 p-4 sm:p-5 flex-col justify-between overflow-y-auto ${
+                  activeMobileTab === 'workers' ? 'flex' : 'hidden md:flex'
+                }`}
+              >
                 <div>
-                  <div className="w-12 h-12 rounded-2xl bg-sky-950 border border-sky-800 text-sky-400 flex items-center justify-center mx-auto mb-2 shadow-inner">
-                    {loginMode === 'master' ? (
-                      <KeyRound className="w-6 h-6 text-purple-400" />
-                    ) : (
-                      <UserCheck className="w-6 h-6" />
-                    )}
-                  </div>
-                  <h2 className="text-xl font-black text-slate-100">
-                    {loginMode === 'master'
-                      ? 'Enter Master Store PIN'
-                      : selectedUser
-                      ? 'Enter Staff PIN'
-                      : 'Select Your Account'}
-                  </h2>
-                  <p className="text-xs text-slate-400 mt-1">
-                    {loginMode === 'master' ? (
-                      <span>Enter store master passcode to unlock this terminal</span>
-                    ) : selectedUser ? (
-                      <>
-                        Authenticating as <span className="text-sky-400 font-bold">{selectedUser.name}</span>{' '}
-                        <span className={`px-1.5 py-0.2 rounded border text-[9px] font-mono ${roleBadges[selectedUser.role]}`}>
-                          {selectedUser.role}
-                        </span>
-                      </>
-                    ) : (
-                      <span className="text-amber-400 font-semibold">
-                        ← Tap your name on the left to enter your PIN
-                      </span>
-                    )}
-                  </p>
-                </div>
-
-                {/* PIN Bullet Dots Display or Placeholder */}
-                {!selectedUser && loginMode === 'staff' ? (
-                  <div className="py-5 px-4 bg-slate-950/80 border border-dashed border-slate-800 rounded-2xl text-center">
-                    <div className="text-sky-400 font-semibold text-xs flex items-center justify-center gap-1.5 mb-1">
-                      <UserIcon className="w-4 h-4" />
-                      <span>Choose Your Profile to Continue</span>
+                  <div className="flex items-center gap-3 mb-4">
+                    <div className="w-9 h-9 rounded-2xl bg-sky-500/10 border border-sky-500/30 text-sky-400 flex items-center justify-center shrink-0">
+                      <ShoppingBag className="w-4 h-4" />
                     </div>
-                    <p className="text-[11px] text-slate-400">
-                      Select your name from the staff directory on the left. The numeric keypad will activate for your account.
-                    </p>
-                  </div>
-                ) : (
-                  <div className="py-2">
-                    <div className="flex justify-center items-center gap-2.5">
-                      {Array.from({ length: Math.max(4, loginMode === 'master' ? masterPin.length : (selectedUser?.pin?.length || 4)) }).map((_, idx) => {
-                        const isFilled = pinInput.length > idx;
-                        return (
-                          <div
-                            key={idx}
-                            className={`w-11 h-12 rounded-2xl border-2 flex items-center justify-center text-lg font-mono font-bold transition-all duration-200 ${
-                              isFilled
-                                ? loginMode === 'master'
-                                  ? 'border-purple-500 bg-purple-950/60 text-purple-300 shadow-lg shadow-purple-500/20 scale-105'
-                                  : 'border-sky-500 bg-sky-950/60 text-sky-300 shadow-lg shadow-sky-500/20 scale-105'
-                                : 'border-slate-800 bg-slate-950 text-slate-600'
-                            }`}
-                          >
-                            {isFilled ? (showPinText ? pinInput[idx] : '●') : ''}
-                          </div>
-                        );
-                      })}
+                    <div className="min-w-0">
+                      <h3 className="font-black text-sm text-slate-100 tracking-wide uppercase truncate">
+                        {storeName}
+                      </h3>
+                      <p className="text-[11px] text-slate-400">
+                        {isMandatory ? 'Security Passcode Protected' : 'Terminal Authentication'}
+                      </p>
                     </div>
+                  </div>
 
-                    {/* Toggle Show PIN Text */}
+                  {/* Login Mode Selector Tabs */}
+                  <div className="flex bg-slate-900 p-1 rounded-xl border border-slate-800 mb-3">
                     <button
                       type="button"
-                      onClick={() => setShowPinText(!showPinText)}
-                      className="mt-2.5 inline-flex items-center gap-1.5 text-[11px] text-slate-400 hover:text-slate-200 transition cursor-pointer"
+                      onClick={() => {
+                        setLoginMode('staff');
+                        setPinInput('');
+                        setErrorMsg('');
+                      }}
+                      className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition cursor-pointer ${
+                        loginMode === 'staff'
+                          ? 'bg-sky-500 text-slate-950 shadow-sm'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
                     >
-                      {showPinText ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                      <span>{showPinText ? 'Hide Digits' : 'Show Digits'}</span>
+                      Staff PIN
                     </button>
-                  </div>
-                )}
-
-                {/* Error Banner */}
-                {errorMsg && (
-                  <div className="bg-rose-950/80 border border-rose-800 text-rose-300 text-xs px-3 py-2 rounded-xl flex items-center justify-center gap-2 animate-shake">
-                    <AlertCircle className="w-4 h-4 shrink-0 text-rose-400" />
-                    <span>{errorMsg}</span>
-                  </div>
-                )}
-
-                {/* Numeric Keypad Grid */}
-                <div className="grid grid-cols-3 gap-2.5 max-w-[260px] mx-auto pt-1">
-                  {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((digit) => (
                     <button
-                      key={digit}
-                      onClick={() => handleKeyPress(digit)}
-                      className="h-13 bg-slate-800/80 hover:bg-slate-700 active:bg-sky-600 text-slate-100 font-mono font-bold text-xl rounded-2xl border border-slate-700/80 transition shadow-sm active:scale-95 flex items-center justify-center py-3 cursor-pointer"
+                      type="button"
+                      onClick={() => {
+                        setLoginMode('master');
+                        setPinInput('');
+                        setErrorMsg('');
+                        setActiveMobileTab('keypad');
+                      }}
+                      className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition cursor-pointer ${
+                        loginMode === 'master'
+                          ? 'bg-purple-600 text-white shadow-sm'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
                     >
-                      {digit}
+                      Master Store PIN
                     </button>
-                  ))}
+                  </div>
 
+                  {loginMode === 'master' ? (
+                    <div className="bg-purple-950/30 border border-purple-800/40 rounded-2xl p-3.5 space-y-2 text-xs text-purple-200">
+                      <div className="font-bold flex items-center gap-1.5 text-purple-300">
+                        <Lock className="w-4 h-4 text-purple-400" />
+                        Store Master Passcode
+                      </div>
+                      <p className="text-[11px] text-slate-400 leading-relaxed">
+                        For store managers and owners only. Enter the secure store master passcode on the numeric keypad to unlock this terminal.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => setActiveMobileTab('keypad')}
+                        className="md:hidden w-full py-2 bg-purple-600 text-white font-bold rounded-xl text-xs mt-2 cursor-pointer"
+                      >
+                        Proceed to Master PIN Keypad →
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="mb-2 flex items-center justify-between text-xs text-slate-400 font-semibold uppercase tracking-wider">
+                        <span>Select Your Account</span>
+                        <span className="text-[10px] text-sky-400 font-mono">
+                          {filteredUsers.length} of {users.length} Staff
+                        </span>
+                      </div>
+
+                      {/* Quick Search Bar */}
+                      <div className="relative mb-2">
+                        <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                        <input
+                          type="text"
+                          placeholder="Search worker by name or role..."
+                          value={searchQuery}
+                          onChange={(e) => setSearchQuery(e.target.value)}
+                          className="w-full bg-slate-900 border border-slate-700/80 rounded-xl pl-8 pr-7 py-1.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-sky-500 transition"
+                        />
+                        {searchQuery && (
+                          <button
+                            type="button"
+                            onClick={() => setSearchQuery('')}
+                            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Role Filter Chips */}
+                      <div className="flex items-center gap-1 overflow-x-auto pb-1 mb-2 text-[10px] no-scrollbar">
+                        {['all', 'Cashier', 'Manager', 'Admin', 'Inventory Staff'].map((role) => (
+                          <button
+                            key={role}
+                            type="button"
+                            onClick={() => setRoleFilter(role)}
+                            className={`px-2 py-0.5 rounded-lg border whitespace-nowrap transition cursor-pointer ${
+                              roleFilter === role
+                                ? 'bg-sky-500/20 text-sky-300 border-sky-500/50 font-bold'
+                                : 'bg-slate-900 text-slate-400 border-slate-800 hover:text-slate-200'
+                            }`}
+                          >
+                            {role === 'all' ? 'All Roles' : role}
+                          </button>
+                        ))}
+                      </div>
+
+                      {/* Staff list cards with dedicated scrollbar */}
+                      <div className="space-y-1.5 max-h-[200px] sm:max-h-[240px] md:max-h-[280px] overflow-y-auto pr-1">
+                        {filteredUsers.length === 0 ? (
+                          <div className="text-center py-6 bg-slate-950/40 border border-dashed border-slate-800 rounded-xl p-3">
+                            <p className="text-xs text-slate-400">No workers match "{searchQuery}"</p>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSearchQuery('');
+                                setRoleFilter('all');
+                              }}
+                              className="text-[11px] text-sky-400 hover:underline mt-1"
+                            >
+                              Clear filters
+                            </button>
+                          </div>
+                        ) : (
+                          filteredUsers.map((u) => {
+                            const isSelected = selectedUser?.id === u.id;
+                            return (
+                              <button
+                                key={u.id}
+                                type="button"
+                                onClick={() => handleSelectUser(u)}
+                                className={`w-full text-left p-2 rounded-xl border transition flex items-center justify-between cursor-pointer ${
+                                  isSelected
+                                    ? 'bg-slate-800 border-sky-500 shadow-md shadow-sky-500/10 text-white ring-1 ring-sky-500'
+                                    : 'bg-slate-900/60 border-slate-800 text-slate-300 hover:bg-slate-800/60 hover:border-slate-700'
+                                }`}
+                              >
+                                <div className="flex items-center gap-2.5 min-w-0">
+                                  <div
+                                    className={`w-7 h-7 rounded-lg flex items-center justify-center font-bold text-xs shrink-0 ${
+                                      isSelected
+                                        ? 'bg-sky-500 text-slate-950'
+                                        : 'bg-slate-800 text-slate-300'
+                                    }`}
+                                  >
+                                    {u.name.charAt(0)}
+                                  </div>
+                                  <div className="min-w-0">
+                                    <div className="font-bold text-xs leading-tight truncate">
+                                      {u.name}
+                                    </div>
+                                    <div className="text-[10px] text-slate-400 mt-0.5 flex items-center gap-1">
+                                      <span
+                                        className={`px-1.5 py-0.2 rounded border text-[9px] font-mono ${
+                                          roleBadges[u.role] ||
+                                          'bg-slate-800 text-slate-300 border-slate-700'
+                                        }`}
+                                      >
+                                        {u.role}
+                                      </span>
+                                    </div>
+                                  </div>
+                                </div>
+
+                                <div className="flex items-center gap-1 shrink-0">
+                                  {isSelected ? (
+                                    <CheckCircle2 className="w-4 h-4 text-sky-400" />
+                                  ) : (
+                                    <ChevronRight className="w-3.5 h-3.5 text-slate-600" />
+                                  )}
+                                </div>
+                              </button>
+                            );
+                          })
+                        )}
+                      </div>
+                    </>
+                  )}
+                </div>
+
+                {/* Forgot PIN & Recovery Action Button */}
+                <div className="mt-3 pt-3 border-t border-slate-800 space-y-2">
                   <button
-                    onClick={handleClear}
-                    className="h-13 bg-slate-950 hover:bg-slate-800 text-slate-400 hover:text-rose-400 font-bold text-xs rounded-2xl border border-slate-800 transition active:scale-95 flex items-center justify-center py-3 cursor-pointer"
+                    type="button"
+                    onClick={() => {
+                      setShowRecoveryView(true);
+                      setIsRecoveryVerified(false);
+                      setRecoveryIdentifier('');
+                      setRecoveryError('');
+                    }}
+                    className="w-full py-1.5 px-3 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition cursor-pointer"
                   >
-                    CLEAR
+                    <KeyRound className="w-3.5 h-3.5" />
+                    <span>Forgot PIN? / Reset</span>
                   </button>
 
-                  <button
-                    onClick={() => handleKeyPress('0')}
-                    className="h-13 bg-slate-800/80 hover:bg-slate-700 active:bg-sky-600 text-slate-100 font-mono font-bold text-xl rounded-2xl border border-slate-700/80 transition shadow-sm active:scale-95 flex items-center justify-center py-3 cursor-pointer"
-                  >
-                    0
-                  </button>
-
-                  <button
-                    onClick={handleBackspace}
-                    className="h-13 bg-slate-950 hover:bg-slate-800 text-slate-400 hover:text-amber-400 font-bold text-xs rounded-2xl border border-slate-800 transition active:scale-95 flex items-center justify-center py-3 cursor-pointer"
-                  >
-                    <Delete className="w-5 h-5" />
-                  </button>
+                  <div className="flex items-center justify-between text-[11px] text-slate-500 px-1">
+                    <span className="flex items-center gap-1 text-slate-400">
+                      <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                      Role Security
+                    </span>
+                    <span className="text-[10px] text-slate-500 font-mono">
+                      Locked
+                    </span>
+                  </div>
                 </div>
               </div>
 
-              {/* Footer controls */}
-              <div className="mt-6 w-full max-w-sm flex items-center justify-between text-xs text-slate-500 pt-3 border-t border-slate-800">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowRecoveryView(true);
-                    setIsRecoveryVerified(false);
-                    setRecoveryIdentifier('');
-                    setRecoveryError('');
-                  }}
-                  className="text-amber-400/90 hover:text-amber-300 transition flex items-center gap-1 text-[11px] underline cursor-pointer"
-                >
-                  <HelpCircle className="w-3 h-3" />
-                  <span>Forgot PIN? / Reset</span>
-                </button>
+              {/* RIGHT PANEL: PIN PAD & ALL NUMERIC NUMBERS */}
+              <div
+                className={`md:col-span-7 p-4 sm:p-5 lg:p-6 flex-col justify-between items-center text-center overflow-y-auto ${
+                  activeMobileTab === 'keypad' ? 'flex' : 'hidden md:flex'
+                }`}
+              >
+                <div className="w-full max-w-sm space-y-3">
+                  {/* Selected Worker Info on Mobile */}
+                  {selectedUser && loginMode === 'staff' && (
+                    <div className="md:hidden flex items-center justify-between bg-slate-950 border border-slate-800 rounded-xl p-2 mb-1 text-left">
+                      <div className="flex items-center gap-2">
+                        <div className="w-7 h-7 rounded-lg bg-sky-500 text-slate-950 font-bold text-xs flex items-center justify-center">
+                          {selectedUser.name.charAt(0)}
+                        </div>
+                        <div>
+                          <div className="text-xs font-bold text-white leading-none">{selectedUser.name}</div>
+                          <span className="text-[9px] text-sky-400 font-mono">{selectedUser.role}</span>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setActiveMobileTab('workers')}
+                        className="text-[11px] text-sky-400 hover:text-sky-300 underline font-semibold cursor-pointer"
+                      >
+                        Switch Staff
+                      </button>
+                    </div>
+                  )}
 
-                {onClose && !isMandatory && (
+                  {/* Header for PIN Entry */}
+                  <div>
+                    <div className="w-10 h-10 rounded-2xl bg-sky-950 border border-sky-800 text-sky-400 flex items-center justify-center mx-auto mb-1.5 shadow-inner">
+                      {loginMode === 'master' ? (
+                        <KeyRound className="w-5 h-5 text-purple-400" />
+                      ) : (
+                        <UserCheck className="w-5 h-5" />
+                      )}
+                    </div>
+                    <h2 className="text-lg sm:text-xl font-black text-slate-100">
+                      {loginMode === 'master'
+                        ? 'Enter Master Store PIN'
+                        : selectedUser
+                        ? 'Enter Staff PIN'
+                        : 'Select Your Account'}
+                    </h2>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      {loginMode === 'master' ? (
+                        <span>Enter store master passcode to unlock this terminal</span>
+                      ) : selectedUser ? (
+                        <>
+                          Authenticating as <span className="text-sky-400 font-bold">{selectedUser.name}</span>{' '}
+                          <span className={`px-1.5 py-0.2 rounded border text-[9px] font-mono ${roleBadges[selectedUser.role]}`}>
+                            {selectedUser.role}
+                          </span>
+                        </>
+                      ) : (
+                        <span className="text-amber-400 font-semibold">
+                          Please select your staff name to enter your PIN
+                        </span>
+                      )}
+                    </p>
+                  </div>
+
+                  {/* PIN Bullet Dots Display or Placeholder */}
+                  {!selectedUser && loginMode === 'staff' ? (
+                    <div className="py-4 px-4 bg-slate-950/80 border border-dashed border-slate-800 rounded-2xl text-center">
+                      <div className="text-sky-400 font-semibold text-xs flex items-center justify-center gap-1.5 mb-1">
+                        <UserIcon className="w-4 h-4" />
+                        <span>Choose Your Account First</span>
+                      </div>
+                      <p className="text-[11px] text-slate-400 mb-2">
+                        Select your name from the staff directory. The numeric keypad will activate for your account.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => setActiveMobileTab('workers')}
+                        className="md:hidden py-1.5 px-4 bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold rounded-xl text-xs transition cursor-pointer"
+                      >
+                        View Workers Directory
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="py-1">
+                      <div className="flex justify-center items-center gap-2">
+                        {Array.from({
+                          length: Math.max(
+                            4,
+                            loginMode === 'master'
+                              ? masterPin.length
+                              : (selectedUser?.pin?.length || 4)
+                          ),
+                        }).map((_, idx) => {
+                          const isFilled = pinInput.length > idx;
+                          return (
+                            <div
+                              key={idx}
+                              className={`w-10 h-11 sm:w-11 sm:h-12 rounded-xl sm:rounded-2xl border-2 flex items-center justify-center text-lg font-mono font-bold transition-all duration-200 ${
+                                isFilled
+                                  ? loginMode === 'master'
+                                    ? 'border-purple-500 bg-purple-950/60 text-purple-300 shadow-lg shadow-purple-500/20 scale-105'
+                                    : 'border-sky-500 bg-sky-950/60 text-sky-300 shadow-lg shadow-sky-500/20 scale-105'
+                                  : 'border-slate-800 bg-slate-950 text-slate-600'
+                              }`}
+                            >
+                              {isFilled ? (showPinText ? pinInput[idx] : '●') : ''}
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      {/* Toggle Show PIN Text */}
+                      <button
+                        type="button"
+                        onClick={() => setShowPinText(!showPinText)}
+                        className="mt-2 inline-flex items-center gap-1.5 text-[11px] text-slate-400 hover:text-slate-200 transition cursor-pointer"
+                      >
+                        {showPinText ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                        <span>{showPinText ? 'Hide Digits' : 'Show Digits'}</span>
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Error Banner */}
+                  {errorMsg && (
+                    <div className="bg-rose-950/80 border border-rose-800 text-rose-300 text-xs px-3 py-1.5 rounded-xl flex items-center justify-center gap-2 animate-shake">
+                      <AlertCircle className="w-4 h-4 shrink-0 text-rose-400" />
+                      <span>{errorMsg}</span>
+                    </div>
+                  )}
+
+                  {/* NUMERIC KEYPAD GRID (ALL NUMERIC NUMBERS 1,2,3,4,5,6,7,8,9,0 + CLEAR + DELETE) */}
+                  <div className="grid grid-cols-3 gap-2 sm:gap-2.5 max-w-[260px] sm:max-w-[280px] mx-auto pt-0.5">
+                    {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((digit) => (
+                      <button
+                        key={digit}
+                        type="button"
+                        onClick={() => handleKeyPress(digit)}
+                        className="h-11 sm:h-12 md:h-12.5 bg-slate-800/80 hover:bg-slate-700 active:bg-sky-600 text-slate-100 font-mono font-bold text-lg sm:text-xl rounded-xl sm:rounded-2xl border border-slate-700/80 transition shadow-sm active:scale-95 flex items-center justify-center py-2 cursor-pointer select-none"
+                      >
+                        {digit}
+                      </button>
+                    ))}
+
+                    <button
+                      type="button"
+                      onClick={handleClear}
+                      className="h-11 sm:h-12 md:h-12.5 bg-slate-950 hover:bg-slate-800 text-slate-400 hover:text-rose-400 font-bold text-xs rounded-xl sm:rounded-2xl border border-slate-800 transition active:scale-95 flex items-center justify-center py-2 cursor-pointer select-none"
+                    >
+                      CLEAR
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleKeyPress('0')}
+                      className="h-11 sm:h-12 md:h-12.5 bg-slate-800/80 hover:bg-slate-700 active:bg-sky-600 text-slate-100 font-mono font-bold text-lg sm:text-xl rounded-xl sm:rounded-2xl border border-slate-700/80 transition shadow-sm active:scale-95 flex items-center justify-center py-2 cursor-pointer select-none"
+                    >
+                      0
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleBackspace}
+                      className="h-11 sm:h-12 md:h-12.5 bg-slate-950 hover:bg-slate-800 text-slate-400 hover:text-amber-400 font-bold text-xs rounded-xl sm:rounded-2xl border border-slate-800 transition active:scale-95 flex items-center justify-center py-2 cursor-pointer select-none"
+                    >
+                      <Delete className="w-5 h-5" />
+                    </button>
+                  </div>
+
+                  <p className="text-[10px] text-slate-500">
+                    Keyboard numpad & digits 0-9 also supported
+                  </p>
+                </div>
+
+                {/* Footer controls */}
+                <div className="mt-3 w-full max-w-sm flex items-center justify-between text-xs text-slate-500 pt-2 border-t border-slate-800">
                   <button
-                    onClick={onClose}
-                    className="text-slate-400 hover:text-white transition underline text-[11px] cursor-pointer"
+                    type="button"
+                    onClick={() => {
+                      setShowRecoveryView(true);
+                      setIsRecoveryVerified(false);
+                      setRecoveryIdentifier('');
+                      setRecoveryError('');
+                    }}
+                    className="text-amber-400/90 hover:text-amber-300 transition flex items-center gap-1 text-[11px] underline cursor-pointer"
                   >
-                    Cancel
+                    <HelpCircle className="w-3 h-3" />
+                    <span>Forgot PIN? / Reset</span>
                   </button>
-                )}
+
+                  {onClose && !isMandatory && (
+                    <button
+                      type="button"
+                      onClick={onClose}
+                      className="text-slate-400 hover:text-white transition underline text-[11px] cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           </div>

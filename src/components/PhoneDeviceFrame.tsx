@@ -25,7 +25,8 @@ import {
   Users,
   Plus,
   Cloud,
-  RefreshCw
+  RefreshCw,
+  AlertTriangle
 } from 'lucide-react';
 import { User } from '../types';
 
@@ -46,7 +47,7 @@ interface PhoneDeviceFrameProps {
   onOpenStaffModal: () => void;
   onNewSale?: () => void;
   onOpenCloudSync?: () => void;
-  cloudSyncStatus?: 'synced' | 'syncing' | 'offline' | 'error';
+  cloudSyncStatus?: 'synced' | 'syncing' | 'offline' | 'error' | 'quota_exceeded';
 }
 
 export const PhoneDeviceFrame: React.FC<PhoneDeviceFrameProps> = ({
@@ -245,11 +246,25 @@ export const PhoneDeviceFrame: React.FC<PhoneDeviceFrameProps> = ({
             {onOpenCloudSync && (
               <button
                 onClick={onOpenCloudSync}
-                className="p-1.5 bg-sky-950/80 hover:bg-sky-900 border border-sky-800/80 text-sky-300 rounded-lg text-[10px] font-bold flex items-center gap-1 shadow-sm cursor-pointer"
-                title="Live Cloud Sync: Connected across all worker phones"
+                className={`p-1.5 border rounded-lg text-[10px] font-bold flex items-center gap-1 shadow-sm cursor-pointer ${
+                  cloudSyncStatus === 'quota_exceeded'
+                    ? 'bg-amber-950/80 hover:bg-amber-900 border-amber-800/80 text-amber-300'
+                    : 'bg-sky-950/80 hover:bg-sky-900 border-sky-800/80 text-sky-300'
+                }`}
+                title={
+                  cloudSyncStatus === 'quota_exceeded'
+                    ? 'Firestore Daily Quota Reached: Operating in Offline Local Storage Mode'
+                    : 'Live Cloud Sync: Connected across all worker phones'
+                }
               >
-                <Cloud className="w-3.5 h-3.5 text-sky-400" />
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                <Cloud className={`w-3.5 h-3.5 ${cloudSyncStatus === 'quota_exceeded' ? 'text-amber-400' : 'text-sky-400'}`} />
+                <span className={`w-1.5 h-1.5 rounded-full ${
+                  cloudSyncStatus === 'quota_exceeded'
+                    ? 'bg-amber-400'
+                    : cloudSyncStatus === 'offline'
+                    ? 'bg-slate-400'
+                    : 'bg-emerald-400 animate-pulse'
+                }`} />
               </button>
             )}
 
@@ -442,6 +457,21 @@ export const PhoneDeviceFrame: React.FC<PhoneDeviceFrameProps> = ({
                 Manage Workers
               </button>
             </div>
+          </div>
+        )}
+
+        {/* Firestore Quota Notice for Mobile Workers */}
+        {cloudSyncStatus === 'quota_exceeded' && onOpenCloudSync && (
+          <div
+            onClick={onOpenCloudSync}
+            className="bg-amber-500 hover:bg-amber-400 text-slate-950 px-3 py-1.5 text-[11px] font-bold flex items-center justify-between shrink-0 cursor-pointer shadow-sm transition"
+            title="Click to view Cloud Quota status & upgrade info"
+          >
+            <span className="flex items-center gap-1.5 truncate">
+              <AlertTriangle className="w-3.5 h-3.5 text-slate-950 shrink-0" />
+              <span className="truncate">Cloud Quota Limit: Local Mode Active</span>
+            </span>
+            <span className="text-[10px] underline ml-1 shrink-0 font-black">Details</span>
           </div>
         )}
 

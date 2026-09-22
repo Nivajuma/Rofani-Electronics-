@@ -162,6 +162,31 @@ export const PhoneDeviceFrame: React.FC<PhoneDeviceFrameProps> = ({
         </div>
 
         <div className="flex items-center gap-2">
+          {/* Cloud Sync & Multi-Phone Share Button */}
+          {onOpenCloudSync && (
+            <button
+              onClick={onOpenCloudSync}
+              className={`px-3 py-1.5 rounded-xl border transition flex items-center gap-1.5 text-xs font-bold shadow-sm cursor-pointer ${
+                cloudSyncStatus === 'quota_exceeded'
+                  ? 'bg-amber-950/90 text-amber-200 border-amber-700'
+                  : 'bg-sky-950/90 text-sky-200 border-sky-600'
+              }`}
+              title="Cloud Sync & Multi-Phone Share with Workers"
+            >
+              <Cloud className="w-3.5 h-3.5 text-sky-400" />
+              <span>Share & Sync</span>
+              <span
+                className={`w-2 h-2 rounded-full ${
+                  cloudSyncStatus === 'quota_exceeded'
+                    ? 'bg-amber-400'
+                    : cloudSyncStatus === 'offline'
+                    ? 'bg-slate-400'
+                    : 'bg-emerald-400 animate-pulse'
+                }`}
+              />
+            </button>
+          )}
+
           {/* Rotate Orientation Toggle */}
           <button
             onClick={onToggleOrientation}

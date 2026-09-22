@@ -35,7 +35,9 @@ import {
   Tag,
   Plus,
   Cloud,
-  RefreshCw
+  RefreshCw,
+  Menu,
+  X
 } from 'lucide-react';
 import {
   Product,
@@ -138,14 +140,21 @@ export default function App() {
     'pos' | 'inventory' | 'stocktake' | 'contacts' | 'cashmanagement' | 'expenses' | 'attendance' | 'reports' | 'onlinestore' | 'onlineorders' | 'settings'
   >('pos');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [displayTheme, setDisplayTheme] = useState<'light' | 'dark' | 'contrast'>('light');
   const [fontScale, setFontScale] = useState<'normal' | 'large'>('normal');
 
   // Format Switcher State (Computer / Desktop vs Mobile Phone Frame)
-  const [deviceFormat, setDeviceFormat] = useState<'computer' | 'phone'>(() =>
-    safeGetJSON('retail_pos_device_format', 'computer')
-  );
+  const [deviceFormat, setDeviceFormat] = useState<'computer' | 'phone'>(() => {
+    const saved = safeGetJSON('retail_pos_device_format', null);
+    if (saved === 'computer' || saved === 'phone') return saved;
+    // Auto-detect mobile phone screens on first visit
+    if (typeof window !== 'undefined' && window.innerWidth < 768) {
+      return 'phone';
+    }
+    return 'computer';
+  });
 
   useEffect(() => {
     safeSetJSON('retail_pos_device_format', deviceFormat);
@@ -341,8 +350,14 @@ export default function App() {
 
   const handleGlobalNewSale = () => {
     setActiveTab('pos');
+    setIsMobileMenuOpen(false);
     setNewSaleTrigger((prev) => prev + 1);
   };
+
+  // Close mobile drawer whenever active tab changes
+  useEffect(() => {
+    setIsMobileMenuOpen(false);
+  }, [activeTab]);
 
   // Selected product for Restock & Sales History audit modal
   const [selectedHistoryProduct, setSelectedHistoryProduct] = useState<Product | null>(null);
@@ -1698,14 +1713,26 @@ export default function App() {
 
   return (
     <div className={`flex h-screen w-full overflow-hidden font-sans ${themeContainerClass} ${fontScaleClass}`}>
+      {/* Mobile Drawer Overlay Backdrop */}
+      {isMobileMenuOpen && (
+        <div
+          className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 lg:hidden cursor-pointer"
+          onClick={() => setIsMobileMenuOpen(false)}
+        />
+      )}
+
       {/* Left Sidebar: Professional Polish Navigation */}
       <nav
-        className={`bg-slate-900 flex flex-col border-r border-slate-800 text-slate-300 shrink-0 transition-all duration-300 ${
-          isSidebarCollapsed ? 'w-16' : 'w-64'
+        className={`bg-slate-900 flex flex-col border-r border-slate-800 text-slate-300 shrink-0 transition-all duration-300 z-50 ${
+          isSidebarCollapsed ? 'lg:w-16' : 'lg:w-64'
+        } ${
+          isMobileMenuOpen
+            ? 'fixed inset-y-0 left-0 w-72 shadow-2xl flex'
+            : 'hidden lg:flex'
         }`}
       >
         <div className="p-4 border-b border-slate-800 flex items-center justify-between">
-          {!isSidebarCollapsed && (
+          {(!isSidebarCollapsed || isMobileMenuOpen) && (
             <div className="flex items-center gap-3 min-w-0">
               <div className="w-9 h-9 bg-blue-600 rounded-lg flex items-center justify-center font-extrabold text-white shadow-lg shadow-blue-600/30 shrink-0">
                 R
@@ -1719,13 +1746,22 @@ export default function App() {
             </div>
           )}
 
-          <button
-            onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
-            title={isSidebarCollapsed ? "Expand Sidebar" : "Collapse Sidebar for Full View"}
-            className="p-2 rounded-xl bg-slate-800/80 hover:bg-slate-800 text-slate-300 hover:text-white transition mx-auto"
-          >
-            {isSidebarCollapsed ? <PanelLeft className="w-5 h-5 text-sky-400" /> : <PanelLeftClose className="w-5 h-5 text-slate-400" />}
-          </button>
+          <div className="flex items-center gap-1.5 ml-auto">
+            <button
+              onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+              title={isSidebarCollapsed ? "Expand Sidebar" : "Collapse Sidebar for Full View"}
+              className="hidden lg:flex p-2 rounded-xl bg-slate-800/80 hover:bg-slate-800 text-slate-300 hover:text-white transition cursor-pointer"
+            >
+              {isSidebarCollapsed ? <PanelLeft className="w-5 h-5 text-sky-400" /> : <PanelLeftClose className="w-5 h-5 text-slate-400" />}
+            </button>
+            <button
+              onClick={() => setIsMobileMenuOpen(false)}
+              title="Close Menu"
+              className="lg:hidden p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         {/* Quick Action: Hero "+ New Sale" Button in Sidebar */}
@@ -2131,19 +2167,85 @@ export default function App() {
           </div>
         )}
 
-        {/* Top Header Stats Bar */}
-        <header className="h-20 bg-white border-b border-slate-200 flex items-center justify-between px-8 shrink-0 shadow-sm z-10">
-          <div className="flex items-center gap-8">
-            <div className="flex flex-col">
-              <span className="text-[11px] text-slate-500 uppercase tracking-widest font-bold">
+        {/* Responsive Mobile Top Header for Smartphones & Tablets on Vercel */}
+        <div className="lg:hidden bg-slate-900 border-b border-slate-800 px-3 py-2 flex items-center justify-between shrink-0 z-20 text-white">
+          <div className="flex items-center gap-2 min-w-0">
+            <button
+              onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+              className="p-2 rounded-xl bg-slate-800 text-slate-300 hover:text-white transition cursor-pointer shrink-0"
+              title="Open Navigation Menu"
+            >
+              <Menu className="w-5 h-5" />
+            </button>
+            <div className="flex items-center gap-1.5 min-w-0">
+              <div className="w-7 h-7 bg-blue-600 rounded-lg flex items-center justify-center font-black text-white text-xs shrink-0 shadow-md">
+                R
+              </div>
+              <div className="min-w-0">
+                <span className="font-black text-xs tracking-wider block leading-none truncate">ROFANI POS</span>
+                <span className="text-[9px] text-slate-400 font-mono block truncate">
+                  {stores.find((s) => s.id === activeStoreId)?.name || 'Main Store'}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-1.5 shrink-0">
+            {/* Always Visible Share & Sync Button on Mobile */}
+            <button
+              onClick={() => setShowCloudSyncModal(true)}
+              title="Cloud Sync & Multi-Phone Share"
+              className={`px-2.5 py-1.5 rounded-xl border transition flex items-center gap-1.5 text-xs font-bold shadow-sm cursor-pointer ${
+                cloudSyncStatus === 'quota_exceeded'
+                  ? 'bg-amber-950/90 text-amber-200 border-amber-700'
+                  : 'bg-sky-500/20 text-sky-200 border-sky-400/40'
+              }`}
+            >
+              <Cloud className={`w-3.5 h-3.5 ${cloudSyncStatus === 'quota_exceeded' ? 'text-amber-400' : 'text-sky-400'}`} />
+              <span>Sync & Share</span>
+              <span
+                className={`w-1.5 h-1.5 rounded-full ${
+                  cloudSyncStatus === 'quota_exceeded'
+                    ? 'bg-amber-400'
+                    : cloudSyncStatus === 'offline'
+                    ? 'bg-slate-400'
+                    : 'bg-emerald-400 animate-pulse'
+                }`}
+              />
+            </button>
+
+            <button
+              onClick={handleGlobalNewSale}
+              title="Create New POS Sale"
+              className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-black flex items-center gap-1 shadow-sm active:scale-95 cursor-pointer"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Sale</span>
+            </button>
+
+            <button
+              onClick={() => setIsTerminalLocked(true)}
+              className="p-2 bg-slate-800 hover:bg-slate-700 text-amber-300 rounded-xl cursor-pointer"
+              title="Lock Terminal PIN"
+            >
+              <Lock className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+
+        {/* Top Header Stats Bar for Desktop & Laptop Viewports */}
+        <header className="hidden lg:flex min-h-16 h-auto py-2.5 lg:h-20 bg-white border-b border-slate-200 items-center justify-between px-4 xl:px-8 shrink-0 shadow-sm z-10 gap-3">
+          <div className="flex items-center gap-4 xl:gap-8 min-w-0">
+            <div className="flex flex-col shrink-0">
+              <span className="text-[10px] xl:text-[11px] text-slate-500 uppercase tracking-widest font-bold">
                 Today's Sales
               </span>
-              <span className="text-xl font-extrabold text-slate-900 font-mono">
+              <span className="text-lg xl:text-xl font-extrabold text-slate-900 font-mono">
                 KSh {(todaySales > 0 ? todaySales : totalGrossSales).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </span>
             </div>
 
-            <div className="flex flex-col border-l border-slate-200 pl-8">
+            <div className="hidden xl:flex flex-col border-l border-slate-200 pl-4 xl:pl-8 shrink-0">
               <span className="text-[11px] text-slate-500 uppercase tracking-widest font-bold">
                 Gross Profit Margin
               </span>
@@ -2152,8 +2254,8 @@ export default function App() {
               </span>
             </div>
 
-            <div className="flex flex-col border-l border-slate-200 pl-8">
-              <span className="text-[11px] text-slate-500 uppercase tracking-widest font-bold">
+            <div className="flex flex-col border-l border-slate-200 pl-4 xl:pl-8 shrink-0">
+              <span className="text-[10px] xl:text-[11px] text-slate-500 uppercase tracking-widest font-bold">
                 Low Stock Alert
               </span>
               <button
@@ -2161,7 +2263,7 @@ export default function App() {
                   setActiveTab('inventory');
                   setInventoryLowStockOnly(true);
                 }}
-                className={`text-xl font-extrabold font-mono hover:underline flex items-center gap-1.5 transition text-left ${
+                className={`text-lg xl:text-xl font-extrabold font-mono hover:underline flex items-center gap-1.5 transition text-left cursor-pointer ${
                   lowStockCount > 0 ? 'text-rose-500 font-black' : 'text-slate-700'
                 }`}
                 title="Click to view only low stock / alerted items in inventory"
@@ -2172,13 +2274,13 @@ export default function App() {
             </div>
           </div>
 
-          <div className="flex items-center gap-2.5">
+          <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end">
             {/* Direct "+ New Sale" Button in Top Header */}
             <button
               id="btn-top-new-sale"
               onClick={handleGlobalNewSale}
               title="Quick Start New POS Sale"
-              className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white rounded-xl transition flex items-center gap-1.5 text-xs font-extrabold shadow-md shadow-emerald-600/25 border border-emerald-400/30"
+              className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white rounded-xl transition flex items-center gap-1.5 text-xs font-extrabold shadow-md shadow-emerald-600/25 border border-emerald-400/30 shrink-0 cursor-pointer"
             >
               <Plus className="w-4 h-4" />
               <ShoppingBag className="w-3.5 h-3.5" />
@@ -2193,18 +2295,18 @@ export default function App() {
                   ? 'Firestore Daily Quota Reached: Operating in Offline Local Storage Mode'
                   : 'Real-Time Cloud Synchronization & Share with Worker Mobile Phones'
               }
-              className={`px-3 py-2 rounded-xl border transition flex items-center gap-1.5 text-xs font-bold shadow-sm ${
+              className={`px-3 py-2 rounded-xl border transition flex items-center gap-1.5 text-xs font-bold shadow-sm shrink-0 cursor-pointer ${
                 cloudSyncStatus === 'quota_exceeded'
                   ? 'bg-amber-50 hover:bg-amber-100 text-amber-950 border-amber-300'
                   : 'bg-sky-50 hover:bg-sky-100 text-sky-800 border-sky-200'
               }`}
             >
               <Cloud className={`w-4 h-4 ${cloudSyncStatus === 'quota_exceeded' ? 'text-amber-600' : 'text-sky-600'}`} />
-              <span className="hidden sm:inline">
-                {cloudSyncStatus === 'quota_exceeded' ? 'Cloud Quota (Local Mode)' : 'Cloud Sync & Share'}
+              <span className="inline">
+                {cloudSyncStatus === 'quota_exceeded' ? 'Cloud Quota' : 'Share & Sync'}
               </span>
               <span
-                className={`w-2 h-2 rounded-full ${
+                className={`w-2 h-2 rounded-full shrink-0 ${
                   cloudSyncStatus === 'quota_exceeded'
                     ? 'bg-amber-500'
                     : cloudSyncStatus === 'offline'
@@ -2219,21 +2321,21 @@ export default function App() {
             <button
               onClick={() => setShowAiAssistantModal(true)}
               title="Open AI Assistant for New Workers & Onboarding Guidance"
-              className="px-3 py-2 bg-gradient-to-r from-indigo-600 via-purple-600 to-sky-600 hover:from-indigo-500 hover:to-sky-500 text-white rounded-xl transition flex items-center gap-1.5 text-xs font-bold shadow-md shadow-indigo-600/20 border border-white/20"
+              className="px-3 py-2 bg-gradient-to-r from-indigo-600 via-purple-600 to-sky-600 hover:from-indigo-500 hover:to-sky-500 text-white rounded-xl transition flex items-center gap-1.5 text-xs font-bold shadow-md shadow-indigo-600/20 border border-white/20 shrink-0 cursor-pointer"
             >
               <Sparkles className="w-4 h-4 text-amber-300 animate-pulse" />
-              <span className="hidden sm:inline">AI Worker Co-Pilot</span>
+              <span className="hidden xl:inline">AI Co-Pilot</span>
             </button>
 
             {/* Multi-Store Branch Selector Button */}
             <button
               onClick={() => setShowStoreManagerModal(true)}
               title="Manage & Switch Multi-Store Branches / Outlets"
-              className="p-2.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-xl border border-indigo-200 transition flex items-center gap-1.5 text-xs font-bold shadow-sm"
+              className="p-2 lg:px-2.5 lg:py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-xl border border-indigo-200 transition flex items-center gap-1.5 text-xs font-bold shadow-sm shrink-0 cursor-pointer"
             >
-              <Building2 className="w-4 h-4 text-indigo-600" />
-              <span className="hidden lg:inline">
-                Branch: {stores.find((s) => s.id === activeStoreId)?.name || 'All Stores'}
+              <Building2 className="w-4 h-4 text-indigo-600 shrink-0" />
+              <span className="hidden xl:inline max-w-[120px] truncate">
+                {stores.find((s) => s.id === activeStoreId)?.name || 'All Stores'}
               </span>
             </button>
 
@@ -2241,29 +2343,29 @@ export default function App() {
             <button
               onClick={() => setShowStaffModal(true)}
               title="Manage Workers (Add, Edit, Delete) & Terminal PINs"
-              className="p-2.5 bg-purple-50 hover:bg-purple-100 text-purple-700 rounded-xl border border-purple-200 transition flex items-center gap-1.5 text-xs font-bold shadow-sm"
+              className="p-2 lg:px-2.5 lg:py-2 bg-purple-50 hover:bg-purple-100 text-purple-700 rounded-xl border border-purple-200 transition flex items-center gap-1.5 text-xs font-bold shadow-sm shrink-0 cursor-pointer"
             >
-              <Users className="w-4 h-4 text-purple-600" />
-              <span className="hidden lg:inline">Manage Workers</span>
+              <Users className="w-4 h-4 text-purple-600 shrink-0" />
+              <span className="hidden xl:inline">Workers</span>
             </button>
 
             {/* Lock Terminal PIN Screen Button */}
             <button
               onClick={() => setIsTerminalLocked(true)}
               title="Lock Register / PIN Auth Screen"
-              className="p-2.5 bg-amber-50 hover:bg-amber-100 text-amber-800 rounded-xl border border-amber-200 transition flex items-center gap-1.5 text-xs font-bold shadow-sm"
+              className="p-2 lg:px-2.5 lg:py-2 bg-amber-50 hover:bg-amber-100 text-amber-800 rounded-xl border border-amber-200 transition flex items-center gap-1.5 text-xs font-bold shadow-sm shrink-0 cursor-pointer"
             >
-              <Lock className="w-4 h-4 text-amber-600" />
-              <span className="hidden lg:inline">Lock PIN</span>
+              <Lock className="w-4 h-4 text-amber-600 shrink-0" />
+              <span className="hidden xl:inline">Lock PIN</span>
             </button>
 
             {/* Sidebar collapse button */}
             <button
               onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
               title={isSidebarCollapsed ? "Expand Sidebar Menu" : "Collapse Sidebar for Full View"}
-              className="p-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl transition flex items-center gap-1.5 text-xs font-semibold"
+              className="p-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl transition flex items-center gap-1.5 text-xs font-semibold cursor-pointer"
             >
-              {isSidebarCollapsed ? <PanelLeft className="w-4 h-4 text-blue-600" /> : <PanelLeftClose className="w-4 h-4" />}
+              {isSidebarCollapsed ? <PanelLeft className="w-4 h-4 text-blue-600" /> : <PanelLeftClose className="w-4 h-4 text-slate-600" />}
               <span className="hidden xl:inline">{isSidebarCollapsed ? "Show Menu" : "Full Canvas"}</span>
             </button>
 

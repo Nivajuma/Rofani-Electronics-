@@ -48,6 +48,7 @@ import {
 import { Product, Supplier, BarcodeScanLog, User, Transaction } from '../../types';
 import { generateAutoBarcode, printBarcodeLabels, printBatchBarcodes } from '../../utils/barcode';
 import { calculateProfitMargin } from '../../utils/margin';
+import { canDeleteInventory, canEditInventory, hasWorkerPermission } from '../../utils/permissions';
 import { SpreadsheetImportModal } from './SpreadsheetImportModal';
 import { ExcelSpreadsheetView } from './ExcelSpreadsheetView';
 import { ImageGeneratorModal } from './ImageGeneratorModal';
@@ -794,6 +795,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     const matchesCat = selectedCategory === 'All' || p.category === selectedCategory;
     const matchesSubCat = selectedSubcategory === 'All' || p.subcategory === selectedSubcategory;
     const matchesLowStock = !showLowStockOnly || p.stockQuantity <= p.minStockAlert;
+    const matchesOutOfStockPerm = hasWorkerPermission(currentUser, 'canViewOutOfStock') || p.stockQuantity > 0;
 
     let matchesPerf = true;
     const perf = performanceMap[p.id];
@@ -809,7 +811,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
       matchesPerf = perf?.tier === 'unranked_no_sales';
     }
 
-    return matchesSearch && matchesCat && matchesSubCat && matchesLowStock && matchesPerf;
+    return matchesSearch && matchesCat && matchesSubCat && matchesLowStock && matchesOutOfStockPerm && matchesPerf;
   });
 
   // Grouped products for Grouped Hierarchy View mode
@@ -854,8 +856,23 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   const paginatedProducts =
     itemsPerPage > 0 ? filteredProducts.slice(startIndex, startIndex + itemsPerPage) : filteredProducts;
 
+  // Role-checked Delete Product Handler
+  const handleDeleteProductWithRoleCheck = (productId: string, productName: string) => {
+    if (!canDeleteInventory(currentUser.role)) {
+      alert(`Access Denied: ${currentUser.role} accounts are not authorized to delete items from inventory. Store Manager or Administrator authorization required.`);
+      return;
+    }
+    if (confirm(`Delete product "${productName}"? This will permanently remove the item from inventory.`)) {
+      onDeleteProduct(productId);
+    }
+  };
+
   // Open modal for NEW item
   const handleOpenNewModal = (prefillCategory?: string, prefillSubcategory?: string) => {
+    if (!canEditInventory(currentUser.role)) {
+      alert(`Access Denied: ${currentUser.role} accounts cannot add new inventory items. Manager, Admin, or Inventory Staff authorization required.`);
+      return;
+    }
     const autoCode = generateAutoBarcode();
     const defaultCat = prefillCategory || consolidatedCategories[0]?.name || 'Electronics';
     const defaultSub = prefillSubcategory || consolidatedCategories.find((c) => c.name === defaultCat)?.subcategories[0] || 'General';
@@ -898,6 +915,10 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
 
   // Open modal for EDITing item
   const handleOpenEditModal = (p: Product) => {
+    if (!canEditInventory(currentUser.role)) {
+      alert(`Access Denied: ${currentUser.role} accounts cannot modify inventory items. Manager, Admin, or Inventory Staff authorization required.`);
+      return;
+    }
     setIsCustomCategoryInput(false);
     setCustomCategoryName('');
     setIsCustomSubcategoryInput(false);
@@ -1110,22 +1131,24 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
             <FileSpreadsheet className="w-4 h-4" /> Import Sheet
           </button>
 
-          <button
-            id="btn-inventory-print-barcodes"
-            onClick={() => {
-              const batchData = filteredProducts.map((p) => ({
-                name: p.name,
-                price: p.sellingPrice,
-                barcode: p.barcode,
-                count: 1
-              }));
-              printBatchBarcodes(batchData, `Inventory Barcodes Sheet (${filteredProducts.length} items)`);
-            }}
-            className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold px-3.5 py-2 rounded-xl text-xs transition flex items-center gap-1.5 shadow-lg"
-            title="Print 1 barcode label for every item in current inventory view"
-          >
-            <Barcode className="w-4 h-4 text-sky-400" /> Print All Barcodes
-          </button>
+          {hasWorkerPermission(currentUser, 'canGenerateBarcode') && (
+            <button
+              id="btn-inventory-print-barcodes"
+              onClick={() => {
+                const batchData = filteredProducts.map((p) => ({
+                  name: p.name,
+                  price: p.sellingPrice,
+                  barcode: p.barcode,
+                  count: 1
+                }));
+                printBatchBarcodes(batchData, `Inventory Barcodes Sheet (${filteredProducts.length} items)`);
+              }}
+              className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold px-3.5 py-2 rounded-xl text-xs transition flex items-center gap-1.5 shadow-lg"
+              title="Print 1 barcode label for every item in current inventory view"
+            >
+              <Barcode className="w-4 h-4 text-sky-400" /> Print All Barcodes
+            </button>
+          )}
 
           <button
             id="btn-inventory-autodelete-duplicates"
@@ -1142,39 +1165,43 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
             )}
           </button>
 
-          <button
-            id="btn-inventory-add-item"
-            onClick={() => handleOpenNewModal()}
-            className="bg-sky-600 hover:bg-sky-500 text-white font-bold px-3.5 py-2 rounded-xl text-xs transition flex items-center gap-1.5 shadow-lg shadow-sky-600/20"
-          >
-            <Plus className="w-4 h-4" /> Add Item
-          </button>
+          {hasWorkerPermission(currentUser, 'canAddNewProducts') && (
+            <>
+              <button
+                id="btn-inventory-add-item"
+                onClick={() => handleOpenNewModal()}
+                className="bg-sky-600 hover:bg-sky-500 text-white font-bold px-3.5 py-2 rounded-xl text-xs transition flex items-center gap-1.5 shadow-lg shadow-sky-600/20"
+              >
+                <Plus className="w-4 h-4" /> Add Item
+              </button>
 
-          <button
-            id="btn-inventory-gallery-auto-add"
-            onClick={() => {
-              setShowAiScanModal(true);
-              // Trigger gallery picker directly
-              galleryInputRef.current?.click();
-            }}
-            className="bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-500 hover:to-emerald-500 text-white font-extrabold px-3.5 py-2 rounded-xl text-xs transition flex items-center gap-2 shadow-lg shadow-teal-600/20 border border-teal-400/40 cursor-pointer"
-            title="Pick a photo from your mobile phone gallery - AI extracts specs & auto-adds to inventory!"
-          >
-            <Smartphone className="w-4 h-4 text-emerald-300" />
-            <span>📱 Phone Gallery (AI Add)</span>
-          </button>
+              <button
+                id="btn-inventory-gallery-auto-add"
+                onClick={() => {
+                  setShowAiScanModal(true);
+                  // Trigger gallery picker directly
+                  galleryInputRef.current?.click();
+                }}
+                className="bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-500 hover:to-emerald-500 text-white font-extrabold px-3.5 py-2 rounded-xl text-xs transition flex items-center gap-2 shadow-lg shadow-teal-600/20 border border-teal-400/40 cursor-pointer"
+                title="Pick a photo from your mobile phone gallery - AI extracts specs & auto-adds to inventory!"
+              >
+                <Smartphone className="w-4 h-4 text-emerald-300" />
+                <span>📱 Phone Gallery (AI Add)</span>
+              </button>
 
-          <button
-            id="btn-inventory-camera-auto-add"
-            onClick={() => {
-              setShowAiScanModal(true);
-            }}
-            className="bg-gradient-to-r from-emerald-500 via-emerald-400 to-teal-400 hover:from-emerald-400 hover:to-teal-300 text-slate-950 font-black px-4 py-2 rounded-xl text-xs transition flex items-center gap-2 shadow-lg shadow-emerald-500/30 border border-emerald-300/50 cursor-pointer"
-            title="Snap phone camera photo, choose from mobile gallery or batch add multiple items - AI will automatically identify, categorize & add items into stock!"
-          >
-            <Sparkles className="w-4 h-4 text-slate-950 animate-pulse" />
-            <span>⚡ AI Vision Scanner</span>
-          </button>
+              <button
+                id="btn-inventory-camera-auto-add"
+                onClick={() => {
+                  setShowAiScanModal(true);
+                }}
+                className="bg-gradient-to-r from-emerald-500 via-emerald-400 to-teal-400 hover:from-emerald-400 hover:to-teal-300 text-slate-950 font-black px-4 py-2 rounded-xl text-xs transition flex items-center gap-2 shadow-lg shadow-emerald-500/30 border border-emerald-300/50 cursor-pointer"
+                title="Snap phone camera photo, choose from mobile gallery or batch add multiple items - AI will automatically identify, categorize & add items into stock!"
+              >
+                <Sparkles className="w-4 h-4 text-slate-950 animate-pulse" />
+                <span>⚡ AI Vision Scanner</span>
+              </button>
+            </>
+          )}
         </div>
       </div>
 
@@ -1885,7 +1912,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                                               <Edit2 className="w-3.5 h-3.5" />
                                             </button>
                                             <button
-                                              onClick={() => onDeleteProduct(p.id)}
+                                              onClick={() => handleDeleteProductWithRoleCheck(p.id, p.name)}
                                               title="Delete Item"
                                               className="p-1 hover:bg-slate-800 text-slate-400 hover:text-rose-400 rounded transition"
                                             >
@@ -2096,9 +2123,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                             <Edit2 className="w-4 h-4" />
                           </button>
                           <button
-                            onClick={() => {
-                              if (confirm(`Delete ${p.name}?`)) onDeleteProduct(p.id);
-                            }}
+                            onClick={() => handleDeleteProductWithRoleCheck(p.id, p.name)}
                             className="p-1.5 hover:bg-slate-800 text-slate-500 hover:text-rose-400 rounded-lg transition"
                           >
                             <Trash2 className="w-4 h-4" />
@@ -2400,13 +2425,15 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                 <div className="sm:col-span-2">
                   <div className="flex justify-between items-center mb-1">
                     <label className="text-slate-300 font-semibold">Barcode Number</label>
-                    <button
-                      type="button"
-                      onClick={handleGenerateBarcodeInForm}
-                      className="text-sky-400 hover:underline flex items-center gap-1 font-semibold text-[11px]"
-                    >
-                      <Sparkles className="w-3.5 h-3.5" /> Auto-Generate Barcode
-                    </button>
+                    {hasWorkerPermission(currentUser, 'canGenerateBarcode') && (
+                      <button
+                        type="button"
+                        onClick={handleGenerateBarcodeInForm}
+                        className="text-sky-400 hover:underline flex items-center gap-1 font-semibold text-[11px]"
+                      >
+                        <Sparkles className="w-3.5 h-3.5" /> Auto-Generate Barcode
+                      </button>
+                    )}
                   </div>
                   <div className="flex gap-2">
                     <input
@@ -2471,17 +2498,23 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
 
                 {/* Stock Quantity */}
                 <div>
-                  <label className="block text-slate-300 font-semibold mb-1">Initial Stock Qty</label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-slate-300 font-semibold">Stock Quantity</label>
+                    {!hasWorkerPermission(currentUser, 'canCountUpdateStockBalance') && (
+                      <span className="text-[10px] text-amber-400 font-mono">Count/Update Restricted</span>
+                    )}
+                  </div>
                   <input
                     type="number"
                     placeholder="0"
+                    disabled={!hasWorkerPermission(currentUser, 'canCountUpdateStockBalance')}
                     value={editingProduct.stockQuantity ?? ''}
                     onChange={(e) =>
                       setEditingProduct((prev) =>
                         prev ? { ...prev, stockQuantity: parseInt(e.target.value, 10) || 0 } : prev
                       )
                     }
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 font-mono focus:outline-none focus:border-sky-500"
+                    className="w-full bg-slate-950 border border-slate-800 disabled:opacity-60 rounded-xl px-3 py-2 text-slate-200 font-mono focus:outline-none focus:border-sky-500"
                   />
                 </div>
 

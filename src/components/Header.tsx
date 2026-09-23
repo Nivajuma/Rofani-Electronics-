@@ -102,7 +102,11 @@ export const Header: React.FC<HeaderProps> = ({
     Admin: 'bg-rose-500/20 text-rose-300 border-rose-500/30',
     Manager: 'bg-amber-500/20 text-amber-300 border-amber-500/30',
     Cashier: 'bg-sky-500/20 text-sky-300 border-sky-500/30',
-    'Inventory Staff': 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
+    'Inventory Staff': 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30',
+    'Sales Role': 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
+    'Stock Ins Role': 'bg-teal-500/20 text-teal-300 border-teal-500/30',
+    'Stock Setup Role': 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30',
+    'Expenses Role': 'bg-orange-500/20 text-orange-300 border-orange-500/30',
   };
 
   return (

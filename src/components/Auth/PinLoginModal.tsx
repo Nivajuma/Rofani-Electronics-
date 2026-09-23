@@ -29,6 +29,7 @@ import { User, Role } from '../../types';
 interface PinLoginModalProps {
   users: User[];
   currentUser: User | null;
+  initialTargetUser?: User | null;
   onLoginSuccess: (user: User) => void;
   isOpen: boolean;
   onClose?: () => void;
@@ -44,6 +45,7 @@ interface PinLoginModalProps {
 export const PinLoginModal: React.FC<PinLoginModalProps> = ({
   users,
   currentUser,
+  initialTargetUser,
   onLoginSuccess,
   isOpen,
   onClose,
@@ -57,7 +59,7 @@ export const PinLoginModal: React.FC<PinLoginModalProps> = ({
 }) => {
   // Always require the employee to select their own account on mandatory startup/terminal lock
   const [selectedUser, setSelectedUser] = useState<User | null>(
-    isMandatory ? null : (currentUser || null)
+    initialTargetUser || (isMandatory ? null : (currentUser || null))
   );
   const [pinInput, setPinInput] = useState<string>('');
   const [errorMsg, setErrorMsg] = useState<string>('');
@@ -99,7 +101,10 @@ export const PinLoginModal: React.FC<PinLoginModalProps> = ({
   // Reset inputs and require clean staff selection whenever the lock screen opens
   useEffect(() => {
     if (isOpen) {
-      if (isMandatory) {
+      if (initialTargetUser) {
+        setSelectedUser(initialTargetUser);
+        setActiveMobileTab('keypad');
+      } else if (isMandatory) {
         setSelectedUser(null);
         setActiveMobileTab('workers');
       } else if (currentUser) {
@@ -121,7 +126,7 @@ export const PinLoginModal: React.FC<PinLoginModalProps> = ({
       setRecoveryError('');
       setRecoverySuccessNotice('');
     }
-  }, [isOpen, isMandatory, currentUser]);
+  }, [isOpen, isMandatory, currentUser, initialTargetUser]);
 
   const handleSelectUser = (user: User) => {
     setSelectedUser(user);
@@ -300,7 +305,11 @@ export const PinLoginModal: React.FC<PinLoginModalProps> = ({
     Admin: 'bg-rose-500/20 text-rose-300 border-rose-500/40',
     Manager: 'bg-purple-500/20 text-purple-300 border-purple-500/40',
     Cashier: 'bg-sky-500/20 text-sky-300 border-sky-500/40',
-    'Inventory Staff': 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40',
+    'Inventory Staff': 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40',
+    'Sales Role': 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40',
+    'Stock Ins Role': 'bg-teal-500/20 text-teal-300 border-teal-500/40',
+    'Stock Setup Role': 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40',
+    'Expenses Role': 'bg-orange-500/20 text-orange-300 border-orange-500/40',
   };
 
   if (!isOpen) return null;

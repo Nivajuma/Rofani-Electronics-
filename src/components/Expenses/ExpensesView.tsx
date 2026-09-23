@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { DollarSign, Plus, Calendar, Tag, CreditCard, Trash2, X, TrendingDown, RefreshCw, Clock, Repeat, Sparkles, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { Expense, PaymentMethod, User, RecurringFrequency } from '../../types';
 import { detectDuplicateExpenses, deduplicateExpenses, processDueRecurringExpenses, computeNextDueDate } from '../../utils/deduplicate';
+import { hasWorkerPermission } from '../../utils/permissions';
 
 interface ExpensesViewProps {
   expenses: Expense[];
@@ -198,13 +199,15 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
             </button>
           )}
 
-          <button
-            id="btn-add-expense"
-            onClick={() => setShowModal(true)}
-            className="bg-sky-600 hover:bg-sky-500 text-white font-bold px-4 py-2.5 rounded-xl text-xs transition flex items-center gap-2 shadow-lg shadow-sky-600/20"
-          >
-            <Plus className="w-4 h-4" /> Log Expense
-          </button>
+          {hasWorkerPermission(currentUser, 'canAddExpenses') && (
+            <button
+              id="btn-add-expense"
+              onClick={() => setShowModal(true)}
+              className="bg-sky-600 hover:bg-sky-500 text-white font-bold px-4 py-2.5 rounded-xl text-xs transition flex items-center gap-2 shadow-lg shadow-sky-600/20"
+            >
+              <Plus className="w-4 h-4" /> Log Expense
+            </button>
+          )}
         </div>
       </div>
 
@@ -463,13 +466,15 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
                           <span>Renew</span>
                         </button>
                       )}
-                      <button
-                        onClick={() => onDeleteExpense(exp.id)}
-                        className="p-1.5 hover:bg-slate-800 text-slate-500 hover:text-rose-400 rounded-lg transition"
-                        title="Delete record"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      {hasWorkerPermission(currentUser, 'canDeleteDailyEntries') && (
+                        <button
+                          onClick={() => onDeleteExpense(exp.id)}
+                          className="p-1.5 hover:bg-slate-800 text-slate-500 hover:text-rose-400 rounded-lg transition"
+                          title="Delete record"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))

@@ -28,9 +28,25 @@ import {
   Percent,
   Calendar,
   Layers,
-  ArrowRight
+  ArrowRight,
+  Sliders,
+  CheckSquare,
+  Square,
+  Plus,
 } from 'lucide-react';
-import { User, Role } from '../../types';
+import { User, Role, WorkerPermissions } from '../../types';
+import {
+  canManageStaff,
+  getWorkerPermissions,
+  hasWorkerPermission,
+  DEFAULT_ROLE_WORKER_PERMISSIONS,
+  PERMISSION_DEFINITIONS,
+  ALL_SELECTABLE_ROLES,
+  applyRoleToWorker,
+  toggleRoleCategoryOnWorker,
+} from '../../utils/permissions';
+import { FlexibleWorkerPermissionsModal } from './FlexibleWorkerPermissionsModal';
+import { FlexibleRolesMatrixView } from './FlexibleRolesMatrixView';
 
 interface StaffManagementModalProps {
   isOpen: boolean;
@@ -55,6 +71,9 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
   const [selectedRoleFilter, setSelectedRoleFilter] = useState<string>('all');
   const [selectedStatusFilter, setSelectedStatusFilter] = useState<string>('all');
 
+  const [currentView, setCurrentView] = useState<'cards' | 'matrix'>('cards');
+  const [adjustingPermissionsUser, setAdjustingPermissionsUser] = useState<User | null>(null);
+
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [deleteTargetUser, setDeleteTargetUser] = useState<User | null>(null);
@@ -64,6 +83,15 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
   const [visiblePins, setVisiblePins] = useState<Record<string, boolean>>({});
   const [copiedPinId, setCopiedPinId] = useState<string | null>(null);
   const [feedbackMessage, setFeedbackMessage] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
+
+  // Supervisor PIN gate state when non-manager/non-admin attempts to open staff management
+  const isDirectlyAuthorized = canManageStaff(currentUser.role);
+  const [isSupervisorUnlocked, setIsSupervisorUnlocked] = useState(false);
+  const [supervisorPinInput, setSupervisorPinInput] = useState('');
+  const [supervisorError, setSupervisorError] = useState('');
+  const [supervisorUser, setSupervisorUser] = useState<User | null>(null);
+
+  const effectiveRole = supervisorUser ? supervisorUser.role : currentUser.role;
 
   // Helper: Generate Random 4-Digit PIN
   function generateRandomPin(): string {
@@ -83,6 +111,11 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
   const [showFormPin, setShowFormPin] = useState(true);
   const [commissionRate, setCommissionRate] = useState<number>(5);
   const [notes, setNotes] = useState('');
+  const [addCustomRoleTitle, setAddCustomRoleTitle] = useState<string>('');
+  const [addPermissions, setAddPermissions] = useState<WorkerPermissions>(() => ({
+    ...DEFAULT_ROLE_WORKER_PERMISSIONS['Cashier'],
+  }));
+  const [showAddPermissionsSection, setShowAddPermissionsSection] = useState(false);
 
   if (!isOpen) return null;
 
@@ -93,27 +126,55 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
     }, 3500);
   };
 
-  const togglePinVisibility = (userId: string) => {
+  const handleVerifySupervisorPin = (pinToTest: string) => {
+    const matched = users.find(
+      (u) => (u.role === 'Admin' || u.role === 'Manager') && u.pin === pinToTest.trim()
+    );
+    if (matched) {
+      setSupervisorUser(matched);
+      setIsSupervisorUnlocked(true);
+      setSupervisorPinInput('');
+      setSupervisorError('');
+      showNotification(`Authorized by ${matched.name} (${matched.role})`, 'success');
+    } else {
+      setSupervisorError('Invalid Supervisor PIN. Only Manager or Administrator PIN is accepted.');
+      setSupervisorPinInput('');
+    }
+  };
+
+  const togglePinVisibility = (targetUser: User) => {
+    if (effectiveRole !== 'Admin' && targetUser.id !== currentUser.id) {
+      showNotification('Security Notice: Only Store Administrators can reveal other workers\' PINs.', 'error');
+      return;
+    }
     setVisiblePins((prev) => ({
       ...prev,
-      [userId]: !prev[userId],
+      [targetUser.id]: !prev[targetUser.id],
     }));
   };
 
-  const handleCopyPin = (user: User) => {
-    navigator.clipboard.writeText(user.pin);
-    setCopiedPinId(user.id);
-    showNotification(`Copied security PIN for ${user.name}`, 'info');
+  const handleCopyPin = (targetUser: User) => {
+    if (effectiveRole !== 'Admin' && targetUser.id !== currentUser.id) {
+      showNotification('Security Notice: Only Store Administrators can copy other workers\' PINs.', 'error');
+      return;
+    }
+    navigator.clipboard.writeText(targetUser.pin);
+    setCopiedPinId(targetUser.id);
+    showNotification(`Copied security PIN for ${targetUser.name}`, 'info');
     setTimeout(() => setCopiedPinId(null), 2000);
   };
 
-  const handleRegenerateWorkerPin = (user: User) => {
+  const handleRegenerateWorkerPin = (targetUser: User) => {
+    if (targetUser.role === 'Admin' && effectiveRole !== 'Admin') {
+      showNotification('Security Notice: Only an Administrator can reset an Administrator\'s PIN.', 'error');
+      return;
+    }
     const newPin = generateRandomPin();
     onUpdateUser({
-      ...user,
+      ...targetUser,
       pin: newPin,
     });
-    showNotification(`Generated new PIN (${newPin}) for ${user.name}`, 'success');
+    showNotification(`Generated new PIN (${newPin}) for ${targetUser.name}`, 'success');
   };
 
   const handleToggleStatus = (user: User) => {
@@ -139,6 +200,9 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
     setShowFormPin(true);
     setCommissionRate(5);
     setNotes('');
+    setAddCustomRoleTitle('');
+    setAddPermissions({ ...DEFAULT_ROLE_WORKER_PERMISSIONS['Cashier'] });
+    setShowAddPermissionsSection(false);
     setShowAddModal(true);
   };
 
@@ -146,6 +210,11 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
     e.preventDefault();
     if (!name.trim()) {
       showNotification('Please enter the worker full name.', 'error');
+      return;
+    }
+
+    if (role === 'Admin' && effectiveRole !== 'Admin') {
+      showNotification('Security Notice: Only an Administrator can create new Administrator accounts.', 'error');
       return;
     }
 
@@ -176,16 +245,23 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
       pin: trimmedPin,
       commissionRate: Number(commissionRate) || 0,
       notes: notes.trim() || undefined,
+      customRoleTitle: addCustomRoleTitle.trim() || undefined,
+      permissions: { ...addPermissions },
     };
 
     onAddUser(newUser);
     setShowAddModal(false);
-    showNotification(`Worker "${newUser.name}" (${newUser.role}) successfully added!`, 'success');
+    showNotification(`Worker "${newUser.name}" (${newUser.role}) successfully added with custom roles!`, 'success');
   };
 
   const handleSaveEditWorker = (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingUser || !editingUser.name.trim()) return;
+
+    if (editingUser.role === 'Admin' && effectiveRole !== 'Admin') {
+      showNotification('Security Notice: Only an Administrator can assign the Administrator role.', 'error');
+      return;
+    }
 
     onUpdateUser(editingUser);
     showNotification(`Updated profile for ${editingUser.name}`, 'success');
@@ -197,6 +273,13 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
 
     if (users.length <= 1) {
       showNotification('Cannot delete the only remaining worker in the system.', 'error');
+      setDeleteTargetUser(null);
+      return;
+    }
+
+    // Check if non-admin is trying to delete an Admin
+    if (deleteTargetUser.role === 'Admin' && effectiveRole !== 'Admin') {
+      showNotification('Security Notice: Only an Administrator can delete an Administrator account.', 'error');
       setDeleteTargetUser(null);
       return;
     }
@@ -264,8 +347,152 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
     Admin: { badge: 'bg-rose-500/20 text-rose-300 border-rose-500/40', border: 'border-rose-900/50' },
     Manager: { badge: 'bg-amber-500/20 text-amber-300 border-amber-500/40', border: 'border-amber-900/50' },
     Cashier: { badge: 'bg-sky-500/20 text-sky-300 border-sky-500/40', border: 'border-sky-900/50' },
-    'Inventory Staff': { badge: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40', border: 'border-emerald-900/50' },
+    'Inventory Staff': { badge: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40', border: 'border-cyan-900/50' },
+    'Sales Role': { badge: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40', border: 'border-emerald-900/50' },
+    'Stock Ins Role': { badge: 'bg-teal-500/20 text-teal-300 border-teal-500/40', border: 'border-teal-900/50' },
+    'Stock Setup Role': { badge: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40', border: 'border-indigo-900/50' },
+    'Expenses Role': { badge: 'bg-orange-500/20 text-orange-300 border-orange-500/40', border: 'border-orange-900/50' },
   };
+
+  const handleQuickAssignRole = (targetUser: User, newRole: Role) => {
+    if (targetUser.role === 'Admin' && effectiveRole !== 'Admin') {
+      showNotification('Security Notice: Only an Administrator can reassign an Administrator account.', 'error');
+      return;
+    }
+    if (newRole === 'Admin' && effectiveRole !== 'Admin') {
+      showNotification('Security Notice: Only an Administrator can assign the Administrator role.', 'error');
+      return;
+    }
+
+    const updatedUser = applyRoleToWorker(targetUser, newRole);
+    onUpdateUser(updatedUser);
+    showNotification(`Assigned "${newRole}" to ${targetUser.name} with updated role permissions!`, 'success');
+  };
+
+  const handleQuickToggleCategory = (
+    targetUser: User,
+    category: 'sales' | 'stockIns' | 'stockSetup' | 'expenses' | 'other'
+  ) => {
+    if (targetUser.role === 'Admin' && effectiveRole !== 'Admin') {
+      showNotification('Security Notice: Only an Administrator can modify Administrator permissions.', 'error');
+      return;
+    }
+
+    const updatedUser = toggleRoleCategoryOnWorker(targetUser, category);
+    onUpdateUser(updatedUser);
+    const categoryLabels = {
+      sales: 'Sales Role',
+      stockIns: 'Stock Ins Role',
+      stockSetup: 'Stock Setup Role',
+      expenses: 'Expenses Role',
+      other: 'Other Roles',
+    };
+    showNotification(`Updated ${categoryLabels[category]} bundle for ${targetUser.name}!`, 'success');
+  };
+
+  if (!isDirectlyAuthorized && !isSupervisorUnlocked) {
+    return (
+      <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-md shadow-2xl p-6 flex flex-col items-center text-center animate-in fade-in zoom-in-95 duration-200">
+          <div className="w-16 h-16 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 mb-4 shadow-inner">
+            <Lock className="w-8 h-8" />
+          </div>
+
+          <h2 className="text-lg font-black text-slate-100 mb-1">
+            Supervisor Authorization Required
+          </h2>
+          <p className="text-xs text-slate-400 mb-5 leading-relaxed">
+            Worker accounts & terminal PIN management is restricted to <strong className="text-slate-200">Store Managers</strong> and <strong className="text-slate-200">Administrators</strong>. Enter an authorized Supervisor PIN to continue.
+          </p>
+
+          <div className="w-full bg-slate-950 p-4 rounded-2xl border border-slate-800 space-y-4">
+            <div className="flex items-center justify-center gap-3 py-2">
+              {[0, 1, 2, 3].map((i) => (
+                <div
+                  key={i}
+                  className={`w-3.5 h-3.5 rounded-full border transition-all ${
+                    supervisorPinInput.length > i
+                      ? 'bg-amber-400 border-amber-400 scale-110 shadow-sm shadow-amber-500/50'
+                      : 'border-slate-700 bg-slate-900'
+                  }`}
+                />
+              ))}
+            </div>
+
+            {supervisorError && (
+              <p className="text-[11px] text-rose-400 font-bold bg-rose-950/60 border border-rose-900 px-3 py-1.5 rounded-xl">
+                {supervisorError}
+              </p>
+            )}
+
+            {/* Keypad */}
+            <div className="grid grid-cols-3 gap-2 pt-2">
+              {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((digit) => (
+                <button
+                  key={digit}
+                  onClick={() => {
+                    if (supervisorPinInput.length < 8) {
+                      const next = supervisorPinInput + digit;
+                      setSupervisorPinInput(next);
+                      setSupervisorError('');
+                      if (next.length === 4) {
+                        handleVerifySupervisorPin(next);
+                      }
+                    }
+                  }}
+                  className="py-3 rounded-xl bg-slate-900 hover:bg-slate-800 active:scale-95 text-slate-200 font-mono font-bold text-base border border-slate-800 transition"
+                >
+                  {digit}
+                </button>
+              ))}
+              <button
+                onClick={() => {
+                  setSupervisorPinInput('');
+                  setSupervisorError('');
+                }}
+                className="py-3 rounded-xl bg-slate-900/60 hover:bg-slate-800 text-slate-400 text-xs font-bold border border-slate-800/80 transition"
+              >
+                Clear
+              </button>
+              <button
+                onClick={() => {
+                  if (supervisorPinInput.length < 8) {
+                    const next = supervisorPinInput + '0';
+                    setSupervisorPinInput(next);
+                    setSupervisorError('');
+                    if (next.length === 4) {
+                      handleVerifySupervisorPin(next);
+                    }
+                  }
+                }}
+                className="py-3 rounded-xl bg-slate-900 hover:bg-slate-800 active:scale-95 text-slate-200 font-mono font-bold text-base border border-slate-800 transition"
+              >
+                0
+              </button>
+              <button
+                onClick={() => {
+                  setSupervisorPinInput((prev) => prev.slice(0, -1));
+                  setSupervisorError('');
+                }}
+                className="py-3 rounded-xl bg-slate-900/60 hover:bg-slate-800 text-slate-400 text-xs font-bold border border-slate-800/80 transition"
+              >
+                ⌫
+              </button>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 w-full mt-4">
+            <button
+              onClick={onClose}
+              className="w-full py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs transition"
+            >
+              Cancel & Return
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
@@ -341,8 +568,61 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
           </div>
         )}
 
-        {/* STATS OVERVIEW BAR */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3 p-3 sm:px-6 bg-slate-950/60 border-b border-slate-800 shrink-0 text-xs">
+        {/* VIEW TABS BAR */}
+        <div className="px-4 sm:px-6 py-2.5 bg-slate-950 border-b border-slate-800 flex flex-wrap items-center justify-between gap-2.5 shrink-0">
+          <div className="flex items-center gap-1.5 bg-slate-900/90 p-1 rounded-2xl border border-slate-800">
+            <button
+              type="button"
+              id="btn-tab-workers-directory"
+              onClick={() => setCurrentView('cards')}
+              className={`px-3.5 py-1.5 rounded-xl font-bold text-xs transition flex items-center gap-1.5 ${
+                currentView === 'cards'
+                  ? 'bg-sky-600 text-white shadow-md'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <Users className="w-3.5 h-3.5" />
+              <span>Worker Profiles & Accounts</span>
+            </button>
+            <button
+              type="button"
+              id="btn-tab-roles-matrix"
+              onClick={() => setCurrentView('matrix')}
+              className={`px-3.5 py-1.5 rounded-xl font-bold text-xs transition flex items-center gap-1.5 ${
+                currentView === 'matrix'
+                  ? 'bg-emerald-600 text-white shadow-md'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <ShieldCheck className="w-3.5 h-3.5" />
+              <span>Flexible Roles Matrix</span>
+              <span className={`text-[10px] px-1.5 py-0.2 rounded font-mono font-bold ${
+                currentView === 'matrix' ? 'bg-emerald-800 text-white' : 'bg-emerald-950 text-emerald-300 border border-emerald-800'
+              }`}>
+                21 Roles
+              </span>
+            </button>
+          </div>
+
+          <div className="text-[11px] text-slate-400 hidden sm:flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+            <span>Granular role adjustments apply across POS & Inventory in real time</span>
+          </div>
+        </div>
+
+        {currentView === 'matrix' ? (
+          <div className="p-4 sm:p-6 overflow-hidden flex-1 flex flex-col">
+            <FlexibleRolesMatrixView
+              users={users}
+              onUpdateUser={onUpdateUser}
+              currentUser={currentUser}
+              onOpenDetailedModal={(worker) => setAdjustingPermissionsUser(worker)}
+            />
+          </div>
+        ) : (
+          <>
+            {/* STATS OVERVIEW BAR */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3 p-3 sm:px-6 bg-slate-950/60 border-b border-slate-800 shrink-0 text-xs">
           <div className="bg-slate-900/80 border border-slate-800 p-2.5 rounded-xl flex items-center justify-between">
             <div>
               <div className="text-[10px] text-slate-400 font-semibold uppercase">Total Workers</div>
@@ -410,9 +690,13 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
                 className="bg-transparent text-slate-200 text-xs focus:outline-none cursor-pointer font-medium"
               >
                 <option value="all" className="bg-slate-900 text-slate-200">All Roles</option>
+                <option value="Sales Role" className="bg-slate-900 text-slate-200">Sales Role</option>
+                <option value="Stock Ins Role" className="bg-slate-900 text-slate-200">Stock Ins Role</option>
+                <option value="Stock Setup Role" className="bg-slate-900 text-slate-200">Stock Setup Role</option>
+                <option value="Expenses Role" className="bg-slate-900 text-slate-200">Expenses Role</option>
                 <option value="Cashier" className="bg-slate-900 text-slate-200">Cashier</option>
-                <option value="Manager" className="bg-slate-900 text-slate-200">Manager</option>
                 <option value="Inventory Staff" className="bg-slate-900 text-slate-200">Inventory Staff</option>
+                <option value="Manager" className="bg-slate-900 text-slate-200">Manager</option>
                 <option value="Admin" className="bg-slate-900 text-slate-200">Admin</option>
               </select>
             </div>
@@ -559,7 +843,7 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
                         {/* Show/Hide PIN */}
                         <button
                           title={isPinVisible ? 'Hide PIN' : 'Reveal PIN'}
-                          onClick={() => togglePinVisibility(u.id)}
+                          onClick={() => togglePinVisibility(u)}
                           className="p-1.5 hover:bg-slate-800 text-slate-400 hover:text-white rounded-lg transition"
                         >
                           {isPinVisible ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
@@ -594,6 +878,148 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
                       </div>
                     </div>
 
+                    {/* Quick Role Selection Bar */}
+                    <div className="bg-slate-900/80 border border-slate-800 p-2.5 rounded-xl space-y-2">
+                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                        <div className="flex items-center gap-1.5 text-xs text-slate-300 font-semibold">
+                          <Sliders className="w-3.5 h-3.5 text-sky-400" />
+                          <span>Select Role:</span>
+                        </div>
+                        <select
+                          value={u.role}
+                          onChange={(e) => handleQuickAssignRole(u, e.target.value as Role)}
+                          className="bg-slate-950 border border-slate-700 text-slate-200 text-xs font-bold rounded-lg px-2.5 py-1 focus:outline-none focus:border-sky-500 cursor-pointer shadow-sm hover:border-slate-600 transition"
+                          title="Quickly change this worker's primary role and automatically apply its default permissions"
+                        >
+                          <option value="Sales Role">Sales Role (POS, Orders & Commission)</option>
+                          <option value="Stock Ins Role">Stock Ins Role (Receiving & Supplies)</option>
+                          <option value="Stock Setup Role">Stock Setup Role (Products & Balance)</option>
+                          <option value="Expenses Role">Expenses Role (Daily Expenses)</option>
+                          <option value="Cashier">Cashier (Standard POS Sales)</option>
+                          <option value="Inventory Staff">Inventory Staff (Storekeeper)</option>
+                          <option value="Manager">Branch Manager (Operations)</option>
+                          <option value="Admin">Administrator (Owner)</option>
+                        </select>
+                      </div>
+
+                      {/* Quick Toggleable Role Category Badges */}
+                      <div>
+                        <div className="text-[10px] text-slate-400 mb-1 flex items-center justify-between">
+                          <span className="font-semibold text-slate-400">Assign Role Bundles:</span>
+                          <span className="text-[9px] text-slate-500">Tap to toggle on/off</span>
+                        </div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {(() => {
+                            const perms = getWorkerPermissions(u);
+                            const isSalesActive = perms.canMakeSales && perms.canManageCustomerOrders;
+                            const isStockInsActive = perms.canAddStockIn && perms.canManageSupplierOrders;
+                            const isStockSetupActive = perms.canAddNewProducts && perms.canCountUpdateStockBalance;
+                            const isExpensesActive = perms.canAddExpenses;
+                            const isOtherActive = perms.canGiveDiscounts || perms.canGenerateBarcode;
+
+                            return (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => handleQuickToggleCategory(u, 'sales')}
+                                  className={`px-2 py-0.5 rounded-lg text-[10px] font-bold border transition flex items-center gap-1 ${
+                                    isSalesActive
+                                      ? 'bg-emerald-950/80 text-emerald-300 border-emerald-600/80 hover:bg-emerald-900/80'
+                                      : 'bg-slate-950/60 text-slate-400 border-slate-800 hover:border-slate-700 hover:text-slate-300'
+                                  }`}
+                                  title="Toggle Sales Role (Make sales, manage customer orders, order status, customers, sales commission)"
+                                >
+                                  {isSalesActive ? <Check className="w-2.5 h-2.5 text-emerald-400" /> : <Plus className="w-2.5 h-2.5 text-slate-500" />}
+                                  <span>Sales Role</span>
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() => handleQuickToggleCategory(u, 'stockIns')}
+                                  className={`px-2 py-0.5 rounded-lg text-[10px] font-bold border transition flex items-center gap-1 ${
+                                    isStockInsActive
+                                      ? 'bg-cyan-950/80 text-cyan-300 border-cyan-600/80 hover:bg-cyan-900/80'
+                                      : 'bg-slate-950/60 text-slate-400 border-slate-800 hover:border-slate-700 hover:text-slate-300'
+                                  }`}
+                                  title="Toggle Stock Ins Role (Add stock in, supplier orders, manage supplies, bad stock)"
+                                >
+                                  {isStockInsActive ? <Check className="w-2.5 h-2.5 text-cyan-400" /> : <Plus className="w-2.5 h-2.5 text-slate-500" />}
+                                  <span>Stock Ins Role</span>
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() => handleQuickToggleCategory(u, 'stockSetup')}
+                                  className={`px-2 py-0.5 rounded-lg text-[10px] font-bold border transition flex items-center gap-1 ${
+                                    isStockSetupActive
+                                      ? 'bg-indigo-950/80 text-indigo-300 border-indigo-600/80 hover:bg-indigo-900/80'
+                                      : 'bg-slate-950/60 text-slate-400 border-slate-800 hover:border-slate-700 hover:text-slate-300'
+                                  }`}
+                                  title="Toggle Stock Setup Role (Add products, offers, view out of stock, count & update balance)"
+                                >
+                                  {isStockSetupActive ? <Check className="w-2.5 h-2.5 text-indigo-400" /> : <Plus className="w-2.5 h-2.5 text-slate-500" />}
+                                  <span>Stock Setup Role</span>
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() => handleQuickToggleCategory(u, 'expenses')}
+                                  className={`px-2 py-0.5 rounded-lg text-[10px] font-bold border transition flex items-center gap-1 ${
+                                    isExpensesActive
+                                      ? 'bg-amber-950/80 text-amber-300 border-amber-600/80 hover:bg-amber-900/80'
+                                      : 'bg-slate-950/60 text-slate-400 border-slate-800 hover:border-slate-700 hover:text-slate-300'
+                                  }`}
+                                  title="Toggle Expenses Role (Add daily operating expenses)"
+                                >
+                                  {isExpensesActive ? <Check className="w-2.5 h-2.5 text-amber-400" /> : <Plus className="w-2.5 h-2.5 text-slate-500" />}
+                                  <span>Expenses Role</span>
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() => handleQuickToggleCategory(u, 'other')}
+                                  className={`px-2 py-0.5 rounded-lg text-[10px] font-bold border transition flex items-center gap-1 ${
+                                    isOtherActive
+                                      ? 'bg-purple-950/80 text-purple-300 border-purple-600/80 hover:bg-purple-900/80'
+                                      : 'bg-slate-950/60 text-slate-400 border-slate-800 hover:border-slate-700 hover:text-slate-300'
+                                  }`}
+                                  title="Toggle Other Roles (Give discounts, edit daily entries, return stocks, generate barcodes, preview receipts)"
+                                >
+                                  {isOtherActive ? <Check className="w-2.5 h-2.5 text-purple-400" /> : <Plus className="w-2.5 h-2.5 text-slate-500" />}
+                                  <span>Other Roles</span>
+                                </button>
+                              </>
+                            );
+                          })()}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Flexible Roles & Permissions Summary */}
+                    {(() => {
+                      const perms = getWorkerPermissions(u);
+                      const activeCount = Object.values(perms).filter(Boolean).length;
+                      return (
+                        <div className="bg-slate-900/60 border border-slate-800/80 px-2.5 py-1.5 rounded-xl flex items-center justify-between text-[11px]">
+                          <div className="flex items-center gap-1.5">
+                            <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                            <span className="text-slate-400">Total Active Roles:</span>
+                            <span className="font-mono font-bold text-emerald-300">
+                              {activeCount} / 21 Capabilities
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setAdjustingPermissionsUser(u)}
+                            className="text-[10px] font-bold text-sky-400 hover:text-sky-300 bg-sky-950/80 hover:bg-sky-900 border border-sky-800/80 px-2 py-0.5 rounded-lg transition flex items-center gap-1"
+                          >
+                            <Sliders className="w-3 h-3" />
+                            <span>Detailed Config</span>
+                          </button>
+                        </div>
+                      );
+                    })()}
+
                     {/* Bottom Metadata & Management Actions */}
                     <div className="flex items-center justify-between pt-1 border-t border-slate-800/80 text-xs">
                       <div className="flex items-center gap-2 text-slate-400 text-[11px]">
@@ -604,6 +1030,18 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
                       </div>
 
                       <div className="flex items-center gap-1.5">
+                        {/* Adjust Flexible Roles Button */}
+                        <button
+                          type="button"
+                          id={`btn-adjust-permissions-${u.id}`}
+                          onClick={() => setAdjustingPermissionsUser(u)}
+                          title="Adjust Flexible Roles & Permissions"
+                          className="p-1.5 hover:bg-emerald-950 text-emerald-400 hover:text-emerald-300 border border-emerald-900/80 rounded-lg transition flex items-center gap-1 text-[11px] font-semibold"
+                        >
+                          <Sliders className="w-3.5 h-3.5" />
+                          <span className="hidden sm:inline">Roles</span>
+                        </button>
+
                         {/* Toggle Active/Inactive */}
                         <button
                           type="button"
@@ -647,6 +1085,8 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
             </div>
           )}
         </div>
+      </>
+    )}
 
         {/* MODAL 1: ADD NEW WORKER */}
         {showAddModal && (
@@ -689,14 +1129,82 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
                     <label className="block text-slate-300 font-semibold mb-1">Worker Role *</label>
                     <select
                       value={role}
-                      onChange={(e) => setRole(e.target.value as Role)}
+                      onChange={(e) => {
+                        const newRole = e.target.value as Role;
+                        setRole(newRole);
+                        setAddPermissions({ ...DEFAULT_ROLE_WORKER_PERMISSIONS[newRole] });
+                      }}
                       className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 focus:outline-none focus:border-sky-500 font-semibold"
                     >
-                      <option value="Cashier">Cashier (POS Sales & Register)</option>
-                      <option value="Manager">Manager (Full Store Operations)</option>
+                      <option value="Sales Role">Sales Role (POS, Customer Orders, Commission)</option>
+                      <option value="Stock Ins Role">Stock Ins Role (Receiving, Supplies, Bad Stock)</option>
+                      <option value="Stock Setup Role">Stock Setup Role (Products, Offers, Counts, Barcodes)</option>
+                      <option value="Expenses Role">Expenses Role (Daily Business Expenditures)</option>
+                      <option value="Cashier">Cashier (Standard POS Sales & Register)</option>
                       <option value="Inventory Staff">Inventory Staff (Stock & Receiving)</option>
+                      <option value="Manager">Manager (Full Store Operations)</option>
                       <option value="Admin">Admin (Full System Access)</option>
                     </select>
+
+                    {/* Quick Role Preset Pills */}
+                    <div className="flex flex-wrap gap-1 mt-1.5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setRole('Sales Role');
+                          setAddPermissions({ ...DEFAULT_ROLE_WORKER_PERMISSIONS['Sales Role'] });
+                        }}
+                        className={`px-2 py-0.5 rounded text-[10px] font-bold border transition ${
+                          role === 'Sales Role'
+                            ? 'bg-emerald-950 text-emerald-300 border-emerald-700'
+                            : 'bg-slate-950 text-slate-400 border-slate-800 hover:text-slate-200'
+                        }`}
+                      >
+                        Sales Role
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setRole('Stock Ins Role');
+                          setAddPermissions({ ...DEFAULT_ROLE_WORKER_PERMISSIONS['Stock Ins Role'] });
+                        }}
+                        className={`px-2 py-0.5 rounded text-[10px] font-bold border transition ${
+                          role === 'Stock Ins Role'
+                            ? 'bg-cyan-950 text-cyan-300 border-cyan-700'
+                            : 'bg-slate-950 text-slate-400 border-slate-800 hover:text-slate-200'
+                        }`}
+                      >
+                        Stock Ins Role
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setRole('Stock Setup Role');
+                          setAddPermissions({ ...DEFAULT_ROLE_WORKER_PERMISSIONS['Stock Setup Role'] });
+                        }}
+                        className={`px-2 py-0.5 rounded text-[10px] font-bold border transition ${
+                          role === 'Stock Setup Role'
+                            ? 'bg-indigo-950 text-indigo-300 border-indigo-700'
+                            : 'bg-slate-950 text-slate-400 border-slate-800 hover:text-slate-200'
+                        }`}
+                      >
+                        Stock Setup Role
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setRole('Expenses Role');
+                          setAddPermissions({ ...DEFAULT_ROLE_WORKER_PERMISSIONS['Expenses Role'] });
+                        }}
+                        className={`px-2 py-0.5 rounded text-[10px] font-bold border transition ${
+                          role === 'Expenses Role'
+                            ? 'bg-amber-950 text-amber-300 border-amber-700'
+                            : 'bg-slate-950 text-slate-400 border-slate-800 hover:text-slate-200'
+                        }`}
+                      >
+                        Expenses Role
+                      </button>
+                    </div>
                   </div>
                 </div>
 
@@ -820,6 +1328,76 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
                   />
                 </div>
 
+                {/* Custom Role Title */}
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">
+                    Custom Role Title / Subtitle (Optional)
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Senior Cashier & Stock Receiver"
+                    value={addCustomRoleTitle}
+                    onChange={(e) => setAddCustomRoleTitle(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 focus:outline-none focus:border-sky-500"
+                  />
+                </div>
+
+                {/* Flexible Permissions Quick Configuration Toggle */}
+                <div className="bg-slate-950 border border-slate-800 rounded-2xl overflow-hidden">
+                  <div
+                    onClick={() => setShowAddPermissionsSection(!showAddPermissionsSection)}
+                    className="p-3 bg-slate-900/80 hover:bg-slate-900 flex items-center justify-between cursor-pointer select-none"
+                  >
+                    <div className="flex items-center gap-2">
+                      <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                      <div>
+                        <div className="text-xs font-bold text-slate-200">
+                          Configure Flexible Permissions ({Object.values(addPermissions).filter(Boolean).length} / 21 Enabled)
+                        </div>
+                        <div className="text-[10px] text-slate-400">
+                          {showAddPermissionsSection ? 'Click to collapse permissions checklist' : 'Click to customize individual roles for this worker'}
+                        </div>
+                      </div>
+                    </div>
+                    <span className="text-xs font-mono font-bold text-sky-400">
+                      {showAddPermissionsSection ? '▲ Hide' : '▼ Customize (21 Roles)'}
+                    </span>
+                  </div>
+
+                  {showAddPermissionsSection && (
+                    <div className="p-3 space-y-2.5 max-h-56 overflow-y-auto border-t border-slate-800">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                        {PERMISSION_DEFINITIONS.map((def) => {
+                          const isChecked = !!addPermissions[def.key];
+                          return (
+                            <label
+                              key={def.key}
+                              className={`p-2 rounded-xl border flex items-center justify-between gap-2 cursor-pointer transition ${
+                                isChecked
+                                  ? 'bg-emerald-950/30 border-emerald-800/80 text-slate-100'
+                                  : 'bg-slate-900/40 border-slate-800 text-slate-400'
+                              }`}
+                            >
+                              <span className="text-[11px] font-semibold">{def.label}</span>
+                              <input
+                                type="checkbox"
+                                checked={isChecked}
+                                onChange={() =>
+                                  setAddPermissions((prev) => ({
+                                    ...prev,
+                                    [def.key]: !prev[def.key],
+                                  }))
+                                }
+                                className="w-3.5 h-3.5 rounded text-emerald-500 focus:ring-0 bg-slate-900 border-slate-700"
+                              />
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
                 {/* Action Buttons */}
                 <div className="pt-3 border-t border-slate-800 flex justify-end gap-2">
                   <button
@@ -882,13 +1460,24 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
                     <label className="block text-slate-300 font-semibold mb-1">Worker Role *</label>
                     <select
                       value={editingUser.role}
-                      onChange={(e) => setEditingUser({ ...editingUser, role: e.target.value as Role })}
+                      onChange={(e) => {
+                        const newRole = e.target.value as Role;
+                        setEditingUser({
+                          ...editingUser,
+                          role: newRole,
+                          permissions: { ...DEFAULT_ROLE_WORKER_PERMISSIONS[newRole], ...editingUser.permissions },
+                        });
+                      }}
                       className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 focus:outline-none focus:border-sky-500 font-semibold"
                     >
-                      <option value="Cashier">Cashier</option>
-                      <option value="Manager">Manager</option>
-                      <option value="Inventory Staff">Inventory Staff</option>
-                      <option value="Admin">Admin</option>
+                      <option value="Sales Role">Sales Role (POS, Customer Orders, Commission)</option>
+                      <option value="Stock Ins Role">Stock Ins Role (Receiving, Supplies, Bad Stock)</option>
+                      <option value="Stock Setup Role">Stock Setup Role (Products, Offers, Counts, Barcodes)</option>
+                      <option value="Expenses Role">Expenses Role (Daily Business Expenditures)</option>
+                      <option value="Cashier">Cashier (Standard POS Sales & Register)</option>
+                      <option value="Inventory Staff">Inventory Staff (Stock & Receiving)</option>
+                      <option value="Manager">Manager (Full Store Operations)</option>
+                      <option value="Admin">Admin (Full System Access)</option>
                     </select>
                   </div>
                 </div>
@@ -982,6 +1571,47 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
                     onChange={(e) => setEditingUser({ ...editingUser, pin: e.target.value })}
                     className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-sky-400 font-mono font-black text-lg text-center tracking-widest focus:outline-none focus:border-sky-500"
                   />
+                </div>
+
+                {/* Custom Role Title */}
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">
+                    Custom Role Title / Subtitle (Optional)
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Lead Sales Associate, Shift Supervisor"
+                    value={editingUser.customRoleTitle || ''}
+                    onChange={(e) => setEditingUser({ ...editingUser, customRoleTitle: e.target.value })}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 focus:outline-none focus:border-sky-500"
+                  />
+                </div>
+
+                {/* Flexible Roles & Permissions Box */}
+                <div className="bg-slate-950 border border-emerald-900/60 p-3.5 rounded-2xl flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex items-center gap-2.5">
+                    <div className="p-2 bg-emerald-950 text-emerald-400 border border-emerald-800 rounded-xl">
+                      <ShieldCheck className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <div className="text-xs font-bold text-slate-200">Flexible Roles & Permissions</div>
+                      <div className="text-[11px] text-slate-400">
+                        {Object.values(getWorkerPermissions(editingUser)).filter(Boolean).length} / 21 granular permissions currently active
+                      </div>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAdjustingPermissionsUser(editingUser);
+                      setEditingUser(null);
+                    }}
+                    className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-3.5 py-1.5 rounded-xl transition flex items-center gap-1.5 shadow-md shadow-emerald-600/20"
+                  >
+                    <Sliders className="w-3.5 h-3.5" />
+                    <span>Customize 21 Roles</span>
+                  </button>
                 </div>
 
                 <div className="pt-3 border-t border-slate-800 flex justify-end gap-2">
@@ -1155,6 +1785,21 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
               </div>
             </div>
           </div>
+        )}
+
+        {/* MODAL 5: FLEXIBLE WORKER ROLES & PERMISSIONS MODAL */}
+        {adjustingPermissionsUser && (
+          <FlexibleWorkerPermissionsModal
+            isOpen={!!adjustingPermissionsUser}
+            onClose={() => setAdjustingPermissionsUser(null)}
+            worker={adjustingPermissionsUser}
+            onUpdateWorker={(updatedWorker) => {
+              onUpdateUser(updatedWorker);
+              setAdjustingPermissionsUser(null);
+              showNotification(`Updated flexible roles & permissions for "${updatedWorker.name}" successfully!`, 'success');
+            }}
+            currentLoggedInUser={currentUser}
+          />
         )}
 
       </div>

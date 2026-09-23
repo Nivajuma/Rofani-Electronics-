@@ -30,6 +30,10 @@ import {
   Clock
 } from 'lucide-react';
 import { User, Role, Transaction, AttendanceRecord, WorkerLoan } from '../../types';
+import {
+  DEFAULT_ROLE_WORKER_PERMISSIONS,
+  applyRoleToWorker,
+} from '../../utils/permissions';
 
 interface WorkerDirectoryViewProps {
   allUsers: User[];
@@ -165,6 +169,7 @@ export const WorkerDirectoryView: React.FC<WorkerDirectoryViewProps> = ({
       pin: trimmedPin,
       commissionRate: Number(commissionRate) || 0,
       notes: notes.trim() || undefined,
+      permissions: { ...DEFAULT_ROLE_WORKER_PERMISSIONS[role] },
     };
 
     if (onAddUser) {
@@ -248,7 +253,11 @@ export const WorkerDirectoryView: React.FC<WorkerDirectoryViewProps> = ({
     Admin: { badge: 'bg-rose-500/20 text-rose-300 border-rose-500/40', border: 'border-rose-900/40' },
     Manager: { badge: 'bg-amber-500/20 text-amber-300 border-amber-500/40', border: 'border-amber-900/40' },
     Cashier: { badge: 'bg-sky-500/20 text-sky-300 border-sky-500/40', border: 'border-sky-900/40' },
-    'Inventory Staff': { badge: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40', border: 'border-emerald-900/40' },
+    'Inventory Staff': { badge: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40', border: 'border-cyan-900/40' },
+    'Sales Role': { badge: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40', border: 'border-emerald-900/40' },
+    'Stock Ins Role': { badge: 'bg-teal-500/20 text-teal-300 border-teal-500/40', border: 'border-teal-900/40' },
+    'Stock Setup Role': { badge: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40', border: 'border-indigo-900/40' },
+    'Expenses Role': { badge: 'bg-orange-500/20 text-orange-300 border-orange-500/40', border: 'border-orange-900/40' },
   };
 
   return (
@@ -398,9 +407,13 @@ export const WorkerDirectoryView: React.FC<WorkerDirectoryViewProps> = ({
               className="bg-transparent text-slate-200 text-xs focus:outline-none cursor-pointer font-medium"
             >
               <option value="all" className="bg-slate-900 text-slate-200">All Roles</option>
+              <option value="Sales Role" className="bg-slate-900 text-slate-200">Sales Role</option>
+              <option value="Stock Ins Role" className="bg-slate-900 text-slate-200">Stock Ins Role</option>
+              <option value="Stock Setup Role" className="bg-slate-900 text-slate-200">Stock Setup Role</option>
+              <option value="Expenses Role" className="bg-slate-900 text-slate-200">Expenses Role</option>
               <option value="Cashier" className="bg-slate-900 text-slate-200">Cashier</option>
-              <option value="Manager" className="bg-slate-900 text-slate-200">Manager</option>
               <option value="Inventory Staff" className="bg-slate-900 text-slate-200">Inventory Staff</option>
+              <option value="Manager" className="bg-slate-900 text-slate-200">Manager</option>
               <option value="Admin" className="bg-slate-900 text-slate-200">Admin</option>
             </select>
           </div>
@@ -592,6 +605,35 @@ export const WorkerDirectoryView: React.FC<WorkerDirectoryViewProps> = ({
                   </div>
                 )}
 
+                {/* Quick Role Selection Bar */}
+                <div className="bg-slate-950/80 border border-slate-800/80 p-2.5 rounded-2xl flex items-center justify-between gap-2 flex-wrap text-xs">
+                  <span className="text-slate-400 font-semibold text-[11px] flex items-center gap-1.5">
+                    <ShieldCheck className="w-3.5 h-3.5 text-sky-400" />
+                    <span>Select Role:</span>
+                  </span>
+                  <select
+                    value={u.role}
+                    onChange={(e) => {
+                      const newRole = e.target.value as Role;
+                      if (onUpdateUser) {
+                        const updated = applyRoleToWorker(u, newRole);
+                        onUpdateUser(updated);
+                        showToast(`Role updated to "${newRole}" for ${u.name}!`, 'success');
+                      }
+                    }}
+                    className="bg-slate-900 border border-slate-700 text-slate-200 text-xs font-bold rounded-lg px-2.5 py-1 focus:outline-none focus:border-sky-500 cursor-pointer shadow-sm hover:border-slate-600 transition"
+                  >
+                    <option value="Sales Role">Sales Role (POS & Orders)</option>
+                    <option value="Stock Ins Role">Stock Ins Role (Supplies)</option>
+                    <option value="Stock Setup Role">Stock Setup Role (Products)</option>
+                    <option value="Expenses Role">Expenses Role (Expenses)</option>
+                    <option value="Cashier">Cashier (Standard POS)</option>
+                    <option value="Inventory Staff">Inventory Staff</option>
+                    <option value="Manager">Manager (Operations)</option>
+                    <option value="Admin">Admin (Full Access)</option>
+                  </select>
+                </div>
+
                 {/* Worker Action Buttons */}
                 <div className="flex items-center justify-between pt-2 border-t border-slate-800 text-xs">
                   <button
@@ -675,9 +717,13 @@ export const WorkerDirectoryView: React.FC<WorkerDirectoryViewProps> = ({
                     onChange={(e) => setRole(e.target.value as Role)}
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 focus:outline-none focus:border-purple-500 font-semibold"
                   >
-                    <option value="Cashier">Cashier (POS Sales & Register)</option>
-                    <option value="Manager">Manager (Full Store Operations)</option>
+                    <option value="Sales Role">Sales Role (POS, Customer Orders, Commission)</option>
+                    <option value="Stock Ins Role">Stock Ins Role (Receiving, Supplies, Bad Stock)</option>
+                    <option value="Stock Setup Role">Stock Setup Role (Products, Offers, Counts, Barcodes)</option>
+                    <option value="Expenses Role">Expenses Role (Daily Business Expenditures)</option>
+                    <option value="Cashier">Cashier (Standard POS Sales & Register)</option>
                     <option value="Inventory Staff">Inventory Staff (Stock & Receiving)</option>
+                    <option value="Manager">Manager (Full Store Operations)</option>
                     <option value="Admin">Admin (Full System Access)</option>
                   </select>
                 </div>
@@ -855,13 +901,24 @@ export const WorkerDirectoryView: React.FC<WorkerDirectoryViewProps> = ({
                   <label className="block text-slate-300 font-semibold mb-1">Worker Role *</label>
                   <select
                     value={editingUser.role}
-                    onChange={(e) => setEditingUser({ ...editingUser, role: e.target.value as Role })}
+                    onChange={(e) => {
+                      const newRole = e.target.value as Role;
+                      setEditingUser({
+                        ...editingUser,
+                        role: newRole,
+                        permissions: { ...DEFAULT_ROLE_WORKER_PERMISSIONS[newRole], ...editingUser.permissions },
+                      });
+                    }}
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 focus:outline-none focus:border-purple-500 font-semibold"
                   >
-                    <option value="Cashier">Cashier</option>
-                    <option value="Manager">Manager</option>
-                    <option value="Inventory Staff">Inventory Staff</option>
-                    <option value="Admin">Admin</option>
+                    <option value="Sales Role">Sales Role (POS, Customer Orders, Commission)</option>
+                    <option value="Stock Ins Role">Stock Ins Role (Receiving, Supplies, Bad Stock)</option>
+                    <option value="Stock Setup Role">Stock Setup Role (Products, Offers, Counts, Barcodes)</option>
+                    <option value="Expenses Role">Expenses Role (Daily Business Expenditures)</option>
+                    <option value="Cashier">Cashier (Standard POS Sales & Register)</option>
+                    <option value="Inventory Staff">Inventory Staff (Stock & Receiving)</option>
+                    <option value="Manager">Manager (Full Store Operations)</option>
+                    <option value="Admin">Admin (Full System Access)</option>
                   </select>
                 </div>
               </div>

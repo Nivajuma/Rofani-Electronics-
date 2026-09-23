@@ -36,6 +36,7 @@ import { Product, CartItem, Customer, PaymentMethod, PaymentBreakdown, Transacti
 import { BarcodeScannerModal } from './BarcodeScannerModal';
 import { ReceiptModal } from './ReceiptModal';
 import { computeProductsPerformance, ProductPerformanceInfo } from '../../utils/salesPerformance';
+import { hasWorkerPermission } from '../../utils/permissions';
 
 interface POSViewProps {
   products: Product[];
@@ -423,23 +424,23 @@ export const POSView: React.FC<POSViewProps> = ({
     });
   };
 
-  // Admin Discount PIN verification handler
+  // Supervisor / Admin Discount PIN verification handler
   const handleVerifyAdminPinForDiscount = (e: React.FormEvent) => {
     e.preventDefault();
     setAdminAuthError('');
 
-    // Check if entered pin matches any admin user
-    const matchedAdmin = allUsers.find(
-      (u) => u.role === 'Admin' && u.pin === adminPinInput.trim()
+    // Check if entered pin matches any user with discount authorization
+    const matchedSupervisor = allUsers.find(
+      (u) => hasWorkerPermission(u, 'canGiveDiscounts') && u.pin === adminPinInput.trim()
     );
 
-    if (matchedAdmin) {
-      setDiscountAuthorizedBy(`${matchedAdmin.name} (Admin)`);
+    if (matchedSupervisor) {
+      setDiscountAuthorizedBy(`${matchedSupervisor.name} (${matchedSupervisor.customRoleTitle || matchedSupervisor.role})`);
       setDiscountAmount(tempDiscountVal > 0 ? tempDiscountVal : 0);
       setShowAdminDiscountAuthModal(false);
       setAdminPinInput('');
     } else {
-      setAdminAuthError('Invalid Admin Security PIN! Only Store Administrators can authorize discounts.');
+      setAdminAuthError('Invalid Security PIN! Manager or authorized staff permission required to grant discounts.');
     }
   };
 
@@ -520,10 +521,18 @@ export const POSView: React.FC<POSViewProps> = ({
     setShowCheckoutModal(false);
     setCart([]);
     setDiscountAmount(0);
-    if (currentUser.role !== 'Admin') {
+    if (!hasWorkerPermission(currentUser, 'canGiveDiscounts')) {
       setDiscountAuthorizedBy(null);
     }
-    setCompletedTx(newTx);
+    if (hasWorkerPermission(currentUser, 'canPreviewReceipt')) {
+      setCompletedTx(newTx);
+    } else {
+      setPosNotice({
+        type: 'success',
+        message: `Sale ${newTx.receiptNumber} completed and recorded successfully!`
+      });
+      executeNewSale();
+    }
   };
 
   // Create new customer submit
@@ -1005,13 +1014,15 @@ export const POSView: React.FC<POSViewProps> = ({
               </select>
             </div>
 
-            <button
-              onClick={() => setShowAddCustomerModal(true)}
-              title="Add New Customer"
-              className="p-1.5 bg-slate-800 hover:bg-slate-700 text-sky-400 rounded-lg transition"
-            >
-              <UserPlus className="w-4 h-4" />
-            </button>
+            {hasWorkerPermission(currentUser, 'canViewManageCustomers') && (
+              <button
+                onClick={() => setShowAddCustomerModal(true)}
+                title="Add New Customer"
+                className="p-1.5 bg-slate-800 hover:bg-slate-700 text-sky-400 rounded-lg transition"
+              >
+                <UserPlus className="w-4 h-4" />
+              </button>
+            )}
           </div>
 
           {/* Cart Itemized List */}
@@ -1131,7 +1142,7 @@ export const POSView: React.FC<POSViewProps> = ({
                   <span className="font-semibold text-slate-300">Sales Discount (KSh):</span>
                 </div>
 
-                {currentUser.role === 'Admin' || discountAuthorizedBy ? (
+                {hasWorkerPermission(currentUser, 'canGiveDiscounts') || discountAuthorizedBy ? (
                   <div className="flex items-center gap-2">
                     <input
                       type="number"
@@ -1139,10 +1150,10 @@ export const POSView: React.FC<POSViewProps> = ({
                       value={discountAmount ?? ''}
                       onChange={(e) => {
                         const val = e.target.value;
-                        if (currentUser.role === 'Admin' || discountAuthorizedBy) {
+                        if (hasWorkerPermission(currentUser, 'canGiveDiscounts') || discountAuthorizedBy) {
                           setDiscountAmount(val as any);
-                          if (currentUser.role === 'Admin' && !discountAuthorizedBy) {
-                            setDiscountAuthorizedBy(`${currentUser.name} (Admin)`);
+                          if (hasWorkerPermission(currentUser, 'canGiveDiscounts') && !discountAuthorizedBy) {
+                            setDiscountAuthorizedBy(`${currentUser.name} (${currentUser.customRoleTitle || currentUser.role})`);
                           }
                         }
                       }}
@@ -1153,7 +1164,7 @@ export const POSView: React.FC<POSViewProps> = ({
                       <button
                         onClick={() => {
                           setDiscountAmount(0);
-                          if (currentUser.role !== 'Admin') setDiscountAuthorizedBy(null);
+                          if (!hasWorkerPermission(currentUser, 'canGiveDiscounts')) setDiscountAuthorizedBy(null);
                         }}
                         className="text-[10px] text-rose-400 hover:underline font-semibold"
                         title="Remove discount"
@@ -1171,7 +1182,7 @@ export const POSView: React.FC<POSViewProps> = ({
                     className="px-2.5 py-1 bg-amber-950/80 hover:bg-amber-900 border border-amber-800 text-amber-300 rounded-lg text-[11px] font-bold transition flex items-center gap-1"
                   >
                     <Lock className="w-3 h-3 text-amber-400" />
-                    <span>Request Admin Discount</span>
+                    <span>Request Supervisor Discount</span>
                   </button>
                 )}
               </div>
@@ -1182,13 +1193,13 @@ export const POSView: React.FC<POSViewProps> = ({
                     <ShieldCheck className="w-3 h-3 text-emerald-400" />
                     <span>Discount Approved By:</span>
                   </span>
-                  <span className="font-bold">{discountAuthorizedBy || 'Store Admin'}</span>
+                  <span className="font-bold">{discountAuthorizedBy || `${currentUser.name} (${currentUser.role})`}</span>
                 </div>
               )}
 
-              {currentUser.role !== 'Admin' && !discountAuthorizedBy && (
+              {currentUser.role !== 'Admin' && currentUser.role !== 'Manager' && !discountAuthorizedBy && (
                 <p className="text-[10px] text-slate-500 italic">
-                  🔒 Only Administrators can give or authorize sales discounts.
+                  🔒 Cashiers require Manager or Admin PIN authorization to apply discounts.
                 </p>
               )}
             </div>
@@ -1227,12 +1238,17 @@ export const POSView: React.FC<POSViewProps> = ({
             )}
             <button
               id="btn-pos-checkout"
-              disabled={cart.length === 0}
+              disabled={cart.length === 0 || !hasWorkerPermission(currentUser, 'canMakeSales')}
               onClick={handleOpenCheckout}
               className="flex-1 bg-gradient-to-r from-sky-500 to-indigo-600 hover:from-sky-400 hover:to-indigo-500 disabled:opacity-50 text-white font-bold py-3 px-4 rounded-xl shadow-lg transition flex items-center justify-center gap-2 text-sm"
+              title={!hasWorkerPermission(currentUser, 'canMakeSales') ? 'Worker does not have "Can make sales" permission' : undefined}
             >
               <CreditCard className="w-4 h-4" />
-              <span>Process Payment (KSh {grandTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })})</span>
+              <span>
+                {!hasWorkerPermission(currentUser, 'canMakeSales')
+                  ? 'Sales Permission Restricted'
+                  : `Process Payment (KSh ${grandTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })})`}
+              </span>
             </button>
           </div>
         </div>
@@ -1372,13 +1388,20 @@ export const POSView: React.FC<POSViewProps> = ({
                     <Calendar className="w-3.5 h-3.5 text-sky-400" />
                     <span>Sale Date & Time (Back-date Option)</span>
                   </span>
-                  <span className="text-[10px] text-slate-400 font-normal">Select past date for forgotten sales</span>
+                  {!hasWorkerPermission(currentUser, 'canBackdateEntries') ? (
+                    <span className="text-[10px] text-amber-400 font-mono flex items-center gap-1">
+                      <Lock className="w-2.5 h-2.5" /> Backdating restricted
+                    </span>
+                  ) : (
+                    <span className="text-[10px] text-slate-400 font-normal">Select past date for forgotten sales</span>
+                  )}
                 </label>
                 <input
                   type="datetime-local"
+                  disabled={!hasWorkerPermission(currentUser, 'canBackdateEntries')}
                   value={saleDate}
                   onChange={(e) => setSaleDate(e.target.value)}
-                  className="w-full bg-slate-900 border border-slate-800 text-slate-200 px-3 py-2 rounded-xl text-xs font-mono focus:outline-none focus:border-sky-500"
+                  className="w-full bg-slate-900 border border-slate-800 disabled:opacity-60 text-slate-200 px-3 py-2 rounded-xl text-xs font-mono focus:outline-none focus:border-sky-500"
                 />
               </div>
 

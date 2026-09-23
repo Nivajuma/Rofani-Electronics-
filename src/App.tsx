@@ -37,7 +37,9 @@ import {
   Cloud,
   RefreshCw,
   Menu,
-  X
+  X,
+  Printer,
+  Barcode
 } from 'lucide-react';
 import {
   Product,
@@ -103,6 +105,17 @@ import { CustomersSuppliersView } from './components/Contacts/CustomersSuppliers
 import { AIAssistantModal } from './components/AI/AIAssistantModal';
 import { AIAssistantWidget } from './components/AI/AIAssistantWidget';
 import { CloudSyncModal } from './components/CloudSync/CloudSyncModal';
+import { PrintBarcodesUtilityModal } from './components/Inventory/PrintBarcodesUtilityModal';
+import {
+  TabKey,
+  hasTabPermission,
+  canManageStaff,
+  canViewGrossProfit,
+  canManageSettings,
+  getRoleBadgeStyle,
+  ROLE_CONFIGURATIONS,
+} from './utils/permissions';
+import { AccessRestrictedView } from './components/Auth/AccessRestrictedView';
 import {
   subscribeToProducts,
   saveProductToCloud,
@@ -206,9 +219,14 @@ export default function App() {
   const [isTerminalLocked, setIsTerminalLocked] = useState<boolean>(() =>
     safeGetJSON('retail_pos_require_pin_startup', true)
   );
+  // Target user when switching workers via PIN lock modal
+  const [pinModalTargetUser, setPinModalTargetUser] = useState<User | null>(null);
+  // Set of tabs temporarily authorized by supervisor PIN during active session
+  const [temporarilyUnlockedTabs, setTemporarilyUnlockedTabs] = useState<Set<TabKey>>(new Set());
   const [showStaffModal, setShowStaffModal] = useState(false);
   const [showInstallModal, setShowInstallModal] = useState(false);
   const [showCloudSyncModal, setShowCloudSyncModal] = useState(false);
+  const [showPrintBarcodesModal, setShowPrintBarcodesModal] = useState(false);
   const [cloudSyncStatus, setCloudSyncStatus] = useState<'synced' | 'syncing' | 'offline' | 'error' | 'quota_exceeded'>('syncing');
   const [isCloudQuotaExceeded, setIsCloudQuotaExceeded] = useState<boolean>(false);
   const [showQuotaBanner, setShowQuotaBanner] = useState<boolean>(true);
@@ -641,7 +659,18 @@ export default function App() {
 
   const handleLoginSuccess = (user: User) => {
     setCurrentUser(user);
+    setPinModalTargetUser(null);
     setIsTerminalLocked(false);
+    setTemporarilyUnlockedTabs(new Set());
+    if (!hasTabPermission(user.role, activeTab as TabKey)) {
+      if (user.role === 'Inventory Staff' || user.role === 'Stock Ins Role' || user.role === 'Stock Setup Role') {
+        setActiveTab('inventory');
+      } else if (user.role === 'Expenses Role') {
+        setActiveTab('expenses');
+      } else {
+        setActiveTab('pos');
+      }
+    }
   };
 
   const handleUpdateMasterPin = async (newPin: string) => {
@@ -1427,9 +1456,37 @@ export default function App() {
   const fontScaleClass = fontScale === 'large' ? 'text-base' : 'text-sm';
 
   // Helper function to render active tab view content
-  const renderActiveTabContent = () => (
-    <>
-      {activeTab === 'pos' && (
+  const renderActiveTabContent = () => {
+    const isTabPermitted =
+      hasTabPermission(currentUser.role, activeTab as TabKey) ||
+      temporarilyUnlockedTabs.has(activeTab as TabKey);
+
+    if (!isTabPermitted) {
+      return (
+        <AccessRestrictedView
+          currentTab={activeTab as TabKey}
+          currentUser={currentUser}
+          allUsers={allUsers}
+          onNavigateToAllowedTab={(tab) => {
+            setActiveTab(tab);
+            if (tab !== 'inventory') setInventoryLowStockOnly(false);
+          }}
+          onTemporaryUnlock={(authorizedBy) => {
+            setTemporarilyUnlockedTabs((prev) => new Set([...prev, activeTab as TabKey]));
+          }}
+          onSwitchUser={(authorizedUser) => {
+            setCurrentUser(authorizedUser);
+            setPinModalTargetUser(null);
+            setIsTerminalLocked(false);
+            setTemporarilyUnlockedTabs(new Set());
+          }}
+        />
+      );
+    }
+
+    return (
+      <>
+        {activeTab === 'pos' && (
         <POSView
           products={products}
           categories={categories}
@@ -1622,7 +1679,8 @@ export default function App() {
         />
       )}
     </>
-  );
+    );
+  };
 
   // If Mobile Phone Format is active, render PhoneDeviceFrame view
   if (deviceFormat === 'phone') {
@@ -1678,8 +1736,10 @@ export default function App() {
           isOpen={isTerminalLocked}
           users={allUsers}
           currentUser={null}
+          initialTargetUser={pinModalTargetUser}
           onLoginSuccess={handleLoginSuccess}
           onClose={() => {
+            setPinModalTargetUser(null);
             if (!requirePinOnStartup) {
               setIsTerminalLocked(false);
             }
@@ -1764,19 +1824,49 @@ export default function App() {
           </div>
         </div>
 
-        {/* Quick Action: Hero "+ New Sale" Button in Sidebar */}
+        {/* Quick Action: Hero "+ New Sale" Button & Secondary "Print Barcodes" in Sidebar */}
         <div className="px-2 pt-3 pb-1 border-b border-slate-800/80">
-          <button
-            id="btn-sidebar-new-sale"
-            onClick={handleGlobalNewSale}
-            title="Create New POS Sale"
-            className={`w-full bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 active:scale-95 text-white font-extrabold rounded-xl shadow-md shadow-emerald-600/25 transition flex items-center ${
-              isSidebarCollapsed ? 'justify-center p-2.5' : 'justify-center gap-2 py-2.5 px-3 text-xs'
-            }`}
-          >
-            <Plus className="w-4 h-4 shrink-0" />
-            {!isSidebarCollapsed && <span>+ New Sale</span>}
-          </button>
+          {isSidebarCollapsed ? (
+            <div className="flex flex-col gap-1.5">
+              <button
+                id="btn-sidebar-new-sale"
+                onClick={handleGlobalNewSale}
+                title="Create New POS Sale"
+                className="w-full bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 active:scale-95 text-white font-extrabold rounded-xl shadow-md shadow-emerald-600/25 transition flex items-center justify-center p-2.5"
+              >
+                <Plus className="w-4 h-4 shrink-0" />
+              </button>
+              <button
+                id="btn-sidebar-print-barcodes"
+                onClick={() => setShowPrintBarcodesModal(true)}
+                title="Print Barcodes Utility - Batch print labels from scan history & catalog"
+                className="w-full bg-slate-800/90 hover:bg-slate-700 active:scale-95 text-sky-400 hover:text-white font-bold rounded-xl border border-slate-700/80 hover:border-sky-500/50 shadow-sm transition flex items-center justify-center p-2.5 cursor-pointer"
+              >
+                <Printer className="w-4 h-4 shrink-0" />
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-1.5">
+              <button
+                id="btn-sidebar-new-sale"
+                onClick={handleGlobalNewSale}
+                title="Create New POS Sale"
+                className="flex-1 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 active:scale-95 text-white font-extrabold rounded-xl shadow-md shadow-emerald-600/25 transition flex items-center justify-center gap-1.5 py-2.5 px-2 text-xs truncate cursor-pointer"
+              >
+                <Plus className="w-4 h-4 shrink-0" />
+                <span className="truncate">+ New Sale</span>
+              </button>
+              <button
+                id="btn-sidebar-print-barcodes"
+                onClick={() => setShowPrintBarcodesModal(true)}
+                title="Print Barcodes Utility - Batch print labels from scan history & catalog"
+                className="bg-slate-800/90 hover:bg-slate-700 active:scale-95 text-sky-300 hover:text-white font-bold rounded-xl border border-slate-700/80 hover:border-sky-500/60 shadow-sm transition flex items-center gap-1.5 py-2.5 px-2.5 text-xs shrink-0 cursor-pointer"
+              >
+                <Printer className="w-3.5 h-3.5 shrink-0 text-sky-400" />
+                <span className="font-semibold">Print Barcodes</span>
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Navigation Items */}
@@ -2086,8 +2176,10 @@ export default function App() {
                 <button
                   key={u.id}
                   onClick={() => {
-                    setCurrentUser(u);
                     setShowRoleSwitcher(false);
+                    if (u.id === currentUser.id) return;
+                    setPinModalTargetUser(u);
+                    setIsTerminalLocked(true);
                   }}
                   className={`w-full text-left px-2.5 py-1.5 rounded-lg flex items-center justify-between transition ${
                     u.id === currentUser.id
@@ -2114,6 +2206,7 @@ export default function App() {
                 <button
                   onClick={() => {
                     setShowRoleSwitcher(false);
+                    setPinModalTargetUser(null);
                     setIsTerminalLocked(true);
                   }}
                   className="w-full text-left px-2.5 py-1.5 rounded-lg flex items-center gap-1.5 text-amber-300 hover:bg-amber-950/40 transition font-semibold"
@@ -2122,16 +2215,18 @@ export default function App() {
                   <span>Lock Terminal (PIN)</span>
                 </button>
 
-                <button
-                  onClick={() => {
-                    handleResetData();
-                    setShowRoleSwitcher(false);
-                  }}
-                  className="w-full text-left px-2.5 py-1.5 rounded-lg flex items-center gap-1.5 text-rose-400 hover:bg-rose-950/40 transition"
-                >
-                  <RotateCcw className="w-3.5 h-3.5" />
-                  <span>Reset Sample Data</span>
-                </button>
+                {currentUser.role === 'Admin' && (
+                  <button
+                    onClick={() => {
+                      handleResetData();
+                      setShowRoleSwitcher(false);
+                    }}
+                    className="w-full text-left px-2.5 py-1.5 rounded-lg flex items-center gap-1.5 text-rose-400 hover:bg-rose-950/40 transition"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>Reset Sample Data</span>
+                  </button>
+                )}
               </div>
             </div>
           )}
@@ -2245,14 +2340,16 @@ export default function App() {
               </span>
             </div>
 
-            <div className="hidden xl:flex flex-col border-l border-slate-200 pl-4 xl:pl-8 shrink-0">
-              <span className="text-[11px] text-slate-500 uppercase tracking-widest font-bold">
-                Gross Profit Margin
-              </span>
-              <span className="text-xl font-extrabold text-emerald-600 font-mono">
-                +{profitMarginPercent.toFixed(1)}% (KSh {grossProfitAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })})
-              </span>
-            </div>
+            {canViewGrossProfit(currentUser.role) && (
+              <div className="hidden xl:flex flex-col border-l border-slate-200 pl-4 xl:pl-8 shrink-0">
+                <span className="text-[11px] text-slate-500 uppercase tracking-widest font-bold">
+                  Gross Profit Margin
+                </span>
+                <span className="text-xl font-extrabold text-emerald-600 font-mono">
+                  +{profitMarginPercent.toFixed(1)}% (KSh {grossProfitAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })})
+                </span>
+              </div>
+            )}
 
             <div className="flex flex-col border-l border-slate-200 pl-4 xl:pl-8 shrink-0">
               <span className="text-[10px] xl:text-[11px] text-slate-500 uppercase tracking-widest font-bold">
@@ -2480,8 +2577,10 @@ export default function App() {
         isOpen={isTerminalLocked}
         users={allUsers}
         currentUser={null}
+        initialTargetUser={pinModalTargetUser}
         onLoginSuccess={handleLoginSuccess}
         onClose={() => {
+          setPinModalTargetUser(null);
           if (!requirePinOnStartup) {
             setIsTerminalLocked(false);
           }
@@ -2567,6 +2666,15 @@ export default function App() {
           onAddRestock={handleAddRestockRecord}
         />
       )}
+
+      {/* Batch Barcode Label Printer Utility Modal */}
+      <PrintBarcodesUtilityModal
+        isOpen={showPrintBarcodesModal}
+        onClose={() => setShowPrintBarcodesModal(false)}
+        scanLogs={scanLogs}
+        products={products}
+        storeName={stores.find((s) => s.id === activeStoreId)?.name || 'ROFANI Retail'}
+      />
 
       {/* Floating AI Worker Assistant Widget Trigger */}
       <AIAssistantWidget onOpen={() => setShowAiAssistantModal(true)} />

@@ -1,4 +1,12 @@
-export type Role = 'Admin' | 'Manager' | 'Cashier' | 'Inventory Staff';
+export type Role =
+  | 'Admin'
+  | 'Manager'
+  | 'Cashier'
+  | 'Inventory Staff'
+  | 'Sales Role'
+  | 'Stock Ins Role'
+  | 'Stock Setup Role'
+  | 'Expenses Role';
 
 export type CommissionType = 'percentage' | 'tiered' | 'fixed_per_sale' | 'profit_share';
 
@@ -8,10 +16,44 @@ export interface CommissionTier {
   rate: number; // percentage e.g. 5, 7.5, 10
 }
 
+export interface WorkerPermissions {
+  // SALES ROLE
+  canMakeSales: boolean;
+  canManageCustomerOrders: boolean;
+  canUpdateSalesOrderStatus: boolean;
+  canViewManageCustomers: boolean;
+  canEnableSalesCommission: boolean;
+
+  // STOCK INS ROLES
+  canAddStockIn: boolean;
+  canManageSupplierOrders: boolean;
+  canViewManageSupplies: boolean;
+  canAddBadStock: boolean;
+
+  // STOCK SETUP ROLES
+  canAddNewProducts: boolean;
+  canCreateOffers: boolean;
+  canViewOutOfStock: boolean;
+  canCountUpdateStockBalance: boolean;
+
+  // EXPENSES ROLES
+  canAddExpenses: boolean;
+
+  // OTHER ROLES
+  canGiveDiscounts: boolean;
+  canEditDailyEntries: boolean;
+  canDeleteDailyEntries: boolean;
+  canBackdateEntries: boolean;
+  canReturnStocks: boolean;
+  canGenerateBarcode: boolean;
+  canPreviewReceipt: boolean;
+}
+
 export interface User {
   id: string;
   name: string;
   role: Role;
+  assignedRoles?: string[]; // e.g. ['Sales Role', 'Stock Ins Role']
   email: string;
   pin: string;
   avatar?: string;
@@ -20,6 +62,8 @@ export interface User {
   department?: string;
   hireDate?: string;
   notes?: string;
+  customRoleTitle?: string;
+  permissions?: Partial<WorkerPermissions>;
   commissionRate?: number; // percentage e.g. 5 for 5%
   commissionType?: CommissionType; // 'percentage' | 'tiered' | 'fixed_per_sale' | 'profit_share'
   fixedCommissionPerSale?: number; // e.g. KSh 50 per sale

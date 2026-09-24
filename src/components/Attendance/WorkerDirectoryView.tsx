@@ -27,12 +27,21 @@ import {
   CreditCard,
   Award,
   RefreshCw,
-  Clock
+  Clock,
+  Plus
 } from 'lucide-react';
 import { User, Role, Transaction, AttendanceRecord, WorkerLoan } from '../../types';
 import {
   DEFAULT_ROLE_WORKER_PERMISSIONS,
   applyRoleToWorker,
+  hasRole,
+  getUserRoles,
+  setWorkerRoles,
+  toggleRoleOnWorker,
+  ALL_ROLES,
+  getCombinedPermissionsForRoles,
+  ALL_21_GRANULAR_ROLES,
+  assignAll21RolesToWorker,
 } from '../../utils/permissions';
 
 interface WorkerDirectoryViewProps {
@@ -161,6 +170,8 @@ export const WorkerDirectoryView: React.FC<WorkerDirectoryViewProps> = ({
       id: `usr-${Date.now()}`,
       name: name.trim(),
       role,
+      roles: [role],
+      assignedRoles: [role],
       phone: phone.trim() || undefined,
       email: email.trim() || `${name.toLowerCase().replace(/[^a-z0-9]/g, '.')}@rofani.co.ke`,
       status,
@@ -220,7 +231,8 @@ export const WorkerDirectoryView: React.FC<WorkerDirectoryViewProps> = ({
       if (searchTerm.trim()) {
         const q = searchTerm.toLowerCase();
         const matchName = u.name?.toLowerCase().includes(q);
-        const matchRole = u.role?.toLowerCase().includes(q);
+        const roles = getUserRoles(u);
+        const matchRole = roles.some((r) => r.toLowerCase().includes(q));
         const matchEmail = u.email?.toLowerCase().includes(q);
         const matchPhone = u.phone?.toLowerCase().includes(q);
         const matchDept = u.department?.toLowerCase().includes(q);
@@ -230,7 +242,7 @@ export const WorkerDirectoryView: React.FC<WorkerDirectoryViewProps> = ({
         }
       }
 
-      if (selectedRoleFilter !== 'all' && u.role !== selectedRoleFilter) {
+      if (selectedRoleFilter !== 'all' && !hasRole(u, selectedRoleFilter as Role)) {
         return false;
       }
 
@@ -249,7 +261,7 @@ export const WorkerDirectoryView: React.FC<WorkerDirectoryViewProps> = ({
   const todayStr = new Date().toISOString().slice(0, 10);
 
   // Role badges
-  const roleBadges: Record<Role, { badge: string; border: string }> = {
+  const roleBadges: Record<string, { badge: string; border: string }> = {
     Admin: { badge: 'bg-rose-500/20 text-rose-300 border-rose-500/40', border: 'border-rose-900/40' },
     Manager: { badge: 'bg-amber-500/20 text-amber-300 border-amber-500/40', border: 'border-amber-900/40' },
     Cashier: { badge: 'bg-sky-500/20 text-sky-300 border-sky-500/40', border: 'border-sky-900/40' },
@@ -258,6 +270,24 @@ export const WorkerDirectoryView: React.FC<WorkerDirectoryViewProps> = ({
     'Stock Ins Role': { badge: 'bg-teal-500/20 text-teal-300 border-teal-500/40', border: 'border-teal-900/40' },
     'Stock Setup Role': { badge: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40', border: 'border-indigo-900/40' },
     'Expenses Role': { badge: 'bg-orange-500/20 text-orange-300 border-orange-500/40', border: 'border-orange-900/40' },
+  };
+
+  const getRoleBadge = (r: string) => {
+    if (roleBadges[r]) return roleBadges[r];
+    const lower = r.toLowerCase();
+    if (lower.includes('sale') || lower.includes('customer') || lower.includes('order') || lower.includes('commission')) {
+      return { badge: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40', border: 'border-emerald-900/40' };
+    }
+    if (lower.includes('stock in') || lower.includes('supplier') || lower.includes('supplies') || lower.includes('bad stock')) {
+      return { badge: 'bg-teal-500/20 text-teal-300 border-teal-500/40', border: 'border-teal-900/40' };
+    }
+    if (lower.includes('product') || lower.includes('offer') || lower.includes('balance') || lower.includes('out of stock')) {
+      return { badge: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40', border: 'border-indigo-900/40' };
+    }
+    if (lower.includes('expense')) {
+      return { badge: 'bg-orange-500/20 text-orange-300 border-orange-500/40', border: 'border-orange-900/40' };
+    }
+    return { badge: 'bg-purple-500/20 text-purple-300 border-purple-500/40', border: 'border-purple-900/40' };
   };
 
   return (
@@ -514,9 +544,18 @@ export const WorkerDirectoryView: React.FC<WorkerDirectoryViewProps> = ({
                   </div>
 
                   <div className="flex flex-col items-end gap-1">
-                    <span className={`px-2 py-0.5 rounded-lg border text-[10px] font-mono font-bold ${badgeConfig.badge}`}>
-                      {u.role}
-                    </span>
+                    <div className="flex flex-wrap justify-end gap-1 max-w-[200px]">
+                      {getUserRoles(u).map((r) => (
+                        <span
+                          key={r}
+                          className={`px-2 py-0.5 rounded-lg border text-[10px] font-mono font-bold ${
+                            roleBadges[r]?.badge || badgeConfig.badge
+                          }`}
+                        >
+                          {r}
+                        </span>
+                      ))}
+                    </div>
                     <span
                       className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${
                         isInactive
@@ -605,33 +644,84 @@ export const WorkerDirectoryView: React.FC<WorkerDirectoryViewProps> = ({
                   </div>
                 )}
 
-                {/* Quick Role Selection Bar */}
-                <div className="bg-slate-950/80 border border-slate-800/80 p-2.5 rounded-2xl flex items-center justify-between gap-2 flex-wrap text-xs">
-                  <span className="text-slate-400 font-semibold text-[11px] flex items-center gap-1.5">
-                    <ShieldCheck className="w-3.5 h-3.5 text-sky-400" />
-                    <span>Select Role:</span>
-                  </span>
-                  <select
-                    value={u.role}
-                    onChange={(e) => {
-                      const newRole = e.target.value as Role;
-                      if (onUpdateUser) {
-                        const updated = applyRoleToWorker(u, newRole);
-                        onUpdateUser(updated);
-                        showToast(`Role updated to "${newRole}" for ${u.name}!`, 'success');
-                      }
-                    }}
-                    className="bg-slate-900 border border-slate-700 text-slate-200 text-xs font-bold rounded-lg px-2.5 py-1 focus:outline-none focus:border-sky-500 cursor-pointer shadow-sm hover:border-slate-600 transition"
-                  >
-                    <option value="Sales Role">Sales Role (POS & Orders)</option>
-                    <option value="Stock Ins Role">Stock Ins Role (Supplies)</option>
-                    <option value="Stock Setup Role">Stock Setup Role (Products)</option>
-                    <option value="Expenses Role">Expenses Role (Expenses)</option>
-                    <option value="Cashier">Cashier (Standard POS)</option>
-                    <option value="Inventory Staff">Inventory Staff</option>
-                    <option value="Manager">Manager (Operations)</option>
-                    <option value="Admin">Admin (Full Access)</option>
-                  </select>
+                {/* Multi-Role Quick Assignment Bar */}
+                <div className="bg-slate-950/80 border border-slate-800/80 p-2.5 rounded-2xl space-y-2 text-xs">
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <span className="text-slate-300 font-semibold text-[11px] flex items-center gap-1.5">
+                      <ShieldCheck className="w-3.5 h-3.5 text-sky-400" />
+                      <span>Assigned Roles ({getUserRoles(u).length}):</span>
+                    </span>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (!onUpdateUser) return;
+                          const updated = assignAll21RolesToWorker(u);
+                          onUpdateUser(updated);
+                          showToast(`Assigned all 21 functional roles to ${u.name}!`, 'success');
+                        }}
+                        className="text-[9px] bg-emerald-950/80 hover:bg-emerald-900 text-emerald-300 border border-emerald-700/80 px-2 py-0.5 rounded font-bold transition flex items-center gap-1"
+                        title="Assign all 21 operational and functional roles to this worker"
+                      >
+                        <Sparkles className="w-2.5 h-2.5 text-amber-400" />
+                        <span>Assign All 21 Roles</span>
+                      </button>
+                      <select
+                        value={u.role}
+                        onChange={(e) => {
+                          const newRole = e.target.value as Role;
+                          if (onUpdateUser) {
+                            const updated = applyRoleToWorker(u, newRole);
+                            onUpdateUser(updated);
+                            showToast(`Primary role set to "${newRole}" for ${u.name}!`, 'success');
+                          }
+                        }}
+                        className="bg-slate-900 border border-slate-700 text-slate-200 text-xs font-bold rounded-lg px-2 py-0.5 focus:outline-none focus:border-sky-500 cursor-pointer shadow-sm hover:border-slate-600 transition"
+                        title="Set primary role"
+                      >
+                        <option value="Sales Role">Sales Role</option>
+                        <option value="Stock Ins Role">Stock Ins Role</option>
+                        <option value="Stock Setup Role">Stock Setup Role</option>
+                        <option value="Expenses Role">Expenses Role</option>
+                        <option value="Cashier">Cashier</option>
+                        <option value="Inventory Staff">Inventory Staff</option>
+                        <option value="Manager">Manager</option>
+                        <option value="Admin">Admin</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Multi-Role Toggle Chips (Worker can hold more than 3 roles simultaneously, up to 21 roles) */}
+                  <div className="flex flex-wrap gap-1">
+                    {ALL_ROLES.map((r) => {
+                      const isAssigned = hasRole(u, r);
+                      const badge = getRoleBadge(r);
+                      return (
+                        <button
+                          key={r}
+                          type="button"
+                          onClick={() => {
+                            if (!onUpdateUser) return;
+                            const updated = toggleRoleOnWorker(u, r);
+                            onUpdateUser(updated);
+                            showToast(
+                              `${isAssigned ? 'Removed' : 'Added'} "${r}" ${isAssigned ? 'from' : 'to'} ${u.name}!`,
+                              'success'
+                            );
+                          }}
+                          className={`px-2 py-0.5 rounded-lg text-[10px] font-bold border transition flex items-center gap-1 cursor-pointer ${
+                            isAssigned
+                              ? `${badge.badge} shadow-sm`
+                              : 'bg-slate-900/60 text-slate-500 border-slate-800 hover:border-slate-700 hover:text-slate-300'
+                          }`}
+                          title={`Click to ${isAssigned ? 'remove' : 'assign'} ${r}`}
+                        >
+                          {isAssigned ? <Check className="w-2.5 h-2.5" /> : <Plus className="w-2.5 h-2.5" />}
+                          <span>{r}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
 
                 {/* Worker Action Buttons */}
@@ -898,15 +988,19 @@ export const WorkerDirectoryView: React.FC<WorkerDirectoryViewProps> = ({
                 </div>
 
                 <div>
-                  <label className="block text-slate-300 font-semibold mb-1">Worker Role *</label>
+                  <label className="block text-slate-300 font-semibold mb-1">Primary Role *</label>
                   <select
                     value={editingUser.role}
                     onChange={(e) => {
                       const newRole = e.target.value as Role;
+                      const currentRoles = getUserRoles(editingUser);
+                      const nextRoles = Array.from(new Set([newRole, ...currentRoles]));
+                      const combined = getCombinedPermissionsForRoles(nextRoles);
                       setEditingUser({
                         ...editingUser,
                         role: newRole,
-                        permissions: { ...DEFAULT_ROLE_WORKER_PERMISSIONS[newRole], ...editingUser.permissions },
+                        roles: nextRoles,
+                        permissions: { ...combined, ...editingUser.permissions },
                       });
                     }}
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 focus:outline-none focus:border-purple-500 font-semibold"
@@ -920,6 +1014,63 @@ export const WorkerDirectoryView: React.FC<WorkerDirectoryViewProps> = ({
                     <option value="Manager">Manager (Full Store Operations)</option>
                     <option value="Admin">Admin (Full System Access)</option>
                   </select>
+                </div>
+
+                {/* Multi-Role Assignment Section */}
+                <div className="col-span-1 sm:col-span-2 bg-slate-950/80 border border-slate-800 p-3 rounded-xl space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-slate-200 font-semibold text-xs flex items-center gap-1.5">
+                      <ShieldCheck className="w-3.5 h-3.5 text-sky-400" />
+                      <span>Assigned Roles (Select multiple roles — worker can hold more than 3 roles simultaneously):</span>
+                    </label>
+                    <span className="text-[10px] text-sky-400 font-mono font-bold">
+                      {getUserRoles(editingUser).length} of 8 Roles Active
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    {ALL_ROLES.map((r) => {
+                      const currentRoles = getUserRoles(editingUser);
+                      const isChecked = currentRoles.includes(r);
+                      return (
+                        <button
+                          key={r}
+                          type="button"
+                          onClick={() => {
+                            let nextRoles: Role[];
+                            if (isChecked) {
+                              if (currentRoles.length <= 1) {
+                                showToast('Worker must have at least one role.', 'error');
+                                return;
+                              }
+                              if (r === 'Admin' && (editingUser.id === 'usr-1' || editingUser.email?.toLowerCase() === 'admin@rofani.co.ke')) {
+                                showToast('Store owner account must retain Administrator role.', 'error');
+                                return;
+                              }
+                              nextRoles = currentRoles.filter((item) => item !== r);
+                            } else {
+                              nextRoles = [...currentRoles, r];
+                            }
+                            const combined = getCombinedPermissionsForRoles(nextRoles);
+                            setEditingUser({
+                              ...editingUser,
+                              roles: nextRoles,
+                              assignedRoles: nextRoles,
+                              role: nextRoles.includes('Admin') ? 'Admin' : nextRoles[0],
+                              permissions: { ...combined, ...editingUser.permissions },
+                            });
+                          }}
+                          className={`p-2 rounded-xl text-left border text-xs font-bold transition flex items-center justify-between cursor-pointer ${
+                            isChecked
+                              ? 'bg-purple-900/40 text-purple-200 border-purple-500 shadow-sm'
+                              : 'bg-slate-900 text-slate-400 border-slate-800 hover:text-slate-200'
+                          }`}
+                        >
+                          <span className="truncate">{r}</span>
+                          {isChecked ? <Check className="w-3.5 h-3.5 text-purple-300 shrink-0" /> : <Plus className="w-3.5 h-3.5 text-slate-600 shrink-0" />}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
               </div>
 

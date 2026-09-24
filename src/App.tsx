@@ -50,6 +50,7 @@ import {
   AttendanceRecord,
   Transaction,
   User,
+  Role,
   StockCountAudit,
   CashTransaction,
   RestockRecord,
@@ -109,11 +110,15 @@ import { PrintBarcodesUtilityModal } from './components/Inventory/PrintBarcodesU
 import {
   TabKey,
   hasTabPermission,
+  hasRole,
+  getUserRoles,
+  setWorkerRoles,
   canManageStaff,
   canViewGrossProfit,
   canManageSettings,
   getRoleBadgeStyle,
   ROLE_CONFIGURATIONS,
+  DEFAULT_ROLE_WORKER_PERMISSIONS,
 } from './utils/permissions';
 import { AccessRestrictedView } from './components/Auth/AccessRestrictedView';
 import {
@@ -196,9 +201,42 @@ export default function App() {
   };
 
   // Role, Worker Users & PIN Security State
-  const [allUsers, setAllUsers] = useState<User[]>(() => safeGetJSON('retail_pos_users', INITIAL_USERS));
+  const [allUsers, setAllUsers] = useState<User[]>(() => {
+    const rawUsers = safeGetJSON<User[]>('retail_pos_users', INITIAL_USERS);
+    // Ensure all workers have their roles[] array populated
+    const migrated = rawUsers.map((u) => {
+      const userRoles = getUserRoles(u);
+      return {
+        ...u,
+        roles: u.roles && u.roles.length > 0 ? Array.from(new Set([...u.roles, ...userRoles])) : userRoles,
+      };
+    });
 
-  const [currentUser, setCurrentUser] = useState<User>(() => safeGetJSON('retail_pos_active_user', INITIAL_USERS[0]));
+    // Safeguard: Ensure at least one worker has the Admin role so store owner is NEVER locked out!
+    const hasAdmin = migrated.some((u) => hasRole(u, 'Admin'));
+    if (!hasAdmin && migrated.length > 0) {
+      const adminCandidateIdx = migrated.findIndex((u) => u.id === 'usr-1');
+      const targetIdx = adminCandidateIdx >= 0 ? adminCandidateIdx : 0;
+      migrated[targetIdx] = {
+        ...migrated[targetIdx],
+        role: 'Admin',
+        roles: Array.from(new Set([...(migrated[targetIdx].roles || []), 'Admin' as Role])),
+        pin: migrated[targetIdx].pin || '1234',
+        permissions: { ...DEFAULT_ROLE_WORKER_PERMISSIONS['Admin'] },
+      };
+      safeSetJSON('retail_pos_users', migrated);
+    }
+    return migrated;
+  });
+
+  const [currentUser, setCurrentUser] = useState<User>(() => {
+    const rawCurrent = safeGetJSON<User>('retail_pos_active_user', INITIAL_USERS[0]);
+    const userRoles = getUserRoles(rawCurrent);
+    return {
+      ...rawCurrent,
+      roles: rawCurrent.roles && rawCurrent.roles.length > 0 ? Array.from(new Set([...rawCurrent.roles, ...userRoles])) : userRoles,
+    };
+  });
 
   // Security Configuration (PIN Protection before sharing with anyone)
   const [requirePinOnStartup, setRequirePinOnStartup] = useState<boolean>(() =>
@@ -579,8 +617,29 @@ export default function App() {
       (cloudUsers) => {
         if (!active) return;
         if (cloudUsers && cloudUsers.length > 0) {
-          setAllUsers(cloudUsers);
-          safeSetJSON('retail_pos_users', cloudUsers);
+          const migrated = cloudUsers.map((u) => {
+            const userRoles = getUserRoles(u);
+            return {
+              ...u,
+              roles: u.roles && u.roles.length > 0 ? Array.from(new Set([...u.roles, ...userRoles])) : userRoles,
+            };
+          });
+
+          // Safeguard: Ensure at least one worker has the Admin role
+          const hasAdmin = migrated.some((u) => hasRole(u, 'Admin'));
+          if (!hasAdmin && migrated.length > 0) {
+            const adminCandidateIdx = migrated.findIndex((u) => u.id === 'usr-1');
+            const targetIdx = adminCandidateIdx >= 0 ? adminCandidateIdx : 0;
+            migrated[targetIdx] = {
+              ...migrated[targetIdx],
+              role: 'Admin',
+              roles: Array.from(new Set([...(migrated[targetIdx].roles || []), 'Admin' as Role])),
+              permissions: { ...DEFAULT_ROLE_WORKER_PERMISSIONS['Admin'] },
+            };
+          }
+
+          setAllUsers(migrated);
+          safeSetJSON('retail_pos_users', migrated);
         } else {
           // If Firestore users collection is newly provisioned, upload current staff profiles to bootstrap cloud
           bulkUploadUsersToCloud(allUsers).catch((err) => {
@@ -624,18 +683,38 @@ export default function App() {
 
   // Worker & PIN Auth Handlers
   const handleAddUser = (newUser: User) => {
-    setAllUsers((prev) => [...prev, newUser]);
-    saveUserToCloud(newUser).catch((err) =>
+    const roles = getUserRoles(newUser);
+    const sanitizedUser: User = {
+      ...newUser,
+      roles: newUser.roles && newUser.roles.length > 0 ? newUser.roles : roles,
+      assignedRoles: newUser.roles && newUser.roles.length > 0 ? newUser.roles : roles,
+    };
+    setAllUsers((prev) => {
+      const updated = [...prev, sanitizedUser];
+      safeSetJSON('retail_pos_users', updated);
+      return updated;
+    });
+    saveUserToCloud(sanitizedUser).catch((err) =>
       console.warn('Could not save user to cloud:', err)
     );
   };
 
   const handleUpdateUser = (updatedUser: User) => {
-    setAllUsers((prev) => prev.map((u) => (u.id === updatedUser.id ? updatedUser : u)));
-    if (currentUser.id === updatedUser.id) {
-      setCurrentUser(updatedUser);
+    const roles = getUserRoles(updatedUser);
+    const sanitizedUser: User = {
+      ...updatedUser,
+      roles: updatedUser.roles && updatedUser.roles.length > 0 ? updatedUser.roles : roles,
+    };
+    setAllUsers((prev) => {
+      const updated = prev.map((u) => (u.id === sanitizedUser.id ? sanitizedUser : u));
+      safeSetJSON('retail_pos_users', updated);
+      return updated;
+    });
+    if (currentUser.id === sanitizedUser.id) {
+      setCurrentUser(sanitizedUser);
+      safeSetJSON('retail_pos_active_user', sanitizedUser);
     }
-    saveUserToCloud(updatedUser).catch((err) =>
+    saveUserToCloud(sanitizedUser).catch((err) =>
       console.warn('Could not update user in cloud:', err)
     );
   };
@@ -643,6 +722,7 @@ export default function App() {
   const handleDeleteUser = (userId: string) => {
     setAllUsers((prev) => {
       const remaining = prev.filter((u) => u.id !== userId);
+      safeSetJSON('retail_pos_users', remaining);
       return remaining;
     });
     // If the active user was deleted, switch to the first remaining user safely
@@ -650,6 +730,7 @@ export default function App() {
       const remainingUser = allUsers.find((u) => u.id !== userId);
       if (remainingUser) {
         setCurrentUser(remainingUser);
+        safeSetJSON('retail_pos_active_user', remainingUser);
       }
     }
     deleteUserFromCloud(userId).catch((err) =>
@@ -659,13 +740,14 @@ export default function App() {
 
   const handleLoginSuccess = (user: User) => {
     setCurrentUser(user);
+    safeSetJSON('retail_pos_active_user', user);
     setPinModalTargetUser(null);
     setIsTerminalLocked(false);
     setTemporarilyUnlockedTabs(new Set());
-    if (!hasTabPermission(user.role, activeTab as TabKey)) {
-      if (user.role === 'Inventory Staff' || user.role === 'Stock Ins Role' || user.role === 'Stock Setup Role') {
+    if (!hasTabPermission(user, activeTab as TabKey)) {
+      if (hasRole(user, 'Inventory Staff') || hasRole(user, 'Stock Ins Role') || hasRole(user, 'Stock Setup Role')) {
         setActiveTab('inventory');
-      } else if (user.role === 'Expenses Role') {
+      } else if (hasRole(user, 'Expenses Role')) {
         setActiveTab('expenses');
       } else {
         setActiveTab('pos');
@@ -690,16 +772,35 @@ export default function App() {
 
   const handleResetAdminPin = async (newPin: string, targetUserId: string) => {
     setAllUsers((prev) => {
-      const updated = prev.map((u) => (u.id === targetUserId ? { ...u, pin: newPin } : u));
+      const updated = prev.map((u) => {
+        if (u.id === targetUserId) {
+          const userRoles = Array.from(new Set([...(u.roles || []), 'Admin' as Role]));
+          return {
+            ...u,
+            pin: newPin,
+            role: 'Admin' as Role,
+            roles: userRoles,
+            permissions: { ...DEFAULT_ROLE_WORKER_PERMISSIONS['Admin'] },
+          };
+        }
+        return u;
+      });
       safeSetJSON('retail_pos_users', updated);
       return updated;
     });
 
     const target = allUsers.find((u) => u.id === targetUserId);
     if (target) {
-      const updatedUser = { ...target, pin: newPin };
+      const updatedUser: User = {
+        ...target,
+        pin: newPin,
+        role: 'Admin',
+        roles: Array.from(new Set([...(target.roles || []), 'Admin' as Role])),
+        permissions: { ...DEFAULT_ROLE_WORKER_PERMISSIONS['Admin'] },
+      };
       if (currentUser.id === targetUserId) {
         setCurrentUser(updatedUser);
+        safeSetJSON('retail_pos_active_user', updatedUser);
       }
       try {
         await saveUserToCloud(updatedUser);
@@ -1458,7 +1559,7 @@ export default function App() {
   // Helper function to render active tab view content
   const renderActiveTabContent = () => {
     const isTabPermitted =
-      hasTabPermission(currentUser.role, activeTab as TabKey) ||
+      hasTabPermission(currentUser, activeTab as TabKey) ||
       temporarilyUnlockedTabs.has(activeTab as TabKey);
 
     if (!isTabPermitted) {
@@ -2215,7 +2316,7 @@ export default function App() {
                   <span>Lock Terminal (PIN)</span>
                 </button>
 
-                {currentUser.role === 'Admin' && (
+                {hasRole(currentUser, 'Admin') && (
                   <button
                     onClick={() => {
                       handleResetData();
@@ -2340,7 +2441,7 @@ export default function App() {
               </span>
             </div>
 
-            {canViewGrossProfit(currentUser.role) && (
+            {canViewGrossProfit(currentUser) && (
               <div className="hidden xl:flex flex-col border-l border-slate-200 pl-4 xl:pl-8 shrink-0">
                 <span className="text-[11px] text-slate-500 uppercase tracking-widest font-bold">
                   Gross Profit Margin

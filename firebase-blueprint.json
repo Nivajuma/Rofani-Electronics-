@@ -144,9 +144,37 @@
         "commissionRate": { "type": "number" }
       },
       "required": ["id", "name", "role", "pin"]
+    },
+    "SensitiveActionLog": {
+      "title": "SensitiveActionLog",
+      "description": "Audit record of sensitive actions (e.g. deleting expenses, modifying inventory) with worker role authorization attribution",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "timestamp": { "type": "string", "maxLength": 64 },
+        "actionType": { "type": "string", "maxLength": 64 },
+        "actionTitle": { "type": "string", "maxLength": 200 },
+        "category": { "type": "string", "maxLength": 50 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "userName": { "type": "string", "maxLength": 200 },
+        "userEmail": { "type": "string", "maxLength": 200 },
+        "authorizingRole": { "type": "string", "maxLength": 100 },
+        "assignedRolesSnapshot": { "type": "array" },
+        "requiredPermissionKey": { "type": "string", "maxLength": 100 },
+        "targetId": { "type": "string", "maxLength": 128 },
+        "targetName": { "type": "string", "maxLength": 200 },
+        "details": { "type": "object" },
+        "reason": { "type": "string", "maxLength": 1000 },
+        "severity": { "type": "string", "maxLength": 20 }
+      },
+      "required": ["id", "timestamp", "actionType", "userName", "authorizingRole"]
     }
   },
   "firestore": {
+    "/sensitive_action_logs/{logId}": {
+      "schema": "SensitiveActionLog",
+      "description": "Immutable security and audit log tracking sensitive actions and authorizing worker roles"
+    },
     "/users/{userId}": {
       "schema": "User",
       "description": "Store staff members, permissions, and PIN credentials synced across all devices"

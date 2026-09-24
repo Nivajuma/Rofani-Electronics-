@@ -98,7 +98,7 @@ export const Header: React.FC<HeaderProps> = ({
     window.open(window.location.href, '_blank');
   };
 
-  const roleBadges: Record<Role, string> = {
+  const roleBadges: Record<string, string> = {
     Admin: 'bg-rose-500/20 text-rose-300 border-rose-500/30',
     Manager: 'bg-amber-500/20 text-amber-300 border-amber-500/30',
     Cashier: 'bg-sky-500/20 text-sky-300 border-sky-500/30',

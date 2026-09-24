@@ -1,4 +1,4 @@
-export type Role =
+export type CoreStoreRole =
   | 'Admin'
   | 'Manager'
   | 'Cashier'
@@ -7,6 +7,36 @@ export type Role =
   | 'Stock Ins Role'
   | 'Stock Setup Role'
   | 'Expenses Role';
+
+export type Granular21Role =
+  // 5 Sales Roles
+  | 'Can make sales'
+  | 'Can make / manage customers orders'
+  | 'Can update sales order status'
+  | 'Can view and manage customers'
+  | 'Can enable sales commission'
+  // 4 Stock Ins Roles
+  | 'Can add stock in'
+  | 'Can make/manage orders to suppliers'
+  | 'Can view and manage supplies'
+  | 'Can add bad stock'
+  // 4 Stock Setup Roles
+  | 'Can add new products'
+  | 'Can creat offers'
+  | 'Can view items out of stock'
+  | 'Can count and update stock balance'
+  // 1 Expenses Role
+  | 'Can add expenses'
+  // 7 Other System Roles
+  | 'can give discounts'
+  | 'Can edit daily entries'
+  | 'Can delete daily entries'
+  | 'Can backdate entries'
+  | 'Can return stocks'
+  | 'Can generate barcode'
+  | 'Can previer receipt';
+
+export type Role = CoreStoreRole | Granular21Role | (string & {});
 
 export type CommissionType = 'percentage' | 'tiered' | 'fixed_per_sale' | 'profit_share';
 
@@ -52,8 +82,9 @@ export interface WorkerPermissions {
 export interface User {
   id: string;
   name: string;
-  role: Role;
-  assignedRoles?: string[]; // e.g. ['Sales Role', 'Stock Ins Role']
+  role: Role; // Primary / display role
+  roles?: Role[]; // Multiple assigned roles (supports assigning multiple roles to a single worker, up to all 21+ roles simultaneously!)
+  assignedRoles?: string[]; // Backwards-compatible alias for roles array
   email: string;
   pin: string;
   avatar?: string;
@@ -480,5 +511,57 @@ export interface BarcodeScanLog {
   deviceType?: 'camera' | 'barcode_gun' | 'manual';
   actionTaken?: 'view_details' | 'added_to_cart' | 'stock_audit' | 'price_check' | 'catalog_search' | 'lookup_failed';
   notes?: string;
+}
+
+export type SensitiveActionType =
+  | 'DELETE_EXPENSE'
+  | 'MODIFY_INVENTORY'
+  | 'DELETE_PRODUCT'
+  | 'ADJUST_STOCK'
+  | 'ADD_RESTOCK'
+  | 'CLEAR_EXPENSES'
+  | 'CLEAR_TRANSACTIONS'
+  | 'RESET_SYSTEM_DATA'
+  | 'DELETE_CUSTOMER'
+  | 'DELETE_SUPPLIER'
+  | 'OVERRIDE_DISCOUNT';
+
+export type SensitiveActionCategory = 'expenses' | 'inventory' | 'stock' | 'sales' | 'security' | 'contacts';
+
+export interface SensitiveActionLog {
+  id: string;
+  timestamp: string; // ISO timestamp
+  actionType: SensitiveActionType;
+  actionTitle: string; // e.g. "Delete Expense: Utilities (KSh 3,500)"
+  category: SensitiveActionCategory;
+
+  // Worker attribution
+  userId: string;
+  userName: string;
+  userEmail: string;
+
+  // Specific role authorization used (e.g. which role was invoked if user has multiple roles)
+  authorizingRole: Role;
+  assignedRolesSnapshot: Role[]; // All roles the user held at that moment
+
+  // Permission key that authorized this action
+  requiredPermissionKey?: keyof WorkerPermissions;
+
+  // Target information
+  targetId?: string;
+  targetName?: string;
+
+  // Contextual changes & metadata
+  details: {
+    summary: string;
+    before?: Record<string, any>;
+    after?: Record<string, any>;
+    diff?: Record<string, { old: any; new: any }>;
+    metadata?: Record<string, any>;
+  };
+
+  // Optional reason/justification entered by worker during authorization
+  reason?: string;
+  severity: 'critical' | 'high' | 'medium';
 }
 

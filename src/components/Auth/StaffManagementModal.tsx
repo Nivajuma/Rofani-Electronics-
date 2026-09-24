@@ -44,6 +44,17 @@ import {
   ALL_SELECTABLE_ROLES,
   applyRoleToWorker,
   toggleRoleCategoryOnWorker,
+  hasRole,
+  getUserRoles,
+  setWorkerRoles,
+  addRoleToWorker,
+  removeRoleFromWorker,
+  toggleRoleOnWorker,
+  ALL_ROLES,
+  getCombinedPermissionsForRoles,
+  ALL_21_GRANULAR_ROLES,
+  assignAll21RolesToWorker,
+  PRIMARY_ROLES,
 } from '../../utils/permissions';
 import { FlexibleWorkerPermissionsModal } from './FlexibleWorkerPermissionsModal';
 import { FlexibleRolesMatrixView } from './FlexibleRolesMatrixView';
@@ -85,13 +96,17 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
   const [feedbackMessage, setFeedbackMessage] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
 
   // Supervisor PIN gate state when non-manager/non-admin attempts to open staff management
-  const isDirectlyAuthorized = canManageStaff(currentUser.role);
+  const isDirectlyAuthorized = canManageStaff(currentUser);
   const [isSupervisorUnlocked, setIsSupervisorUnlocked] = useState(false);
   const [supervisorPinInput, setSupervisorPinInput] = useState('');
   const [supervisorError, setSupervisorError] = useState('');
   const [supervisorUser, setSupervisorUser] = useState<User | null>(null);
 
-  const effectiveRole = supervisorUser ? supervisorUser.role : currentUser.role;
+  const effectiveRole = supervisorUser
+    ? supervisorUser.role
+    : hasRole(currentUser, 'Admin')
+    ? 'Admin'
+    : currentUser.role;
 
   // Helper: Generate Random 4-Digit PIN
   function generateRandomPin(): string {
@@ -103,6 +118,7 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
   // New Worker Form State
   const [name, setName] = useState('');
   const [role, setRole] = useState<Role>('Cashier');
+  const [addRoles, setAddRoles] = useState<Role[]>(['Cashier']);
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
   const [status, setStatus] = useState<'active' | 'inactive'>('active');
@@ -128,7 +144,7 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
 
   const handleVerifySupervisorPin = (pinToTest: string) => {
     const matched = users.find(
-      (u) => (u.role === 'Admin' || u.role === 'Manager') && u.pin === pinToTest.trim()
+      (u) => (hasRole(u, 'Admin') || hasRole(u, 'Manager')) && u.pin === pinToTest.trim()
     );
     if (matched) {
       setSupervisorUser(matched);
@@ -192,6 +208,7 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
   const handleOpenAddModal = () => {
     setName('');
     setRole('Cashier');
+    setAddRoles(['Cashier']);
     setPhone('');
     setEmail('');
     setStatus('active');
@@ -233,10 +250,14 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
       if (!confirmUse) return;
     }
 
+    const userRoles = addRoles.length > 0 ? addRoles : [role];
+    const combinedPerms = getCombinedPermissionsForRoles(userRoles);
     const newUser: User = {
       id: `usr-${Date.now()}`,
       name: name.trim(),
-      role: role,
+      role: userRoles.includes('Admin') ? 'Admin' : userRoles[0],
+      roles: userRoles,
+      assignedRoles: userRoles,
       phone: phone.trim() || undefined,
       email: email.trim() || `${name.toLowerCase().replace(/[^a-z0-9]/g, '.')}@rofani.co.ke`,
       status: status,
@@ -246,25 +267,35 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
       commissionRate: Number(commissionRate) || 0,
       notes: notes.trim() || undefined,
       customRoleTitle: addCustomRoleTitle.trim() || undefined,
-      permissions: { ...addPermissions },
+      permissions: { ...combinedPerms, ...addPermissions },
     };
 
     onAddUser(newUser);
     setShowAddModal(false);
-    showNotification(`Worker "${newUser.name}" (${newUser.role}) successfully added with custom roles!`, 'success');
+    showNotification(`Worker "${newUser.name}" successfully added with ${userRoles.length} assigned roles!`, 'success');
   };
 
   const handleSaveEditWorker = (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingUser || !editingUser.name.trim()) return;
 
-    if (editingUser.role === 'Admin' && effectiveRole !== 'Admin') {
+    if (hasRole(editingUser, 'Admin') && effectiveRole !== 'Admin') {
       showNotification('Security Notice: Only an Administrator can assign the Administrator role.', 'error');
       return;
     }
 
-    onUpdateUser(editingUser);
-    showNotification(`Updated profile for ${editingUser.name}`, 'success');
+    const currentRoles = getUserRoles(editingUser);
+    const isOwner = editingUser.id === 'usr-1' || editingUser.email?.toLowerCase() === 'admin@rofani.co.ke';
+    const finalRoles = isOwner && !currentRoles.includes('Admin') ? [...currentRoles, 'Admin' as Role] : currentRoles;
+    const finalUser: User = {
+      ...editingUser,
+      role: finalRoles.includes('Admin') ? 'Admin' : finalRoles[0],
+      roles: finalRoles,
+      assignedRoles: finalRoles,
+    };
+
+    onUpdateUser(finalUser);
+    showNotification(`Updated profile for ${finalUser.name}`, 'success');
     setEditingUser(null);
   };
 
@@ -305,7 +336,8 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
       if (searchTerm.trim()) {
         const q = searchTerm.toLowerCase();
         const matchName = u.name?.toLowerCase().includes(q);
-        const matchRole = u.role?.toLowerCase().includes(q);
+        const roles = getUserRoles(u);
+        const matchRole = roles.some((r) => r.toLowerCase().includes(q));
         const matchEmail = u.email?.toLowerCase().includes(q);
         const matchPhone = u.phone?.toLowerCase().includes(q);
         const matchDept = u.department?.toLowerCase().includes(q);
@@ -315,8 +347,8 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
         }
       }
 
-      // Role filter
-      if (selectedRoleFilter !== 'all' && u.role !== selectedRoleFilter) {
+      // Role filter (matches any of the worker's assigned roles)
+      if (selectedRoleFilter !== 'all' && !hasRole(u, selectedRoleFilter as Role)) {
         return false;
       }
 
@@ -343,7 +375,7 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
     return { total, active, cashiers, managers, inventory, admins };
   }, [users]);
 
-  const roleBadges: Record<Role, { badge: string; border: string }> = {
+  const roleBadges: Record<string, { badge: string; border: string }> = {
     Admin: { badge: 'bg-rose-500/20 text-rose-300 border-rose-500/40', border: 'border-rose-900/50' },
     Manager: { badge: 'bg-amber-500/20 text-amber-300 border-amber-500/40', border: 'border-amber-900/50' },
     Cashier: { badge: 'bg-sky-500/20 text-sky-300 border-sky-500/40', border: 'border-sky-900/50' },
@@ -354,8 +386,36 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
     'Expenses Role': { badge: 'bg-orange-500/20 text-orange-300 border-orange-500/40', border: 'border-orange-900/50' },
   };
 
+  const getRoleBadge = (r: string) => {
+    if (roleBadges[r]) return roleBadges[r];
+    const lower = r.toLowerCase();
+    if (lower.includes('sale') || lower.includes('customer') || lower.includes('order') || lower.includes('commission')) {
+      return { badge: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40', border: 'border-emerald-900/50' };
+    }
+    if (lower.includes('stock in') || lower.includes('supplier') || lower.includes('supplies') || lower.includes('bad stock')) {
+      return { badge: 'bg-teal-500/20 text-teal-300 border-teal-500/40', border: 'border-teal-900/50' };
+    }
+    if (lower.includes('product') || lower.includes('offer') || lower.includes('balance') || lower.includes('out of stock')) {
+      return { badge: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40', border: 'border-indigo-900/50' };
+    }
+    if (lower.includes('expense')) {
+      return { badge: 'bg-orange-500/20 text-orange-300 border-orange-500/40', border: 'border-orange-900/50' };
+    }
+    return { badge: 'bg-purple-500/20 text-purple-300 border-purple-500/40', border: 'border-purple-900/50' };
+  };
+
+  const handleAssignAll21Roles = (targetUser: User) => {
+    if (hasRole(targetUser, 'Admin') && effectiveRole !== 'Admin') {
+      showNotification('Security Notice: Only an Administrator can modify Administrator accounts.', 'error');
+      return;
+    }
+    const updatedUser = assignAll21RolesToWorker(targetUser);
+    onUpdateUser(updatedUser);
+    showNotification(`Assigned all 21 functional capability roles to ${targetUser.name}!`, 'success');
+  };
+
   const handleQuickAssignRole = (targetUser: User, newRole: Role) => {
-    if (targetUser.role === 'Admin' && effectiveRole !== 'Admin') {
+    if (hasRole(targetUser, 'Admin') && effectiveRole !== 'Admin') {
       showNotification('Security Notice: Only an Administrator can reassign an Administrator account.', 'error');
       return;
     }
@@ -366,7 +426,27 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
 
     const updatedUser = applyRoleToWorker(targetUser, newRole);
     onUpdateUser(updatedUser);
-    showNotification(`Assigned "${newRole}" to ${targetUser.name} with updated role permissions!`, 'success');
+    showNotification(`Assigned primary role "${newRole}" to ${targetUser.name} with updated role permissions!`, 'success');
+  };
+
+  const handleQuickToggleRole = (targetUser: User, roleToToggle: Role) => {
+    if (roleToToggle === 'Admin' && effectiveRole !== 'Admin') {
+      showNotification('Security Notice: Only an Administrator can assign or revoke the Administrator role.', 'error');
+      return;
+    }
+    const isOwner = targetUser.id === 'usr-1' || targetUser.email?.toLowerCase() === 'admin@rofani.co.ke';
+    if (roleToToggle === 'Admin' && isOwner && hasRole(targetUser, 'Admin')) {
+      showNotification('Store owner account must retain Administrator role.', 'error');
+      return;
+    }
+
+    const updatedUser = toggleRoleOnWorker(targetUser, roleToToggle);
+    onUpdateUser(updatedUser);
+    const hasItNow = hasRole(updatedUser, roleToToggle);
+    showNotification(
+      `${hasItNow ? 'Assigned' : 'Removed'} role "${roleToToggle}" ${hasItNow ? 'to' : 'from'} ${targetUser.name}!`,
+      'success'
+    );
   };
 
   const handleQuickToggleCategory = (
@@ -814,9 +894,18 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
                       </div>
 
                       <div className="flex flex-col items-end gap-1 shrink-0">
-                        <span className={`px-2 py-0.5 rounded-lg border text-[10px] font-mono font-bold ${badgeConfig.badge}`}>
-                          {u.role}
-                        </span>
+                        <div className="flex flex-wrap justify-end gap-1 max-w-[200px]">
+                          {getUserRoles(u).map((r) => (
+                            <span
+                              key={r}
+                              className={`px-2 py-0.5 rounded-lg border text-[10px] font-mono font-bold ${
+                                roleBadges[r]?.badge || badgeConfig.badge
+                              }`}
+                            >
+                              {r}
+                            </span>
+                          ))}
+                        </div>
                         <span
                           className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${
                             isInactive
@@ -883,7 +972,7 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
                       <div className="flex items-center justify-between gap-2 flex-wrap">
                         <div className="flex items-center gap-1.5 text-xs text-slate-300 font-semibold">
                           <Sliders className="w-3.5 h-3.5 text-sky-400" />
-                          <span>Select Role:</span>
+                          <span>Primary Role:</span>
                         </div>
                         <select
                           value={u.role}
@@ -900,6 +989,47 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
                           <option value="Manager">Branch Manager (Operations)</option>
                           <option value="Admin">Administrator (Owner)</option>
                         </select>
+                      </div>
+
+                      {/* Multi-Role Quick Toggles (Worker can hold more than 3 roles simultaneously, up to 21 roles) */}
+                      <div>
+                        <div className="text-[10px] text-slate-400 mb-1 flex items-center justify-between">
+                          <span className="font-semibold text-slate-300 flex items-center gap-1.5">
+                            <ShieldCheck className="w-3 h-3 text-sky-400" />
+                            <span>Assigned Roles ({getUserRoles(u).length} Active - Multi-Role Allowed):</span>
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => handleAssignAll21Roles(u)}
+                            className="text-[9px] bg-emerald-950/80 hover:bg-emerald-900 text-emerald-300 border border-emerald-700/80 px-2 py-0.5 rounded font-bold transition flex items-center gap-1"
+                            title="Assign all 21 operational and functional roles to this worker"
+                          >
+                            <Sparkles className="w-2.5 h-2.5 text-amber-400" />
+                            <span>Assign All 21 Roles</span>
+                          </button>
+                        </div>
+                        <div className="flex flex-wrap gap-1">
+                          {ALL_ROLES.map((r) => {
+                            const isAssigned = hasRole(u, r);
+                            const badge = getRoleBadge(r);
+                            return (
+                              <button
+                                key={r}
+                                type="button"
+                                onClick={() => handleQuickToggleRole(u, r)}
+                                className={`px-2 py-0.5 rounded-lg text-[10px] font-bold border transition flex items-center gap-1 cursor-pointer ${
+                                  isAssigned
+                                    ? `${badge.badge} shadow-sm`
+                                    : 'bg-slate-950/60 text-slate-500 border-slate-800 hover:border-slate-700 hover:text-slate-300'
+                                }`}
+                                title={`Click to ${isAssigned ? 'remove' : 'assign'} ${r}`}
+                              >
+                                {isAssigned ? <Check className="w-2.5 h-2.5" /> : <Plus className="w-2.5 h-2.5" />}
+                                <span>{r}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
                       </div>
 
                       {/* Quick Toggleable Role Category Badges */}
@@ -1205,6 +1335,79 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
                         Expenses Role
                       </button>
                     </div>
+
+                    {/* Multi-Role Assignment (Worker can hold more than 3 roles simultaneously, up to 21 roles) */}
+                    <div className="bg-slate-950 border border-slate-800 p-2.5 rounded-xl space-y-1.5 mt-2">
+                      <div className="flex items-center justify-between text-[11px]">
+                        <span className="text-slate-300 font-semibold flex items-center gap-1">
+                          <ShieldCheck className="w-3.5 h-3.5 text-sky-400" />
+                          <span>Assign Multiple Roles ({addRoles.length} of {ALL_ROLES.length} Selected):</span>
+                        </span>
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const all21AndPrimary = Array.from(new Set([...ALL_ROLES]));
+                              setAddRoles(all21AndPrimary);
+                              setRole(all21AndPrimary.includes('Admin') ? 'Admin' : all21AndPrimary[0]);
+                              const combined = getCombinedPermissionsForRoles(all21AndPrimary);
+                              setAddPermissions(combined);
+                            }}
+                            className="text-[10px] bg-emerald-950/80 hover:bg-emerald-900 text-emerald-300 border border-emerald-700/80 px-2 py-0.5 rounded font-bold transition flex items-center gap-1"
+                          >
+                            <Sparkles className="w-2.5 h-2.5 text-amber-400" />
+                            <span>Assign All 21 Roles</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setAddRoles(['Cashier']);
+                              setRole('Cashier');
+                              setAddPermissions({ ...DEFAULT_ROLE_WORKER_PERMISSIONS.Cashier });
+                            }}
+                            className="text-[10px] bg-slate-900 hover:bg-slate-800 text-slate-400 border border-slate-800 px-2 py-0.5 rounded font-semibold transition"
+                          >
+                            Reset
+                          </button>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+                        {ALL_ROLES.map((r) => {
+                          const isSelected = addRoles.includes(r);
+                          return (
+                            <button
+                              key={r}
+                              type="button"
+                              onClick={() => {
+                                let next: Role[];
+                                if (isSelected) {
+                                  if (addRoles.length <= 1) return;
+                                  next = addRoles.filter((item) => item !== r);
+                                } else {
+                                  next = [...addRoles, r];
+                                }
+                                setAddRoles(next);
+                                setRole(next.includes('Admin') ? 'Admin' : next[0]);
+                                const combined = getCombinedPermissionsForRoles(next);
+                                setAddPermissions((prev) => ({ ...combined, ...prev }));
+                              }}
+                              className={`p-1.5 rounded-lg text-left border text-[11px] font-bold transition flex items-center justify-between cursor-pointer ${
+                                isSelected
+                                  ? 'bg-sky-950/80 text-sky-300 border-sky-600'
+                                  : 'bg-slate-900 text-slate-400 border-slate-800 hover:text-slate-200'
+                              }`}
+                            >
+                              <span className="truncate">{r}</span>
+                              {isSelected ? (
+                                <Check className="w-3 h-3 text-sky-400 shrink-0" />
+                              ) : (
+                                <Plus className="w-3 h-3 text-slate-600 shrink-0" />
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
                   </div>
                 </div>
 
@@ -1457,15 +1660,20 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
                   </div>
 
                   <div>
-                    <label className="block text-slate-300 font-semibold mb-1">Worker Role *</label>
+                    <label className="block text-slate-300 font-semibold mb-1">Primary Role *</label>
                     <select
                       value={editingUser.role}
                       onChange={(e) => {
                         const newRole = e.target.value as Role;
+                        const currentRoles = getUserRoles(editingUser);
+                        const nextRoles = Array.from(new Set([newRole, ...currentRoles]));
+                        const combined = getCombinedPermissionsForRoles(nextRoles);
                         setEditingUser({
                           ...editingUser,
                           role: newRole,
-                          permissions: { ...DEFAULT_ROLE_WORKER_PERMISSIONS[newRole], ...editingUser.permissions },
+                          roles: nextRoles,
+                          assignedRoles: nextRoles,
+                          permissions: { ...combined, ...editingUser.permissions },
                         });
                       }}
                       className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 focus:outline-none focus:border-sky-500 font-semibold"
@@ -1479,6 +1687,83 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
                       <option value="Manager">Manager (Full Store Operations)</option>
                       <option value="Admin">Admin (Full System Access)</option>
                     </select>
+                  </div>
+                </div>
+
+                {/* Multi-Role Assignment Section */}
+                <div className="bg-slate-950/80 border border-slate-800 p-3 rounded-xl space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-slate-200 font-semibold text-xs flex items-center gap-1.5">
+                      <ShieldCheck className="w-3.5 h-3.5 text-sky-400" />
+                      <span>Assigned Roles (Select multiple roles — worker can hold more than 3 roles simultaneously, up to 21 roles):</span>
+                    </label>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const allRolesList = Array.from(new Set([...ALL_ROLES]));
+                          const combined = getCombinedPermissionsForRoles(allRolesList);
+                          setEditingUser({
+                            ...editingUser,
+                            roles: allRolesList,
+                            assignedRoles: allRolesList,
+                            role: allRolesList.includes('Admin') ? 'Admin' : allRolesList[0],
+                            permissions: { ...combined, ...editingUser.permissions },
+                          });
+                        }}
+                        className="text-[10px] bg-emerald-950/80 hover:bg-emerald-900 text-emerald-300 border border-emerald-700/80 px-2 py-0.5 rounded font-bold transition flex items-center gap-1"
+                      >
+                        <Sparkles className="w-2.5 h-2.5 text-amber-400" />
+                        <span>Assign All 21 Roles</span>
+                      </button>
+                      <span className="text-[10px] text-sky-400 font-mono font-bold">
+                        {getUserRoles(editingUser).length} of {ALL_ROLES.length} Roles
+                      </span>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    {ALL_ROLES.map((r) => {
+                      const currentRoles = getUserRoles(editingUser);
+                      const isChecked = currentRoles.includes(r);
+                      return (
+                        <button
+                          key={r}
+                          type="button"
+                          onClick={() => {
+                            let nextRoles: Role[];
+                            if (isChecked) {
+                              if (currentRoles.length <= 1) {
+                                showNotification('Worker must have at least one role.', 'error');
+                                return;
+                              }
+                              if (r === 'Admin' && (editingUser.id === 'usr-1' || editingUser.email?.toLowerCase() === 'admin@rofani.co.ke')) {
+                                showNotification('Store owner account must retain Administrator role.', 'error');
+                                return;
+                              }
+                              nextRoles = currentRoles.filter((item) => item !== r);
+                            } else {
+                              nextRoles = [...currentRoles, r];
+                            }
+                            const combined = getCombinedPermissionsForRoles(nextRoles);
+                            setEditingUser({
+                              ...editingUser,
+                              roles: nextRoles,
+                              assignedRoles: nextRoles,
+                              role: nextRoles.includes('Admin') ? 'Admin' : nextRoles[0],
+                              permissions: { ...combined, ...editingUser.permissions },
+                            });
+                          }}
+                          className={`p-2 rounded-xl text-left border text-xs font-bold transition flex items-center justify-between cursor-pointer ${
+                            isChecked
+                              ? 'bg-sky-900/40 text-sky-200 border-sky-500 shadow-sm'
+                              : 'bg-slate-900 text-slate-400 border-slate-800 hover:text-slate-200'
+                          }`}
+                        >
+                          <span className="truncate">{r}</span>
+                          {isChecked ? <Check className="w-3.5 h-3.5 text-sky-300 shrink-0" /> : <Plus className="w-3.5 h-3.5 text-slate-600 shrink-0" />}
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
 

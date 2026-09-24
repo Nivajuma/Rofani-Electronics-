@@ -21,6 +21,8 @@ import {
   DEFAULT_ROLE_WORKER_PERMISSIONS,
   getWorkerPermissions,
   PermissionDefinition,
+  ALL_21_GRANULAR_ROLES,
+  getUserRoles,
 } from '../../utils/permissions';
 
 interface FlexibleWorkerPermissionsModalProps {
@@ -130,9 +132,19 @@ export const FlexibleWorkerPermissionsModal: React.FC<FlexibleWorkerPermissionsM
   };
 
   const handleSave = () => {
+    // Collect active granular roles from enabled permissions
+    const activeGranularRoles = ALL_21_GRANULAR_ROLES.filter((g) => permissions[g.key]).map((g) => g.role);
+    const baseRoles = getUserRoles(worker).filter((r) => !ALL_21_GRANULAR_ROLES.some((g) => g.role === r));
+    if (!baseRoles.includes(selectedRole)) {
+      baseRoles.unshift(selectedRole);
+    }
+    const combinedRoles = Array.from(new Set([...baseRoles, ...activeGranularRoles]));
+
     const updated: User = {
       ...worker,
       role: selectedRole,
+      roles: combinedRoles,
+      assignedRoles: combinedRoles,
       permissions: { ...permissions },
       customRoleTitle: customRoleTitle.trim() || undefined,
     };

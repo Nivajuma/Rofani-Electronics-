@@ -21,6 +21,10 @@ import {
   getWorkerPermissions,
   PermissionDefinition,
   applyRoleToWorker,
+  getUserRoles,
+  hasRole,
+  ALL_21_GRANULAR_ROLES,
+  assignAll21RolesToWorker,
 } from '../../utils/permissions';
 
 interface FlexibleRolesMatrixViewProps {
@@ -45,11 +49,12 @@ export const FlexibleRolesMatrixView: React.FC<FlexibleRolesMatrixViewProps> = (
     if (searchTerm.trim()) {
       const q = searchTerm.toLowerCase();
       const matchName = u.name.toLowerCase().includes(q);
-      const matchRole = u.role.toLowerCase().includes(q);
+      const roles = getUserRoles(u);
+      const matchRole = roles.some((r) => r.toLowerCase().includes(q));
       const matchEmail = u.email.toLowerCase().includes(q);
       if (!matchName && !matchRole && !matchEmail) return false;
     }
-    if (roleFilter !== 'all' && u.role !== roleFilter) return false;
+    if (roleFilter !== 'all' && !hasRole(u, roleFilter as Role)) return false;
     return true;
   });
 
@@ -59,19 +64,36 @@ export const FlexibleRolesMatrixView: React.FC<FlexibleRolesMatrixViewProps> = (
   });
 
   const handleTogglePermission = (targetUser: User, permissionKey: keyof WorkerPermissions) => {
-    if (targetUser.role === 'Admin' && currentUser.role !== 'Admin') {
+    if (hasRole(targetUser, 'Admin') && !hasRole(currentUser, 'Admin')) {
       alert('Security Notice: Only an Administrator can alter Administrator permissions.');
       return;
     }
 
     const currentPerms = getWorkerPermissions(targetUser);
     const newValue = !currentPerms[permissionKey];
+    const newPerms = {
+      ...currentPerms,
+      [permissionKey]: newValue,
+    };
+
+    const matchingGranular = ALL_21_GRANULAR_ROLES.find((g) => g.key === permissionKey);
+    const currentRoles = getUserRoles(targetUser);
+    let nextRoles = [...currentRoles];
+    if (matchingGranular) {
+      if (newValue) {
+        if (!nextRoles.includes(matchingGranular.role)) {
+          nextRoles.push(matchingGranular.role);
+        }
+      } else {
+        nextRoles = nextRoles.filter((r) => r !== matchingGranular.role);
+      }
+    }
+
     const updatedUser: User = {
       ...targetUser,
-      permissions: {
-        ...currentPerms,
-        [permissionKey]: newValue,
-      },
+      roles: nextRoles.length > 0 ? nextRoles : [targetUser.role || 'Cashier'],
+      assignedRoles: nextRoles,
+      permissions: newPerms,
     };
 
     onUpdateUser(updatedUser);
@@ -85,13 +107,26 @@ export const FlexibleRolesMatrixView: React.FC<FlexibleRolesMatrixViewProps> = (
   };
 
   const handleQuickChangeRole = (worker: User, newRole: Role) => {
-    if (worker.role === 'Admin' && currentUser.role !== 'Admin') {
+    if (hasRole(worker, 'Admin') && !hasRole(currentUser, 'Admin')) {
       alert('Security Notice: Only an Administrator can alter Administrator accounts.');
       return;
     }
     const updated = applyRoleToWorker(worker, newRole);
     onUpdateUser(updated);
     setLastUpdatedNotice(`Assigned "${newRole}" to ${worker.name} with updated defaults!`);
+    setTimeout(() => {
+      setLastUpdatedNotice(null);
+    }, 3000);
+  };
+
+  const handleAssignAll21Roles = (worker: User) => {
+    if (hasRole(worker, 'Admin') && !hasRole(currentUser, 'Admin')) {
+      alert('Security Notice: Only an Administrator can alter Administrator accounts.');
+      return;
+    }
+    const updated = assignAll21RolesToWorker(worker);
+    onUpdateUser(updated);
+    setLastUpdatedNotice(`Assigned all 21 functional roles to ${worker.name}!`);
     setTimeout(() => {
       setLastUpdatedNotice(null);
     }, 3000);
@@ -280,6 +315,16 @@ export const FlexibleRolesMatrixView: React.FC<FlexibleRolesMatrixViewProps> = (
                               <span className="text-emerald-400 font-bold font-mono text-[10px] shrink-0">
                                 {activePermCount}/21
                               </span>
+                            </div>
+                            <div className="flex items-center gap-1 mt-1 flex-wrap max-w-[220px]">
+                              {getUserRoles(worker).map((r) => (
+                                <span
+                                  key={r}
+                                  className="text-[8px] bg-slate-900/90 border border-slate-700/80 text-slate-300 px-1 py-0.2 rounded font-mono"
+                                >
+                                  {r}
+                                </span>
+                              ))}
                             </div>
                             {worker.customRoleTitle && (
                               <span className="text-[9px] text-indigo-300 bg-indigo-950/80 border border-indigo-800/80 px-1.5 py-0.2 rounded font-semibold inline-block mt-0.5">

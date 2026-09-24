@@ -8,7 +8,7 @@ import {
   getDocs,
 } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from './firebase';
-import { Product, Transaction, Customer, Supplier, Expense, RestockRecord, User } from '../types';
+import { Product, Transaction, Customer, Supplier, Expense, RestockRecord, User, SensitiveActionLog } from '../types';
 
 // Sanitize helper to remove undefined values for Firestore compatibility
 export function cleanForFirestore<T extends Record<string, any>>(obj: T): T {
@@ -392,6 +392,45 @@ export async function bulkUploadUsersToCloud(users: User[]): Promise<number> {
     return count;
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, 'users/batch');
+    throw error;
+  }
+}
+
+// ---------------- SENSITIVE ACTION & AUDIT LOGS LIVE SYNC ----------------
+
+export function subscribeToAuditLogs(
+  onUpdate: (logs: SensitiveActionLog[]) => void,
+  onError?: (err: any) => void
+) {
+  const colRef = collection(db, 'sensitive_action_logs');
+  return onSnapshot(
+    colRef,
+    (snapshot) => {
+      if (!snapshot.empty) {
+        const loaded: SensitiveActionLog[] = [];
+        snapshot.forEach((d) => {
+          loaded.push({ id: d.id, ...d.data() } as SensitiveActionLog);
+        });
+        // Sort newest first
+        loaded.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+        onUpdate(loaded);
+      }
+    },
+    (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'sensitive_action_logs');
+      if (onError) onError(error);
+    }
+  );
+}
+
+export async function saveAuditLogToCloud(log: SensitiveActionLog): Promise<void> {
+  const path = `sensitive_action_logs/${log.id}`;
+  try {
+    const docRef = doc(db, 'sensitive_action_logs', log.id);
+    const cleaned = cleanForFirestore(log);
+    await setDoc(docRef, cleaned, { merge: true });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
     throw error;
   }
 }

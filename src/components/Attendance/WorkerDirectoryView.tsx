@@ -106,6 +106,11 @@ export const WorkerDirectoryView: React.FC<WorkerDirectoryViewProps> = ({
   };
 
   const togglePinVisibility = (userId: string) => {
+    const targetUser = allUsers.find((u) => u.id === userId);
+    if (targetUser && hasRole(targetUser, 'Admin') && !hasRole(currentUser, 'Admin')) {
+      showToast("Security Notice: Only Store Administrators can reveal an Administrator's PIN.", 'error');
+      return;
+    }
     setVisiblePins((prev) => ({
       ...prev,
       [userId]: !prev[userId],
@@ -113,6 +118,10 @@ export const WorkerDirectoryView: React.FC<WorkerDirectoryViewProps> = ({
   };
 
   const handleCopyPin = (user: User) => {
+    if (hasRole(user, 'Admin') && !hasRole(currentUser, 'Admin')) {
+      showToast("Security Notice: Only Store Administrators can copy an Administrator's PIN.", 'error');
+      return;
+    }
     navigator.clipboard.writeText(user.pin);
     setCopiedPinId(user.id);
     showToast(`Copied security PIN for ${user.name}`, 'info');
@@ -126,7 +135,7 @@ export const WorkerDirectoryView: React.FC<WorkerDirectoryViewProps> = ({
       ...user,
       pin: newPin,
     });
-    showToast(`Regenerated new PIN (${newPin}) for ${user.name}`, 'success');
+    showToast(`Regenerated new PIN for ${user.name}`, 'success');
   };
 
   const handleToggleStatus = (user: User) => {

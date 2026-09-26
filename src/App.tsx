@@ -14,6 +14,7 @@ import {
   MessageSquare,
   Share2,
   ShieldCheck,
+  ShieldAlert,
   RotateCcw,
   ChevronDown,
   Database,
@@ -63,7 +64,9 @@ import {
   WorkerLoanRepayment,
   FinancingFacility,
   FacilityRepayment,
-  BarcodeScanLog
+  BarcodeScanLog,
+  SensitiveActionLog,
+  SensitiveActionType
 } from './types';
 import {
   INITIAL_USERS,
@@ -92,10 +95,12 @@ import { ExpensesView } from './components/Expenses/ExpensesView';
 import { CashManagementView } from './components/Finance/CashManagementView';
 import { AttendanceView } from './components/Attendance/AttendanceView';
 import { ReportsView } from './components/Reports/ReportsView';
+import { AuditLogsView } from './components/Reports/AuditLogsView';
 import { DataManagementView } from './components/Settings/DataManagementView';
 import { FloatingToolWidget } from './components/Tools/FloatingToolWidget';
 import { PinLoginModal } from './components/Auth/PinLoginModal';
 import { StaffManagementModal } from './components/Auth/StaffManagementModal';
+import { RoleAuthorizationModal, RoleAuthorizationRequest } from './components/Auth/RoleAuthorizationModal';
 import { InstallPwaModal } from './components/InstallPwaModal';
 import { PhoneDeviceFrame } from './components/PhoneDeviceFrame';
 import { ItemHistoryModal } from './components/Inventory/ItemHistoryModal';
@@ -120,6 +125,13 @@ import {
   ROLE_CONFIGURATIONS,
   DEFAULT_ROLE_WORKER_PERMISSIONS,
 } from './utils/permissions';
+import {
+  loadAuditLogsFromStorage,
+  saveAuditLogsToStorage,
+  buildSensitiveActionLog,
+  getQualifyingRolesForAction,
+  computeProductDiff,
+} from './utils/auditLogger';
 import { AccessRestrictedView } from './components/Auth/AccessRestrictedView';
 import {
   subscribeToProducts,
@@ -134,6 +146,7 @@ import {
   saveSupplierToCloud,
   subscribeToExpenses,
   saveExpenseToCloud,
+  deleteExpenseFromCloud,
   subscribeToRestockRecords,
   saveRestockRecordToCloud,
   subscribeToStoreSecurity,
@@ -143,6 +156,8 @@ import {
   saveUserToCloud,
   deleteUserFromCloud,
   bulkUploadUsersToCloud,
+  subscribeToAuditLogs,
+  saveAuditLogToCloud,
 } from './lib/cloudSync';
 import { testFirestoreConnection, isQuotaExceededError } from './lib/firebase';
 import { safeGetJSON, safeSetJSON } from './utils/safeStorage';
@@ -155,7 +170,7 @@ import {
 export default function App() {
   // Navigation & Display Layout State
   const [activeTab, setActiveTab] = useState<
-    'pos' | 'inventory' | 'stocktake' | 'contacts' | 'cashmanagement' | 'expenses' | 'attendance' | 'reports' | 'onlinestore' | 'onlineorders' | 'settings'
+    'pos' | 'inventory' | 'stocktake' | 'contacts' | 'cashmanagement' | 'expenses' | 'attendance' | 'reports' | 'onlinestore' | 'onlineorders' | 'settings' | 'auditlogs'
   >('pos');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -650,6 +665,18 @@ export default function App() {
       (error) => handleSyncError(error, 'users')
     );
 
+    // 9. Subscribe to Sensitive Action & Audit Logs
+    const unsubAudit = subscribeToAuditLogs(
+      (cloudLogs) => {
+        if (!active) return;
+        if (cloudLogs && cloudLogs.length > 0) {
+          setAuditLogs(cloudLogs);
+          safeSetJSON('retail_pos_sensitive_action_logs', cloudLogs);
+        }
+      },
+      (error) => handleSyncError(error, 'audit')
+    );
+
     return () => {
       active = false;
       unsubProducts();
@@ -660,8 +687,26 @@ export default function App() {
       unsubRestock();
       unsubSecurity();
       unsubUsers();
+      unsubAudit();
     };
   }, []);
+
+  // Sensitive Action Role Authorization & Audit Trail State
+  const [auditLogs, setAuditLogs] = useState<SensitiveActionLog[]>(() =>
+    loadAuditLogsFromStorage()
+  );
+  const [roleAuthRequest, setRoleAuthRequest] = useState<RoleAuthorizationRequest | null>(null);
+
+  useEffect(() => {
+    saveAuditLogsToStorage(auditLogs);
+  }, [auditLogs]);
+
+  const handleRecordAuditLog = (log: SensitiveActionLog) => {
+    setAuditLogs((prev) => [log, ...prev]);
+    saveAuditLogToCloud(log).catch((err) =>
+      console.warn('Could not sync audit log to cloud:', err)
+    );
+  };
 
   // Barcode Scanner Activity & Staff Scans Audit Log State
   const [scanLogs, setScanLogs] = useState<BarcodeScanLog[]>(() =>
@@ -1072,21 +1117,92 @@ export default function App() {
   };
 
   const handleSaveProduct = (prod: Product) => {
-    if (prod.imageUrl && prod.imageUrl.trim() !== '') {
-      saveProductImageToIndexedDB(prod.id, prod.imageUrl);
-    }
-    setProducts((prev) => {
-      const idx = prev.findIndex((p) => p.id === prod.id);
-      if (idx > -1) {
-        const copy = [...prev];
-        copy[idx] = prod;
-        return copy;
-      }
-      return [prod, ...prev];
-    });
+    const existing = products.find((p) => p.id === prod.id);
 
-    // Real-Time Cloud Sync to Firestore
-    saveProductToCloud(prod).catch(() => {});
+    const performSave = (authorizingRole?: Role, reason?: string) => {
+      if (prod.imageUrl && prod.imageUrl.trim() !== '') {
+        saveProductImageToIndexedDB(prod.id, prod.imageUrl);
+      }
+      setProducts((prev) => {
+        const idx = prev.findIndex((p) => p.id === prod.id);
+        if (idx > -1) {
+          const copy = [...prev];
+          copy[idx] = prod;
+          return copy;
+        }
+        return [prod, ...prev];
+      });
+
+      // Real-Time Cloud Sync to Firestore
+      saveProductToCloud(prod).catch(() => {});
+
+      if (existing && authorizingRole) {
+        const diff = computeProductDiff(existing, prod);
+        const diffKeys = Object.keys(diff);
+        const diffSummary = diffKeys.map(
+          (k) => `${k}: ${existing[k as keyof Product]} → ${prod[k as keyof Product]}`
+        );
+
+        const log = buildSensitiveActionLog({
+          actionType: 'MODIFY_INVENTORY',
+          actionTitle: `Modified Product: ${prod.name}`,
+          user: currentUser,
+          authorizingRole,
+          targetId: prod.id,
+          targetName: prod.name,
+          details: {
+            summary: diffSummary.length > 0
+              ? `Updated ${diffSummary.join(', ')} on ${prod.name}`
+              : `Updated catalog attributes for ${prod.name}`,
+            before: existing,
+            after: prod,
+            diff,
+          },
+          reason,
+          severity: 'high',
+        });
+        handleRecordAuditLog(log);
+      }
+    };
+
+    if (existing) {
+      const diff = computeProductDiff(existing, prod);
+      const diffKeys = Object.keys(diff);
+      if (diffKeys.length > 0) {
+        const qualifyingRoles = getQualifyingRolesForAction(currentUser, 'MODIFY_INVENTORY');
+        const userRoles = getUserRoles(currentUser);
+
+        if (qualifyingRoles.length > 1 || userRoles.length > 1) {
+          const diffSummary = diffKeys.map(
+            (k) => `${k}: ${existing[k as keyof Product]} → ${prod[k as keyof Product]}`
+          );
+
+          setRoleAuthRequest({
+            actionType: 'MODIFY_INVENTORY',
+            actionTitle: `Modify Product: ${prod.name}`,
+            targetId: prod.id,
+            targetName: prod.name,
+            qualifyingRoles: qualifyingRoles.length > 0 ? qualifyingRoles : userRoles,
+            user: currentUser,
+            diffSummary,
+            metadata: { before: existing, after: prod },
+            onConfirm: (selectedRole, reason) => {
+              performSave(selectedRole, reason);
+              setRoleAuthRequest(null);
+            },
+            onCancel: () => setRoleAuthRequest(null),
+          });
+          return;
+        } else {
+          const singleRole = qualifyingRoles[0] || userRoles[0] || 'Staff';
+          performSave(singleRole);
+          return;
+        }
+      }
+    }
+
+    // New item or unchanged
+    performSave();
   };
 
   const handleBatchImportProducts = (importedProducts: Product[], replaceExisting: boolean) => {
@@ -1115,9 +1231,57 @@ export default function App() {
   };
 
   const handleDeleteProduct = (productId: string) => {
-    deleteProductImageFromIndexedDB(productId);
-    setProducts((prev) => prev.filter((p) => p.id !== productId));
-    deleteProductFromCloud(productId).catch(() => {});
+    const existing = products.find((p) => p.id === productId);
+    const qualifyingRoles = getQualifyingRolesForAction(currentUser, 'DELETE_PRODUCT');
+    const userRoles = getUserRoles(currentUser);
+
+    const performDelete = (authorizingRole: Role, reason?: string) => {
+      deleteProductImageFromIndexedDB(productId);
+      setProducts((prev) => prev.filter((p) => p.id !== productId));
+      deleteProductFromCloud(productId).catch(() => {});
+
+      const log = buildSensitiveActionLog({
+        actionType: 'DELETE_PRODUCT',
+        actionTitle: `Deleted Product: ${existing?.name || productId}`,
+        user: currentUser,
+        authorizingRole,
+        targetId: productId,
+        targetName: existing?.name || productId,
+        details: {
+          summary: `Permanently removed ${existing?.name || 'product'} (SKU: ${existing?.sku || 'N/A'}, Barcode: ${existing?.barcode || 'N/A'}, Stock: ${existing?.stockQuantity || 0}) from store catalog`,
+          before: existing || {},
+        },
+        reason,
+        severity: 'critical',
+      });
+      handleRecordAuditLog(log);
+    };
+
+    if (qualifyingRoles.length > 1 || userRoles.length > 1) {
+      setRoleAuthRequest({
+        actionType: 'DELETE_PRODUCT',
+        actionTitle: `Delete Product: ${existing?.name || productId}`,
+        targetId: productId,
+        targetName: existing?.name || productId,
+        qualifyingRoles: qualifyingRoles.length > 0 ? qualifyingRoles : userRoles,
+        user: currentUser,
+        diffSummary: existing ? [
+          `SKU: ${existing.sku || 'N/A'}`,
+          `Barcode: ${existing.barcode || 'N/A'}`,
+          `Category: ${existing.category}`,
+          `Selling Price: KSh ${existing.sellingPrice}`,
+          `Stock On Hand: ${existing.stockQuantity} units`,
+        ] : undefined,
+        onConfirm: (selectedRole, reason) => {
+          performDelete(selectedRole, reason);
+          setRoleAuthRequest(null);
+        },
+        onCancel: () => setRoleAuthRequest(null),
+      });
+    } else {
+      const singleRole = qualifyingRoles[0] || userRoles[0] || 'Staff';
+      performDelete(singleRole);
+    }
   };
 
   const handleAddRestockRecord = (
@@ -1179,9 +1343,57 @@ export default function App() {
     saveExpenseToCloud(restockExp).catch(() => {});
   };
 
-  const handleApplyStockAdjustment = (updatedProducts: Product[], _audit: StockCountAudit) => {
-    setProducts(updatedProducts);
-    updatedProducts.forEach((p) => saveProductToCloud(p).catch(() => {}));
+  const handleApplyStockAdjustment = (updatedProducts: Product[], audit: StockCountAudit) => {
+    const qualifyingRoles = getQualifyingRolesForAction(currentUser, 'ADJUST_STOCK');
+    const userRoles = getUserRoles(currentUser);
+
+    const performAdjustment = (authorizingRole: Role, reason?: string) => {
+      setProducts(updatedProducts);
+      updatedProducts.forEach((p) => saveProductToCloud(p).catch(() => {}));
+
+      const log = buildSensitiveActionLog({
+        actionType: 'ADJUST_STOCK',
+        actionTitle: `Stock Adjustment: ${audit.items.length} Products Reconciled`,
+        user: currentUser,
+        authorizingRole,
+        details: {
+          summary: `Reconciled shelf inventory count for ${audit.items.length} products (Net Variance: ${audit.totalVarianceCount} units, Total Cost: KSh ${audit.totalVarianceCost.toLocaleString()})`,
+          metadata: {
+            auditId: audit.id,
+            auditDate: audit.auditDate,
+            totalVarianceCount: audit.totalVarianceCount,
+            totalVarianceCost: audit.totalVarianceCost,
+            itemsCount: audit.items.length,
+          },
+        },
+        reason: reason || audit.notes,
+        severity: 'high',
+      });
+      handleRecordAuditLog(log);
+    };
+
+    if (qualifyingRoles.length > 1 || userRoles.length > 1) {
+      setRoleAuthRequest({
+        actionType: 'ADJUST_STOCK',
+        actionTitle: `Physical Stock Count Reconciliation (${audit.items.length} Items)`,
+        targetName: `Stock Count Audit: ${audit.auditDate}`,
+        qualifyingRoles: qualifyingRoles.length > 0 ? qualifyingRoles : userRoles,
+        user: currentUser,
+        diffSummary: [
+          `Items Checked: ${audit.items.length}`,
+          `Total Unit Variance: ${audit.totalVarianceCount}`,
+          `Total Variance Value: KSh ${audit.totalVarianceCost.toLocaleString()}`,
+        ],
+        onConfirm: (selectedRole, reason) => {
+          performAdjustment(selectedRole, reason);
+          setRoleAuthRequest(null);
+        },
+        onCancel: () => setRoleAuthRequest(null),
+      });
+    } else {
+      const singleRole = qualifyingRoles[0] || userRoles[0] || 'Staff';
+      performAdjustment(singleRole);
+    }
   };
 
   const handleAddExpense = (exp: Expense) => {
@@ -1190,7 +1402,58 @@ export default function App() {
   };
 
   const handleDeleteExpense = (expId: string) => {
-    setExpenses((prev) => prev.filter((e) => e.id !== expId));
+    const exp = expenses.find((e) => e.id === expId);
+    const qualifyingRoles = getQualifyingRolesForAction(currentUser, 'DELETE_EXPENSE');
+    const userRoles = getUserRoles(currentUser);
+
+    const performDelete = (authorizingRole: Role, reason?: string) => {
+      setExpenses((prev) => prev.filter((e) => e.id !== expId));
+      deleteExpenseFromCloud(expId).catch(() => {});
+
+      const log = buildSensitiveActionLog({
+        actionType: 'DELETE_EXPENSE',
+        actionTitle: `Deleted Expense: ${exp ? exp.category : 'Record'} (${exp ? `KSh ${exp.amount.toLocaleString()}` : ''})`,
+        user: currentUser,
+        authorizingRole,
+        targetId: expId,
+        targetName: exp ? `${exp.category} - ${exp.description || 'Record'}` : expId,
+        details: {
+          summary: `Deleted ${exp?.category || 'expense'} of KSh ${(exp?.amount || 0).toLocaleString()} (${exp?.description || 'No description'})`,
+          before: exp || {},
+        },
+        reason,
+        severity: 'critical',
+      });
+      handleRecordAuditLog(log);
+    };
+
+    if (qualifyingRoles.length > 1 || userRoles.length > 1) {
+      setRoleAuthRequest({
+        actionType: 'DELETE_EXPENSE',
+        actionTitle: `Delete Expense: ${exp ? exp.category : 'Record'} (${exp ? `KSh ${exp.amount.toLocaleString()}` : ''})`,
+        targetId: expId,
+        targetName: exp ? `${exp.category} - ${exp.description || 'Record'}` : expId,
+        qualifyingRoles: qualifyingRoles.length > 0 ? qualifyingRoles : userRoles,
+        user: currentUser,
+        diffSummary: exp ? [
+          `Category: ${exp.category}`,
+          `Amount: KSh ${exp.amount.toLocaleString()}`,
+          `Description: ${exp.description || 'None'}`,
+          `Payment Method: ${exp.paymentMethod}`,
+          `Recorded By: ${exp.recordedBy}`,
+          `Date: ${exp.date}`,
+        ] : undefined,
+        metadata: { expense: exp },
+        onConfirm: (selectedRole, reason) => {
+          performDelete(selectedRole, reason);
+          setRoleAuthRequest(null);
+        },
+        onCancel: () => setRoleAuthRequest(null),
+      });
+    } else {
+      const singleRole = qualifyingRoles[0] || userRoles[0] || 'Staff';
+      performDelete(singleRole);
+    }
   };
 
   const handleAddCashTransaction = (tx: CashTransaction) => {
@@ -1533,11 +1796,81 @@ export default function App() {
   };
 
   const handleClearTransactions = () => {
-    setTransactions([]);
+    const userRoles = getUserRoles(currentUser);
+    const qualifyingRoles = getQualifyingRolesForAction(currentUser, 'CLEAR_TRANSACTIONS');
+
+    const performClear = (authorizingRole: Role, reason?: string) => {
+      const count = transactions.length;
+      setTransactions([]);
+      const log = buildSensitiveActionLog({
+        actionType: 'CLEAR_TRANSACTIONS',
+        actionTitle: `Purged Sales History (${count} Receipts)`,
+        user: currentUser,
+        authorizingRole,
+        details: {
+          summary: `Purged ${count} sales receipts from store register history`,
+        },
+        reason,
+        severity: 'critical',
+      });
+      handleRecordAuditLog(log);
+    };
+
+    if (userRoles.length > 1) {
+      setRoleAuthRequest({
+        actionType: 'CLEAR_TRANSACTIONS',
+        actionTitle: `Purge All Sales Transactions (${transactions.length} Receipts)`,
+        qualifyingRoles: qualifyingRoles.length > 0 ? qualifyingRoles : userRoles,
+        user: currentUser,
+        diffSummary: [`Total Receipts to Purge: ${transactions.length}`],
+        onConfirm: (selectedRole, reason) => {
+          performClear(selectedRole, reason);
+          setRoleAuthRequest(null);
+        },
+        onCancel: () => setRoleAuthRequest(null),
+      });
+    } else {
+      performClear(userRoles[0] || 'Admin');
+    }
   };
 
   const handleClearExpenses = () => {
-    setExpenses([]);
+    const userRoles = getUserRoles(currentUser);
+    const qualifyingRoles = getQualifyingRolesForAction(currentUser, 'CLEAR_EXPENSES');
+
+    const performClear = (authorizingRole: Role, reason?: string) => {
+      const count = expenses.length;
+      setExpenses([]);
+      const log = buildSensitiveActionLog({
+        actionType: 'CLEAR_EXPENSES',
+        actionTitle: `Purged All Expense History (${count} Records)`,
+        user: currentUser,
+        authorizingRole,
+        details: {
+          summary: `Purged ${count} historical store expense records and overhead schedules`,
+        },
+        reason,
+        severity: 'critical',
+      });
+      handleRecordAuditLog(log);
+    };
+
+    if (userRoles.length > 1) {
+      setRoleAuthRequest({
+        actionType: 'CLEAR_EXPENSES',
+        actionTitle: `Purge All Expense Logs (${expenses.length} Records)`,
+        qualifyingRoles: qualifyingRoles.length > 0 ? qualifyingRoles : userRoles,
+        user: currentUser,
+        diffSummary: [`Total Records to Purge: ${expenses.length}`],
+        onConfirm: (selectedRole, reason) => {
+          performClear(selectedRole, reason);
+          setRoleAuthRequest(null);
+        },
+        onCancel: () => setRoleAuthRequest(null),
+      });
+    } else {
+      performClear(userRoles[0] || 'Admin');
+    }
   };
 
   // User initials avatar helper
@@ -1623,6 +1956,10 @@ export default function App() {
           scanLogs={scanLogs}
           onRecordScanLog={handleRecordScanLog}
           onClearScanLogs={handleClearScanLogs}
+          storeName={stores.find((s) => s.id === activeStoreId)?.name || 'ROFANI Flagship Store'}
+          onOpenAiAssistantWithPrompt={(_prompt) => {
+            setShowAiAssistantModal(true);
+          }}
         />
       )}
 
@@ -1682,6 +2019,7 @@ export default function App() {
           onAddExpense={handleAddExpense}
           onDeleteExpense={handleDeleteExpense}
           onBatchUpdateExpenses={setExpenses}
+          onOpenAuditLogs={() => setActiveTab('auditlogs')}
         />
       )}
 
@@ -1716,7 +2054,17 @@ export default function App() {
           customers={customers}
           suppliers={suppliers}
           expenses={expenses}
+          auditLogs={auditLogs}
         />
+      )}
+
+      {activeTab === 'auditlogs' && (
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+          <AuditLogsView
+            logs={auditLogs}
+            onClose={() => setActiveTab('reports')}
+          />
+        </div>
       )}
 
       {activeTab === 'onlinestore' && (
@@ -1777,6 +2125,7 @@ export default function App() {
           masterPin={masterPin}
           onUpdateMasterPin={handleUpdateMasterPin}
           onLockNow={() => setIsTerminalLocked(true)}
+          onOpenAuditLogs={() => setActiveTab('auditlogs')}
         />
       )}
     </>
@@ -1868,6 +2217,9 @@ export default function App() {
           isOpen={showInstallModal}
           onClose={() => setShowInstallModal(false)}
         />
+
+        {/* Role Authorization Modal for Sensitive Operations in Phone Mode */}
+        <RoleAuthorizationModal request={roleAuthRequest} />
       </div>
     );
   }
@@ -2136,6 +2488,26 @@ export default function App() {
             {!isSidebarCollapsed && (
               <span className="text-[10px] bg-slate-800/80 px-1.5 py-0.5 rounded font-mono text-slate-300">
                 PDF
+              </span>
+            )}
+          </button>
+
+          <button
+            onClick={() => setActiveTab('auditlogs')}
+            title="Worker Role Authorization Audit Trail"
+            className={`w-full flex items-center ${isSidebarCollapsed ? 'justify-center px-2' : 'justify-between px-3'} py-2.5 rounded-lg transition ${
+              activeTab === 'auditlogs'
+                ? 'bg-purple-600 text-white shadow-md'
+                : 'hover:bg-slate-800 text-slate-300'
+            }`}
+          >
+            <div className="flex items-center gap-3">
+              <ShieldAlert className="w-4 h-4 opacity-90 shrink-0 text-purple-400" />
+              {!isSidebarCollapsed && <span>Audit Trail</span>}
+            </div>
+            {!isSidebarCollapsed && auditLogs.length > 0 && (
+              <span className="text-[10px] bg-purple-950/80 text-purple-300 border border-purple-800/80 px-1.5 py-0.5 rounded font-mono font-bold">
+                {auditLogs.length}
               </span>
             )}
           </button>
@@ -2790,7 +3162,14 @@ export default function App() {
         lowStockCount={lowStockCount}
         totalProductsCount={products.length}
         totalSalesToday={todaySales > 0 ? todaySales : totalGrossSales}
+        products={products}
+        transactions={transactions}
+        onOpenPredictiveRestock={() => {
+          setActiveTab('inventory');
+        }}
       />
+      {/* Role Authorization Modal for Sensitive Operations (Modifying Inventory, Deleting Expenses, Stock Count Adjustment) */}
+      <RoleAuthorizationModal request={roleAuthRequest} />
     </div>
   );
 }

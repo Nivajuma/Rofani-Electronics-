@@ -26,14 +26,15 @@ import {
   Plus,
   Cloud,
   RefreshCw,
-  AlertTriangle
+  AlertTriangle,
+  ShieldAlert
 } from 'lucide-react';
 import { User } from '../types';
 
 interface PhoneDeviceFrameProps {
   children: React.ReactNode;
-  activeTab: 'pos' | 'inventory' | 'stocktake' | 'contacts' | 'cashmanagement' | 'expenses' | 'attendance' | 'reports' | 'onlinestore' | 'onlineorders' | 'settings';
-  onSelectTab: (tab: 'pos' | 'inventory' | 'stocktake' | 'contacts' | 'cashmanagement' | 'expenses' | 'attendance' | 'reports' | 'onlinestore' | 'onlineorders' | 'settings') => void;
+  activeTab: 'pos' | 'inventory' | 'stocktake' | 'contacts' | 'cashmanagement' | 'expenses' | 'attendance' | 'reports' | 'onlinestore' | 'onlineorders' | 'settings' | 'auditlogs';
+  onSelectTab: (tab: 'pos' | 'inventory' | 'stocktake' | 'contacts' | 'cashmanagement' | 'expenses' | 'attendance' | 'reports' | 'onlinestore' | 'onlineorders' | 'settings' | 'auditlogs') => void;
   onSelectStockAlertFilter?: () => void;
   phoneOrientation: 'portrait' | 'landscape';
   phoneModel: 'iphone15pro' | 'galaxyS24' | 'pixel8';
@@ -451,6 +452,21 @@ export const PhoneDeviceFrame: React.FC<PhoneDeviceFrameProps> = ({
               >
                 <Settings className="w-4 h-4 text-purple-400" />
                 <span>KRA Settings</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  onSelectTab('auditlogs');
+                  setShowMobileMoreMenu(false);
+                }}
+                className={`col-span-2 p-2.5 rounded-xl border flex items-center gap-2 font-bold ${
+                  activeTab === 'auditlogs'
+                    ? 'bg-purple-600 border-purple-500 text-white'
+                    : 'bg-slate-950 border-purple-800/60 text-purple-300 hover:bg-slate-800'
+                }`}
+              >
+                <ShieldAlert className="w-4 h-4 text-purple-400" />
+                <span>Role Authorization Audit Trail</span>
               </button>
 
               {onOpenCloudSync && (

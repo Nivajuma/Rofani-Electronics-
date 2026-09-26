@@ -190,7 +190,7 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
       ...targetUser,
       pin: newPin,
     });
-    showNotification(`Generated new PIN (${newPin}) for ${targetUser.name}`, 'success');
+    showNotification(`Generated new PIN for ${targetUser.name}`, 'success');
   };
 
   const handleToggleStatus = (user: User) => {

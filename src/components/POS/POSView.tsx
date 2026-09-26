@@ -1625,7 +1625,7 @@ export const POSView: React.FC<POSViewProps> = ({
                   placeholder="••••"
                   className="w-full bg-slate-950 border border-slate-800 text-center tracking-widest text-lg font-mono font-bold rounded-xl px-3 py-2 text-white focus:outline-none focus:border-amber-400"
                 />
-                <p className="text-[10px] text-slate-500 mt-1 text-center">(Default Admin PIN is 1234)</p>
+                <p className="text-[10px] text-slate-500 mt-1 text-center">Manager or Admin authorization required</p>
               </div>
 
               <div>

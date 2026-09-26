@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { DollarSign, Plus, Calendar, Tag, CreditCard, Trash2, X, TrendingDown, RefreshCw, Clock, Repeat, Sparkles, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { DollarSign, Plus, Calendar, Tag, CreditCard, Trash2, X, TrendingDown, RefreshCw, Clock, Repeat, Sparkles, AlertTriangle, CheckCircle2, ShieldAlert } from 'lucide-react';
 import { Expense, PaymentMethod, User, RecurringFrequency } from '../../types';
 import { detectDuplicateExpenses, deduplicateExpenses, processDueRecurringExpenses, computeNextDueDate } from '../../utils/deduplicate';
 import { hasWorkerPermission } from '../../utils/permissions';
@@ -10,6 +10,7 @@ interface ExpensesViewProps {
   onAddExpense: (expense: Expense) => void;
   onDeleteExpense: (expenseId: string) => void;
   onBatchUpdateExpenses?: (expenses: Expense[]) => void;
+  onOpenAuditLogs?: () => void;
 }
 
 export const ExpensesView: React.FC<ExpensesViewProps> = ({
@@ -18,6 +19,7 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
   onAddExpense,
   onDeleteExpense,
   onBatchUpdateExpenses,
+  onOpenAuditLogs,
 }) => {
   const [showModal, setShowModal] = useState(false);
   const [filterCategory, setFilterCategory] = useState<string>('All');
@@ -206,6 +208,18 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
               className="bg-sky-600 hover:bg-sky-500 text-white font-bold px-4 py-2.5 rounded-xl text-xs transition flex items-center gap-2 shadow-lg shadow-sky-600/20"
             >
               <Plus className="w-4 h-4" /> Log Expense
+            </button>
+          )}
+
+          {onOpenAuditLogs && (
+            <button
+              type="button"
+              onClick={onOpenAuditLogs}
+              className="bg-purple-950/80 hover:bg-purple-900 border border-purple-700/80 text-purple-300 font-bold px-3.5 py-2.5 rounded-xl text-xs transition flex items-center gap-1.5 shadow-lg cursor-pointer"
+              title="View Role Authorization Audit Ledger"
+            >
+              <ShieldAlert className="w-4 h-4 text-purple-400" />
+              <span>Audit Trail</span>
             </button>
           )}
         </div>

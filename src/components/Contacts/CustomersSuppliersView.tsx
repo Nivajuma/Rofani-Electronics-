@@ -33,6 +33,7 @@ import { SupplierEditModal } from './SupplierEditModal';
 import { SupplierPaymentModal } from './SupplierPaymentModal';
 import { SupplierDetailsModal } from './SupplierDetailsModal';
 import { ContactsImportExportModal } from './ContactsImportExportModal';
+import { CustomerPromotionGeneratorModal } from '../Marketing/CustomerPromotionGeneratorModal';
 
 interface CustomersSuppliersViewProps {
   customers: Customer[];
@@ -108,6 +109,8 @@ export const CustomersSuppliersView: React.FC<CustomersSuppliersViewProps> = ({
   const [isSupplierDetailsOpen, setIsSupplierDetailsOpen] = useState(false);
 
   const [isImportExportOpen, setIsImportExportOpen] = useState(false);
+  const [isPromoGeneratorOpen, setIsPromoGeneratorOpen] = useState(false);
+  const [selectedPromoCustomer, setSelectedPromoCustomer] = useState<Customer | null>(null);
 
   // 1. Calculate Customer Metrics
   const customerMetrics = useMemo(() => {

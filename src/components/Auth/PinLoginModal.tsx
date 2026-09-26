@@ -83,7 +83,8 @@ export const PinLoginModal: React.FC<PinLoginModalProps> = ({
   const [recoveryIdentifier, setRecoveryIdentifier] = useState<string>('');
   const [isRecoveryVerified, setIsRecoveryVerified] = useState<boolean>(false);
   const [targetAdminUser, setTargetAdminUser] = useState<User | null>(null);
-  const [newAdminPin, setNewAdminPin] = useState<string>('1234');
+  const [newAdminPin, setNewAdminPin] = useState<string>('');
+  const [showNewAdminPin, setShowNewAdminPin] = useState<boolean>(false);
   const [syncMasterPasscode, setSyncMasterPasscode] = useState<boolean>(true);
   const [recoveryError, setRecoveryError] = useState<string>('');
   const [recoverySuccessNotice, setRecoverySuccessNotice] = useState<string>('');
@@ -129,7 +130,8 @@ export const PinLoginModal: React.FC<PinLoginModalProps> = ({
       setShowRecoveryView(false);
       setIsRecoveryVerified(false);
       setRecoveryIdentifier('');
-      setNewAdminPin('1234');
+      setNewAdminPin('');
+      setShowNewAdminPin(false);
       setRecoveryError('');
       setRecoverySuccessNotice('');
     }
@@ -301,7 +303,8 @@ export const PinLoginModal: React.FC<PinLoginModalProps> = ({
       if (validEmails.includes(lowerInput)) {
         setIsRecoveryVerified(true);
         setTargetAdminUser(defaultAdmin);
-        setNewAdminPin('1234');
+        setNewAdminPin('');
+        setShowNewAdminPin(false);
         setRecoveryError('');
       } else {
         setRecoveryError(
@@ -313,7 +316,8 @@ export const PinLoginModal: React.FC<PinLoginModalProps> = ({
       if (trimmedInput.toUpperCase() === validKey) {
         setIsRecoveryVerified(true);
         setTargetAdminUser(defaultAdmin);
-        setNewAdminPin('1234');
+        setNewAdminPin('');
+        setShowNewAdminPin(false);
         setRecoveryError('');
       } else {
         setRecoveryError('Invalid Emergency Reset Key. Try again or verify store configuration.');
@@ -526,26 +530,36 @@ export const PinLoginModal: React.FC<PinLoginModalProps> = ({
                         Choose New Admin 4-Digit PIN:
                       </label>
                       <div className="flex items-center gap-3">
-                        <input
-                          type="text"
-                          maxLength={8}
-                          value={newAdminPin}
-                          onChange={(e) => setNewAdminPin(e.target.value.replace(/\D/g, ''))}
-                          placeholder="e.g. 1234"
-                          className="w-44 px-4 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-white text-lg font-mono font-bold tracking-widest text-center focus:outline-none focus:border-emerald-500"
-                        />
-                        <div className="flex items-center gap-2">
-                          {['1234', '9999', '0000'].map((preset) => (
-                            <button
-                              key={preset}
-                              type="button"
-                              onClick={() => setNewAdminPin(preset)}
-                              className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-mono transition border border-slate-700 cursor-pointer"
-                            >
-                              {preset}
-                            </button>
-                          ))}
+                        <div className="relative">
+                          <input
+                            type={showNewAdminPin ? 'text' : 'password'}
+                            maxLength={8}
+                            value={newAdminPin}
+                            onChange={(e) => setNewAdminPin(e.target.value.replace(/\D/g, ''))}
+                            placeholder="••••"
+                            className="w-44 px-4 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-white text-lg font-mono font-bold tracking-widest text-center focus:outline-none focus:border-emerald-500 pr-10"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowNewAdminPin(!showNewAdminPin)}
+                            className="absolute right-2.5 top-3 text-slate-400 hover:text-white transition cursor-pointer"
+                            title={showNewAdminPin ? 'Hide PIN' : 'Show PIN'}
+                          >
+                            {showNewAdminPin ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                          </button>
                         </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const rand = Math.floor(1000 + Math.random() * 9000).toString();
+                            setNewAdminPin(rand);
+                            setShowNewAdminPin(true);
+                          }}
+                          className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold transition border border-slate-700 cursor-pointer flex items-center gap-1.5"
+                        >
+                          <KeyRound className="w-3.5 h-3.5 text-emerald-400" />
+                          <span>Generate Secure PIN</span>
+                        </button>
                       </div>
                     </div>
 
@@ -556,7 +570,7 @@ export const PinLoginModal: React.FC<PinLoginModalProps> = ({
                         onChange={(e) => setSyncMasterPasscode(e.target.checked)}
                         className="w-4 h-4 text-emerald-500 bg-slate-900 border-slate-700 rounded focus:ring-emerald-500 cursor-pointer"
                       />
-                      <span>Also synchronize the Store Master Passcode to match this new PIN ({newAdminPin || '....'})</span>
+                      <span>Also synchronize the Store Master Passcode to match this new PIN</span>
                     </label>
 
                     {recoveryError && (
@@ -609,8 +623,8 @@ export const PinLoginModal: React.FC<PinLoginModalProps> = ({
                       As the project owner, you can view or update the <span className="font-mono text-sky-300">users</span> collection directly in your Firebase Firestore console.
                     </p>
                     <p className="flex items-start gap-2">
-                      <strong className="text-slate-200 shrink-0">3. Factory Default:</strong>
-                      The factory master passcode is <span className="font-mono text-amber-300 font-bold">1234</span> on the "Master Store PIN" tab.
+                      <strong className="text-slate-200 shrink-0">3. Master Passcode:</strong>
+                      Enter your store master passcode on the "Master Store PIN" tab to unlock this terminal.
                     </p>
                   </div>
                 )}
@@ -749,7 +763,7 @@ export const PinLoginModal: React.FC<PinLoginModalProps> = ({
                                   </span>
                                 </div>
                                 <div className="text-[10px] text-rose-300/80">
-                                  {adminAcc ? adminAcc.name : 'Store Owner'} • PIN: 1234
+                                  {adminAcc ? adminAcc.name : 'Store Owner'} • Administrator Account
                                 </div>
                               </div>
                             </div>

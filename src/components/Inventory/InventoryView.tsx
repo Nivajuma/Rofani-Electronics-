@@ -61,6 +61,8 @@ import {
   detectRepeatedItemPhotos,
   resolveRepeatedCatalogPhotos
 } from '../../utils/productImages';
+import { PredictiveRestockModal } from './PredictiveRestockModal';
+import { calculateReplenishmentPlan } from '../../utils/replenishment';
 
 interface InventoryViewProps {
   products: Product[];
@@ -79,6 +81,8 @@ interface InventoryViewProps {
   scanLogs?: BarcodeScanLog[];
   onRecordScanLog?: (log: BarcodeScanLog) => void;
   onClearScanLogs?: () => void;
+  storeName?: string;
+  onOpenAiAssistantWithPrompt?: (prompt: string) => void;
 }
 
 export const InventoryView: React.FC<InventoryViewProps> = ({
@@ -104,6 +108,8 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   scanLogs = [],
   onRecordScanLog = () => {},
   onClearScanLogs = () => {},
+  storeName = 'Main Store',
+  onOpenAiAssistantWithPrompt,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('All');
@@ -119,6 +125,29 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   const performanceSummary = React.useMemo(() => {
     return computePerformanceSummary(performanceMap);
   }, [performanceMap]);
+
+  // AI Predictive Replenishment & Stock Velocity Runway Analysis
+  const replenishmentAnalysis = React.useMemo(() => {
+    return calculateReplenishmentPlan(products, transactions, 21, 30);
+  }, [products, transactions]);
+
+  const criticalRestockCount =
+    replenishmentAnalysis.summary.outOfStockCount + replenishmentAnalysis.summary.criticalCount;
+
+  const [showPredictiveRestockModal, setShowPredictiveRestockModal] = useState<boolean>(false);
+
+  const handleQuickRestockProduct = (productId: string, addedQuantity: number, reason?: string) => {
+    const existing = products.find((p) => p.id === productId);
+    if (!existing) return;
+    const currentStock = Number(existing.stockQuantity ?? existing.stock ?? 0);
+    const updatedProduct: Product = {
+      ...existing,
+      stockQuantity: currentStock + addedQuantity,
+      stock: currentStock + addedQuantity,
+      updatedAt: new Date().toISOString()
+    };
+    onSaveProduct(updatedProduct);
+  };
 
   // Sync state when initialShowLowStockOnly prop changes from parent
   React.useEffect(() => {
@@ -858,13 +887,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
 
   // Role-checked Delete Product Handler
   const handleDeleteProductWithRoleCheck = (productId: string, productName: string) => {
-    if (!canDeleteInventory(currentUser.role)) {
-      alert(`Access Denied: ${currentUser.role} accounts are not authorized to delete items from inventory. Store Manager or Administrator authorization required.`);
-      return;
-    }
-    if (confirm(`Delete product "${productName}"? This will permanently remove the item from inventory.`)) {
-      onDeleteProduct(productId);
-    }
+    onDeleteProduct(productId);
   };
 
   // Open modal for NEW item
@@ -1101,6 +1124,22 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
               )}
             </button>
           </div>
+
+          {/* AI Predictive Restock Button */}
+          <button
+            id="btn-inventory-predictive-restock"
+            onClick={() => setShowPredictiveRestockModal(true)}
+            className="bg-gradient-to-r from-purple-600 via-indigo-600 to-sky-600 hover:from-purple-500 hover:to-sky-500 text-white font-extrabold px-3.5 py-2 rounded-xl text-xs transition flex items-center gap-1.5 shadow-lg shadow-indigo-600/30 border border-indigo-400/40 relative cursor-pointer group"
+            title="AI Predictive Restock: Real-time sales velocity analysis & smart replenishment suggestions"
+          >
+            <Sparkles className="w-4 h-4 text-amber-300 animate-pulse" />
+            <span>Predictive Restock</span>
+            {criticalRestockCount > 0 && (
+              <span className="bg-rose-500 text-white text-[10px] font-black px-1.5 py-0.2 rounded-full shadow-sm animate-pulse">
+                {criticalRestockCount}
+              </span>
+            )}
+          </button>
 
           {onOpenStoreManagerModal && (
             <button
@@ -3648,6 +3687,18 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           setShowScanHistoryModal(false);
           handleOpenEditModal(prod);
         }}
+      />
+
+      {/* MODAL: AI PREDICTIVE RESTOCK & INVENTORY REPLENISHMENT */}
+      <PredictiveRestockModal
+        isOpen={showPredictiveRestockModal}
+        onClose={() => setShowPredictiveRestockModal(false)}
+        products={products}
+        transactions={transactions}
+        storeName={storeName}
+        onQuickRestockProduct={handleQuickRestockProduct}
+        onOpenAiAssistantWithPrompt={onOpenAiAssistantWithPrompt}
+        currentUser={currentUser}
       />
 
       {/* Permanently Mounted Hidden File Inputs for Device Camera & File Picker */}

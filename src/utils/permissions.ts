@@ -11,7 +11,8 @@ export type TabKey =
   | 'reports'
   | 'onlinestore'
   | 'onlineorders'
-  | 'settings';
+  | 'settings'
+  | 'auditlogs';
 
 export interface PermissionDefinition {
   key: keyof WorkerPermissions;
@@ -396,6 +397,7 @@ export const ROLE_CONFIGURATIONS: Record<string, RoleConfiguration> = {
       'onlinestore',
       'onlineorders',
       'settings',
+      'auditlogs',
     ],
     canManageStaff: true,
     canViewStaffPins: true,
@@ -419,6 +421,7 @@ export const ROLE_CONFIGURATIONS: Record<string, RoleConfiguration> = {
       'reports',
       'onlinestore',
       'onlineorders',
+      'auditlogs',
     ],
     canManageStaff: false,
     canViewStaffPins: false,
@@ -991,6 +994,8 @@ export function hasTabPermission(roleOrUser: Role | User, tab: TabKey): boolean 
       return perms.canManageCustomerOrders || perms.canUpdateSalesOrderStatus;
     case 'attendance':
       return perms.canEnableSalesCommission;
+    case 'auditlogs':
+      return hasRole(user, 'Admin') || hasRole(user, 'Manager') || perms.canDeleteDailyEntries || perms.canEditDailyEntries;
     default:
       return false;
   }
@@ -1411,4 +1416,5 @@ export const TAB_LABELS: Record<TabKey, string> = {
   onlinestore: 'Online Storefront',
   onlineorders: 'Online Orders & Delivery',
   settings: 'System & KRA Fiscal Settings',
+  auditlogs: 'Worker Role Authorization Audit Trail',
 };

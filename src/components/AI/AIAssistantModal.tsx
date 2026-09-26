@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   Sparkles,
   Bot,
@@ -15,8 +15,13 @@ import {
   CreditCard,
   Building2,
   Copy,
-  Check
+  Check,
+  TrendingUp,
+  Package,
+  AlertTriangle
 } from 'lucide-react';
+import { Product, Transaction } from '../../types';
+import { calculateReplenishmentPlan } from '../../utils/replenishment';
 
 interface AIAssistantModalProps {
   isOpen: boolean;
@@ -27,6 +32,9 @@ interface AIAssistantModalProps {
   lowStockCount: number;
   totalProductsCount: number;
   totalSalesToday: number;
+  products?: Product[];
+  transactions?: Transaction[];
+  onOpenPredictiveRestock?: () => void;
 }
 
 interface Message {
@@ -37,6 +45,16 @@ interface Message {
 }
 
 const QUICK_QUESTIONS = [
+  {
+    icon: Sparkles,
+    label: 'Smart Inventory Replenishment & Velocity Forecast',
+    prompt: 'Provide smart inventory replenishment suggestions based on our current sales velocity and stock levels. Which products need urgent reordering, what are the recommended reorder quantities, and how much working capital is required?'
+  },
+  {
+    icon: TrendingUp,
+    label: 'Fastest Depleting Stock & Runway Analysis',
+    prompt: 'Which products are selling the fastest (highest sales velocity) and how many days of stock runway remain before we run out of stock?'
+  },
   {
     icon: CreditCard,
     label: 'How do I process M-Pesa sales?',
@@ -77,13 +95,16 @@ export const AIAssistantModal: React.FC<AIAssistantModalProps> = ({
   activeTab,
   lowStockCount,
   totalProductsCount,
-  totalSalesToday
+  totalSalesToday,
+  products = [],
+  transactions = [],
+  onOpenPredictiveRestock
 }) => {
   const [messages, setMessages] = useState<Message[]>([
     {
       id: 'init-1',
       sender: 'assistant',
-      text: `Hujambo! 👋 Welcome to **ROFANI Electronics & Boutique**.\n\nI am your **Gemini 3.5 AI Staff Co-Pilot**. Whether you are a new cashier, stock manager, or store clerk, I am here to guide you step-by-step through operating our POS system, issuing KRA tax invoices, transferring stock, or managing customer debts.\n\nClick any quick topic below or ask me any question!`,
+      text: `Hujambo! 👋 Welcome to **ROFANI Electronics & Boutique**.\n\nI am your **Gemini AI Staff Co-Pilot & Inventory Strategist**. I analyze real-time sales velocity across customer transactions to give you **predictive inventory replenishment suggestions**, stockout forecasts, and step-by-step guides for POS sales, KRA tax invoices, and branch transfers.\n\nClick any quick topic below or ask me any question!`,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     }
   ]);
@@ -91,6 +112,12 @@ export const AIAssistantModal: React.FC<AIAssistantModalProps> = ({
   const [inputQuery, setInputQuery] = useState('');
   const [loading, setLoading] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  // Compute replenishment metrics for live context
+  const replenishmentData = useMemo(() => {
+    if (!products || products.length === 0) return null;
+    return calculateReplenishmentPlan(products, transactions, 21, 30);
+  }, [products, transactions]);
 
   if (!isOpen) return null;
 
@@ -110,6 +137,32 @@ export const AIAssistantModal: React.FC<AIAssistantModalProps> = ({
     setLoading(true);
 
     try {
+      // Build top critical items and fast movers summary text for prompt context
+      let criticalItemsText = '';
+      let fastMoversText = '';
+
+      if (replenishmentData) {
+        const criticalItems = replenishmentData.items
+          .filter((i) => i.urgency === 'critical' || i.urgency === 'out_of_stock')
+          .slice(0, 5);
+
+        criticalItemsText = criticalItems
+          .map(
+            (i) =>
+              `${i.productName} (Current Stock: ${i.currentStock} ${i.unit}, Velocity: ${i.dailyVelocity}/day, Runway: ${i.daysRemaining}d, Reorder: ${i.recommendedOrderQty} ${i.unit} ~ KSh ${i.estimatedCost.toLocaleString()})`
+          )
+          .join('; ');
+
+        const fastMovers = replenishmentData.items
+          .filter((i) => i.dailyVelocity > 0)
+          .sort((a, b) => b.dailyVelocity - a.dailyVelocity)
+          .slice(0, 5);
+
+        fastMoversText = fastMovers
+          .map((i) => `${i.productName} (${i.dailyVelocity}/day, ${i.weeklyVelocity}/wk, stock: ${i.currentStock})`)
+          .join('; ');
+      }
+
       const response = await fetch('/api/ai/assistant', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -121,7 +174,10 @@ export const AIAssistantModal: React.FC<AIAssistantModalProps> = ({
             activeTab,
             lowStockCount,
             totalProducts: totalProductsCount,
-            totalSalesToday
+            totalSalesToday,
+            replenishmentSummary: replenishmentData ? replenishmentData.summary : null,
+            criticalItemsText,
+            fastMoversText
           }
         })
       });
@@ -200,6 +256,19 @@ export const AIAssistantModal: React.FC<AIAssistantModalProps> = ({
           </div>
 
           <div className="flex items-center gap-3 shrink-0">
+            {onOpenPredictiveRestock && (
+              <button
+                onClick={() => {
+                  onClose();
+                  onOpenPredictiveRestock();
+                }}
+                className="bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-extrabold px-2.5 py-1 rounded-lg text-xs flex items-center gap-1.5 shadow-sm transition cursor-pointer"
+                title="Open Predictive Restock & Velocity Table"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-amber-300 animate-pulse" />
+                <span>Predictive Restock</span>
+              </button>
+            )}
             {lowStockCount > 0 && (
               <span className="bg-amber-500/10 text-amber-400 border border-amber-500/20 px-2 py-0.5 rounded-md text-[11px] font-bold">
                 ⚠️ {lowStockCount} items low in stock

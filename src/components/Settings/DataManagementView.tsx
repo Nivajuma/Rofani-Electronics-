@@ -63,6 +63,7 @@ interface DataManagementViewProps {
   masterPin?: string;
   onUpdateMasterPin?: (newPin: string) => void;
   onLockNow?: () => void;
+  onOpenAuditLogs?: () => void;
 }
 
 export const DataManagementView: React.FC<DataManagementViewProps> = ({
@@ -92,6 +93,7 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
   masterPin = '1234',
   onUpdateMasterPin,
   onLockNow,
+  onOpenAuditLogs,
 }) => {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -658,7 +660,7 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
                       return;
                     }
                     onUpdateMasterPin?.(inputMasterPin);
-                    triggerNotify(`Master Store PIN updated to: ${inputMasterPin}`);
+                    triggerNotify('Master Store PIN updated successfully.');
                   }}
                   className="px-3.5 py-2 bg-purple-600 hover:bg-purple-500 text-white font-bold rounded-xl text-xs transition shadow-sm"
                 >
@@ -666,7 +668,7 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
                 </button>
               </div>
               <p className="text-[10px] text-slate-400">
-                Default: <span className="font-mono font-bold text-slate-600">{masterPin}</span>. Staff can also use their own individual worker PINs.
+                Staff can also authenticate using their own individual worker security PINs.
               </p>
             </div>
 
@@ -745,6 +747,27 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
                 <div className="font-bold text-xs text-slate-800">Sales Transactions CSV</div>
                 <div className="text-[10px] text-slate-500">{transactions.length} receipts history</div>
               </button>
+
+              {onOpenAuditLogs && (
+                <button
+                  type="button"
+                  onClick={onOpenAuditLogs}
+                  className="bg-purple-50 hover:bg-purple-100 text-purple-900 p-3.5 rounded-xl border border-purple-200 transition text-left space-y-1.5 group md:col-span-3 flex items-center justify-between cursor-pointer"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-purple-100 text-purple-700 rounded-lg group-hover:scale-110 transition">
+                      <ShieldCheck className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <div className="font-bold text-xs text-purple-950">Worker Role Authorization Audit Trail</div>
+                      <div className="text-[10px] text-purple-700">Inspect full audit ledger of worker roles authorizing sensitive actions (expense deletions, catalog edits)</div>
+                    </div>
+                  </div>
+                  <span className="px-3.5 py-1.5 bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs rounded-xl shadow-sm transition">
+                    View Audit Logs →
+                  </span>
+                </button>
+              )}
             </div>
           </div>
 

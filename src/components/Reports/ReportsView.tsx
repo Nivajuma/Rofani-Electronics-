@@ -12,9 +12,10 @@ import {
   Clock,
   Sparkles,
   ChevronRight,
-  Landmark
+  Landmark,
+  ShieldAlert
 } from 'lucide-react';
-import { Transaction, Product, Customer, Supplier, Expense } from '../../types';
+import { Transaction, Product, Customer, Supplier, Expense, SensitiveActionLog } from '../../types';
 import {
   exportSalesReportPDF,
   exportProfitReportPDF,
@@ -23,6 +24,7 @@ import {
   exportSupplierReportPDF,
   exportKRATaxReportPDF
 } from '../../utils/pdfGenerator';
+import { AuditLogsView } from './AuditLogsView';
 
 interface ReportsViewProps {
   transactions: Transaction[];
@@ -30,6 +32,7 @@ interface ReportsViewProps {
   customers: Customer[];
   suppliers: Supplier[];
   expenses: Expense[];
+  auditLogs?: SensitiveActionLog[];
 }
 
 export const ReportsView: React.FC<ReportsViewProps> = ({
@@ -38,9 +41,10 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   customers,
   suppliers,
   expenses,
+  auditLogs = [],
 }) => {
   const [activeReportTab, setActiveReportTab] = useState<
-    'sales' | 'profit' | 'kra_tax' | 'item_movement' | 'customers' | 'suppliers'
+    'sales' | 'profit' | 'kra_tax' | 'item_movement' | 'customers' | 'suppliers' | 'audit_trail'
   >('sales');
 
   const [dateFilter, setDateFilter] = useState<'all' | 'today' | 'week' | 'month'>('all');
@@ -251,6 +255,22 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
           }`}
         >
           <Truck className="w-4 h-4" /> Supplier Directory
+        </button>
+
+        <button
+          onClick={() => setActiveReportTab('audit_trail')}
+          className={`px-4 py-2 rounded-xl font-bold flex items-center gap-2 transition whitespace-nowrap ${
+            activeReportTab === 'audit_trail'
+              ? 'bg-purple-600 text-white shadow-md'
+              : 'bg-slate-900 border border-purple-800/60 text-purple-300 hover:text-white'
+          }`}
+        >
+          <ShieldAlert className="w-4 h-4 text-purple-400" /> Worker Role Audit Trail
+          {auditLogs.length > 0 && (
+            <span className="text-[10px] font-mono px-1.5 py-0.2 bg-purple-950 text-purple-300 rounded-full border border-purple-700">
+              {auditLogs.length}
+            </span>
+          )}
         </button>
       </div>
 
@@ -579,6 +599,11 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             </table>
           </div>
         </div>
+      )}
+
+      {/* 7. SENSITIVE ROLE AUTHORIZATION AUDIT TRAIL */}
+      {activeReportTab === 'audit_trail' && (
+        <AuditLogsView logs={auditLogs} />
       )}
     </div>
   );

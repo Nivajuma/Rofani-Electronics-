@@ -248,6 +248,17 @@ export async function saveExpenseToCloud(exp: Expense): Promise<void> {
   }
 }
 
+export async function deleteExpenseFromCloud(expenseId: string): Promise<void> {
+  const path = `expenses/${expenseId}`;
+  try {
+    const docRef = doc(db, 'expenses', expenseId);
+    await deleteDoc(docRef);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+    throw error;
+  }
+}
+
 // ---------------- RESTOCK RECORDS LIVE SYNC ----------------
 
 export function subscribeToRestockRecords(

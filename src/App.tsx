@@ -1612,7 +1612,23 @@ export default function App() {
   };
 
   const handleDeleteStore = (storeId: string) => {
-    setStores((prev) => prev.filter((s) => s.id !== storeId));
+    setStores((prev) => {
+      const remaining = prev.filter((s) => s.id !== storeId);
+      if (remaining.length === 0) return prev;
+      if (activeStoreId === storeId) {
+        setActiveStoreId(remaining[0].id);
+      }
+      const hasMain = remaining.some((s) => s.isMainBranch);
+      if (!hasMain && remaining[0]) {
+        remaining[0] = { ...remaining[0], isMainBranch: true };
+      }
+      return remaining;
+    });
+  };
+
+  const handleResetDemoStores = () => {
+    setStores(INITIAL_STORES);
+    setActiveStoreId(INITIAL_STORES[0].id);
   };
 
   const handlePlaceOnlineOrder = (newOrderData: Omit<OnlineOrder, 'id' | 'createdAt' | 'orderNumber'>) => {
@@ -2126,6 +2142,8 @@ export default function App() {
           onUpdateMasterPin={handleUpdateMasterPin}
           onLockNow={() => setIsTerminalLocked(true)}
           onOpenAuditLogs={() => setActiveTab('auditlogs')}
+          stores={stores}
+          onOpenStoreManager={() => setShowStoreManagerModal(true)}
         />
       )}
     </>
@@ -3114,6 +3132,7 @@ export default function App() {
         onAddStore={handleAddStore}
         onUpdateStore={handleUpdateStore}
         onDeleteStore={handleDeleteStore}
+        onResetDemoStores={handleResetDemoStores}
         activeStoreId={activeStoreId}
         onSelectActiveStore={(id) => {
           setActiveStoreId(id);

@@ -1,7 +1,9 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Transaction } from '../../types';
 import { exportReceiptPDF } from '../../utils/pdfGenerator';
-import { X, Printer, Download, Share2, MessageSquare, CheckCircle2 } from 'lucide-react';
+import { X, Printer, Download, Share2, MessageSquare, CheckCircle2, Send, Smartphone } from 'lucide-react';
+import { TransactionSmsModal } from './TransactionSmsModal';
+import { getSmsDeliveryLogs, SmsDeliveryRecord } from '../../utils/smsService';
 
 interface ReceiptModalProps {
   transaction: Transaction;
@@ -9,6 +11,19 @@ interface ReceiptModalProps {
 }
 
 export const ReceiptModal: React.FC<ReceiptModalProps> = ({ transaction, onClose }) => {
+  const [showSmsModal, setShowSmsModal] = useState(false);
+  const [latestSms, setLatestSms] = useState<SmsDeliveryRecord | null>(null);
+
+  useEffect(() => {
+    const logs = getSmsDeliveryLogs();
+    const match = logs.find(
+      (l) => l.transactionId === transaction.id || l.receiptNumber === transaction.receiptNumber
+    );
+    if (match) {
+      setLatestSms(match);
+    }
+  }, [transaction]);
+
   // Format receipt message string for WhatsApp and SMS sharing
   const formatReceiptText = () => {
     let msg = `*RECEIPT #${transaction.receiptNumber}*\n`;
@@ -56,6 +71,32 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({ transaction, onClose
             className="p-1 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-white transition"
           >
             <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Automated Transaction Summary SMS Banner */}
+        <div className="px-4 py-2.5 bg-slate-950 border-b border-slate-800 text-xs flex items-center justify-between flex-wrap gap-2">
+          <div className="flex items-center gap-2">
+            <div className={`w-2 h-2 rounded-full ${latestSms ? 'bg-emerald-400 animate-pulse' : 'bg-indigo-400'}`}></div>
+            {latestSms ? (
+              <span className="text-emerald-300 font-medium">
+                Summary SMS sent to <strong className="text-white font-mono">{latestSms.formattedPhone}</strong>{' '}
+                <span className="text-[10px] text-emerald-400 font-mono">({latestSms.status} • {latestSms.id})</span>
+              </span>
+            ) : (
+              <span className="text-slate-300">
+                Customer: <strong className="text-white">{transaction.customerName || 'Walk-in'}</strong>{' '}
+                <span className="font-mono text-indigo-300">({transaction.customerPhone || 'No phone set'})</span>
+              </span>
+            )}
+          </div>
+          <button
+            id="btn-receipt-open-sms-modal"
+            onClick={() => setShowSmsModal(true)}
+            className="px-2.5 py-1 bg-gradient-to-r from-indigo-600 to-sky-600 hover:from-indigo-500 hover:to-sky-500 text-white rounded-lg text-[11px] font-bold transition flex items-center gap-1 shadow"
+          >
+            <Smartphone className="w-3.5 h-3.5" />
+            <span>{latestSms ? 'View / Resend SMS' : '📱 Send Summary SMS'}</span>
           </button>
         </div>
 
@@ -189,10 +230,10 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({ transaction, onClose
             </button>
 
             <button
-              onClick={handleSMSShare}
+              onClick={() => setShowSmsModal(true)}
               className="flex items-center justify-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 text-white py-2 px-3 rounded-xl text-xs font-semibold transition"
             >
-              <MessageSquare className="w-4 h-4" /> Send SMS
+              <MessageSquare className="w-4 h-4" /> {latestSms ? 'Resend SMS' : 'Send SMS'}
             </button>
           </div>
 
@@ -206,6 +247,15 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({ transaction, onClose
           </button>
         </div>
       </div>
+
+      {/* Transaction Summary SMS Modal */}
+      <TransactionSmsModal
+        isOpen={showSmsModal}
+        onClose={() => setShowSmsModal(false)}
+        transaction={transaction}
+        storeName="ROFANI ELECTRONICS AND BOUTIQUE"
+        onSmsSent={(rec) => setLatestSms(rec)}
+      />
     </div>
   );
 };

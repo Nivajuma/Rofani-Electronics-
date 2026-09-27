@@ -33,8 +33,9 @@ import {
   Eye,
   EyeOff
 } from 'lucide-react';
-import { Product, Customer, Supplier, Transaction, Expense, AttendanceRecord, User } from '../../types';
+import { Product, Customer, Supplier, Transaction, Expense, AttendanceRecord, User, StoreLocation } from '../../types';
 import { detectDuplicateProducts, deduplicateProducts } from '../../utils/deduplicate';
+import { DataSnapshotModal } from './DataSnapshotModal';
 
 interface DataManagementViewProps {
   products: Product[];
@@ -45,6 +46,8 @@ interface DataManagementViewProps {
   expenses: Expense[];
   attendanceRecords: AttendanceRecord[];
   allUsers: User[];
+  stores?: StoreLocation[];
+  onOpenStoreManager?: () => void;
   onImportData: (data: any) => void;
   onResetSampleData: () => void;
   onClearTransactions: () => void;
@@ -94,6 +97,8 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
   onUpdateMasterPin,
   onLockNow,
   onOpenAuditLogs,
+  stores = [],
+  onOpenStoreManager,
 }) => {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -112,6 +117,9 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
 
   // Confirm dialogs state
   const [confirmModal, setConfirmModal] = useState<'reset' | 'clear_tx' | 'clear_exp' | null>(null);
+
+  // Full Data Snapshot Modal state
+  const [showSnapshotModal, setShowSnapshotModal] = useState(false);
 
   const triggerNotify = (msg: string) => {
     setSuccessMessage(msg);
@@ -514,6 +522,32 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
             </div>
           </div>
 
+          {/* Store Branches & Multi-Outlet Settings Card */}
+          {onOpenStoreManager && (
+            <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-3">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                <div className="flex items-center gap-2">
+                  <Building2 className="w-5 h-5 text-indigo-600" />
+                  <h3 className="font-bold text-sm text-slate-800">Store Branches & Multi-Outlet Settings</h3>
+                </div>
+                <span className="text-xs bg-indigo-50 text-indigo-700 px-2.5 py-0.5 rounded-full font-bold">
+                  {stores?.length || 4} Outlets
+                </span>
+              </div>
+              <p className="text-xs text-slate-500 leading-relaxed">
+                Edit store branch names, street address, manager assignments, customize demo outlets, and manage inter-branch stock transfers.
+              </p>
+              <button
+                type="button"
+                onClick={onOpenStoreManager}
+                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl text-xs transition flex items-center gap-2 shadow-sm cursor-pointer"
+              >
+                <Building2 className="w-4 h-4" />
+                <span>Open Branch & Store Editor</span>
+              </button>
+            </div>
+          )}
+
           {/* Business Profile */}
           <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-4">
             <div className="flex items-center gap-2 border-b border-slate-100 pb-3">
@@ -708,8 +742,38 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
             </div>
 
             <p className="text-xs text-slate-500">
-              Download complete, unencrypted backups of your system state. You can restore this file at any time on any computer or store terminal.
+              Download complete backups of your system state. You can restore this file at any time on any computer or store terminal.
             </p>
+
+            {/* FULL ENCRYPTED DATA SNAPSHOT CARD */}
+            <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 border-2 border-indigo-500/50 rounded-2xl p-4.5 text-white shadow-md flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+              <div className="flex items-start gap-3.5">
+                <div className="w-11 h-11 bg-indigo-500/20 border border-indigo-400/40 rounded-xl flex items-center justify-center text-indigo-300 shrink-0 shadow-inner">
+                  <Lock className="w-5 h-5 text-sky-300" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h4 className="font-extrabold text-sm text-white">Download Full Data Snapshot</h4>
+                    <span className="bg-sky-500/20 text-sky-200 border border-sky-400/40 text-[10px] px-2 py-0.5 rounded-full font-mono font-bold">
+                      AES-256 / Unified CSV
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-300 mt-0.5">
+                    Export all collections ({products.length} products, {transactions.length} sales, {customers.length} customers) into a single encrypted JSON or unified CSV file.
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                id="btn-open-full-data-snapshot"
+                onClick={() => setShowSnapshotModal(true)}
+                className="px-4 py-2.5 bg-gradient-to-r from-sky-500 to-indigo-600 hover:from-sky-400 hover:to-indigo-500 text-white font-extrabold rounded-xl text-xs flex items-center gap-2 shadow-lg shadow-indigo-600/30 transition shrink-0 active:scale-95 cursor-pointer"
+              >
+                <Download className="w-4 h-4" />
+                <span>Download Full Snapshot</span>
+              </button>
+            </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
               <button
@@ -930,6 +994,23 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
           </div>
         </div>
       )}
+
+      {/* FULL DATA SNAPSHOT MODAL */}
+      <DataSnapshotModal
+        isOpen={showSnapshotModal}
+        onClose={() => setShowSnapshotModal(false)}
+        products={products}
+        transactions={transactions}
+        customers={customers}
+        suppliers={suppliers}
+        expenses={expenses}
+        attendanceRecords={attendanceRecords}
+        allUsers={allUsers}
+        stores={stores}
+        storeName={storeName}
+        masterPin={masterPin}
+        onRestoreSnapshot={onImportData}
+      />
     </div>
   );
 };

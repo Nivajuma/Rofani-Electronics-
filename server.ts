@@ -591,6 +591,387 @@ Generate high-converting, realistic copy in JSON format with these exact keys:
     }
   });
 
+  // ==========================================
+  // SAFARICOM M-PESA DARAJA & STK PUSH API
+  // ==========================================
+  interface MpesaTransactionState {
+    checkoutRequestId: string;
+    merchantRequestId: string;
+    phoneNumber: string;
+    amount: number;
+    accountReference: string;
+    storeName: string;
+    tillNumber: string;
+    status: 'PENDING' | 'COMPLETED' | 'CANCELLED' | 'FAILED';
+    mpesaReceiptNumber?: string;
+    smsNotification?: string;
+    createdAt: string;
+  }
+
+  const mpesaTxStore = new Map<string, MpesaTransactionState>();
+
+  // Helper to generate Safaricom receipt code (e.g. QHJ8291KLM)
+  const generateReceiptCode = () => {
+    const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+    const prefixes = ['Q', 'R', 'S', 'T'];
+    let code = prefixes[Math.floor(Math.random() * prefixes.length)];
+    for (let i = 0; i < 9; i++) {
+      code += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    return code;
+  };
+
+  // Endpoint 1: Dispatch STK Push Prompt to Customer Phone
+  app.post('/api/mpesa/stkpush', async (req, res) => {
+    try {
+      const {
+        phoneNumber,
+        amount,
+        accountReference = 'POS-SALE',
+        transactionDesc = 'Store Purchase',
+        storeName = 'ROFANI ELECTRONICS & BOUTIQUE',
+        tillNumber = '174379',
+        shortcodeType = 'till',
+        checkoutRequestId: clientReqId,
+        mode = 'instant_demo',
+      } = req.body;
+
+      if (!phoneNumber || !amount) {
+        res.status(400).json({ error: 'phoneNumber and amount are required' });
+        return;
+      }
+
+      // Normalize phone number to 254...
+      let cleanPhone = String(phoneNumber).replace(/[\s\-\(\)\+]/g, '');
+      if (cleanPhone.startsWith('0')) {
+        cleanPhone = '254' + cleanPhone.slice(1);
+      } else if (cleanPhone.startsWith('7') || cleanPhone.startsWith('1')) {
+        cleanPhone = '254' + cleanPhone;
+      }
+
+      const checkoutRequestId = clientReqId || `ws_CO_${Date.now()}_${Math.floor(Math.random() * 100000)}`;
+      const merchantRequestId = `REQ_${Date.now()}`;
+
+      // Check if real Daraja environment variables exist for live execution
+      const consumerKey = process.env.MPESA_CONSUMER_KEY;
+      const consumerSecret = process.env.MPESA_CONSUMER_SECRET;
+      const passkey = process.env.MPESA_PASSKEY;
+      const shortcode = process.env.MPESA_SHORTCODE || tillNumber;
+
+      if (mode === 'live_daraja' && consumerKey && consumerSecret && passkey) {
+        try {
+          // Live Safaricom Daraja STK Push flow
+          const authBuffer = Buffer.from(`${consumerKey}:${consumerSecret}`).toString('base64');
+          const tokenRes = await fetch('https://api.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials', {
+            headers: { Authorization: `Basic ${authBuffer}` },
+          });
+
+          if (tokenRes.ok) {
+            const tokenData = (await tokenRes.json()) as any;
+            const accessToken = tokenData.access_token;
+
+            const timestamp = new Date()
+              .toISOString()
+              .replace(/[^0-9]/g, '')
+              .slice(0, 14); // YYYYMMDDHHmmss
+            const password = Buffer.from(`${shortcode}${passkey}${timestamp}`).toString('base64');
+
+            const stkRes = await fetch('https://api.safaricom.co.ke/mpesa/stkpush/v1/processrequest', {
+              method: 'POST',
+              headers: {
+                Authorization: `Bearer ${accessToken}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                BusinessShortCode: shortcode,
+                Password: password,
+                Timestamp: timestamp,
+                TransactionType: shortcodeType === 'till' ? 'CustomerBuyGoodsOnline' : 'CustomerPayBillOnline',
+                Amount: Math.round(Number(amount)),
+                PartyA: cleanPhone,
+                PartyB: shortcode,
+                PhoneNumber: cleanPhone,
+                CallBackURL: `https://${req.headers.host || 'localhost:3000'}/api/mpesa/callback`,
+                AccountReference: accountReference,
+                TransactionDesc: transactionDesc,
+              }),
+            });
+
+            const stkData = (await stkRes.json()) as any;
+            if (stkRes.ok && stkData.ResponseCode === '0') {
+              mpesaTxStore.set(stkData.CheckoutRequestID || checkoutRequestId, {
+                checkoutRequestId: stkData.CheckoutRequestID || checkoutRequestId,
+                merchantRequestId: stkData.MerchantRequestID || merchantRequestId,
+                phoneNumber: cleanPhone,
+                amount: Number(amount),
+                accountReference,
+                storeName,
+                tillNumber,
+                status: 'PENDING',
+                createdAt: new Date().toISOString(),
+              });
+
+              res.json({
+                success: true,
+                checkoutRequestId: stkData.CheckoutRequestID,
+                merchantRequestId: stkData.MerchantRequestID,
+                responseCode: stkData.ResponseCode,
+                responseDescription: stkData.ResponseDescription,
+                customerMessage: stkData.CustomerMessage,
+              });
+              return;
+            }
+          }
+        } catch (darajaErr) {
+          console.warn('Live Daraja call failed, using high-fidelity local simulator:', darajaErr);
+        }
+      }
+
+      // Default/Demo/Simulated STK Push
+      const txRecord: MpesaTransactionState = {
+        checkoutRequestId,
+        merchantRequestId,
+        phoneNumber: cleanPhone,
+        amount: Number(amount),
+        accountReference,
+        storeName,
+        tillNumber,
+        status: 'PENDING',
+        createdAt: new Date().toISOString(),
+      };
+      mpesaTxStore.set(checkoutRequestId, txRecord);
+
+      res.json({
+        success: true,
+        checkoutRequestId,
+        merchantRequestId,
+        responseCode: '0',
+        responseDescription: 'Success. Request accepted for processing',
+        customerMessage: `Success. Lipa Na M-PESA STK Push prompt sent to customer ${cleanPhone}.`,
+      });
+    } catch (err: any) {
+      console.error('M-PESA STK Push error:', err);
+      res.status(500).json({ error: err.message || 'Internal server error processing M-PESA request' });
+    }
+  });
+
+  // Endpoint 2: Query Transaction Status
+  app.get('/api/mpesa/query/:checkoutRequestId', (req, res) => {
+    const { checkoutRequestId } = req.params;
+    const tx = mpesaTxStore.get(checkoutRequestId);
+
+    if (!tx) {
+      res.json({
+        checkoutRequestId,
+        status: 'PENDING',
+      });
+      return;
+    }
+
+    res.json(tx);
+  });
+
+  // Endpoint 3: Simulate Customer PIN Entry
+  app.post('/api/mpesa/simulate-pin', (req, res) => {
+    const { checkoutRequestId, action = 'CONFIRM' } = req.body;
+    let tx = mpesaTxStore.get(checkoutRequestId);
+
+    if (!tx) {
+      tx = {
+        checkoutRequestId: checkoutRequestId || `ws_CO_${Date.now()}`,
+        merchantRequestId: `REQ_${Date.now()}`,
+        phoneNumber: '254712345678',
+        amount: 1000,
+        accountReference: 'POS-SALE',
+        storeName: 'ROFANI ELECTRONICS & BOUTIQUE',
+        tillNumber: '174379',
+        status: 'PENDING',
+        createdAt: new Date().toISOString(),
+      };
+      mpesaTxStore.set(checkoutRequestId, tx);
+    }
+
+    if (action === 'CANCEL') {
+      tx.status = 'CANCELLED';
+      res.json({ success: false, status: 'CANCELLED', message: 'Transaction cancelled by customer' });
+      return;
+    }
+
+    const receipt = generateReceiptCode();
+    const now = new Date();
+    const dateStr = now.toLocaleDateString('en-GB');
+    const timeStr = now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+
+    tx.status = 'COMPLETED';
+    tx.mpesaReceiptNumber = receipt;
+    tx.smsNotification = `${receipt} Confirmed. Ksh ${tx.amount.toLocaleString(undefined, { minimumFractionDigits: 2 })} sent to ${tx.storeName.toUpperCase()} (Till ${tx.tillNumber}) on ${dateStr} at ${timeStr}. New M-PESA balance is Ksh ${(tx.amount * 3.2 + 1540).toFixed(2)}. Transaction cost, Ksh 0.00.`;
+
+    res.json({
+      success: true,
+      status: 'COMPLETED',
+      mpesaReceiptNumber: receipt,
+      smsNotification: tx.smsNotification,
+    });
+  });
+
+  // Endpoint 4: Safaricom Webhook Callback Receiver
+  app.post('/api/mpesa/callback', (req, res) => {
+    try {
+      const callbackData = req.body?.Body?.stkCallback;
+      if (callbackData) {
+        const checkoutRequestId = callbackData.CheckoutRequestID;
+        const resultCode = callbackData.ResultCode;
+        const tx = mpesaTxStore.get(checkoutRequestId);
+
+        if (tx) {
+          if (resultCode === 0) {
+            const metaItems = callbackData.CallbackMetadata?.Item || [];
+            const receiptItem = metaItems.find((item: any) => item.Name === 'MpesaReceiptNumber');
+            tx.status = 'COMPLETED';
+            tx.mpesaReceiptNumber = receiptItem ? receiptItem.Value : generateReceiptCode();
+          } else {
+            tx.status = 'FAILED';
+          }
+        }
+      }
+    } catch (e) {
+      console.error('Error handling Safaricom callback:', e);
+    }
+    res.json({ ResultCode: 0, ResultDesc: 'Accepted' });
+  });
+
+  // ==========================================
+  // MOCK TRANSACTION SUMMARY SMS GATEWAY API
+  // ==========================================
+  interface SmsLogRecord {
+    id: string;
+    transactionId: string;
+    receiptNumber: string;
+    phoneNumber: string;
+    customerName: string;
+    messageText: string;
+    senderId: string;
+    status: 'DELIVERED' | 'SENT' | 'FAILED';
+    carrier: string;
+    cost: number;
+    segments: number;
+    sentAt: string;
+    details: string;
+  }
+
+  const smsLogsStore: SmsLogRecord[] = [];
+
+  // Endpoint: Send Automated Transaction Summary SMS
+  app.post('/api/sms/send-transaction-summary', (req, res) => {
+    try {
+      const {
+        phoneNumber,
+        customerName = 'Valued Customer',
+        transactionId,
+        receiptNumber,
+        summaryMessage,
+        storeName = 'ROFANI',
+        senderId = 'ROFANI',
+        grandTotal,
+        amountPaid,
+        balanceDue,
+      } = req.body;
+
+      if (!phoneNumber || !summaryMessage) {
+        res.status(400).json({ error: 'phoneNumber and summaryMessage are required' });
+        return;
+      }
+
+      // Normalize phone number
+      let cleanPhone = String(phoneNumber).replace(/[\s\-\(\)\+]/g, '');
+      if (cleanPhone.startsWith('0')) {
+        cleanPhone = '254' + cleanPhone.slice(1);
+      } else if (cleanPhone.startsWith('7') || cleanPhone.startsWith('1')) {
+        cleanPhone = '254' + cleanPhone;
+      }
+
+      const segments = Math.ceil(summaryMessage.length / 160) || 1;
+      let carrier = 'SAFARICOM';
+      if (cleanPhone.startsWith('25473') || cleanPhone.startsWith('25475') || cleanPhone.startsWith('25478') || cleanPhone.startsWith('25410')) {
+        carrier = 'AIRTEL';
+      } else if (cleanPhone.startsWith('25477')) {
+        carrier = 'TELKOM';
+      }
+
+      const messageId = `MSG-AT-${Date.now().toString().slice(-6)}-${Math.floor(100 + Math.random() * 900)}`;
+      const newSmsRecord: SmsLogRecord = {
+        id: messageId,
+        transactionId: transactionId || `tx-${Date.now()}`,
+        receiptNumber: receiptNumber || 'INV-SALE',
+        phoneNumber: cleanPhone,
+        customerName,
+        messageText: summaryMessage,
+        senderId: senderId.slice(0, 11).toUpperCase(),
+        status: 'DELIVERED',
+        carrier,
+        cost: parseFloat((segments * 0.8).toFixed(2)),
+        segments,
+        sentAt: new Date().toISOString(),
+        details: `Delivered to handset via ${carrier} bulk SMS gateway channel`,
+      };
+
+      smsLogsStore.unshift(newSmsRecord);
+      if (smsLogsStore.length > 200) {
+        smsLogsStore.pop();
+      }
+
+      console.log(`[Mock SMS Gateway] Automated summary SMS sent to +${cleanPhone} (Ref: ${messageId})`);
+
+      res.json({
+        success: true,
+        messageId,
+        status: 'DELIVERED',
+        carrier,
+        cost: `KES ${newSmsRecord.cost.toFixed(2)}`,
+        segments,
+        sentAt: newSmsRecord.sentAt,
+        details: newSmsRecord.details,
+      });
+    } catch (err: any) {
+      console.error('Error sending transaction SMS:', err);
+      res.status(500).json({ error: err.message || 'Failed to dispatch SMS notification' });
+    }
+  });
+
+  // Endpoint: Get SMS Gateway Delivery Logs
+  app.get('/api/sms/logs', (req, res) => {
+    res.json({
+      success: true,
+      count: smsLogsStore.length,
+      logs: smsLogsStore,
+    });
+  });
+
+  // Endpoint: Resend / Retry SMS
+  app.post('/api/sms/retry', (req, res) => {
+    const { messageId } = req.body;
+    const existing = smsLogsStore.find((log) => log.id === messageId);
+    if (!existing) {
+      res.status(404).json({ error: 'Message not found in delivery logs' });
+      return;
+    }
+
+    const retriedRecord: SmsLogRecord = {
+      ...existing,
+      id: `MSG-AT-${Date.now().toString().slice(-6)}-${Math.floor(100 + Math.random() * 900)}`,
+      sentAt: new Date().toISOString(),
+      status: 'DELIVERED',
+      details: `Re-sent successfully to handset via ${existing.carrier}`,
+    };
+
+    smsLogsStore.unshift(retriedRecord);
+    res.json({
+      success: true,
+      record: retriedRecord,
+      message: `SMS re-sent successfully to +${existing.phoneNumber}`,
+    });
+  });
+
   // Health check endpoint
   app.get('/api/health', (req, res) => {
     res.json({ status: 'ok', time: new Date().toISOString() });

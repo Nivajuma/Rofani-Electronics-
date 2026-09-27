@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { X, CreditCard, DollarSign, CheckCircle2, AlertCircle, Phone, FileText } from 'lucide-react';
+import { X, CreditCard, DollarSign, CheckCircle2, AlertCircle, Phone, FileText, Smartphone } from 'lucide-react';
 import { Customer, PaymentMethod, User } from '../../types';
+import { MpesaPromptModal } from '../POS/MpesaPromptModal';
 
 interface CustomerDebtPaymentModalProps {
   isOpen: boolean;
@@ -31,6 +32,7 @@ export const CustomerDebtPaymentModal: React.FC<CustomerDebtPaymentModalProps> =
   const [reference, setReference] = useState('');
   const [notes, setNotes] = useState('');
   const [error, setError] = useState('');
+  const [showMpesaPromptModal, setShowMpesaPromptModal] = useState(false);
 
   const handleQuickAmount = (val: number) => {
     setAmount(val.toString());
@@ -203,6 +205,33 @@ export const CustomerDebtPaymentModal: React.FC<CustomerDebtPaymentModalProps> =
             </div>
           </div>
 
+          {/* M-PESA STK Push Quick Prompt Button */}
+          {paymentMethod === 'mpesa' && (
+            <div className="bg-emerald-950/40 border border-emerald-500/30 p-3.5 rounded-2xl space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-emerald-400 font-extrabold flex items-center gap-1.5 text-xs">
+                  <Smartphone className="w-4 h-4 text-emerald-300" />
+                  <span>Prompt Customer M-PESA Phone (STK Push)</span>
+                </span>
+                <span className="text-[10px] text-emerald-300/80 font-mono">
+                  {customer.phone && customer.phone !== 'N/A' ? customer.phone : 'Enter phone in prompt'}
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-300">
+                Customer provides their Safaricom phone number and enters their PIN on their phone when the prompt appears.
+              </p>
+              <button
+                type="button"
+                id="btn-customer-debt-mpesa-prompt"
+                onClick={() => setShowMpesaPromptModal(true)}
+                className="w-full bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-500 hover:to-green-500 text-white font-extrabold py-2.5 px-4 rounded-xl text-xs transition flex items-center justify-center gap-2 shadow-lg shadow-emerald-950/40"
+              >
+                <Smartphone className="w-4 h-4 text-emerald-100" />
+                <span>📱 Prompt Customer's Phone (KSh {parseFloat(amount || '0').toLocaleString(undefined, { minimumFractionDigits: 2 })})</span>
+              </button>
+            </div>
+          )}
+
           {/* Reference / M-Pesa Code */}
           <div>
             <label className="block text-slate-300 font-semibold mb-1">
@@ -252,6 +281,20 @@ export const CustomerDebtPaymentModal: React.FC<CustomerDebtPaymentModalProps> =
           </div>
         </form>
       </div>
+
+      {/* M-PESA STK Push Modal */}
+      <MpesaPromptModal
+        isOpen={showMpesaPromptModal}
+        onClose={() => setShowMpesaPromptModal(false)}
+        amount={parseFloat(amount) || currentDebt}
+        initialPhone={customer.phone && customer.phone !== 'N/A' ? customer.phone : ''}
+        customerName={customer.name}
+        accountReference={`DEBT-${customer.name.slice(0, 6).toUpperCase()}`}
+        onPaymentSuccess={(receiptCode, phone, paidAmt) => {
+          setReference(receiptCode);
+          setNotes(`Paid via Lipa Na M-PESA STK Push (${receiptCode}) from mobile ${phone}`);
+        }}
+      />
     </div>
   );
 };

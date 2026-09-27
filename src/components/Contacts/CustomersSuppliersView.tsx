@@ -459,6 +459,21 @@ export const CustomersSuppliersView: React.FC<CustomersSuppliersViewProps> = ({
               <span>Export PDF Report</span>
             </button>
 
+            {activeTab === 'customers' && (
+              <button
+                id="btn-ai-customer-promotions"
+                onClick={() => {
+                  setSelectedPromoCustomer(null);
+                  setIsPromoGeneratorOpen(true);
+                }}
+                className="px-4 py-2.5 bg-gradient-to-r from-purple-600 via-indigo-600 to-sky-600 hover:from-purple-500 hover:to-sky-500 text-white rounded-2xl text-xs font-extrabold transition flex items-center gap-1.5 shadow-lg shadow-indigo-600/30 border border-indigo-400/40 cursor-pointer"
+                title="AI Customer Promotion Generator: Create targeted SMS, WhatsApp, and discount campaigns"
+              >
+                <Sparkles className="w-4 h-4 text-amber-300 animate-pulse" />
+                <span>AI Promo Generator</span>
+              </button>
+            )}
+
             {activeTab === 'customers' ? (
               <button
                 onClick={() => {
@@ -750,6 +765,17 @@ export const CustomersSuppliersView: React.FC<CustomersSuppliersViewProps> = ({
 
                               <button
                                 onClick={() => {
+                                  setSelectedPromoCustomer(c);
+                                  setIsPromoGeneratorOpen(true);
+                                }}
+                                title={`Generate AI Promotion Campaign for ${c.name}`}
+                                className="p-1.5 bg-purple-950/80 hover:bg-purple-900 border border-purple-700/60 text-purple-300 rounded-xl transition cursor-pointer"
+                              >
+                                <Sparkles className="w-4 h-4 text-amber-300" />
+                              </button>
+
+                              <button
+                                onClick={() => {
                                   setEditingCustomer(c);
                                   setIsCustomerEditOpen(true);
                                 }}
@@ -1036,6 +1062,19 @@ export const CustomersSuppliersView: React.FC<CustomersSuppliersViewProps> = ({
         suppliers={suppliers}
         onImportCustomers={onImportCustomers}
         onImportSuppliers={onImportSuppliers}
+      />
+
+      {/* MODAL: AI CUSTOMER PROMOTION & MARKETING GENERATOR */}
+      <CustomerPromotionGeneratorModal
+        isOpen={isPromoGeneratorOpen}
+        onClose={() => {
+          setIsPromoGeneratorOpen(false);
+          setSelectedPromoCustomer(null);
+        }}
+        customers={customers}
+        products={products}
+        initialCustomer={selectedPromoCustomer}
+        currentUser={currentUser}
       />
     </div>
   );

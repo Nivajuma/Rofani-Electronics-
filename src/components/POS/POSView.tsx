@@ -35,6 +35,9 @@ import {
 import { Product, CartItem, Customer, PaymentMethod, PaymentBreakdown, Transaction, User as Employee, BarcodeScanLog } from '../../types';
 import { BarcodeScannerModal } from './BarcodeScannerModal';
 import { ReceiptModal } from './ReceiptModal';
+import { MpesaPromptModal } from './MpesaPromptModal';
+import { SmsDeliveryLogsModal } from './SmsDeliveryLogsModal';
+import { isAutoSmsEnabled, setAutoSmsEnabled, sendTransactionSummarySms } from '../../utils/smsService';
 import { computeProductsPerformance, ProductPerformanceInfo } from '../../utils/salesPerformance';
 import { hasWorkerPermission } from '../../utils/permissions';
 
@@ -191,6 +194,16 @@ export const POSView: React.FC<POSViewProps> = ({
   const [showNewSaleConfirmModal, setShowNewSaleConfirmModal] = useState(false);
   const [posNotice, setPosNotice] = useState<{ message: string; type: 'success' | 'warning' | 'info' } | null>(null);
 
+  // M-PESA STK Push Modal State
+  const [showMpesaPromptModal, setShowMpesaPromptModal] = useState(false);
+  const [mpesaPromptAmount, setMpesaPromptAmount] = useState<number>(0);
+  const [mpesaActiveRowIndex, setMpesaActiveRowIndex] = useState<number | null>(null);
+  const [isDirectMpesaCheckout, setIsDirectMpesaCheckout] = useState(false);
+
+  // Automated Transaction Summary SMS State
+  const [showSmsLogsModal, setShowSmsLogsModal] = useState(false);
+  const [autoSmsSummary, setAutoSmsSummary] = useState(isAutoSmsEnabled());
+
   // Core New Sale Action Execution
   const executeNewSale = () => {
     setCart([]);
@@ -202,6 +215,7 @@ export const POSView: React.FC<POSViewProps> = ({
     setSearchTerm('');
     setSelectedCategory('All');
     setShowCheckoutModal(false);
+    setShowMpesaPromptModal(false);
     setShowNewSaleConfirmModal(false);
     setPosNotice({ message: 'New sale initialized! Register is fresh and ready for items.', type: 'success' });
     setTimeout(() => {
@@ -424,6 +438,148 @@ export const POSView: React.FC<POSViewProps> = ({
     });
   };
 
+  // Direct 1-Tap M-PESA STK Push Prompt for Current Cart
+  const handleOpenMpesaStkPushDirect = () => {
+    if (cart.length === 0) return;
+    setMpesaPromptAmount(grandTotal);
+    setMpesaActiveRowIndex(null);
+    setIsDirectMpesaCheckout(true);
+    setShowMpesaPromptModal(true);
+  };
+
+  // Callback when customer finishes PIN on phone
+  const handleMpesaPromptSuccess = (receiptCode: string, phone: string, paidAmount: number, sms?: string) => {
+    if (mpesaActiveRowIndex !== null) {
+      // Update specific row in checkout modal
+      setPaymentEntries((prev) =>
+        prev.map((row, idx) => {
+          if (idx === mpesaActiveRowIndex) {
+            return {
+              ...row,
+              method: 'mpesa',
+              amount: paidAmount,
+              reference: receiptCode,
+            };
+          }
+          return row;
+        })
+      );
+      setPosNotice({
+        message: `M-PESA prompt verified! Code: ${receiptCode} (KSh ${paidAmount.toLocaleString()})`,
+        type: 'success',
+      });
+    } else {
+      // Direct M-Pesa sale
+      setPaymentEntries([
+        {
+          method: 'mpesa',
+          amount: paidAmount,
+          reference: receiptCode,
+        },
+      ]);
+      setPosNotice({
+        message: `M-PESA STK payment confirmed for ${phone}! Code: ${receiptCode}`,
+        type: 'success',
+      });
+    }
+  };
+
+  // Instant finalize sale directly after customer enters M-Pesa PIN
+  const handleMpesaDirectFinalize = (receiptCode: string, phone: string) => {
+    const receiptNo = `INV-${new Date().getFullYear()}${(new Date().getMonth() + 1).toString().padStart(2, '0')}${new Date().getDate().toString().padStart(2, '0')}-${Math.floor(100 + Math.random() * 900)}`;
+    const finalTxDate = saleDate ? new Date(saleDate).toISOString() : new Date().toISOString();
+
+    const newTx: Transaction = {
+      id: `tx-${Date.now()}`,
+      receiptNumber: receiptNo,
+      date: finalTxDate,
+      items: [...cart],
+      subtotal,
+      discountTotal: numDiscount,
+      discountAuthorizedBy: numDiscount > 0 ? (discountAuthorizedBy || `${currentUser.name} (Admin)`) : undefined,
+      taxTotal,
+      grandTotal,
+      amountPaid: grandTotal,
+      balanceDue: 0,
+      paymentStatus: 'Paid',
+      payments: [
+        {
+          method: 'mpesa',
+          amount: grandTotal,
+          reference: receiptCode,
+        },
+      ],
+      customerId: selectedCustomer.id,
+      customerName: selectedCustomer.name,
+      customerPhone: phone || selectedCustomer.phone,
+      cashierName: currentUser.name,
+      cashierId: currentUser.id,
+      salesRepId: selectedSalesRep.id,
+      salesRepName: selectedSalesRep.name,
+      cashierCommissionRate: currentCartComm.rate,
+      cashierCommissionAmount: currentCartComm.amount,
+      commissionModelApplied: currentCartComm.modelDescription,
+      notes: `Lipa Na M-PESA STK Push (${receiptCode}) - Customer: ${phone}`,
+    };
+
+    // Update Product Stock Levels
+    const updatedProducts = products.map((prod) => {
+      const cartMatch = cart.find((c) => c.product.id === prod.id);
+      if (cartMatch) {
+        return {
+          ...prod,
+          stockQuantity: Math.max(0, prod.stockQuantity - cartMatch.quantity),
+          updatedAt: new Date().toISOString().slice(0, 10),
+        };
+      }
+      return prod;
+    });
+
+    // Update Customer Purchases
+    const updatedCustomers = customers.map((cust) => {
+      if (cust.id === selectedCustomer.id) {
+        return {
+          ...cust,
+          totalPurchases: cust.totalPurchases + grandTotal,
+        };
+      }
+      return cust;
+    });
+
+    onCompleteSale(newTx, updatedProducts, updatedCustomers);
+
+    // Automated Transaction Summary SMS Notification via Mock Gateway
+    const targetPhone = phone || selectedCustomer.phone;
+    if (autoSmsSummary && targetPhone && targetPhone !== 'N/A') {
+      sendTransactionSummarySms(newTx, targetPhone, { storeName: 'ROFANI' })
+        .then((res) => {
+          setPosNotice({
+            type: 'success',
+            message: `Sale ${newTx.receiptNumber} completed! 📱 Automated summary SMS delivered to ${res.record.formattedPhone} (${res.record.id}).`,
+          });
+        })
+        .catch((err) => {
+          console.warn('Automated SMS notification warning:', err);
+        });
+    }
+
+    setShowCheckoutModal(false);
+    setCart([]);
+    setDiscountAmount(0);
+    if (!hasWorkerPermission(currentUser, 'canGiveDiscounts')) {
+      setDiscountAuthorizedBy(null);
+    }
+    if (hasWorkerPermission(currentUser, 'canPreviewReceipt')) {
+      setCompletedTx(newTx);
+    } else {
+      setPosNotice({
+        type: 'success',
+        message: `Sale ${newTx.receiptNumber} completed via M-PESA (${receiptCode})!`,
+      });
+      executeNewSale();
+    }
+  };
+
   // Supervisor / Admin Discount PIN verification handler
   const handleVerifyAdminPinForDiscount = (e: React.FormEvent) => {
     e.preventDefault();
@@ -518,6 +674,21 @@ export const POSView: React.FC<POSViewProps> = ({
     });
 
     onCompleteSale(newTx, updatedProducts, updatedCustomers);
+
+    // Automated Transaction Summary SMS Notification via Mock Gateway
+    if (autoSmsSummary && newTx.customerPhone && newTx.customerPhone !== 'N/A') {
+      sendTransactionSummarySms(newTx, newTx.customerPhone, { storeName: 'ROFANI' })
+        .then((res) => {
+          setPosNotice({
+            type: 'success',
+            message: `Sale ${newTx.receiptNumber} completed! 📱 Automated summary SMS delivered to ${res.record.formattedPhone} (${res.record.id}).`,
+          });
+        })
+        .catch((err) => {
+          console.warn('Automated SMS notification warning:', err);
+        });
+    }
+
     setShowCheckoutModal(false);
     setCart([]);
     setDiscountAmount(0);
@@ -634,6 +805,17 @@ export const POSView: React.FC<POSViewProps> = ({
             >
               <Scan className="w-4 h-4" />
               <span className="hidden sm:inline">Scan</span>
+            </button>
+
+            {/* Transaction SMS Logs Button */}
+            <button
+              id="btn-pos-view-sms-logs"
+              onClick={() => setShowSmsLogsModal(true)}
+              className="bg-indigo-950/80 hover:bg-indigo-900 border border-indigo-800 text-indigo-300 font-bold px-3 py-2.5 rounded-xl text-xs transition flex items-center gap-1.5 shrink-0 shadow-sm"
+              title="View Automated Transaction Summary SMS Delivery Logs"
+            >
+              <Smartphone className="w-3.5 h-3.5 text-indigo-400" />
+              <span className="hidden sm:inline">SMS Logs</span>
             </button>
           </div>
 
@@ -1223,33 +1405,53 @@ export const POSView: React.FC<POSViewProps> = ({
           </div>
 
           {/* Checkout & New Sale Action Buttons */}
-          <div className="flex items-center gap-2">
-            {cart.length > 0 && (
-              <button
-                id="btn-pos-clear-new-sale"
-                type="button"
-                onClick={handleTriggerNewSale}
-                className="bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 font-bold py-3 px-3 rounded-xl transition flex items-center justify-center gap-1.5 text-xs shrink-0"
-                title="Discard current items and start a fresh sale"
-              >
-                <RotateCcw className="w-3.5 h-3.5 text-slate-400" />
-                <span className="hidden sm:inline">New Sale</span>
-              </button>
-            )}
+          <div className="space-y-2">
+            {/* Quick 1-Tap M-PESA STK Push Prompt Button */}
             <button
-              id="btn-pos-checkout"
+              id="btn-pos-mpesa-fast-prompt"
+              type="button"
               disabled={cart.length === 0 || !hasWorkerPermission(currentUser, 'canMakeSales')}
-              onClick={handleOpenCheckout}
-              className="flex-1 bg-gradient-to-r from-sky-500 to-indigo-600 hover:from-sky-400 hover:to-indigo-500 disabled:opacity-50 text-white font-bold py-3 px-4 rounded-xl shadow-lg transition flex items-center justify-center gap-2 text-sm"
-              title={!hasWorkerPermission(currentUser, 'canMakeSales') ? 'Worker does not have "Can make sales" permission' : undefined}
+              onClick={handleOpenMpesaStkPushDirect}
+              className="w-full bg-gradient-to-r from-emerald-600 via-emerald-500 to-green-600 hover:from-emerald-500 hover:to-green-500 disabled:opacity-40 text-white font-extrabold py-3 px-4 rounded-xl shadow-lg shadow-emerald-950/40 transition flex items-center justify-center gap-2 text-xs sm:text-sm border border-emerald-400/40 group"
+              title="Customer gives mobile number -> SMS/SIM STK prompt sent to customer phone to enter PIN"
             >
-              <CreditCard className="w-4 h-4" />
+              <div className="w-5 h-5 rounded-md bg-white/20 flex items-center justify-center font-black text-xs text-white shadow-sm group-hover:scale-105 transition">
+                M
+              </div>
+              <Smartphone className="w-4 h-4 text-emerald-100" />
               <span>
-                {!hasWorkerPermission(currentUser, 'canMakeSales')
-                  ? 'Sales Permission Restricted'
-                  : `Process Payment (KSh ${grandTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })})`}
+                📱 Prompt Customer M-PESA (STK Push) • KSh {grandTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}
               </span>
             </button>
+
+            <div className="flex items-center gap-2">
+              {cart.length > 0 && (
+                <button
+                  id="btn-pos-clear-new-sale"
+                  type="button"
+                  onClick={handleTriggerNewSale}
+                  className="bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 font-bold py-3 px-3 rounded-xl transition flex items-center justify-center gap-1.5 text-xs shrink-0"
+                  title="Discard current items and start a fresh sale"
+                >
+                  <RotateCcw className="w-3.5 h-3.5 text-slate-400" />
+                  <span className="hidden sm:inline">New Sale</span>
+                </button>
+              )}
+              <button
+                id="btn-pos-checkout"
+                disabled={cart.length === 0 || !hasWorkerPermission(currentUser, 'canMakeSales')}
+                onClick={handleOpenCheckout}
+                className="flex-1 bg-gradient-to-r from-sky-500 to-indigo-600 hover:from-sky-400 hover:to-indigo-500 disabled:opacity-50 text-white font-bold py-3 px-4 rounded-xl shadow-lg transition flex items-center justify-center gap-2 text-sm"
+                title={!hasWorkerPermission(currentUser, 'canMakeSales') ? 'Worker does not have "Can make sales" permission' : undefined}
+              >
+                <CreditCard className="w-4 h-4" />
+                <span>
+                  {!hasWorkerPermission(currentUser, 'canMakeSales')
+                    ? 'Sales Permission Restricted'
+                    : `Multi-Pay / Cash / Other (KSh ${grandTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })})`}
+                </span>
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -1346,6 +1548,30 @@ export const POSView: React.FC<POSViewProps> = ({
                         className="w-full bg-slate-900 border border-slate-800 text-slate-300 px-3 py-1.5 rounded-lg text-xs font-mono focus:outline-none"
                       />
                     )}
+
+                    {p.method === 'mpesa' && (
+                      <div className="flex items-center gap-2 pt-0.5">
+                        <button
+                          type="button"
+                          id={`btn-prompt-mpesa-row-${idx}`}
+                          onClick={() => {
+                            setMpesaPromptAmount(Number(p.amount) || grandTotal);
+                            setMpesaActiveRowIndex(idx);
+                            setIsDirectMpesaCheckout(false);
+                            setShowMpesaPromptModal(true);
+                          }}
+                          className="flex-1 bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-500 hover:to-green-500 text-white font-bold py-2 px-3 rounded-lg text-xs transition flex items-center justify-center gap-1.5 shadow-md shadow-emerald-950/40"
+                        >
+                          <Smartphone className="w-3.5 h-3.5 text-emerald-200" />
+                          <span>Prompt Customer M-PESA Phone (STK Push)</span>
+                        </button>
+                        {p.reference && (
+                          <span className="text-[10px] text-emerald-400 font-mono bg-emerald-950/60 border border-emerald-800/80 px-2 py-1.5 rounded-lg flex items-center gap-1 shrink-0 font-bold">
+                            <CheckCircle2 className="w-3 h-3 text-emerald-400" /> STK Verified
+                          </span>
+                        )}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
@@ -1415,6 +1641,30 @@ export const POSView: React.FC<POSViewProps> = ({
                   onChange={(e) => setSaleNotes(e.target.value)}
                   className="w-full bg-slate-950 border border-slate-800 text-slate-200 px-3 py-2 rounded-xl text-xs focus:outline-none"
                 />
+              </div>
+
+              {/* Automated Transaction Summary SMS Option */}
+              <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 flex items-center justify-between">
+                <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-slate-200">
+                  <input
+                    type="checkbox"
+                    checked={autoSmsSummary}
+                    onChange={(e) => {
+                      setAutoSmsSummary(e.target.checked);
+                      setAutoSmsEnabled(e.target.checked);
+                    }}
+                    className="w-4 h-4 rounded border-slate-700 bg-slate-900 text-indigo-600 focus:ring-0"
+                  />
+                  <span className="flex items-center gap-1.5">
+                    <Smartphone className="w-3.5 h-3.5 text-indigo-400" />
+                    <span>Auto-send SMS transaction summary upon completion</span>
+                  </span>
+                </label>
+                <span className="text-[10px] font-mono text-indigo-300">
+                  {selectedCustomer.phone && selectedCustomer.phone !== 'N/A'
+                    ? selectedCustomer.phone
+                    : 'Customer phone required'}
+                </span>
               </div>
             </div>
 
@@ -1667,6 +1917,24 @@ export const POSView: React.FC<POSViewProps> = ({
           </div>
         </div>
       )}
+
+      {/* MODAL 5: M-PESA EXPRESS STK PUSH PROMPT MODAL */}
+      <MpesaPromptModal
+        isOpen={showMpesaPromptModal}
+        onClose={() => setShowMpesaPromptModal(false)}
+        amount={mpesaPromptAmount || grandTotal}
+        initialPhone={selectedCustomer.phone && selectedCustomer.phone !== 'N/A' ? selectedCustomer.phone : ''}
+        customerName={selectedCustomer.name}
+        accountReference={`POS-${cart.length > 0 ? (cart[0].product.sku || 'ITEM').slice(0, 8) : 'SALE'}`}
+        onPaymentSuccess={handleMpesaPromptSuccess}
+        onAutoFinalizeSale={isDirectMpesaCheckout ? handleMpesaDirectFinalize : undefined}
+      />
+
+      {/* MODAL 6: AUTOMATED TRANSACTION SUMMARY SMS DELIVERY LOGS */}
+      <SmsDeliveryLogsModal
+        isOpen={showSmsLogsModal}
+        onClose={() => setShowSmsLogsModal(false)}
+      />
     </div>
   );
 };

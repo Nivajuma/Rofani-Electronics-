@@ -56,6 +56,11 @@ const QUICK_QUESTIONS = [
     prompt: 'Which products are selling the fastest (highest sales velocity) and how many days of stock runway remain before we run out of stock?'
   },
   {
+    icon: Sparkles,
+    label: 'Customer Promotions & SMS Campaign Ideas',
+    prompt: 'Give me high-converting promotional campaign ideas and WhatsApp/SMS copy to boost store sales this week for our electronics and boutique fashion shoppers in Kenya.'
+  },
+  {
     icon: CreditCard,
     label: 'How do I process M-Pesa sales?',
     prompt: 'How do I process an M-Pesa transaction step-by-step in POS and verify customer payment?'

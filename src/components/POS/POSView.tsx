@@ -30,7 +30,8 @@ import {
   Zap,
   Gem,
   AlertTriangle,
-  TrendingUp
+  TrendingUp,
+  ArrowLeft
 } from 'lucide-react';
 import { Product, CartItem, Customer, PaymentMethod, PaymentBreakdown, Transaction, User as Employee, BarcodeScanLog } from '../../types';
 import { BarcodeScannerModal } from './BarcodeScannerModal';
@@ -73,6 +74,9 @@ export const POSView: React.FC<POSViewProps> = ({
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
   const [viewMode, setViewMode] = useState<'list' | 'grid'>('list');
   const [performanceFilter, setPerformanceFilter] = useState<'All' | 'high_sales_high_profit' | 'low_sales' | 'high_sales_low_profit' | 'low_sales_high_profit'>('All');
+
+  // Mobile responsive view mode ('catalog' or 'cart') for effortless mobile POS operation
+  const [mobileTab, setMobileTab] = useState<'catalog' | 'cart'>('catalog');
 
   // Sales Velocity and Margin Performance Map
   const performanceMap = React.useMemo(() => {
@@ -217,6 +221,7 @@ export const POSView: React.FC<POSViewProps> = ({
     setShowCheckoutModal(false);
     setShowMpesaPromptModal(false);
     setShowNewSaleConfirmModal(false);
+    setMobileTab('catalog');
     setPosNotice({ message: 'New sale initialized! Register is fresh and ready for items.', type: 'success' });
     setTimeout(() => {
       setPosNotice(null);
@@ -297,7 +302,10 @@ export const POSView: React.FC<POSViewProps> = ({
   // Add Item to Cart
   const handleAddToCart = (product: Product) => {
     if (product.stockQuantity <= 0) {
-      alert(`Out of stock! ${product.name} currently has 0 items.`);
+      setPosNotice({
+        type: 'info',
+        message: `Out of stock: ${product.name} currently has 0 items available.`
+      });
       return;
     }
 
@@ -306,7 +314,10 @@ export const POSView: React.FC<POSViewProps> = ({
       if (existingIndex > -1) {
         const existing = prev[existingIndex];
         if (existing.quantity >= product.stockQuantity) {
-          alert(`Cannot add more than available stock (${product.stockQuantity} pcs).`);
+          setPosNotice({
+            type: 'info',
+            message: `Stock limit reached: Only ${product.stockQuantity} ${product.unit} available for ${product.name}.`
+          });
           return prev;
         }
         const updated = [...prev];
@@ -363,7 +374,32 @@ export const POSView: React.FC<POSViewProps> = ({
       handleAddToCart(found);
       setShowScanner(false);
     } else {
-      alert(`No product found with barcode/SKU: ${barcode}`);
+      setPosNotice({
+        type: 'info',
+        message: `No product found matching barcode/SKU: ${barcode}`
+      });
+    }
+  };
+
+  // Quick Enter key handler in search input: auto-adds if exact barcode/SKU or single filtered match
+  const handleSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      const trimmed = searchTerm.trim().toLowerCase();
+      if (!trimmed) return;
+
+      const exactMatch = products.find(
+        (p) => p.barcode.toLowerCase() === trimmed || p.sku.toLowerCase() === trimmed
+      );
+      if (exactMatch) {
+        handleAddToCart(exactMatch);
+        setSearchTerm('');
+        return;
+      }
+
+      if (filteredProducts.length === 1) {
+        handleAddToCart(filteredProducts[0]);
+        setSearchTerm('');
+      }
     }
   };
 
@@ -375,7 +411,10 @@ export const POSView: React.FC<POSViewProps> = ({
           if (item.product.id === productId) {
             const newQty = item.quantity + delta;
             if (newQty > item.product.stockQuantity) {
-              alert(`Stock limit reached (${item.product.stockQuantity} available).`);
+              setPosNotice({
+                type: 'info',
+                message: `Stock limit reached: Only ${item.product.stockQuantity} available for this item.`
+              });
               return item;
             }
             if (newQty <= 0) return null; // remove
@@ -727,7 +766,7 @@ export const POSView: React.FC<POSViewProps> = ({
   };
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-4">
+    <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6 space-y-4 pb-28 lg:pb-6">
       {/* Toast Notice Banner (New Sale / Feedback) */}
       {posNotice && (
         <div
@@ -747,76 +786,163 @@ export const POSView: React.FC<POSViewProps> = ({
         </div>
       )}
 
+      {/* MOBILE SEGMENTED VIEW SWITCHER: CATALOG VS CART/CHECKOUT (Visible only on mobile screens) */}
+      <div className="lg:hidden flex items-center p-1 bg-slate-900 border border-slate-800 rounded-xl gap-1 shadow-sm">
+        <button
+          type="button"
+          id="btn-mobile-tab-catalog"
+          onClick={() => setMobileTab('catalog')}
+          className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 ${
+            mobileTab === 'catalog'
+              ? 'bg-sky-600 text-white shadow-md'
+              : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+          }`}
+        >
+          <Package className="w-4 h-4" />
+          <span>Catalog ({filteredProducts.length})</span>
+        </button>
+
+        <button
+          type="button"
+          id="btn-mobile-tab-cart"
+          onClick={() => setMobileTab('cart')}
+          className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 relative ${
+            mobileTab === 'cart'
+              ? 'bg-sky-600 text-white shadow-md'
+              : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+          }`}
+        >
+          <ShoppingBag className="w-4 h-4" />
+          <span>Cart & Sale ({cart.reduce((s, i) => s + i.quantity, 0)})</span>
+          {cart.length > 0 && (
+            <span className="font-mono text-emerald-400 font-extrabold ml-1">
+              • KSh {grandTotal.toLocaleString()}
+            </span>
+          )}
+        </button>
+      </div>
+
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         {/* LEFT 7 COLS: PRODUCT CATALOG & SEARCH */}
-        <div className="lg:col-span-7 space-y-4">
+        <div className={`lg:col-span-7 space-y-4 ${mobileTab === 'catalog' ? 'block' : 'hidden lg:block'}`}>
           {/* Search bar, Barcode Scanner, View Toggle & New Sale Button */}
-          <div className="bg-slate-900 border border-slate-800 p-3 rounded-2xl shadow-md flex items-center gap-2">
-            <div className="relative flex-1">
-              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+          <div className="bg-slate-900 border border-slate-800 p-3 rounded-2xl shadow-md space-y-2.5">
+            {/* Dedicated Full-Width Search Input Bar */}
+            <div className="relative w-full flex items-center">
+              <Search className="w-4 h-4 text-sky-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
               <input
                 type="text"
                 placeholder="Search products by Name, SKU, or Barcode..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 text-slate-200 text-xs pl-9 pr-4 py-2.5 rounded-xl focus:outline-none focus:border-sky-500"
+                onKeyDown={handleSearchKeyDown}
+                className="w-full bg-slate-950 border border-slate-700/80 text-white placeholder-slate-400 text-base sm:text-xs pl-10 pr-24 py-2.5 rounded-xl focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-sky-500 transition shadow-inner font-medium"
+                autoComplete="off"
+                autoCorrect="off"
+                spellCheck={false}
               />
+              <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1.5">
+                {searchTerm && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchTerm('')}
+                    className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition"
+                    title="Clear search query"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setShowScanner(true)}
+                  className="sm:hidden p-1.5 rounded-lg bg-sky-600/30 hover:bg-sky-600/50 text-sky-400 hover:text-sky-200 border border-sky-500/30 transition flex items-center gap-1"
+                  title="Scan Barcode"
+                >
+                  <Scan className="w-3.5 h-3.5" />
+                </button>
+              </div>
             </div>
 
-            {/* Prominent New Sale Button in Catalog Header */}
-            <button
-              id="btn-pos-new-sale-catalog"
-              onClick={handleTriggerNewSale}
-              className="bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white font-extrabold px-3.5 py-2.5 rounded-xl text-xs transition flex items-center gap-1.5 shadow-md shadow-emerald-600/25 shrink-0"
-              title="Start a fresh new sale (clears cart)"
-            >
-              <Plus className="w-4 h-4" />
-              <span className="hidden sm:inline">New Sale</span>
-            </button>
+            {/* Active search pill for instant mobile visibility */}
+            {searchTerm && (
+              <div className="flex items-center justify-between text-xs bg-sky-950/60 border border-sky-800/60 px-3 py-1.5 rounded-xl text-sky-300">
+                <div className="flex items-center gap-1.5 truncate">
+                  <Search className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+                  <span className="text-slate-400 text-[11px]">Searching:</span>
+                  <span className="font-bold text-white truncate max-w-[160px] sm:max-w-xs">"{searchTerm}"</span>
+                  <span className="text-sky-300 font-mono font-bold text-[11px]">({filteredProducts.length} {filteredProducts.length === 1 ? 'item' : 'items'})</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSearchTerm('')}
+                  className="text-[11px] font-bold text-sky-400 hover:text-white flex items-center gap-0.5 shrink-0 ml-2 bg-slate-900 px-2 py-0.5 rounded-lg border border-slate-700"
+                >
+                  <X className="w-3 h-3" />
+                  <span>Clear</span>
+                </button>
+              </div>
+            )}
 
-            {/* Grid / List View Toggle */}
-            <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800 shrink-0">
-              <button
-                type="button"
-                onClick={() => setViewMode('list')}
-                title="List Form View (Compact table for 300+ items)"
-                className={`p-1.5 rounded-lg transition ${
-                  viewMode === 'list' ? 'bg-sky-600 text-white shadow-sm' : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                <List className="w-4 h-4" />
-              </button>
-              <button
-                type="button"
-                onClick={() => setViewMode('grid')}
-                title="Grid Cards View"
-                className={`p-1.5 rounded-lg transition ${
-                  viewMode === 'grid' ? 'bg-sky-600 text-white shadow-sm' : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                <LayoutGrid className="w-4 h-4" />
-              </button>
+            {/* Quick action tools row */}
+            <div className="flex items-center justify-between gap-2 flex-wrap sm:flex-nowrap">
+              <div className="flex items-center gap-2 flex-wrap min-w-0">
+                {/* Prominent New Sale Button */}
+                <button
+                  id="btn-pos-new-sale-catalog"
+                  onClick={handleTriggerNewSale}
+                  className="bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white font-extrabold px-3 py-1.5 rounded-xl text-xs transition flex items-center gap-1.5 shadow-md shadow-emerald-600/25 shrink-0"
+                  title="Start a fresh new sale (clears cart)"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>New Sale</span>
+                </button>
+
+                {/* Scan Barcode (Tablet/Desktop) */}
+                <button
+                  id="btn-pos-scan-barcode"
+                  onClick={() => setShowScanner(true)}
+                  className="hidden sm:flex bg-sky-600 hover:bg-sky-500 text-white font-semibold px-3 py-1.5 rounded-xl text-xs transition items-center gap-1.5 shadow-md shadow-sky-600/20 shrink-0"
+                >
+                  <Scan className="w-3.5 h-3.5" />
+                  <span>Scan</span>
+                </button>
+
+                {/* Transaction SMS Logs Button */}
+                <button
+                  id="btn-pos-view-sms-logs"
+                  onClick={() => setShowSmsLogsModal(true)}
+                  className="bg-indigo-950/80 hover:bg-indigo-900 border border-indigo-800 text-indigo-300 font-bold px-2.5 py-1.5 rounded-xl text-xs transition flex items-center gap-1.5 shrink-0 shadow-sm"
+                  title="View Automated Transaction Summary SMS Delivery Logs"
+                >
+                  <Smartphone className="w-3.5 h-3.5 text-indigo-400" />
+                  <span className="hidden sm:inline">SMS Logs</span>
+                </button>
+              </div>
+
+              {/* Grid / List View Toggle */}
+              <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800 shrink-0 ml-auto">
+                <button
+                  type="button"
+                  onClick={() => setViewMode('list')}
+                  title="List Form View (Compact table for 300+ items)"
+                  className={`p-1.5 rounded-lg transition ${
+                    viewMode === 'list' ? 'bg-sky-600 text-white shadow-sm' : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <List className="w-4 h-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setViewMode('grid')}
+                  title="Grid Cards View"
+                  className={`p-1.5 rounded-lg transition ${
+                    viewMode === 'grid' ? 'bg-sky-600 text-white shadow-sm' : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <LayoutGrid className="w-4 h-4" />
+                </button>
+              </div>
             </div>
-
-            <button
-              id="btn-pos-scan-barcode"
-              onClick={() => setShowScanner(true)}
-              className="bg-sky-600 hover:bg-sky-500 text-white font-semibold px-4 py-2.5 rounded-xl text-xs transition flex items-center gap-2 shadow-md shadow-sky-600/20 shrink-0"
-            >
-              <Scan className="w-4 h-4" />
-              <span className="hidden sm:inline">Scan</span>
-            </button>
-
-            {/* Transaction SMS Logs Button */}
-            <button
-              id="btn-pos-view-sms-logs"
-              onClick={() => setShowSmsLogsModal(true)}
-              className="bg-indigo-950/80 hover:bg-indigo-900 border border-indigo-800 text-indigo-300 font-bold px-3 py-2.5 rounded-xl text-xs transition flex items-center gap-1.5 shrink-0 shadow-sm"
-              title="View Automated Transaction Summary SMS Delivery Logs"
-            >
-              <Smartphone className="w-3.5 h-3.5 text-indigo-400" />
-              <span className="hidden sm:inline">SMS Logs</span>
-            </button>
           </div>
 
           {/* Sales & Profit Velocity Performance Filter Pills */}
@@ -1047,7 +1173,24 @@ export const POSView: React.FC<POSViewProps> = ({
           ) : (
             /* Product Cards Grid */
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 max-h-[calc(100vh-280px)] overflow-y-auto pr-1">
-              {filteredProducts.map((p) => {
+              {filteredProducts.length === 0 ? (
+                <div className="col-span-full py-10 text-center text-slate-500 bg-slate-950/40 rounded-2xl border border-dashed border-slate-800 p-6 space-y-2">
+                  <Search className="w-7 h-7 text-slate-600 mx-auto" />
+                  <p className="text-sm font-semibold text-slate-300">No items matching "{searchTerm}"</p>
+                  <p className="text-xs text-slate-500">Check spelling or try searching by SKU or Barcode</p>
+                  {searchTerm && (
+                    <button
+                      type="button"
+                      onClick={() => setSearchTerm('')}
+                      className="mt-2 inline-flex items-center gap-1 text-xs font-bold text-sky-400 hover:text-sky-300 bg-sky-950/60 border border-sky-900/60 px-3 py-1 rounded-lg"
+                    >
+                      <X className="w-3 h-3" />
+                      <span>Clear Search</span>
+                    </button>
+                  )}
+                </div>
+              ) : (
+                filteredProducts.map((p) => {
                 const isLowStock = p.stockQuantity <= p.minStockAlert;
                 const isOutOfStock = p.stockQuantity <= 0;
                 const perf = performanceMap[p.id];
@@ -1147,13 +1290,33 @@ export const POSView: React.FC<POSViewProps> = ({
                     </div>
                   </div>
                 );
-              })}
+              }))}
             </div>
           )}
         </div>
 
         {/* RIGHT 5 COLS: POS RECEIPT CART & CHECKOUT PANEL */}
-        <div className="lg:col-span-5 bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-xl space-y-4">
+        <div className={`lg:col-span-5 bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-xl space-y-4 ${mobileTab === 'cart' ? 'block' : 'hidden lg:block'}`}>
+          {/* Mobile Back to Catalog Button & Quick Reset */}
+          <div className="lg:hidden flex items-center justify-between pb-2 border-b border-slate-800">
+            <button
+              type="button"
+              onClick={() => setMobileTab('catalog')}
+              className="text-xs font-bold text-sky-400 hover:text-sky-300 flex items-center gap-1.5 py-1 px-2.5 rounded-lg bg-sky-950/60 border border-sky-900/60"
+            >
+              <ArrowLeft className="w-3.5 h-3.5" />
+              <span>← Add More Items</span>
+            </button>
+            <button
+              type="button"
+              onClick={handleTriggerNewSale}
+              className="text-xs font-bold text-emerald-400 hover:text-emerald-300 flex items-center gap-1 py-1 px-2.5 rounded-lg bg-emerald-950/60 border border-emerald-900/60"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              <span>Reset / New Sale</span>
+            </button>
+          </div>
+
           {/* Header & Customer Picker */}
           <div className="flex items-center justify-between border-b border-slate-800 pb-3">
             <div className="flex items-center gap-2">
@@ -1208,12 +1371,22 @@ export const POSView: React.FC<POSViewProps> = ({
           </div>
 
           {/* Cart Itemized List */}
-          <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+          <div className="space-y-2 max-h-64 sm:max-h-80 overflow-y-auto pr-1">
             {cart.length === 0 ? (
-              <div className="text-center py-10 space-y-2 border-2 border-dashed border-slate-800 rounded-2xl">
+              <div className="text-center py-10 space-y-3 border-2 border-dashed border-slate-800 rounded-2xl">
                 <ShoppingBag className="w-8 h-8 text-slate-600 mx-auto" />
-                <p className="text-xs text-slate-400 font-medium">Cart is empty</p>
-                <p className="text-[11px] text-slate-500">Scan barcode or tap products to build receipt</p>
+                <div>
+                  <p className="text-xs text-slate-400 font-medium">Cart is empty</p>
+                  <p className="text-[11px] text-slate-500">Scan barcode or tap products to build receipt</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setMobileTab('catalog')}
+                  className="lg:hidden inline-flex items-center gap-1.5 px-3 py-1.5 bg-sky-600 hover:bg-sky-500 text-white rounded-xl text-xs font-bold shadow-md transition"
+                >
+                  <Package className="w-3.5 h-3.5" />
+                  <span>Browse Products Catalog</span>
+                </button>
               </div>
             ) : (
               cart.map((item) => (
@@ -1455,6 +1628,73 @@ export const POSView: React.FC<POSViewProps> = ({
           </div>
         </div>
       </div>
+
+      {/* MOBILE STICKY BOTTOM QUICK-SALE & CHECKOUT BAR (Zero-scrolling checkout for mobile phones) */}
+      {cart.length > 0 && (
+        <div className="lg:hidden sticky bottom-2 left-0 right-0 z-40 bg-slate-900/95 backdrop-blur-md border border-slate-700/80 rounded-2xl p-2.5 shadow-2xl safe-area-bottom mt-4">
+          <div className="flex items-center justify-between gap-2 max-w-lg mx-auto">
+            {/* Reset / New Sale 1-tap Button */}
+            <button
+              type="button"
+              id="btn-mobile-sticky-new-sale"
+              onClick={handleTriggerNewSale}
+              className="px-2.5 py-2 bg-slate-950 hover:bg-slate-800 border border-slate-800 text-slate-300 rounded-xl text-xs font-bold transition flex items-center gap-1 shrink-0 active:scale-95"
+              title="Clear & Start New Sale"
+            >
+              <RotateCcw className="w-3.5 h-3.5 text-slate-400" />
+              <span className="text-[11px] font-semibold">New Sale</span>
+            </button>
+
+            {/* Tap to View Cart details */}
+            <button
+              type="button"
+              id="btn-mobile-sticky-view-cart"
+              onClick={() => setMobileTab('cart')}
+              className="flex flex-col items-start px-2 py-0.5 text-left flex-1 min-w-0 cursor-pointer"
+            >
+              <div className="flex items-center gap-1 text-[11px] text-slate-400">
+                <ShoppingBag className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+                <span className="font-bold text-slate-200">
+                  {cart.reduce((s, i) => s + i.quantity, 0)} {cart.reduce((s, i) => s + i.quantity, 0) === 1 ? 'item' : 'items'}
+                </span>
+                <span className="text-[10px] text-sky-400 underline font-semibold ml-0.5">Edit</span>
+              </div>
+              <div className="text-sm font-extrabold text-emerald-400 font-mono leading-tight">
+                KSh {grandTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+              </div>
+            </button>
+
+            {/* Quick 1-tap Checkout Actions */}
+            <div className="flex items-center gap-1.5 shrink-0">
+              {/* Quick M-PESA Prompt */}
+              <button
+                type="button"
+                id="btn-mobile-sticky-mpesa"
+                disabled={!hasWorkerPermission(currentUser, 'canMakeSales')}
+                onClick={handleOpenMpesaStkPushDirect}
+                className="bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white font-extrabold px-2.5 py-2 rounded-xl text-xs shadow-md transition flex items-center gap-1 disabled:opacity-50"
+                title="1-Tap M-PESA STK Push"
+              >
+                <Smartphone className="w-3.5 h-3.5" />
+                <span>M-PESA</span>
+              </button>
+
+              {/* Primary Charge / Make Sale Button */}
+              <button
+                type="button"
+                id="btn-mobile-sticky-charge"
+                disabled={!hasWorkerPermission(currentUser, 'canMakeSales')}
+                onClick={handleOpenCheckout}
+                className="bg-gradient-to-r from-sky-500 to-indigo-600 hover:from-sky-400 hover:to-indigo-500 active:scale-95 text-white font-extrabold px-3 py-2 rounded-xl text-xs shadow-lg transition flex items-center gap-1.5 disabled:opacity-50"
+                title="Complete Sale & Multi-payment"
+              >
+                <CreditCard className="w-3.5 h-3.5" />
+                <span>Make Sale</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* MODAL 1: CHECKOUT & MULTI-PAYMENT / PARTIAL PAYMENT */}
       {showCheckoutModal && (

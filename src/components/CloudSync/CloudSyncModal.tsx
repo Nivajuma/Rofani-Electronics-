@@ -15,7 +15,10 @@ import {
   Radio,
   QrCode,
   Lock,
-  Edit3
+  Edit3,
+  Eye,
+  EyeOff,
+  Shield
 } from 'lucide-react';
 import QRCode from 'qrcode';
 import { bulkUploadProductsToCloud, bulkUploadUsersToCloud } from '../../lib/cloudSync';
@@ -70,6 +73,8 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
   const [urlInput, setUrlInput] = useState<string>(getCleanShareUrl());
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string>('');
   const [showQrCode, setShowQrCode] = useState(true);
+  const [showPinOnScreen, setShowPinOnScreen] = useState(false);
+  const [includePinInWhatsApp, setIncludePinInWhatsApp] = useState(false);
 
   // Generate QR Code dynamically
   useEffect(() => {
@@ -279,9 +284,21 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
                   <p className="text-xs text-slate-300 leading-relaxed">
                     Open your iPhone or Android camera and point it at this QR code. Tap the banner that pops up to open the live store terminal on your phone.
                   </p>
-                  <p className="text-[11px] text-sky-300 font-mono">
-                    Master Passcode: <strong className="text-white font-bold">{masterPin}</strong>
-                  </p>
+                  <div className="flex items-center gap-2 text-[11px] text-sky-300 font-mono">
+                    <span>Master Passcode:</span>
+                    <strong className="text-white font-bold bg-slate-800/90 px-1.5 py-0.5 rounded tracking-widest">
+                      {showPinOnScreen ? masterPin : '••••'}
+                    </strong>
+                    <button
+                      type="button"
+                      onClick={() => setShowPinOnScreen(!showPinOnScreen)}
+                      className="text-slate-400 hover:text-white p-0.5 transition cursor-pointer"
+                      title={showPinOnScreen ? "Hide PIN" : "Reveal PIN"}
+                      aria-label="Toggle Master PIN Visibility"
+                    >
+                      {showPinOnScreen ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                    </button>
+                  </div>
                 </div>
               </div>
             )}
@@ -313,7 +330,7 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
                   />
                   <button
                     type="submit"
-                    className="px-3.5 py-2 bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold rounded-xl transition"
+                    className="px-3.5 py-2 bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold rounded-xl transition cursor-pointer"
                   >
                     Update
                   </button>
@@ -323,7 +340,7 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
                   <span className="truncate flex-1 pl-1 select-all">{shareUrl}</span>
                   <button
                     onClick={handleCopyLink}
-                    className="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded-lg font-sans font-bold text-xs transition flex items-center gap-1 shrink-0 active:scale-95"
+                    className="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded-lg font-sans font-bold text-xs transition flex items-center gap-1 shrink-0 active:scale-95 cursor-pointer"
                   >
                     {copied ? <Check className="w-3.5 h-3.5 text-emerald-300" /> : <Copy className="w-3.5 h-3.5" />}
                     <span>{copied ? 'Copied!' : 'Copy Link'}</span>
@@ -332,25 +349,54 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
               )}
             </div>
 
-            {/* Quick Share Buttons */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              <a
-                href={`https://wa.me/?text=${encodeURIComponent(`Here is our ROFANI POS store terminal link: ${shareUrl}\nStore Master PIN: ${masterPin}`)}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="bg-emerald-600 hover:bg-emerald-500 text-white text-center py-2.5 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 shadow-sm active:scale-95"
-              >
-                <Share2 className="w-3.5 h-3.5" />
-                <span>Share via WhatsApp</span>
-              </a>
+            {/* Quick Share Buttons & Security Guard */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-[11px] px-1 text-slate-400">
+                <span className="flex items-center gap-1 text-emerald-400 font-medium">
+                  <ShieldCheck className="w-3.5 h-3.5" />
+                  <span>Master PIN hidden from WhatsApp</span>
+                </span>
+                <label className="flex items-center gap-1.5 cursor-pointer text-slate-400 hover:text-slate-300 select-none">
+                  <input
+                    type="checkbox"
+                    checked={includePinInWhatsApp}
+                    onChange={(e) => setIncludePinInWhatsApp(e.target.checked)}
+                    className="rounded border-slate-700 bg-slate-900 text-amber-500 focus:ring-0 w-3.5 h-3.5 cursor-pointer"
+                  />
+                  <span className="text-[10px]">Include PIN (Not recommended)</span>
+                </label>
+              </div>
 
-              <button
-                onClick={() => window.open(shareUrl, '_blank')}
-                className="py-2.5 px-3 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-semibold transition flex items-center justify-center gap-1.5 border border-slate-700 active:scale-95 cursor-pointer"
-              >
-                <ExternalLink className="w-3.5 h-3.5" />
-                <span>Test in New Tab</span>
-              </button>
+              {includePinInWhatsApp && (
+                <div className="p-2 bg-amber-950/40 border border-amber-600/30 rounded-lg text-[10px] text-amber-300 flex items-center gap-1.5">
+                  <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                  <span>Security Warning: Sharing your Master PIN in WhatsApp chats gives full admin terminal access.</span>
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <a
+                  href={`https://wa.me/?text=${encodeURIComponent(
+                    includePinInWhatsApp
+                      ? `Here is our ROFANI POS store terminal link: ${shareUrl}\nStore Master PIN: ${masterPin}`
+                      : `Here is our ROFANI POS store terminal link: ${shareUrl}\n\n(Protected POS Terminal. Please sign in with your assigned employee PIN.)`
+                  )}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="bg-emerald-600 hover:bg-emerald-500 text-white text-center py-2.5 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 shadow-sm active:scale-95 cursor-pointer"
+                >
+                  <Share2 className="w-3.5 h-3.5" />
+                  <span>Share via WhatsApp</span>
+                </a>
+
+                <button
+                  onClick={() => window.open(shareUrl, '_blank')}
+                  className="py-2.5 px-3 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-semibold transition flex items-center justify-center gap-1.5 border border-slate-700 active:scale-95 cursor-pointer"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  <span>Test in New Tab</span>
+                </button>
+              </div>
             </div>
 
             {/* Security Lock Notice */}

@@ -379,7 +379,7 @@ export const DataSnapshotModal: React.FC<DataSnapshotModalProps> = ({
                       }}
                       className="text-[10px] text-sky-400 hover:underline flex items-center gap-1 font-mono"
                     >
-                      <KeyRound className="w-3 h-3" /> Use Store Master PIN ({masterPin})
+                      <KeyRound className="w-3 h-3" /> Autofill Store Master PIN (••••)
                     </button>
                   </div>
 

@@ -35,6 +35,7 @@ import {
 } from 'lucide-react';
 import { Product, CartItem, Customer, PaymentMethod, PaymentBreakdown, Transaction, User as Employee, BarcodeScanLog } from '../../types';
 import { BarcodeScannerModal } from './BarcodeScannerModal';
+import { AiReceiptScannerModal } from './AiReceiptScannerModal';
 import { ReceiptModal } from './ReceiptModal';
 import { MpesaPromptModal } from './MpesaPromptModal';
 import { SmsDeliveryLogsModal } from './SmsDeliveryLogsModal';
@@ -54,6 +55,8 @@ interface POSViewProps {
   onRecordScanLog?: (log: BarcodeScanLog) => void;
   newSaleTrigger?: number;
   onNewSaleStarted?: () => void;
+  onSaveProduct?: (product: Product) => void;
+  onBatchImportProducts?: (products: Product[], replaceExisting: boolean) => void;
 }
 
 export const POSView: React.FC<POSViewProps> = ({
@@ -68,6 +71,8 @@ export const POSView: React.FC<POSViewProps> = ({
   onRecordScanLog,
   newSaleTrigger,
   onNewSaleStarted,
+  onSaveProduct,
+  onBatchImportProducts,
 }) => {
   // Search & Filter State
   const [searchTerm, setSearchTerm] = useState('');
@@ -192,6 +197,7 @@ export const POSView: React.FC<POSViewProps> = ({
 
   // Modals State
   const [showScanner, setShowScanner] = useState(false);
+  const [showAiReceiptScanner, setShowAiReceiptScanner] = useState(false);
   const [showCheckoutModal, setShowCheckoutModal] = useState(false);
   const [completedTx, setCompletedTx] = useState<Transaction | null>(null);
   const [showAddCustomerModal, setShowAddCustomerModal] = useState(false);
@@ -207,6 +213,92 @@ export const POSView: React.FC<POSViewProps> = ({
   // Automated Transaction Summary SMS State
   const [showSmsLogsModal, setShowSmsLogsModal] = useState(false);
   const [autoSmsSummary, setAutoSmsSummary] = useState(isAutoSmsEnabled());
+
+  // Add multiple items to cart (e.g. from AI vision scanner)
+  const handleAddMultipleToCart = (itemsToAdd: { product: Product; quantity: number }[]) => {
+    if (!itemsToAdd || itemsToAdd.length === 0) return;
+
+    setCart((prev) => {
+      let updated = [...prev];
+      itemsToAdd.forEach(({ product, quantity }) => {
+        const existingIdx = updated.findIndex((item) => item.product.id === product.id);
+        if (existingIdx > -1) {
+          const existing = updated[existingIdx];
+          const newQty = Math.min(existing.quantity + quantity, product.stockQuantity);
+          updated[existingIdx] = {
+            ...existing,
+            quantity: newQty,
+            total: (existing.unitPrice - existing.discount) * newQty,
+          };
+        } else {
+          const qty = Math.min(quantity, Math.max(1, product.stockQuantity));
+          updated.push({
+            product,
+            quantity: qty,
+            unitPrice: product.sellingPrice,
+            discount: 0,
+            total: product.sellingPrice * qty,
+          });
+        }
+      });
+      return updated;
+    });
+
+    const totalQty = itemsToAdd.reduce((sum, item) => sum + item.quantity, 0);
+    setPosNotice({
+      type: 'success',
+      message: `✨ AI identified & added ${totalQty} item(s) directly to the receipt!`,
+    });
+    setTimeout(() => setPosNotice(null), 3500);
+  };
+
+  // Handle adding a brand new product detected by AI Receipt Scanner
+  const handleAddNewProductFromAiReceipt = (
+    newProduct: Product,
+    andAddToCart: boolean = true,
+    quantity: number = 1
+  ) => {
+    // 1. Save new product to store catalog & cloud sync
+    if (onSaveProduct) {
+      onSaveProduct(newProduct);
+    }
+
+    // 2. Add to sales receipt cart if requested
+    if (andAddToCart) {
+      handleAddMultipleToCart([{ product: newProduct, quantity }]);
+    }
+
+    setPosNotice({
+      type: 'success',
+      message: `✨ Added "${newProduct.name}" to store inventory${andAddToCart ? ' & sales receipt' : ''}!`,
+    });
+    setTimeout(() => setPosNotice(null), 3500);
+  };
+
+  // Handle batch adding multiple new products detected by AI Receipt Scanner
+  const handleBatchAddNewProductsFromAiReceipt = (
+    newItems: { product: Product; quantity: number }[],
+    andAddToCart: boolean = true
+  ) => {
+    if (!newItems || newItems.length === 0) return;
+
+    const productsToSave = newItems.map((item) => item.product);
+    if (onBatchImportProducts) {
+      onBatchImportProducts(productsToSave, false);
+    } else if (onSaveProduct) {
+      productsToSave.forEach((p) => onSaveProduct(p));
+    }
+
+    if (andAddToCart) {
+      handleAddMultipleToCart(newItems);
+    }
+
+    setPosNotice({
+      type: 'success',
+      message: `✨ Added ${newItems.length} new product(s) to store catalog${andAddToCart ? ' & sales receipt' : ''}!`,
+    });
+    setTimeout(() => setPosNotice(null), 3500);
+  };
 
   // Core New Sale Action Execution
   const executeNewSale = () => {
@@ -917,6 +1009,18 @@ export const POSView: React.FC<POSViewProps> = ({
                   <span>New Sale</span>
                 </button>
 
+                {/* AI Camera Scan to Receipt Button */}
+                <button
+                  id="btn-pos-ai-scan-receipt"
+                  type="button"
+                  onClick={() => setShowAiReceiptScanner(true)}
+                  className="bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 active:scale-95 text-white font-extrabold px-3 py-1.5 rounded-xl text-xs transition flex items-center gap-1.5 shadow-md shadow-purple-600/25 shrink-0 cursor-pointer"
+                  title="AI Visual Scanner: Point camera at counter items or order sheet to automatically add to receipt"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-amber-300 animate-pulse" />
+                  <span>AI Scan to Receipt</span>
+                </button>
+
                 {/* Scan Barcode (Tablet/Desktop) */}
                 <button
                   id="btn-pos-scan-barcode"
@@ -1344,6 +1448,18 @@ export const POSView: React.FC<POSViewProps> = ({
               <h3 className="font-bold text-sm text-slate-100">Receipt Order Cart</h3>
             </div>
             <div className="flex items-center gap-2">
+              {/* AI Quick Add to Receipt */}
+              <button
+                id="btn-pos-ai-scan-cart"
+                type="button"
+                onClick={() => setShowAiReceiptScanner(true)}
+                className="bg-purple-950/80 hover:bg-purple-900 border border-purple-700/80 text-purple-300 font-bold px-2.5 py-1 rounded-lg text-xs transition flex items-center gap-1 shadow-sm cursor-pointer"
+                title="Scan items with AI to automatically add onto this receipt"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                <span className="hidden sm:inline">AI Add</span>
+              </button>
+
               <span className="bg-sky-950 border border-sky-800 text-sky-300 text-xs px-2.5 py-1 rounded-lg font-mono font-bold">
                 {cart.reduce((sum, item) => sum + item.quantity, 0)} items
               </span>
@@ -1397,16 +1513,27 @@ export const POSView: React.FC<POSViewProps> = ({
                 <ShoppingBag className="w-8 h-8 text-slate-600 mx-auto" />
                 <div>
                   <p className="text-xs text-slate-400 font-medium">Cart is empty</p>
-                  <p className="text-[11px] text-slate-500">Scan barcode or tap products to build receipt</p>
+                  <p className="text-[11px] text-slate-500">Scan barcode, tap products, or use AI camera scan to build receipt</p>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setMobileTab('catalog')}
-                  className="lg:hidden inline-flex items-center gap-1.5 px-3 py-1.5 bg-sky-600 hover:bg-sky-500 text-white rounded-xl text-xs font-bold shadow-md transition"
-                >
-                  <Package className="w-3.5 h-3.5" />
-                  <span>Browse Products Catalog</span>
-                </button>
+                <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setShowAiReceiptScanner(true)}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white rounded-xl text-xs font-extrabold shadow-md shadow-purple-600/25 transition cursor-pointer"
+                  >
+                    <Sparkles className="w-3.5 h-3.5 text-amber-300 animate-pulse" />
+                    <span>AI Scan & Auto-Add Items</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setMobileTab('catalog')}
+                    className="lg:hidden inline-flex items-center gap-1.5 px-3 py-1.5 bg-sky-600 hover:bg-sky-500 text-white rounded-xl text-xs font-bold shadow-md transition cursor-pointer"
+                  >
+                    <Package className="w-3.5 h-3.5" />
+                    <span>Browse Products Catalog</span>
+                  </button>
+                </div>
               </div>
             ) : (
               cart.map((item) => (
@@ -2018,6 +2145,19 @@ export const POSView: React.FC<POSViewProps> = ({
           onClose={() => setShowScanner(false)}
           sampleBarcodes={products.map((p) => ({ name: `${p.name} ($${p.sellingPrice})`, barcode: p.barcode }))}
           products={products}
+          onSwitchToAiScanner={() => setShowAiReceiptScanner(true)}
+        />
+      )}
+
+      {/* MODAL: AI MULTIMODAL RECEIPT SCANNER */}
+      {showAiReceiptScanner && (
+        <AiReceiptScannerModal
+          products={products}
+          categories={categories}
+          onAddItemsToReceipt={handleAddMultipleToCart}
+          onAddNewProduct={handleAddNewProductFromAiReceipt}
+          onBatchAddNewProducts={handleBatchAddNewProductsFromAiReceipt}
+          onClose={() => setShowAiReceiptScanner(false)}
         />
       )}
 

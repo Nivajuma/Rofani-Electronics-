@@ -63,6 +63,7 @@ import {
 } from '../../utils/productImages';
 import { PredictiveRestockModal } from './PredictiveRestockModal';
 import { calculateReplenishmentPlan } from '../../utils/replenishment';
+import { AiReceiptScannerModal } from '../POS/AiReceiptScannerModal';
 
 interface InventoryViewProps {
   products: Product[];
@@ -212,6 +213,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   // Auto Deduplicate Repeated Items State
   const [showDeduplicateModal, setShowDeduplicateModal] = useState<boolean>(false);
   const [showAiScanModal, setShowAiScanModal] = useState<boolean>(false);
+  const [showReceiptScanModal, setShowReceiptScanModal] = useState<boolean>(false);
   const [isDragOverPhoto, setIsDragOverPhoto] = useState<boolean>(false);
   const [previewImage, setPreviewImage] = useState<{ url: string; title: string } | null>(null);
 
@@ -1212,6 +1214,16 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                 className="bg-sky-600 hover:bg-sky-500 text-white font-bold px-3.5 py-2 rounded-xl text-xs transition flex items-center gap-1.5 shadow-lg shadow-sky-600/20"
               >
                 <Plus className="w-4 h-4" /> Add Item
+              </button>
+
+              <button
+                id="btn-inventory-receipt-scan"
+                onClick={() => setShowReceiptScanModal(true)}
+                className="bg-gradient-to-r from-purple-600 via-indigo-600 to-sky-600 hover:from-purple-500 hover:to-sky-500 text-white font-extrabold px-3.5 py-2 rounded-xl text-xs transition flex items-center gap-1.5 shadow-lg shadow-purple-600/25 border border-purple-400/40 cursor-pointer"
+                title="Scan physical receipt, supplier invoice or delivery note - AI automatically detects items and adds new items into stock!"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-amber-300 animate-pulse" />
+                <span>🧾 AI Scan Receipt / Invoice</span>
               </button>
 
               <button
@@ -3700,6 +3712,28 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
         onOpenAiAssistantWithPrompt={onOpenAiAssistantWithPrompt}
         currentUser={currentUser}
       />
+
+      {/* MODAL: AI MULTIMODAL RECEIPT & INVOICE SCANNER */}
+      {showReceiptScanModal && (
+        <AiReceiptScannerModal
+          products={products}
+          categories={categories}
+          onAddItemsToReceipt={(items) => {
+            items.forEach(({ product }) => onSaveProduct(product));
+          }}
+          onAddNewProduct={(prod) => {
+            onSaveProduct(prod);
+          }}
+          onBatchAddNewProducts={(newProducts) => {
+            if (onBatchImportProducts) {
+              onBatchImportProducts(newProducts.map((p) => p.product), false);
+            } else {
+              newProducts.forEach(({ product }) => onSaveProduct(product));
+            }
+          }}
+          onClose={() => setShowReceiptScanModal(false)}
+        />
+      )}
 
       {/* Permanently Mounted Hidden File Inputs for Device Camera & File Picker */}
       <input

@@ -15,7 +15,8 @@ import {
   Volume2,
   Info,
   Check,
-  ShoppingBag
+  ShoppingBag,
+  Sparkles
 } from 'lucide-react';
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
 import { Product } from '../../types';
@@ -25,6 +26,7 @@ interface BarcodeScannerModalProps {
   onClose: () => void;
   sampleBarcodes: { name: string; barcode: string }[];
   products?: Product[];
+  onSwitchToAiScanner?: () => void;
 }
 
 export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
@@ -32,6 +34,7 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
   onClose,
   sampleBarcodes,
   products = [],
+  onSwitchToAiScanner,
 }) => {
   const [manualBarcode, setManualBarcode] = useState('');
   const [isScanning, setIsScanning] = useState(false);
@@ -353,6 +356,22 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
           </div>
 
           <div className="flex items-center gap-1">
+            {/* Switch to AI Visual Scan button */}
+            {onSwitchToAiScanner && (
+              <button
+                type="button"
+                onClick={() => {
+                  onClose();
+                  onSwitchToAiScanner();
+                }}
+                className="bg-purple-950/80 hover:bg-purple-900 border border-purple-700/80 text-purple-300 font-bold px-2.5 py-1.5 rounded-xl text-xs transition flex items-center gap-1 shadow-sm"
+                title="Switch to AI Visual Recognition: Scan items or order notes without barcode"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                <span className="hidden sm:inline">AI Visual</span>
+              </button>
+            )}
+
             {/* Torch toggle button */}
             {hasTorch && (
               <button

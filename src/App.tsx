@@ -1949,6 +1949,8 @@ export default function App() {
           onAddCustomer={handleAddCustomer}
           onRecordScanLog={handleRecordScanLog}
           newSaleTrigger={newSaleTrigger}
+          onSaveProduct={handleSaveProduct}
+          onBatchImportProducts={handleBatchImportProducts}
         />
       )}
 

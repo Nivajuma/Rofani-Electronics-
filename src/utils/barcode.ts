@@ -44,9 +44,15 @@ export const generateBarcodeDataUrl = (barcodeValue: string, text?: string): str
 };
 
 /**
- * Print barcode label sheet for an item
+ * Print barcode label sheet for an item (defaults to only item name and barcode on stickers)
  */
-export const printBarcodeLabels = (productName: string, price: number | string, barcode: string, count: number = 8) => {
+export const printBarcodeLabels = (
+  productName: string,
+  price: number | string,
+  barcode: string,
+  count: number = 8,
+  includePrice: boolean = false
+) => {
   const numPrice = typeof price === 'number' ? price : (parseFloat(String(price)) || 0);
   const dataUrl = generateBarcodeDataUrl(barcode, barcode);
   const printWindow = window.open('', '_blank');
@@ -55,14 +61,16 @@ export const printBarcodeLabels = (productName: string, price: number | string, 
   let labelsHtml = '';
   for (let i = 0; i < count; i++) {
     labelsHtml += `
-      <div style="border: 1px dashed #cbd5e1; padding: 10px; border-radius: 6px; text-align: center; width: 180px; box-sizing: border-box; background: #ffffff;">
-        <div style="font-size: 11px; font-weight: bold; font-family: sans-serif; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+      <div style="border: 1px dashed #cbd5e1; padding: 8px 10px; border-radius: 6px; text-align: center; width: 180px; box-sizing: border-box; background: #ffffff; page-break-inside: avoid;">
+        <div style="font-size: 12px; font-weight: 800; font-family: sans-serif; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #0f172a; margin-bottom: 4px; letter-spacing: -0.2px;">
           ${productName}
         </div>
-        <div style="font-size: 14px; font-weight: 800; color: #1e293b; font-family: sans-serif; margin: 2px 0;">
+        ${includePrice ? `
+        <div style="font-size: 13px; font-weight: 800; color: #1e293b; font-family: sans-serif; margin: 2px 0;">
           KSh ${numPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
         </div>
-        <img src="${dataUrl}" style="max-width: 100%; height: 45px;" />
+        ` : ''}
+        <img src="${dataUrl}" style="max-width: 100%; height: 48px; display: block; margin: 0 auto;" />
       </div>
     `;
   }
@@ -83,7 +91,10 @@ export const printBarcodeLabels = (productName: string, price: number | string, 
       </head>
       <body>
         <div class="no-print" style="margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center;">
-          <h2>Barcode Label Sheet (${count} labels)</h2>
+          <div>
+            <h2 style="margin: 0; font-size: 18px; color: #0f172a;">Barcode Label Sheet (${count} labels)</h2>
+            <p style="margin: 4px 0 0 0; color: #64748b; font-size: 12px;">Format: <strong>Only Item Name + Barcode</strong></p>
+          </div>
           <button onclick="window.print()" style="padding: 10px 20px; background: #0284c7; color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer;">Print Labels</button>
         </div>
         <div class="grid">
@@ -96,11 +107,12 @@ export const printBarcodeLabels = (productName: string, price: number | string, 
 };
 
 /**
- * Print batch barcode labels for multiple products or entire catalog
+ * Print batch barcode labels for multiple products or entire catalog (defaults to only item name on stickers)
  */
 export const printBatchBarcodes = (
-  items: { name: string; price: number; barcode: string; count?: number }[],
-  title: string = 'All Inventory Items Barcode Catalog'
+  items: { name: string; price?: number; barcode: string; count?: number }[],
+  title: string = 'All Inventory Items Barcode Catalog',
+  includePrice: boolean = false
 ) => {
   if (!items || items.length === 0) return;
   const printWindow = window.open('', '_blank');
@@ -117,14 +129,16 @@ export const printBatchBarcodes = (
     for (let i = 0; i < count; i++) {
       totalLabels++;
       labelsHtml += `
-        <div style="border: 1px dashed #cbd5e1; padding: 8px; border-radius: 6px; text-align: center; width: 175px; box-sizing: border-box; background: #ffffff; page-break-inside: avoid;">
-          <div style="font-size: 11px; font-weight: bold; font-family: sans-serif; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #0f172a;">
+        <div style="border: 1px dashed #cbd5e1; padding: 8px 10px; border-radius: 6px; text-align: center; width: 175px; box-sizing: border-box; background: #ffffff; page-break-inside: avoid;">
+          <div style="font-size: 12px; font-weight: 800; font-family: sans-serif; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #0f172a; margin-bottom: 4px; letter-spacing: -0.2px;">
             ${item.name}
           </div>
+          ${includePrice && item.price !== undefined ? `
           <div style="font-size: 13px; font-weight: 800; color: #0284c7; font-family: sans-serif; margin: 2px 0;">
             KSh ${item.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </div>
-          <img src="${dataUrl}" style="max-width: 100%; height: 42px; display: block; margin: 0 auto;" />
+          ` : ''}
+          <img src="${dataUrl}" style="max-width: 100%; height: 46px; display: block; margin: 0 auto;" />
         </div>
       `;
     }
@@ -148,7 +162,7 @@ export const printBatchBarcodes = (
         <div class="no-print" style="margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #e2e8f0; padding-bottom: 12px;">
           <div>
             <h2 style="margin: 0; font-size: 18px; color: #0f172a;">${title}</h2>
-            <p style="margin: 4px 0 0 0; color: #64748b; font-size: 12px;">Total Barcode Labels: <strong>${totalLabels}</strong> (${items.length} unique items)</p>
+            <p style="margin: 4px 0 0 0; color: #64748b; font-size: 12px;">Total Barcode Labels: <strong>${totalLabels}</strong> (${items.length} unique items) • Format: <strong>Only Item Name + Barcode</strong></p>
           </div>
           <button onclick="window.print()" style="padding: 10px 20px; background: #0284c7; color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; font-size: 13px;">Print Barcode Sheet</button>
         </div>

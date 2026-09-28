@@ -343,10 +343,25 @@ export const POSView: React.FC<POSViewProps> = ({
     });
   };
 
-  // Barcode Scanned Handler
-  const handleBarcodeScan = (barcode: string) => {
-    const found = products.find((p) => p.barcode === barcode || p.sku.toLowerCase() === barcode.toLowerCase());
-    
+  // Barcode Scanned Handler with smart normalization (trim, leading zeros, UPC/EAN)
+  const handleBarcodeScan = (barcodeRaw: string) => {
+    const barcode = (barcodeRaw || '').trim();
+    if (!barcode) return;
+
+    const norm = (s?: string) => (s || '').trim().toLowerCase();
+    const strip0 = (s?: string) => norm(s).replace(/^0+/, '');
+
+    const found = products.find((p) => {
+      const pCode = norm(p.barcode);
+      const pSku = norm(p.sku);
+      const bCode = norm(barcode);
+      if (pCode === bCode || pSku === bCode) return true;
+      if (strip0(pCode) && strip0(pCode) === strip0(bCode)) return true;
+      if (pCode.length === 12 && '0' + pCode === bCode) return true;
+      if (bCode.length === 12 && '0' + bCode === pCode) return true;
+      return false;
+    });
+
     if (onRecordScanLog) {
       onRecordScanLog({
         id: `scan-pos-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
@@ -364,7 +379,7 @@ export const POSView: React.FC<POSViewProps> = ({
         userName: (selectedSalesRep || currentUser).name,
         userRole: (selectedSalesRep || currentUser).role,
         scanLocation: 'pos',
-        deviceType: 'barcode_gun',
+        deviceType: 'camera',
         actionTaken: found ? 'added_to_cart' : 'lookup_failed',
         notes: found ? `Scanned at POS checkout: added to cart` : `Barcode not found in catalog`,
       });
@@ -372,12 +387,17 @@ export const POSView: React.FC<POSViewProps> = ({
 
     if (found) {
       handleAddToCart(found);
-      setShowScanner(false);
+      setPosNotice({
+        type: 'success',
+        message: `Added "${found.name}" (KSh ${found.sellingPrice.toLocaleString()}) to cart!`
+      });
+      setTimeout(() => setPosNotice(null), 3500);
     } else {
       setPosNotice({
         type: 'info',
-        message: `No product found matching barcode/SKU: ${barcode}`
+        message: `Scanned code "${barcode}" is not registered in your catalog.`
       });
+      setTimeout(() => setPosNotice(null), 4000);
     }
   };
 
@@ -1997,6 +2017,7 @@ export const POSView: React.FC<POSViewProps> = ({
           onScan={handleBarcodeScan}
           onClose={() => setShowScanner(false)}
           sampleBarcodes={products.map((p) => ({ name: `${p.name} ($${p.sellingPrice})`, barcode: p.barcode }))}
+          products={products}
         />
       )}
 

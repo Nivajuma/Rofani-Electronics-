@@ -285,14 +285,29 @@ export const BarcodeScanHistoryContent: React.FC<BarcodeScanHistoryProps> = ({
           Html5QrcodeSupportedFormats.QR_CODE,
           Html5QrcodeSupportedFormats.CODE_39,
           Html5QrcodeSupportedFormats.ITF,
+          Html5QrcodeSupportedFormats.CODABAR,
+          Html5QrcodeSupportedFormats.DATA_MATRIX,
         ];
 
-        scannerInstance = new Html5Qrcode(scannerContainerId, { formatsToSupport, verbose: false });
+        scannerInstance = new Html5Qrcode(scannerContainerId, {
+          formatsToSupport,
+          verbose: false,
+          experimentalFeatures: {
+            useBarCodeDetectorIfSupported: true,
+          },
+        });
         html5QrcodeScannerRef.current = scannerInstance;
 
         await scannerInstance.start(
           { facingMode },
-          { fps: 15, qrbox: { width: 250, height: 160 }, aspectRatio: 1.7777 },
+          {
+            fps: 20,
+            qrbox: (viewfinderWidth, viewfinderHeight) => ({
+              width: Math.min(Math.floor(viewfinderWidth * 0.92), 360),
+              height: Math.min(Math.floor(viewfinderHeight * 0.52), 220),
+            }),
+            disableFlip: false,
+          },
           (decodedText) => {
             if (!isSubscribed) return;
             handleProcessBarcodeScan(decodedText, 'camera');

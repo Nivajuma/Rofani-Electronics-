@@ -59,6 +59,7 @@ export const PrintBarcodesUtilityModal: React.FC<PrintBarcodesUtilityModalProps>
   const [labelCounts, setLabelCounts] = useState<Record<string, number>>({});
   const [sheetTitle, setSheetTitle] = useState(`${storeName} Barcode Labels Sheet`);
   const [previewItemId, setPreviewItemId] = useState<string | null>(null);
+  const [includePrice, setIncludePrice] = useState(false);
 
   // Map products by barcode & id for fast lookup
   const productsByBarcode = useMemo(() => {
@@ -243,7 +244,7 @@ export const PrintBarcodesUtilityModal: React.FC<PrintBarcodesUtilityModalProps>
     }));
 
     const finalTitle = sheetTitle.trim() || `${storeName} Barcode Labels`;
-    printBatchBarcodes(batchData, finalTitle);
+    printBatchBarcodes(batchData, finalTitle, includePrice);
   };
 
   if (!isOpen) return null;
@@ -439,6 +440,36 @@ export const PrintBarcodesUtilityModal: React.FC<PrintBarcodesUtilityModalProps>
                   </div>
                 </>
               )}
+
+              {/* Sticker Content Format: Only Item Name vs Include Price */}
+              <div className="flex items-center gap-1.5 bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 text-[11px]">
+                <Tag className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+                <span className="text-slate-400 font-medium">Sticker Info:</span>
+                <button
+                  type="button"
+                  onClick={() => setIncludePrice(false)}
+                  className={`px-2 py-0.5 rounded font-bold transition cursor-pointer ${
+                    !includePrice
+                      ? 'bg-sky-600 text-white shadow-sm'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                  title="Sticker contains only Item Name + Barcode (No price on sticker)"
+                >
+                  Only Item Name
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIncludePrice(true)}
+                  className={`px-2 py-0.5 rounded font-bold transition cursor-pointer ${
+                    includePrice
+                      ? 'bg-sky-600 text-white shadow-sm'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                  title="Sticker includes selling price"
+                >
+                  With Price
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -601,10 +632,14 @@ export const PrintBarcodesUtilityModal: React.FC<PrintBarcodesUtilityModalProps>
               <span className="text-xs text-slate-400">
                 Selected for Batch Printing:
               </span>
-              <span className="text-sm font-black text-white flex items-center gap-1.5 font-mono">
+              <span className="text-sm font-black text-white flex items-center gap-1.5 font-mono flex-wrap">
                 <span className="text-sky-400">{selectedItemsList.length}</span> Products
                 <span className="text-slate-500">•</span>
                 <span className="text-emerald-400 font-extrabold">{totalLabelsCount}</span> Labels Total
+                <span className="text-slate-500">•</span>
+                <span className="text-[11px] text-sky-300 bg-sky-950/80 border border-sky-800/80 px-2 py-0.5 rounded-full font-sans font-semibold">
+                  {includePrice ? 'Item Name + Price' : 'Only Item Name'}
+                </span>
               </span>
             </div>
           </div>

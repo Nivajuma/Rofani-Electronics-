@@ -36,6 +36,7 @@ import {
 import { Product, Customer, Supplier, Transaction, Expense, AttendanceRecord, User, StoreLocation } from '../../types';
 import { detectDuplicateProducts, deduplicateProducts } from '../../utils/deduplicate';
 import { DataSnapshotModal } from './DataSnapshotModal';
+import { CameraPermissionsCard } from './CameraPermissionsCard';
 
 interface DataManagementViewProps {
   products: Product[];
@@ -330,6 +331,9 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
           </button>
         </div>
       )}
+
+      {/* Persistent Camera & Barcode Auto-Permission Settings */}
+      <CameraPermissionsCard />
 
       {/* Main Grid: Settings & Backup Tools */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

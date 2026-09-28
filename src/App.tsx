@@ -112,6 +112,7 @@ import { AIAssistantModal } from './components/AI/AIAssistantModal';
 import { AIAssistantWidget } from './components/AI/AIAssistantWidget';
 import { CloudSyncModal } from './components/CloudSync/CloudSyncModal';
 import { PrintBarcodesUtilityModal } from './components/Inventory/PrintBarcodesUtilityModal';
+import { CameraStartupPrompt } from './components/Common/CameraStartupPrompt';
 import {
   TabKey,
   hasTabPermission,
@@ -2238,6 +2239,8 @@ export default function App() {
 
         {/* Role Authorization Modal for Sensitive Operations in Phone Mode */}
         <RoleAuthorizationModal request={roleAuthRequest} />
+        {/* Automatic Camera Authorization on App Launch */}
+        <CameraStartupPrompt />
       </div>
     );
   }
@@ -3189,6 +3192,8 @@ export default function App() {
       />
       {/* Role Authorization Modal for Sensitive Operations (Modifying Inventory, Deleting Expenses, Stock Count Adjustment) */}
       <RoleAuthorizationModal request={roleAuthRequest} />
+      {/* Automatic Camera Authorization on App Launch */}
+      <CameraStartupPrompt />
     </div>
   );
 }

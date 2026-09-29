@@ -146,11 +146,18 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({ transaction, onClose
 
               {transaction.items.map((it, idx) => (
                 <div key={idx} className="grid grid-cols-12 text-[11px] items-center">
-                  <div className="col-span-6 truncate font-sans font-medium text-slate-800">
-                    {it.product.name}
+                  <div className="col-span-6 font-sans font-medium text-slate-800">
+                    <div className="truncate">{it.product.name}</div>
+                    {it.discount > 0 && (
+                      <div className="text-[9px] text-emerald-600 font-mono">
+                        (Disc: -KSh {it.discount.toLocaleString()} ea • Saved KSh {(it.discount * it.quantity).toLocaleString()})
+                      </div>
+                    )}
                   </div>
                   <div className="col-span-2 text-center text-slate-600">{it.quantity}</div>
-                  <div className="col-span-4 text-right font-bold text-slate-900">KSh {it.total.toLocaleString(undefined, { minimumFractionDigits: 2 })}</div>
+                  <div className="col-span-4 text-right font-bold text-slate-900">
+                    KSh {it.total.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  </div>
                 </div>
               ))}
             </div>
@@ -163,7 +170,14 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({ transaction, onClose
               </div>
               {transaction.discountTotal > 0 && (
                 <div className="flex justify-between text-emerald-600 font-semibold">
-                  <span>Discount</span>
+                  <span className="flex items-center gap-1">
+                    <span>Discount</span>
+                    {transaction.discountAuthorizedBy && (
+                      <span className="text-[9px] text-slate-500 font-normal">
+                        ({transaction.discountAuthorizedBy})
+                      </span>
+                    )}
+                  </span>
                   <span>-KSh {transaction.discountTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
                 </div>
               )}

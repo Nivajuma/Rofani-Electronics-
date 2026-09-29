@@ -14,6 +14,9 @@ import {
   AlertCircle,
   ShoppingBag,
   Percent,
+  Banknote,
+  Tag,
+  Coins,
   X,
   UserPlus,
   LayoutGrid,
@@ -42,6 +45,7 @@ import { SmsDeliveryLogsModal } from './SmsDeliveryLogsModal';
 import { isAutoSmsEnabled, setAutoSmsEnabled, sendTransactionSummarySms } from '../../utils/smsService';
 import { computeProductsPerformance, ProductPerformanceInfo } from '../../utils/salesPerformance';
 import { hasWorkerPermission } from '../../utils/permissions';
+import { isContactPickerSupported, pickFromDevicePhonebook, parseContactFile } from '../../utils/phoneContacts';
 
 interface POSViewProps {
   products: Product[];
@@ -109,7 +113,14 @@ export const POSView: React.FC<POSViewProps> = ({
   const [cart, setCart] = useState<CartItem[]>([]);
   const [selectedCustomer, setSelectedCustomer] = useState<Customer>(customers[0] || { id: 'cust-1', name: 'Walk-in Customer', phone: 'N/A', totalPurchases: 0, currentBalanceDue: 0 });
   const [discountAmount, setDiscountAmount] = useState<number>(0);
+  const [discountMode, setDiscountMode] = useState<'fixed' | 'percentage'>('fixed');
+  const [discountInputVal, setDiscountInputVal] = useState<string>('');
   const [taxRate, setTaxRate] = useState<number>(0); // e.g. 0% by default or configurable
+
+  // Item-Level Manual Discount State
+  const [editingItemDiscountId, setEditingItemDiscountId] = useState<string | null>(null);
+  const [itemDiscountMode, setItemDiscountMode] = useState<'fixed' | 'percentage'>('fixed');
+  const [itemDiscountInputVal, setItemDiscountInputVal] = useState<string>('');
 
   // Admin Discount Authorization State ("Only admin can give discount")
   const adminUsers = allUsers.filter((u) => u.role === 'Admin');
@@ -120,6 +131,7 @@ export const POSView: React.FC<POSViewProps> = ({
   const [selectedAdminId, setSelectedAdminId] = useState<string>(adminUsers[0]?.id || '');
   const [adminPinInput, setAdminPinInput] = useState<string>('');
   const [adminAuthError, setAdminAuthError] = useState<string>('');
+  const [supervisorDiscountMode, setSupervisorDiscountMode] = useState<'fixed' | 'percentage'>('fixed');
   const [tempDiscountVal, setTempDiscountVal] = useState<number>(100);
 
   // Sales Representative Attributed to this Sale (defaults to current logged-in user)
@@ -305,6 +317,10 @@ export const POSView: React.FC<POSViewProps> = ({
     setCart([]);
     setSelectedCustomer(customers[0] || { id: 'cust-1', name: 'Walk-in Customer', phone: 'N/A', totalPurchases: 0, currentBalanceDue: 0 });
     setDiscountAmount(0);
+    setDiscountInputVal('');
+    setDiscountMode('fixed');
+    setEditingItemDiscountId(null);
+    setItemDiscountInputVal('');
     if (currentUser.role !== 'Admin') {
       setDiscountAuthorizedBy(null);
     }
@@ -347,6 +363,53 @@ export const POSView: React.FC<POSViewProps> = ({
   const [newCustName, setNewCustName] = useState('');
   const [newCustPhone, setNewCustPhone] = useState('');
   const [newCustEmail, setNewCustEmail] = useState('');
+  const [custPhonebookNotice, setCustPhonebookNotice] = useState('');
+  const posCustVcfInputRef = React.useRef<HTMLInputElement>(null);
+
+  const handlePickPhoneContactForPOS = async () => {
+    setCustPhonebookNotice('');
+    if (isContactPickerSupported()) {
+      try {
+        const picked = await pickFromDevicePhonebook(false);
+        if (picked.length > 0) {
+          const c = picked[0];
+          setNewCustName(c.name || '');
+          if (c.phone && c.phone !== 'N/A') setNewCustPhone(c.phone);
+          if (c.email) setNewCustEmail(c.email);
+          setCustPhonebookNotice(`✨ Auto-filled ${c.name} from phone book!`);
+          setTimeout(() => setCustPhonebookNotice(''), 4000);
+        }
+      } catch {
+        setCustPhonebookNotice('📱 Select your phone contacts file (.vcf / .csv) to auto-fill.');
+        posCustVcfInputRef.current?.click();
+      }
+    } else {
+      setCustPhonebookNotice('📱 Select your phone contacts file (.vcf / .csv) to auto-fill.');
+      posCustVcfInputRef.current?.click();
+    }
+  };
+
+  const handlePOSVcfUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const text = event.target?.result as string;
+      const parsed = parseContactFile(text);
+      if (parsed.length > 0) {
+        const c = parsed[0];
+        setNewCustName(c.name || '');
+        if (c.phone && c.phone !== 'N/A') setNewCustPhone(c.phone);
+        if (c.email) setNewCustEmail(c.email);
+        setCustPhonebookNotice(`✨ Imported ${c.name} from contact card file!`);
+        setTimeout(() => setCustPhonebookNotice(''), 4000);
+      } else {
+        setCustPhonebookNotice('No valid contact found in this file.');
+      }
+    };
+    reader.readAsText(file);
+    if (posCustVcfInputRef.current) posCustVcfInputRef.current.value = '';
+  };
 
   // Payment Breakdown State for Partial Payments
   const [paymentEntries, setPaymentEntries] = useState<PaymentBreakdown[]>([
@@ -544,13 +607,51 @@ export const POSView: React.FC<POSViewProps> = ({
 
   const removeFromCart = (productId: string) => {
     setCart((prev) => prev.filter((item) => item.product.id !== productId));
+    if (editingItemDiscountId === productId) {
+      setEditingItemDiscountId(null);
+    }
+  };
+
+  // Item-level manual discount updater
+  const handleUpdateItemDiscount = (productId: string, discountPerUnit: number) => {
+    setCart((prev) =>
+      prev.map((item) => {
+        if (item.product.id === productId) {
+          const safeDiscount = Math.max(0, Math.min(item.unitPrice, discountPerUnit));
+          return {
+            ...item,
+            discount: safeDiscount,
+            total: (item.unitPrice - safeDiscount) * item.quantity,
+          };
+        }
+        return item;
+      })
+    );
   };
 
   // Calculate Subtotals & Totals
-  const numDiscount = parseFloat(String(discountAmount)) || 0;
-  const subtotal = cart.reduce((sum, item) => sum + item.total, 0);
-  const taxTotal = (subtotal - numDiscount) * (taxRate / 100);
-  const grandTotal = Math.max(0, subtotal - numDiscount + taxTotal);
+  const grossSubtotal = cart.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0);
+  const itemDiscountsTotal = cart.reduce((sum, item) => sum + (item.discount || 0) * item.quantity, 0);
+  const itemsSubtotal = cart.reduce((sum, item) => sum + item.total, 0);
+
+  // Compute sale-level manual or percentage discount
+  let numDiscount = 0;
+  const parsedSaleInput = parseFloat(discountInputVal);
+  if (!isNaN(parsedSaleInput) && parsedSaleInput > 0) {
+    if (discountMode === 'percentage') {
+      numDiscount = Math.round((parsedSaleInput / 100) * itemsSubtotal);
+    } else {
+      numDiscount = Math.min(itemsSubtotal, parsedSaleInput);
+    }
+  } else if (discountAmount > 0 && !discountInputVal) {
+    numDiscount = Math.min(itemsSubtotal, discountAmount);
+  }
+
+  const totalDiscount = itemDiscountsTotal + numDiscount;
+  const subtotal = grossSubtotal; // Gross subtotal before all discounts
+  const afterDiscountAmount = Math.max(0, itemsSubtotal - numDiscount);
+  const taxTotal = afterDiscountAmount * (taxRate / 100);
+  const grandTotal = Math.max(0, afterDiscountAmount + taxTotal);
 
   const currentCartComm = calculateWorkerCommission(selectedSalesRep, grandTotal, cart);
   const repTodayComm = repTodayTx.reduce((sum, tx) => {
@@ -646,8 +747,8 @@ export const POSView: React.FC<POSViewProps> = ({
       date: finalTxDate,
       items: [...cart],
       subtotal,
-      discountTotal: numDiscount,
-      discountAuthorizedBy: numDiscount > 0 ? (discountAuthorizedBy || `${currentUser.name} (Admin)`) : undefined,
+      discountTotal: totalDiscount,
+      discountAuthorizedBy: totalDiscount > 0 ? (discountAuthorizedBy || `${currentUser.name} (Admin)`) : undefined,
       taxTotal,
       grandTotal,
       amountPaid: grandTotal,
@@ -743,7 +844,17 @@ export const POSView: React.FC<POSViewProps> = ({
 
     if (matchedSupervisor) {
       setDiscountAuthorizedBy(`${matchedSupervisor.name} (${matchedSupervisor.customRoleTitle || matchedSupervisor.role})`);
-      setDiscountAmount(tempDiscountVal > 0 ? tempDiscountVal : 0);
+      const val = Math.max(0, tempDiscountVal);
+      if (supervisorDiscountMode === 'percentage') {
+        setDiscountMode('percentage');
+        setDiscountInputVal(String(val));
+        const computedAmt = Math.round((val / 100) * itemsSubtotal);
+        setDiscountAmount(computedAmt);
+      } else {
+        setDiscountMode('fixed');
+        setDiscountInputVal(String(val));
+        setDiscountAmount(val);
+      }
       setShowAdminDiscountAuthModal(false);
       setAdminPinInput('');
     } else {
@@ -776,8 +887,8 @@ export const POSView: React.FC<POSViewProps> = ({
       date: finalTxDate,
       items: [...cart],
       subtotal,
-      discountTotal: numDiscount,
-      discountAuthorizedBy: numDiscount > 0 ? (discountAuthorizedBy || `${currentUser.name} (Admin)`) : undefined,
+      discountTotal: totalDiscount,
+      discountAuthorizedBy: totalDiscount > 0 ? (discountAuthorizedBy || `${currentUser.name} (Admin)`) : undefined,
       taxTotal,
       grandTotal,
       amountPaid: totalPaid,
@@ -1539,57 +1650,227 @@ export const POSView: React.FC<POSViewProps> = ({
               cart.map((item) => (
                 <div
                   key={item.product.id}
-                  className="bg-slate-950 p-2.5 rounded-xl border border-slate-800 flex items-center justify-between gap-2.5 text-xs"
+                  className="bg-slate-950 p-2.5 rounded-xl border border-slate-800 space-y-2 text-xs"
                 >
-                  <div className="flex items-center gap-2.5 flex-1 min-w-0">
-                    {item.product.imageUrl ? (
-                      <img
-                        src={item.product.imageUrl}
-                        alt={item.product.name}
-                        referrerPolicy="no-referrer"
-                        className="w-10 h-10 rounded-lg object-cover border border-slate-700 shrink-0 shadow-sm"
-                        onError={(e) => { e.currentTarget.style.display = 'none'; }}
-                      />
-                    ) : (
-                      <div className="w-10 h-10 rounded-lg bg-slate-900 border border-slate-800 flex items-center justify-center text-slate-600 shrink-0">
-                        <Package className="w-4 h-4 text-slate-500" />
-                      </div>
-                    )}
-                    <div className="min-w-0 flex-1">
-                      <div className="font-semibold text-slate-200 truncate">{item.product.name}</div>
-                      <div className="text-[10px] text-slate-400 font-mono">
-                        KSh {item.unitPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })} / {item.product.unit} {item.product.sizeCapacity ? `• ${item.product.sizeCapacity}` : ''}
+                  <div className="flex items-center justify-between gap-2.5">
+                    <div className="flex items-center gap-2.5 flex-1 min-w-0">
+                      {item.product.imageUrl ? (
+                        <img
+                          src={item.product.imageUrl}
+                          alt={item.product.name}
+                          referrerPolicy="no-referrer"
+                          className="w-10 h-10 rounded-lg object-cover border border-slate-700 shrink-0 shadow-sm"
+                          onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                        />
+                      ) : (
+                        <div className="w-10 h-10 rounded-lg bg-slate-900 border border-slate-800 flex items-center justify-center text-slate-600 shrink-0">
+                          <Package className="w-4 h-4 text-slate-500" />
+                        </div>
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <div className="font-semibold text-slate-200 truncate">{item.product.name}</div>
+                        <div className="text-[10px] text-slate-400 font-mono flex items-center gap-1.5 flex-wrap">
+                          {item.discount > 0 ? (
+                            <>
+                              <span className="line-through text-slate-500">
+                                KSh {item.unitPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                              </span>
+                              <span className="text-emerald-400 font-bold">
+                                KSh {(item.unitPrice - item.discount).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                              </span>
+                              <span className="text-[9px] bg-emerald-950/80 text-emerald-300 border border-emerald-800 px-1 rounded font-semibold">
+                                -KSh {item.discount} off
+                              </span>
+                            </>
+                          ) : (
+                            <span>KSh {item.unitPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                          )}
+                          <span>/ {item.product.unit} {item.product.sizeCapacity ? `• ${item.product.sizeCapacity}` : ''}</span>
+                        </div>
                       </div>
                     </div>
-                  </div>
 
-                  {/* Quantity Counter */}
-                  <div className="flex items-center gap-1.5 bg-slate-900 px-2 py-1 rounded-lg border border-slate-800">
+                    {/* Quantity Counter */}
+                    <div className="flex items-center gap-1.5 bg-slate-900 px-2 py-1 rounded-lg border border-slate-800">
+                      <button
+                        onClick={() => updateCartQty(item.product.id, -1)}
+                        className="text-slate-400 hover:text-white p-0.5"
+                      >
+                        <Minus className="w-3.5 h-3.5" />
+                      </button>
+                      <span className="font-bold font-mono text-slate-100 px-1">{item.quantity}</span>
+                      <button
+                        onClick={() => updateCartQty(item.product.id, 1)}
+                        className="text-slate-400 hover:text-white p-0.5"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+
+                    <div className="text-right font-bold text-slate-100 min-w-[70px]">
+                      KSh {item.total.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                    </div>
+
                     <button
-                      onClick={() => updateCartQty(item.product.id, -1)}
-                      className="text-slate-400 hover:text-white p-0.5"
+                      onClick={() => removeFromCart(item.product.id)}
+                      className="p-1 hover:bg-slate-800 text-slate-500 hover:text-rose-400 rounded transition"
+                      title="Remove item from cart"
                     >
-                      <Minus className="w-3.5 h-3.5" />
-                    </button>
-                    <span className="font-bold font-mono text-slate-100 px-1">{item.quantity}</span>
-                    <button
-                      onClick={() => updateCartQty(item.product.id, 1)}
-                      className="text-slate-400 hover:text-white p-0.5"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
+                      <Trash2 className="w-3.5 h-3.5" />
                     </button>
                   </div>
 
-                  <div className="text-right font-bold text-slate-100 min-w-[70px]">
-                    KSh {item.total.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  {/* Item Discount Action Bar */}
+                  <div className="flex items-center justify-between pt-1 border-t border-slate-900 text-[11px]">
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (editingItemDiscountId === item.product.id) {
+                            setEditingItemDiscountId(null);
+                          } else {
+                            setEditingItemDiscountId(item.product.id);
+                            setItemDiscountMode('fixed');
+                            setItemDiscountInputVal(item.discount > 0 ? String(item.discount) : '');
+                          }
+                        }}
+                        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md font-semibold transition ${
+                          item.discount > 0
+                            ? 'bg-amber-950/70 border border-amber-800 text-amber-300 hover:bg-amber-900'
+                            : 'bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-800'
+                        }`}
+                        title="Set manual cash or % discount for this specific item"
+                      >
+                        <Tag className="w-3 h-3 text-amber-400" />
+                        <span>{item.discount > 0 ? `Item Disc: -KSh ${(item.discount * item.quantity).toLocaleString()}` : 'Give Item Discount'}</span>
+                      </button>
+                      {item.discount > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => handleUpdateItemDiscount(item.product.id, 0)}
+                          className="text-[10px] text-rose-400 hover:underline"
+                        >
+                          Clear
+                        </button>
+                      )}
+                    </div>
+
+                    {item.discount > 0 && (
+                      <span className="text-[10px] text-emerald-400 font-mono">
+                        Saved KSh {(item.discount * item.quantity).toLocaleString()}
+                      </span>
+                    )}
                   </div>
 
-                  <button
-                    onClick={() => removeFromCart(item.product.id)}
-                    className="p-1 hover:bg-slate-800 text-slate-500 hover:text-rose-400 rounded transition"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
+                  {/* Inline Item Discount Popover/Editor */}
+                  {editingItemDiscountId === item.product.id && (
+                    <div className="p-2.5 bg-slate-900/90 rounded-xl border border-amber-800/60 space-y-2 mt-1">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-amber-300 text-[11px] flex items-center gap-1">
+                          <Tag className="w-3 h-3" /> Manual Item Discount: {item.product.name}
+                        </span>
+                        <div className="flex items-center bg-slate-950 p-0.5 rounded-lg border border-slate-800 text-[10px]">
+                          <button
+                            type="button"
+                            onClick={() => setItemDiscountMode('fixed')}
+                            className={`px-2 py-0.5 rounded font-bold transition ${
+                              itemDiscountMode === 'fixed' ? 'bg-amber-500 text-slate-950' : 'text-slate-400 hover:text-white'
+                            }`}
+                          >
+                            Manual KSh
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setItemDiscountMode('percentage')}
+                            className={`px-2 py-0.5 rounded font-bold transition ${
+                              itemDiscountMode === 'percentage' ? 'bg-amber-500 text-slate-950' : 'text-slate-400 hover:text-white'
+                            }`}
+                          >
+                            % Off
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <div className="relative flex-1">
+                          <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500 text-[10px] font-mono font-bold">
+                            {itemDiscountMode === 'fixed' ? 'KSh' : '%'}
+                          </span>
+                          <input
+                            type="number"
+                            min="0"
+                            max={itemDiscountMode === 'fixed' ? item.unitPrice : 100}
+                            value={itemDiscountInputVal}
+                            onChange={(e) => setItemDiscountInputVal(e.target.value)}
+                            placeholder={itemDiscountMode === 'fixed' ? 'e.g. 50' : 'e.g. 10'}
+                            className="w-full bg-slate-950 border border-slate-700 pl-9 pr-2 py-1 rounded-lg text-xs font-mono font-bold text-amber-300 focus:outline-none focus:border-amber-400"
+                          />
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const val = parseFloat(itemDiscountInputVal) || 0;
+                            let discPerUnit = 0;
+                            if (itemDiscountMode === 'percentage') {
+                              discPerUnit = Math.round((val / 100) * item.unitPrice);
+                            } else {
+                              discPerUnit = Math.min(item.unitPrice, val);
+                            }
+                            handleUpdateItemDiscount(item.product.id, discPerUnit);
+                            setEditingItemDiscountId(null);
+                          }}
+                          className="px-3 py-1 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs rounded-lg transition"
+                        >
+                          Apply
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setEditingItemDiscountId(null)}
+                          className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs rounded-lg transition"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+
+                      {/* Quick Chips for Item Discount */}
+                      <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
+                        <span className="text-[10px] text-slate-500">Quick:</span>
+                        {itemDiscountMode === 'fixed' ? (
+                          [20, 50, 100, 200, 500].map((amt) => (
+                            <button
+                              key={amt}
+                              type="button"
+                              onClick={() => {
+                                setItemDiscountInputVal(String(amt));
+                                handleUpdateItemDiscount(item.product.id, Math.min(item.unitPrice, amt));
+                                setEditingItemDiscountId(null);
+                              }}
+                              className="px-1.5 py-0.5 bg-slate-950 hover:bg-amber-950 border border-slate-800 hover:border-amber-700 text-slate-300 hover:text-amber-300 text-[10px] rounded font-mono transition"
+                            >
+                              -KSh {amt}
+                            </button>
+                          ))
+                        ) : (
+                          [5, 10, 15, 20, 50].map((pct) => (
+                            <button
+                              key={pct}
+                              type="button"
+                              onClick={() => {
+                                setItemDiscountInputVal(String(pct));
+                                const disc = Math.round((pct / 100) * item.unitPrice);
+                                handleUpdateItemDiscount(item.product.id, disc);
+                                setEditingItemDiscountId(null);
+                              }}
+                              className="px-1.5 py-0.5 bg-slate-950 hover:bg-amber-950 border border-slate-800 hover:border-amber-700 text-slate-300 hover:text-amber-300 text-[10px] rounded font-mono transition"
+                            >
+                              {pct}% off
+                            </button>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
               ))
             )}
@@ -1636,64 +1917,203 @@ export const POSView: React.FC<POSViewProps> = ({
 
           {/* Discount, KRA Tax & Totals summary */}
           <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800 space-y-2.5 text-xs">
-            {/* Admin-Only Discount Guard */}
-            <div className="bg-slate-900 p-2.5 rounded-xl border border-slate-800 space-y-2">
-              <div className="flex items-center justify-between">
+            {/* Sales Discount Controller with Dual Manual & Percentage Support */}
+            <div className="bg-slate-900 p-2.5 rounded-xl border border-slate-800 space-y-2.5">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
                 <div className="flex items-center gap-1.5">
-                  <Percent className="w-3.5 h-3.5 text-amber-400" />
-                  <span className="font-semibold text-slate-300">Sales Discount (KSh):</span>
+                  {discountMode === 'fixed' ? (
+                    <Banknote className="w-3.5 h-3.5 text-amber-400" />
+                  ) : (
+                    <Percent className="w-3.5 h-3.5 text-amber-400" />
+                  )}
+                  <span className="font-semibold text-slate-300">
+                    Sales Discount {discountMode === 'fixed' ? '(Manual KSh)' : '(Percentage %)'}:
+                  </span>
                 </div>
 
-                {hasWorkerPermission(currentUser, 'canGiveDiscounts') || discountAuthorizedBy ? (
+                {/* Mode Toggle: Manual Cash (KSh) vs Percentage (%) */}
+                <div className="flex items-center bg-slate-950 p-0.5 rounded-lg border border-slate-800 text-[10px]">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDiscountMode('fixed');
+                      if (discountMode === 'percentage' && numDiscount > 0) {
+                        setDiscountInputVal(String(numDiscount));
+                        setDiscountAmount(numDiscount);
+                      }
+                    }}
+                    className={`px-2 py-0.5 rounded font-bold transition flex items-center gap-1 ${
+                      discountMode === 'fixed'
+                        ? 'bg-amber-500 text-slate-950 shadow-sm'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                    title="Give flat manual discount in Kenyan Shillings"
+                  >
+                    <Banknote className="w-3 h-3" />
+                    <span>Manual (KSh)</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDiscountMode('percentage');
+                      if (discountMode === 'fixed' && numDiscount > 0 && itemsSubtotal > 0) {
+                        const pct = Math.round((numDiscount / itemsSubtotal) * 100);
+                        setDiscountInputVal(pct > 0 ? String(pct) : '');
+                      }
+                    }}
+                    className={`px-2 py-0.5 rounded font-bold transition flex items-center gap-1 ${
+                      discountMode === 'percentage'
+                        ? 'bg-amber-500 text-slate-950 shadow-sm'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                    title="Give percentage discount calculated from subtotal"
+                  >
+                    <Percent className="w-3 h-3" />
+                    <span>Percentage (%)</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Discount Input & Quick Preset Chips */}
+              {hasWorkerPermission(currentUser, 'canGiveDiscounts') || discountAuthorizedBy ? (
+                <div className="space-y-2">
                   <div className="flex items-center gap-2">
-                    <input
-                      type="number"
-                      min="0"
-                      value={discountAmount ?? ''}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        if (hasWorkerPermission(currentUser, 'canGiveDiscounts') || discountAuthorizedBy) {
-                          setDiscountAmount(val as any);
+                    <div className="relative flex-1">
+                      <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500 text-xs font-mono font-bold">
+                        {discountMode === 'fixed' ? 'KSh' : '%'}
+                      </span>
+                      <input
+                        type="number"
+                        min="0"
+                        max={discountMode === 'percentage' ? 100 : itemsSubtotal}
+                        value={discountInputVal}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setDiscountInputVal(val);
+                          const numVal = parseFloat(val) || 0;
+                          if (discountMode === 'percentage') {
+                            setDiscountAmount(Math.round((numVal / 100) * itemsSubtotal));
+                          } else {
+                            setDiscountAmount(numVal);
+                          }
                           if (hasWorkerPermission(currentUser, 'canGiveDiscounts') && !discountAuthorizedBy) {
                             setDiscountAuthorizedBy(`${currentUser.name} (${currentUser.customRoleTitle || currentUser.role})`);
                           }
-                        }
-                      }}
-                      placeholder="0.00"
-                      className="w-24 bg-slate-950 border border-slate-700 text-right px-2 py-1 rounded-lg text-xs font-mono font-bold text-amber-300 focus:outline-none focus:border-amber-400"
-                    />
-                    {discountAmount > 0 && (
-                      <button
-                        onClick={() => {
-                          setDiscountAmount(0);
-                          if (!hasWorkerPermission(currentUser, 'canGiveDiscounts')) setDiscountAuthorizedBy(null);
                         }}
-                        className="text-[10px] text-rose-400 hover:underline font-semibold"
-                        title="Remove discount"
+                        placeholder={discountMode === 'fixed' ? 'e.g. 200' : 'e.g. 10'}
+                        className="w-full bg-slate-950 border border-slate-700 pl-10 pr-2 py-1.5 rounded-lg text-xs font-mono font-bold text-amber-300 focus:outline-none focus:border-amber-400"
+                      />
+                    </div>
+
+                    {(numDiscount > 0 || discountInputVal !== '') && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDiscountInputVal('');
+                          setDiscountAmount(0);
+                          if (!hasWorkerPermission(currentUser, 'canGiveDiscounts')) {
+                            setDiscountAuthorizedBy(null);
+                          }
+                        }}
+                        className="px-2 py-1.5 bg-rose-950/60 hover:bg-rose-900 border border-rose-800 text-rose-300 rounded-lg text-[11px] font-semibold transition"
+                        title="Clear discount"
                       >
                         Clear
                       </button>
                     )}
                   </div>
-                ) : (
+
+                  {/* 1-Tap Quick Discount Preset Chips */}
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="text-[10px] text-slate-500 font-medium">Quick Presets:</span>
+                    {discountMode === 'fixed' ? (
+                      [50, 100, 200, 500, 1000].map((amt) => (
+                        <button
+                          key={amt}
+                          type="button"
+                          onClick={() => {
+                            setDiscountInputVal(String(amt));
+                            setDiscountAmount(amt);
+                            if (hasWorkerPermission(currentUser, 'canGiveDiscounts') && !discountAuthorizedBy) {
+                              setDiscountAuthorizedBy(`${currentUser.name} (${currentUser.customRoleTitle || currentUser.role})`);
+                            }
+                          }}
+                          className={`px-2 py-0.5 rounded text-[10px] font-mono transition border ${
+                            parseFloat(discountInputVal) === amt
+                              ? 'bg-amber-500 text-slate-950 border-amber-400 font-bold'
+                              : 'bg-slate-950 hover:bg-amber-950 border-slate-800 hover:border-amber-700 text-slate-300 hover:text-amber-300'
+                          }`}
+                        >
+                          -KSh {amt}
+                        </button>
+                      ))
+                    ) : (
+                      [5, 10, 15, 20, 25].map((pct) => (
+                        <button
+                          key={pct}
+                          type="button"
+                          onClick={() => {
+                            setDiscountInputVal(String(pct));
+                            setDiscountAmount(Math.round((pct / 100) * itemsSubtotal));
+                            if (hasWorkerPermission(currentUser, 'canGiveDiscounts') && !discountAuthorizedBy) {
+                              setDiscountAuthorizedBy(`${currentUser.name} (${currentUser.customRoleTitle || currentUser.role})`);
+                            }
+                          }}
+                          className={`px-2 py-0.5 rounded text-[10px] font-mono transition border ${
+                            parseFloat(discountInputVal) === pct
+                              ? 'bg-amber-500 text-slate-950 border-amber-400 font-bold'
+                              : 'bg-slate-950 hover:bg-amber-950 border-slate-800 hover:border-amber-700 text-slate-300 hover:text-amber-300'
+                          }`}
+                        >
+                          {pct}% off
+                        </button>
+                      ))
+                    )}
+                  </div>
+
+                  {/* Dynamic calculation summary note */}
+                  {numDiscount > 0 && (
+                    <div className="text-[10px] text-amber-300/90 font-mono bg-amber-950/20 border border-amber-900/40 px-2 py-1 rounded-md">
+                      {discountMode === 'fixed' ? (
+                        <span>
+                          💵 Deducting manual flat <strong>KSh {numDiscount.toLocaleString()}</strong> from bill{' '}
+                          {itemsSubtotal > 0 && (
+                            <span className="text-slate-400">
+                              (saves {((numDiscount / itemsSubtotal) * 100).toFixed(1)}%)
+                            </span>
+                          )}
+                        </span>
+                      ) : (
+                        <span>
+                          📊 Applying <strong>{discountInputVal}%</strong> discount = Saves{' '}
+                          <strong>KSh {numDiscount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</strong>
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="pt-1">
                   <button
+                    type="button"
                     onClick={() => {
                       setTempDiscountVal(100);
                       setShowAdminDiscountAuthModal(true);
                     }}
-                    className="px-2.5 py-1 bg-amber-950/80 hover:bg-amber-900 border border-amber-800 text-amber-300 rounded-lg text-[11px] font-bold transition flex items-center gap-1"
+                    className="w-full px-2.5 py-1.5 bg-amber-950/80 hover:bg-amber-900 border border-amber-800 text-amber-300 rounded-lg text-[11px] font-bold transition flex items-center justify-center gap-1.5"
                   >
-                    <Lock className="w-3 h-3 text-amber-400" />
-                    <span>Request Supervisor Discount</span>
+                    <Lock className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Request Supervisor Discount (Manual KSh or %)</span>
                   </button>
-                )}
-              </div>
+                </div>
+              )}
 
-              {discountAmount > 0 && (
+              {totalDiscount > 0 && (
                 <div className="flex items-center justify-between text-[10px] text-emerald-400 font-mono bg-emerald-950/40 border border-emerald-900/60 px-2 py-1 rounded-lg">
                   <span className="flex items-center gap-1">
                     <ShieldCheck className="w-3 h-3 text-emerald-400" />
-                    <span>Discount Approved By:</span>
+                    <span>Discount Authorization:</span>
                   </span>
                   <span className="font-bold">{discountAuthorizedBy || `${currentUser.name} (${currentUser.role})`}</span>
                 </div>
@@ -1701,15 +2121,43 @@ export const POSView: React.FC<POSViewProps> = ({
 
               {currentUser.role !== 'Admin' && currentUser.role !== 'Manager' && !discountAuthorizedBy && (
                 <p className="text-[10px] text-slate-500 italic">
-                  🔒 Cashiers require Manager or Admin PIN authorization to apply discounts.
+                  🔒 Cashiers require Manager or Admin PIN authorization to apply manual cash or percentage discounts.
                 </p>
               )}
             </div>
 
-            <div className="flex items-center justify-between border-t border-slate-800 pt-2">
-              <span className="text-slate-400">Subtotal:</span>
-              <span className="font-mono font-semibold text-slate-200">KSh {subtotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+            {/* Subtotal, Item Discounts & Totals Breakdown */}
+            <div className="flex items-center justify-between border-t border-slate-800 pt-2 text-slate-300">
+              <span className="text-slate-400">Items Gross Subtotal:</span>
+              <span className="font-mono font-semibold">KSh {grossSubtotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
             </div>
+
+            {itemDiscountsTotal > 0 && (
+              <div className="flex items-center justify-between text-emerald-400 font-mono text-[11px]">
+                <span className="flex items-center gap-1">
+                  <Tag className="w-3 h-3" />
+                  <span>Item-Level Discounts:</span>
+                </span>
+                <span>-KSh {itemDiscountsTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+              </div>
+            )}
+
+            {numDiscount > 0 && (
+              <div className="flex items-center justify-between text-amber-400 font-mono text-[11px]">
+                <span className="flex items-center gap-1">
+                  {discountMode === 'fixed' ? <Banknote className="w-3 h-3" /> : <Percent className="w-3 h-3" />}
+                  <span>Sale Discount {discountMode === 'fixed' ? '(Manual KSh)' : `(${discountInputVal}%)`}:</span>
+                </span>
+                <span>-KSh {numDiscount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+              </div>
+            )}
+
+            {totalDiscount > 0 && (
+              <div className="flex items-center justify-between text-emerald-300 font-mono text-[11px] bg-emerald-950/30 px-2 py-0.5 rounded border border-emerald-900/40">
+                <span className="font-bold">Total Customer Savings:</span>
+                <span className="font-extrabold">-KSh {totalDiscount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+              </div>
+            )}
 
             <div className="flex items-center justify-between text-[11px] text-amber-400/90 font-mono">
               <span className="flex items-center gap-1">
@@ -2086,6 +2534,38 @@ export const POSView: React.FC<POSViewProps> = ({
               </button>
             </div>
 
+            {/* Hidden file input for contact import */}
+            <input
+              ref={posCustVcfInputRef}
+              type="file"
+              accept=".vcf,.vcard,.csv,.txt,text/vcard,text/csv,text/plain"
+              onChange={handlePOSVcfUpload}
+              className="hidden"
+            />
+
+            {/* Quick Phonebook Contact Picker Banner */}
+            <div className="p-2.5 bg-sky-950/40 border border-sky-900/60 rounded-xl flex items-center justify-between gap-2">
+              <span className="text-[11px] text-slate-300">
+                In your phone contacts?
+              </span>
+              <button
+                type="button"
+                onClick={handlePickPhoneContactForPOS}
+                className="px-2.5 py-1 bg-sky-600 hover:bg-sky-500 text-white rounded-lg text-xs font-bold transition flex items-center gap-1 shadow-sm active:scale-95 cursor-pointer"
+                title="Auto-fill name, phone, and email from device contacts file or phone book"
+              >
+                <Smartphone className="w-3.5 h-3.5" />
+                <span>📱 Pick from Phone Book / File</span>
+              </button>
+            </div>
+
+            {custPhonebookNotice && (
+              <div className="text-[11px] font-semibold text-emerald-400 bg-emerald-950/60 border border-emerald-900 px-2.5 py-1.5 rounded-lg flex items-center gap-1.5">
+                <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
+                <span>{custPhonebookNotice}</span>
+              </div>
+            )}
+
             <form onSubmit={handleCreateCustomerSubmit} className="space-y-3 text-xs">
               <div>
                 <label className="block text-slate-400 mb-1">Full Name *</label>
@@ -2280,15 +2760,117 @@ export const POSView: React.FC<POSViewProps> = ({
               </div>
 
               <div>
-                <label className="block text-xs text-slate-400 mb-1">Discount Amount to Apply (KSh)</label>
-                <input
-                  type="number"
-                  min="1"
-                  value={tempDiscountVal || ''}
-                  onChange={(e) => setTempDiscountVal(Math.max(0, parseFloat(e.target.value) || 0))}
-                  placeholder="e.g. 200"
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs font-mono text-slate-100 focus:outline-none focus:border-amber-400"
-                />
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-xs text-slate-300 font-semibold">
+                    Discount Type:
+                  </label>
+                  <div className="flex items-center bg-slate-950 p-0.5 rounded-lg border border-slate-800 text-[10px]">
+                    <button
+                      type="button"
+                      onClick={() => setSupervisorDiscountMode('fixed')}
+                      className={`px-2 py-0.5 rounded font-bold transition flex items-center gap-1 ${
+                        supervisorDiscountMode === 'fixed' ? 'bg-amber-500 text-slate-950 shadow-sm' : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      <Banknote className="w-3 h-3" />
+                      <span>Manual KSh</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSupervisorDiscountMode('percentage')}
+                      className={`px-2 py-0.5 rounded font-bold transition flex items-center gap-1 ${
+                        supervisorDiscountMode === 'percentage' ? 'bg-amber-500 text-slate-950 shadow-sm' : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      <Percent className="w-3 h-3" />
+                      <span>Percentage %</span>
+                    </button>
+                  </div>
+                </div>
+
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs font-mono font-bold">
+                    {supervisorDiscountMode === 'fixed' ? 'KSh' : '%'}
+                  </span>
+                  <input
+                    type="number"
+                    min="1"
+                    max={supervisorDiscountMode === 'percentage' ? 100 : itemsSubtotal}
+                    value={tempDiscountVal || ''}
+                    onChange={(e) => setTempDiscountVal(Math.max(0, parseFloat(e.target.value) || 0))}
+                    placeholder={supervisorDiscountMode === 'fixed' ? 'e.g. 200' : 'e.g. 10'}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-12 pr-3 py-2 text-xs font-mono font-bold text-amber-300 focus:outline-none focus:border-amber-400"
+                  />
+                </div>
+
+                {/* Preset Chips */}
+                <div className="flex items-center gap-1.5 flex-wrap mt-2">
+                  <span className="text-[10px] text-slate-500 font-medium">Quick Presets:</span>
+                  {supervisorDiscountMode === 'fixed' ? (
+                    [50, 100, 200, 500, 1000].map((amt) => (
+                      <button
+                        key={amt}
+                        type="button"
+                        onClick={() => setTempDiscountVal(amt)}
+                        className={`px-2 py-0.5 rounded text-[10px] font-mono transition border ${
+                          tempDiscountVal === amt
+                            ? 'bg-amber-500 text-slate-950 border-amber-400 font-bold'
+                            : 'bg-slate-950 hover:bg-amber-950 border-slate-800 hover:border-amber-700 text-slate-300 hover:text-amber-300'
+                        }`}
+                      >
+                        -KSh {amt}
+                      </button>
+                    ))
+                  ) : (
+                    [5, 10, 15, 20, 25].map((pct) => (
+                      <button
+                        key={pct}
+                        type="button"
+                        onClick={() => setTempDiscountVal(pct)}
+                        className={`px-2 py-0.5 rounded text-[10px] font-mono transition border ${
+                          tempDiscountVal === pct
+                            ? 'bg-amber-500 text-slate-950 border-amber-400 font-bold'
+                            : 'bg-slate-950 hover:bg-amber-950 border-slate-800 hover:border-amber-700 text-slate-300 hover:text-amber-300'
+                        }`}
+                      >
+                        {pct}% off
+                      </button>
+                    ))
+                  )}
+                </div>
+
+                {/* Live Preview Box */}
+                <div className="bg-slate-950/80 p-2.5 rounded-xl border border-slate-800 mt-3 space-y-1 text-[11px] font-mono">
+                  <div className="flex justify-between text-slate-400">
+                    <span>Items Subtotal:</span>
+                    <span>KSh {itemsSubtotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                  </div>
+                  <div className="flex justify-between text-amber-400 font-bold">
+                    <span>
+                      Authorized Discount {supervisorDiscountMode === 'fixed' ? '(Manual KSh)' : `(${tempDiscountVal}%)`}:
+                    </span>
+                    <span>
+                      -KSh{' '}
+                      {(supervisorDiscountMode === 'percentage'
+                        ? Math.round((tempDiscountVal / 100) * itemsSubtotal)
+                        : tempDiscountVal
+                      ).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-white font-extrabold border-t border-slate-800 pt-1">
+                    <span>Payable Total:</span>
+                    <span className="text-sky-400">
+                      KSh{' '}
+                      {Math.max(
+                        0,
+                        itemsSubtotal -
+                          (supervisorDiscountMode === 'percentage'
+                            ? Math.round((tempDiscountVal / 100) * itemsSubtotal)
+                            : tempDiscountVal)
+                      ).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                </div>
               </div>
 
               {adminAuthError && (

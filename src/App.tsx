@@ -1105,6 +1105,7 @@ export default function App() {
           (c.phone !== 'N/A' && !existingPhones.has(c.phone.trim())) ||
           (c.phone === 'N/A' && !existingNames.has(c.name.toLowerCase().trim()))
       );
+      uniqueNew.forEach((c) => saveCustomerToCloud(c).catch(() => {}));
       return [...prev, ...uniqueNew];
     });
   };
@@ -1113,6 +1114,7 @@ export default function App() {
     setSuppliers((prev) => {
       const existingNames = new Set(prev.map((s) => s.name.toLowerCase().trim()));
       const uniqueNew = newSuppliers.filter((s) => !existingNames.has(s.name.toLowerCase().trim()));
+      uniqueNew.forEach((s) => saveSupplierToCloud(s).catch(() => {}));
       return [...prev, ...uniqueNew];
     });
   };

@@ -1,6 +1,12 @@
-import React, { useState, useEffect } from 'react';
-import { X, Building2, Phone, Mail, MapPin, FileText, CreditCard, Layers } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { X, Building2, Phone, Mail, MapPin, FileText, CreditCard, Layers, Smartphone, ShieldCheck, Clipboard } from 'lucide-react';
 import { Supplier } from '../../types';
+import {
+  isContactPickerSupported,
+  pickFromDevicePhonebook,
+  parseContactFile,
+  parseRawTextContacts,
+} from '../../utils/phoneContacts';
 
 interface SupplierEditModalProps {
   isOpen: boolean;
@@ -26,6 +32,79 @@ export const SupplierEditModal: React.FC<SupplierEditModalProps> = ({
   const [categorySpecialty, setCategorySpecialty] = useState('');
   const [notes, setNotes] = useState('');
   const [errors, setErrors] = useState<{ name?: string; phone?: string }>({});
+  const [phonebookNotice, setPhonebookNotice] = useState<string>('');
+  const [showPasteBox, setShowPasteBox] = useState(false);
+  const [pasteInput, setPasteInput] = useState('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handlePickFromPhonebook = async () => {
+    setPhonebookNotice('');
+    if (isContactPickerSupported()) {
+      try {
+        const picked = await pickFromDevicePhonebook(false);
+        if (picked.length > 0) {
+          const c = picked[0];
+          setName(c.company || c.name || name);
+          setContactPerson(c.company ? c.name : 'Account Manager');
+          if (c.phone && c.phone !== 'N/A') setPhone(c.phone);
+          if (c.email) setEmail(c.email);
+          if (c.address) setAddress(c.address);
+          setPhonebookNotice(`✨ Auto-filled supplier details for ${c.name} from phone book!`);
+          setTimeout(() => setPhonebookNotice(''), 4000);
+        }
+      } catch {
+        setPhonebookNotice('📱 Select your phone contacts file (.vcf / .csv) to auto-fill.');
+        fileInputRef.current?.click();
+      }
+    } else {
+      setPhonebookNotice('📱 Select your phone contacts file (.vcf / .csv) to auto-fill.');
+      fileInputRef.current?.click();
+    }
+  };
+
+  const handleVcfSingleContactUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const text = event.target?.result as string;
+      const parsed = parseContactFile(text);
+      if (parsed.length > 0) {
+        const c = parsed[0];
+        setName(c.company || c.name || name);
+        setContactPerson(c.company ? c.name : 'Account Manager');
+        if (c.phone && c.phone !== 'N/A') setPhone(c.phone);
+        if (c.email) setEmail(c.email);
+        if (c.address) setAddress(c.address);
+        setPhonebookNotice(`✨ Imported supplier ${c.name} from contacts file!`);
+        setTimeout(() => setPhonebookNotice(''), 4000);
+      } else {
+        setPhonebookNotice('No valid contact found in file.');
+      }
+    };
+    reader.readAsText(file);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const handleQuickPasteSubmit = () => {
+    if (!pasteInput.trim()) return;
+    const parsed = parseRawTextContacts(pasteInput);
+    if (parsed.length > 0) {
+      const c = parsed[0];
+      if (c.company) setName(c.company);
+      else if (c.name && c.name !== 'Contact 1') setName(c.name);
+      if (c.name) setContactPerson(c.name);
+      if (c.phone && c.phone !== 'N/A') setPhone(c.phone);
+      if (c.email) setEmail(c.email);
+      if (c.address) setAddress(c.address);
+      setPhonebookNotice(`✨ Extracted ${c.name || 'supplier'} from pasted info!`);
+      setShowPasteBox(false);
+      setPasteInput('');
+      setTimeout(() => setPhonebookNotice(''), 4000);
+    } else {
+      setPhonebookNotice('Could not extract supplier name or phone from pasted text.');
+    }
+  };
 
   useEffect(() => {
     if (supplier) {
@@ -122,7 +201,93 @@ export const SupplierEditModal: React.FC<SupplierEditModalProps> = ({
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="mt-5 space-y-4 text-xs">
+        {/* Hidden file input for contacts file */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".vcf,.vcard,.csv,.txt,text/vcard,text/csv,text/plain"
+          onChange={handleVcfSingleContactUpload}
+          className="hidden"
+        />
+
+        {/* Quick Phonebook Contact Picker Banner */}
+        <div className="mt-4 p-3 bg-indigo-950/40 border border-indigo-900/60 rounded-2xl space-y-2">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+            <div className="flex items-center gap-2">
+              <Smartphone className="w-4 h-4 text-indigo-400 shrink-0" />
+              <span className="text-[11px] text-slate-300">
+                Have this vendor or supplier in your phone contacts?
+              </span>
+            </div>
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <button
+                type="button"
+                onClick={handlePickFromPhonebook}
+                className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 shadow-md shadow-indigo-600/20 active:scale-95 cursor-pointer"
+                title="Auto-fill company, contact person, phone, and email from phone contacts file (.vcf / .csv) or phone book"
+              >
+                <Smartphone className="w-3.5 h-3.5" />
+                <span>📱 Phone Contacts / File</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowPasteBox(!showPasteBox)}
+                className="px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-300 hover:text-white rounded-xl text-xs font-medium transition flex items-center justify-center gap-1 cursor-pointer"
+                title="Paste supplier company name and phone from clipboard"
+              >
+                <Clipboard className="w-3.5 h-3.5 text-indigo-400" />
+                <span>📋 Paste Info</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Quick Paste Inline Box */}
+          {showPasteBox && (
+            <div className="pt-2 border-t border-indigo-900/40 space-y-1.5">
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  placeholder="Paste here: e.g. Safari Distributors 0722334455 supply@safari.co.ke"
+                  value={pasteInput}
+                  onChange={(e) => setPasteInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleQuickPasteSubmit();
+                    }
+                  }}
+                  className="flex-1 bg-slate-950 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500 font-mono"
+                />
+                <button
+                  type="button"
+                  onClick={handleQuickPasteSubmit}
+                  className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-xl transition"
+                >
+                  Auto-Fill
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowPasteBox(false)}
+                  className="px-2 py-1.5 bg-slate-800 text-slate-400 hover:text-slate-200 text-xs rounded-xl"
+                >
+                  Cancel
+                </button>
+              </div>
+              <p className="text-[10px] text-slate-400">
+                💡 Tip: Copy any contact from WhatsApp, SMS, or Phone Contacts and paste here to auto-fill.
+              </p>
+            </div>
+          )}
+        </div>
+
+        {phonebookNotice && (
+          <div className="mt-2 text-xs font-semibold text-emerald-400 bg-emerald-950/60 border border-emerald-900 px-3 py-2 rounded-xl flex items-center gap-1.5">
+            <ShieldCheck className="w-4 h-4 shrink-0" />
+            <span>{phonebookNotice}</span>
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit} className="mt-4 space-y-4 text-xs">
           {/* Company Name & Contact Person */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>

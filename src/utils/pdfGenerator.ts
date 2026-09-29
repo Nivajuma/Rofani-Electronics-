@@ -371,7 +371,11 @@ export const exportReceiptPDF = (tx: Transaction) => {
     // Truncate long item names
     const shortName = it.product.name.length > 20 ? it.product.name.slice(0, 18) + '..' : it.product.name;
     doc.text(shortName, 6, y);
-    doc.text(`${it.quantity} x KSh ${it.unitPrice.toLocaleString()}`, 45, y);
+    if (it.discount > 0) {
+      doc.text(`${it.quantity} x KSh ${(it.unitPrice - it.discount).toLocaleString()} (disc -${it.discount})`, 45, y);
+    } else {
+      doc.text(`${it.quantity} x KSh ${it.unitPrice.toLocaleString()}`, 45, y);
+    }
     doc.text(`KSh ${it.total.toLocaleString()}`, 74, y, { align: 'right' });
     y += 5;
   });

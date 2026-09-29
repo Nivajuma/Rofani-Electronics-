@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, Upload, Download, FileSpreadsheet, CheckCircle2, AlertCircle, Users, Building2 } from 'lucide-react';
+import { X, Upload, Download, FileSpreadsheet, CheckCircle2, AlertCircle, Users, Building2, Smartphone } from 'lucide-react';
 import { Customer, Supplier } from '../../types';
 
 interface ContactsImportExportModalProps {
@@ -10,6 +10,7 @@ interface ContactsImportExportModalProps {
   suppliers: Supplier[];
   onImportCustomers: (newCustomers: Customer[]) => void;
   onImportSuppliers: (newSuppliers: Supplier[]) => void;
+  onOpenPhonebook?: () => void;
 }
 
 export const ContactsImportExportModal: React.FC<ContactsImportExportModalProps> = ({
@@ -20,6 +21,7 @@ export const ContactsImportExportModal: React.FC<ContactsImportExportModalProps>
   suppliers,
   onImportCustomers,
   onImportSuppliers,
+  onOpenPhonebook,
 }) => {
   const [csvText, setCsvText] = useState('');
   const [importSummary, setImportSummary] = useState<{ count: number; sample: string[] } | null>(null);
@@ -216,6 +218,36 @@ export const ContactsImportExportModal: React.FC<ContactsImportExportModalProps>
         </div>
 
         <div className="mt-5 space-y-4 text-xs">
+          {/* Quick Import from Phonebook Banner */}
+          {onOpenPhonebook && (
+            <div className="p-3.5 bg-gradient-to-r from-sky-950/70 to-indigo-950/70 border border-sky-800/60 rounded-2xl flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-10 h-10 rounded-xl bg-sky-500/20 border border-sky-500/30 flex items-center justify-center text-sky-400 shrink-0">
+                  <Smartphone className="w-5 h-5" />
+                </div>
+                <div className="min-w-0">
+                  <h4 className="font-bold text-slate-100 text-xs">
+                    Direct Phone Book Contacts Import
+                  </h4>
+                  <p className="text-[11px] text-slate-400 truncate">
+                    Tap to open your phone's contact picker or upload a .vcf file
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  onClose();
+                  onOpenPhonebook();
+                }}
+                className="px-3 py-1.5 bg-sky-600 hover:bg-sky-500 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shrink-0 shadow-md shadow-sky-600/20 cursor-pointer active:scale-95"
+              >
+                <Smartphone className="w-3.5 h-3.5" />
+                <span>Open Phone Book</span>
+              </button>
+            </div>
+          )}
+
           {/* Quick Export Cards */}
           <div className="grid grid-cols-2 gap-3">
             <button

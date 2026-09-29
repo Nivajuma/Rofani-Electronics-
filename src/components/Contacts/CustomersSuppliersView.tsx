@@ -22,7 +22,8 @@ import {
   Layers,
   ArrowUpDown,
   FileText,
-  Sparkles
+  Sparkles,
+  Smartphone
 } from 'lucide-react';
 import { Customer, Supplier, Transaction, Product, User, PaymentMethod } from '../../types';
 import { exportCustomerReportPDF, exportSupplierReportPDF } from '../../utils/pdfGenerator';
@@ -33,6 +34,7 @@ import { SupplierEditModal } from './SupplierEditModal';
 import { SupplierPaymentModal } from './SupplierPaymentModal';
 import { SupplierDetailsModal } from './SupplierDetailsModal';
 import { ContactsImportExportModal } from './ContactsImportExportModal';
+import { PhonebookImportModal } from './PhonebookImportModal';
 import { CustomerPromotionGeneratorModal } from '../Marketing/CustomerPromotionGeneratorModal';
 
 interface CustomersSuppliersViewProps {
@@ -109,6 +111,7 @@ export const CustomersSuppliersView: React.FC<CustomersSuppliersViewProps> = ({
   const [isSupplierDetailsOpen, setIsSupplierDetailsOpen] = useState(false);
 
   const [isImportExportOpen, setIsImportExportOpen] = useState(false);
+  const [isPhonebookModalOpen, setIsPhonebookModalOpen] = useState(false);
   const [isPromoGeneratorOpen, setIsPromoGeneratorOpen] = useState(false);
   const [selectedPromoCustomer, setSelectedPromoCustomer] = useState<Customer | null>(null);
 
@@ -437,6 +440,16 @@ export const CustomersSuppliersView: React.FC<CustomersSuppliersViewProps> = ({
 
           {/* Action Buttons */}
           <div className="flex items-center gap-2 flex-wrap">
+            <button
+              id="btn-import-phonebook-contacts"
+              onClick={() => setIsPhonebookModalOpen(true)}
+              className="px-3.5 py-2.5 bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-500 hover:to-indigo-500 text-white rounded-2xl text-xs font-bold transition flex items-center gap-1.5 shadow-md shadow-sky-600/20 active:scale-95 cursor-pointer"
+              title="Directly import contacts from your phone book or .vcf file"
+            >
+              <Smartphone className="w-4 h-4 text-white" />
+              <span>📱 Import from Phone Book</span>
+            </button>
+
             <button
               onClick={() => setIsImportExportOpen(true)}
               className="px-3.5 py-2.5 bg-slate-950 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 text-slate-300 rounded-2xl text-xs font-semibold transition flex items-center gap-1.5"
@@ -1060,6 +1073,16 @@ export const CustomersSuppliersView: React.FC<CustomersSuppliersViewProps> = ({
         targetType={activeTab}
         customers={customers}
         suppliers={suppliers}
+        onImportCustomers={onImportCustomers}
+        onImportSuppliers={onImportSuppliers}
+        onOpenPhonebook={() => setIsPhonebookModalOpen(true)}
+      />
+
+      {/* MODAL: DIRECT PHONEBOOK CONTACTS IMPORTER */}
+      <PhonebookImportModal
+        isOpen={isPhonebookModalOpen}
+        onClose={() => setIsPhonebookModalOpen(false)}
+        defaultTarget={activeTab}
         onImportCustomers={onImportCustomers}
         onImportSuppliers={onImportSuppliers}
       />

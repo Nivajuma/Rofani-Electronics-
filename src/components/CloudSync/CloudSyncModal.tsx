@@ -18,11 +18,13 @@ import {
   Edit3,
   Eye,
   EyeOff,
-  Shield
+  Shield,
+  WifiOff
 } from 'lucide-react';
 import QRCode from 'qrcode';
 import { bulkUploadProductsToCloud, bulkUploadUsersToCloud } from '../../lib/cloudSync';
 import { Product, User } from '../../types';
+import { useNetworkStatus } from '../../utils/offlineSync';
 
 interface CloudSyncModalProps {
   isOpen: boolean;
@@ -56,6 +58,7 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
   onLockNow,
   recoveryEmail = 'NivaJuma@gmail.com',
 }) => {
+  const { isOnline, pendingCount, isSimulated, toggleSimulatedOffline, checkConnection } = useNetworkStatus();
   const [copied, setCopied] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadMsg, setUploadMsg] = useState<string | null>(null);
@@ -170,6 +173,56 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
 
         {/* Scrollable Content Body */}
         <div className="p-4 sm:p-6 space-y-4 sm:space-y-5 overflow-y-auto flex-1">
+          {/* Offline Visual Indicator Banner */}
+          {!isOnline && (
+            <div
+              role="status"
+              aria-live="polite"
+              className="bg-amber-500/15 border-2 border-amber-500/60 p-4 rounded-2xl space-y-3 shadow-md animate-pulse"
+            >
+              <div className="flex items-start gap-3">
+                <div className="w-8 h-8 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center shrink-0 border border-amber-500/40">
+                  <WifiOff className="w-4 h-4 text-amber-400" />
+                </div>
+                <div className="flex-1 space-y-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-xs font-black text-amber-300 uppercase tracking-wider">
+                      You are currently offline
+                    </span>
+                    {pendingCount > 0 && (
+                      <span className="bg-amber-500 text-slate-950 text-[10px] font-black px-2 py-0.5 rounded-full font-mono">
+                        {pendingCount} action{pendingCount === 1 ? '' : 's'} queued
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-amber-200/90 leading-relaxed font-semibold">
+                    Any actions performed will only sync once a stable connection is re-established.
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 pt-2 border-t border-amber-500/30 flex-wrap">
+                <button
+                  type="button"
+                  onClick={async () => {
+                    await checkConnection();
+                    if (onTriggerSync) onTriggerSync();
+                  }}
+                  className="px-3 py-1.5 bg-slate-950 text-amber-300 hover:bg-slate-900 border border-amber-500/40 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-sm active:scale-95"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  <span>Check Connection Now</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={toggleSimulatedOffline}
+                  className="px-3 py-1.5 bg-amber-500/20 text-amber-200 hover:bg-amber-500/30 border border-amber-500/30 rounded-xl text-xs font-bold transition cursor-pointer"
+                >
+                  {isSimulated ? 'Exit Simulated Offline' : 'Toggle Simulated Offline'}
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Quota Exceeded Alert Banner (if applicable) */}
           {(cloudSyncStatus === 'quota_exceeded' || isQuotaExceeded) && (
             <div className="bg-amber-950/80 border border-amber-700/80 p-3.5 sm:p-4 rounded-2xl space-y-2.5">

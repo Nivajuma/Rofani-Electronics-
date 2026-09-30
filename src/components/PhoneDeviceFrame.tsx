@@ -4,6 +4,7 @@ import {
   Monitor,
   RotateCw,
   Wifi,
+  WifiOff,
   Battery,
   Signal,
   ShoppingBag,
@@ -30,6 +31,9 @@ import {
   ShieldAlert
 } from 'lucide-react';
 import { User } from '../types';
+import { OfflineSyncBanner } from './Network/OfflineSyncBanner';
+import { NetworkStatusBadge } from './Network/NetworkStatusBadge';
+import { useNetworkStatus } from '../utils/offlineSync';
 
 interface PhoneDeviceFrameProps {
   children: React.ReactNode;
@@ -49,6 +53,7 @@ interface PhoneDeviceFrameProps {
   onNewSale?: () => void;
   onOpenCloudSync?: () => void;
   cloudSyncStatus?: 'synced' | 'syncing' | 'offline' | 'error' | 'quota_exceeded';
+  onTriggerSync?: () => Promise<void> | void;
 }
 
 export const PhoneDeviceFrame: React.FC<PhoneDeviceFrameProps> = ({
@@ -69,9 +74,11 @@ export const PhoneDeviceFrame: React.FC<PhoneDeviceFrameProps> = ({
   onNewSale,
   onOpenCloudSync,
   cloudSyncStatus = 'synced',
+  onTriggerSync,
 }) => {
   const [showMobileMoreMenu, setShowMobileMoreMenu] = useState(false);
   const [currentTime, setCurrentTime] = useState('09:41');
+  const { isOnline } = useNetworkStatus();
 
   // Dynamic status bar time update
   React.useEffect(() => {
@@ -163,6 +170,9 @@ export const PhoneDeviceFrame: React.FC<PhoneDeviceFrameProps> = ({
         </div>
 
         <div className="flex items-center gap-2">
+          {/* Real-time Network & Offline Status Indicator */}
+          <NetworkStatusBadge onClick={onOpenCloudSync} />
+
           {/* Cloud Sync & Multi-Phone Share Button */}
           {onOpenCloudSync && (
             <button
@@ -248,7 +258,14 @@ export const PhoneDeviceFrame: React.FC<PhoneDeviceFrameProps> = ({
           <div className="flex items-center gap-2">
             <Signal className="w-3 h-3 text-slate-300" />
             <span className="text-[9px] font-bold text-slate-300 font-mono">5G</span>
-            <Wifi className="w-3 h-3 text-slate-300" />
+            {!isOnline ? (
+              <div className="flex items-center gap-1 text-amber-400 font-black text-[10px]" title="You are currently offline">
+                <WifiOff className="w-3 h-3 text-amber-400 animate-pulse" />
+                <span>Offline</span>
+              </div>
+            ) : (
+              <Wifi className="w-3 h-3 text-slate-300" />
+            )}
             <Battery className="w-3.5 h-3.5 text-emerald-400 fill-emerald-400" />
           </div>
         </div>
@@ -268,6 +285,9 @@ export const PhoneDeviceFrame: React.FC<PhoneDeviceFrameProps> = ({
           </div>
 
           <div className="flex items-center gap-1.5 shrink-0">
+            {/* Real-time Network & Offline Status Indicator */}
+            <NetworkStatusBadge onClick={onOpenCloudSync} />
+
             {/* Real-Time Cloud Sync Indicator */}
             {onOpenCloudSync && (
               <button
@@ -515,6 +535,11 @@ export const PhoneDeviceFrame: React.FC<PhoneDeviceFrameProps> = ({
             <span className="text-[10px] underline ml-1 shrink-0 font-black">Details</span>
           </div>
         )}
+
+        {/* Pinned Sticky Offline Notification Banner in Mobile Phone Screen */}
+        <div className="bg-slate-950 px-2 pt-1.5 shrink-0 z-20">
+          <OfflineSyncBanner compact onTriggerSync={onTriggerSync} />
+        </div>
 
         {/* MOBILE MAIN VIEWPORT CONTENT CONTAINER */}
         <div className="flex-1 overflow-y-auto bg-slate-950 text-slate-100 p-2 sm:p-3 space-y-3 scrollbar-thin scrollbar-thumb-slate-800">

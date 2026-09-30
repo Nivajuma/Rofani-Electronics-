@@ -18,6 +18,8 @@ import {
   Tag,
   Coins,
   X,
+  WifiOff,
+  Wifi,
   UserPlus,
   LayoutGrid,
   List,
@@ -46,6 +48,7 @@ import { isAutoSmsEnabled, setAutoSmsEnabled, sendTransactionSummarySms } from '
 import { computeProductsPerformance, ProductPerformanceInfo } from '../../utils/salesPerformance';
 import { hasWorkerPermission } from '../../utils/permissions';
 import { isContactPickerSupported, pickFromDevicePhonebook, parseContactFile } from '../../utils/phoneContacts';
+import { useNetworkStatus } from '../../utils/offlineSync';
 
 interface POSViewProps {
   products: Product[];
@@ -78,6 +81,9 @@ export const POSView: React.FC<POSViewProps> = ({
   onSaveProduct,
   onBatchImportProducts,
 }) => {
+  // Network Connectivity Status
+  const { isOnline } = useNetworkStatus();
+
   // Search & Filter State
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
@@ -1006,6 +1012,32 @@ export const POSView: React.FC<POSViewProps> = ({
           <button onClick={() => setPosNotice(null)} className="text-slate-400 hover:text-white p-1">
             <X className="w-3.5 h-3.5" />
           </button>
+        </div>
+      )}
+
+      {/* POS Offline Visual Indicator Banner */}
+      {!isOnline && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="bg-amber-500/15 border-2 border-amber-500/60 rounded-2xl p-3 flex items-center justify-between gap-3 text-xs text-amber-200 shadow-md animate-pulse"
+        >
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-8 h-8 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center shrink-0 border border-amber-500/40">
+              <WifiOff className="w-4 h-4 text-amber-400" />
+            </div>
+            <div className="min-w-0">
+              <span className="font-extrabold text-amber-300 text-xs sm:text-sm block leading-tight">
+                You are currently offline
+              </span>
+              <span className="text-[11px] sm:text-xs text-amber-200/90 leading-tight block mt-0.5">
+                Any actions performed will only sync once a stable connection is re-established.
+              </span>
+            </div>
+          </div>
+          <span className="bg-amber-500 text-slate-950 px-2.5 py-1 rounded-xl text-[10px] font-black shrink-0 uppercase tracking-wider hidden sm:inline-block shadow-sm">
+            Local Safe Mode
+          </span>
         </div>
       )}
 
@@ -2174,6 +2206,25 @@ export const POSView: React.FC<POSViewProps> = ({
 
           {/* Checkout & New Sale Action Buttons */}
           <div className="space-y-2">
+            {/* Offline Cart Indicator */}
+            {!isOnline && (
+              <div
+                role="status"
+                aria-live="polite"
+                className="flex items-start gap-2.5 p-2.5 bg-amber-500/15 border-2 border-amber-500/60 text-amber-300 rounded-xl text-xs font-semibold shadow-sm animate-pulse"
+              >
+                <WifiOff className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                <div>
+                  <span className="font-black text-amber-200 block text-[11px] uppercase tracking-wider">
+                    You are currently offline
+                  </span>
+                  <span className="text-[11px] leading-tight text-amber-300/90 block mt-0.5">
+                    Any actions performed will only sync once a stable connection is re-established.
+                  </span>
+                </div>
+              </div>
+            )}
+
             {/* Quick 1-Tap M-PESA STK Push Prompt Button */}
             <button
               id="btn-pos-mpesa-fast-prompt"
@@ -2304,6 +2355,23 @@ export const POSView: React.FC<POSViewProps> = ({
                 <X className="w-5 h-5" />
               </button>
             </div>
+
+            {/* Offline Checkout Notice */}
+            {!isOnline && (
+              <div
+                role="status"
+                aria-live="polite"
+                className="bg-amber-500/15 border-b-2 border-amber-500/40 px-4 py-2.5 text-amber-300 text-xs font-semibold flex items-center gap-2.5"
+              >
+                <WifiOff className="w-4 h-4 text-amber-400 shrink-0 animate-pulse" />
+                <div>
+                  <span className="font-extrabold text-amber-200 mr-1.5">You are currently offline:</span>
+                  <span>
+                    Any actions performed will only sync once a stable connection is re-established.
+                  </span>
+                </div>
+              </div>
+            )}
 
             <div className="p-5 overflow-y-auto space-y-4 flex-1">
               {/* Grand Total Summary Box */}

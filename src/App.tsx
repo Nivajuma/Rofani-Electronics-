@@ -167,6 +167,14 @@ import {
   saveProductImageToIndexedDB,
   deleteProductImageFromIndexedDB,
 } from './utils/imageStorage';
+import { OfflineSyncBanner } from './components/Network/OfflineSyncBanner';
+import { NetworkStatusBadge } from './components/Network/NetworkStatusBadge';
+import {
+  getIsOnline,
+  addPendingSyncItem,
+  getPendingSyncQueue,
+  removePendingSyncItem,
+} from './utils/offlineSync';
 
 export default function App() {
   // Navigation & Display Layout State
@@ -502,6 +510,61 @@ export default function App() {
   useEffect(() => {
     safeSetJSON('retail_pos_active_user', currentUser);
   }, [currentUser]);
+
+  // Offline sync handler to push queued offline actions to Firestore once connection is re-established
+  const syncPendingQueueToCloud = async () => {
+    const queue = getPendingSyncQueue();
+    if (queue.length === 0) return;
+    setCloudSyncStatus('syncing');
+
+    let syncedCount = 0;
+    for (const item of queue) {
+      try {
+        if (item.type === 'sale') {
+          await saveTransactionToCloud(item.data);
+        } else if (item.type === 'product') {
+          await saveProductToCloud(item.data);
+        } else if (item.type === 'customer') {
+          await saveCustomerToCloud(item.data);
+        } else if (item.type === 'supplier') {
+          await saveSupplierToCloud(item.data);
+        } else if (item.type === 'expense') {
+          await saveExpenseToCloud(item.data);
+        } else if (item.type === 'restock') {
+          await saveRestockRecordToCloud(item.data);
+        } else if (item.type === 'user') {
+          await saveUserToCloud(item.data);
+        }
+        removePendingSyncItem(item.id);
+        syncedCount++;
+      } catch (err) {
+        if (isQuotaExceededError(err)) {
+          setIsCloudQuotaExceeded(true);
+          setCloudSyncStatus('quota_exceeded');
+        } else {
+          console.warn(`[Sync Queue] Offline action ${item.id} waiting for stable connection:`, err);
+        }
+        break;
+      }
+    }
+
+    if (syncedCount > 0) {
+      setLastSyncedTime(new Date().toLocaleTimeString());
+      setCloudSyncStatus('synced');
+    }
+  };
+
+  // Automatically attempt sync when network connection transitions from offline to online
+  useEffect(() => {
+    const handleReconnected = () => {
+      syncPendingQueueToCloud();
+    };
+
+    window.addEventListener('online', handleReconnected);
+    return () => {
+      window.removeEventListener('online', handleReconnected);
+    };
+  }, []);
 
   // Real-Time Firebase Firestore Cloud Synchronization Across All Mobile Phones & Devices
   useEffect(() => {
@@ -966,20 +1029,58 @@ export default function App() {
     setProducts(updatedProducts);
     setCustomers(updatedCustomers);
 
-    // Real-Time Cloud Sync to Firestore for all connected worker mobile devices
-    saveTransactionToCloud(tx).catch((err) => {
-      if (isQuotaExceededError(err)) {
-        setIsCloudQuotaExceeded(true);
-        setCloudSyncStatus('quota_exceeded');
-      }
-    });
-    updatedProducts.forEach((p) => saveProductToCloud(p).catch(() => {}));
-    updatedCustomers.forEach((c) => saveCustomerToCloud(c).catch(() => {}));
+    const isCurrentlyOffline = !getIsOnline();
+
+    if (isCurrentlyOffline) {
+      addPendingSyncItem({
+        type: 'sale',
+        description: `POS Sale #${tx.receiptNumber} (KSh ${tx.grandTotal.toLocaleString()})`,
+        data: tx,
+      });
+      updatedProducts.forEach((p) => {
+        addPendingSyncItem({
+          type: 'product',
+          description: `Stock Update: ${p.name} (${p.stockQuantity} ${p.unit})`,
+          data: p,
+        });
+      });
+    } else {
+      // Real-Time Cloud Sync to Firestore for all connected worker mobile devices
+      saveTransactionToCloud(tx).catch((err) => {
+        if (isQuotaExceededError(err)) {
+          setIsCloudQuotaExceeded(true);
+          setCloudSyncStatus('quota_exceeded');
+        } else {
+          // Cloud save failed (e.g. intermittent drop), queue for sync when connection stabilizes
+          addPendingSyncItem({
+            type: 'sale',
+            description: `POS Sale #${tx.receiptNumber} (KSh ${tx.grandTotal.toLocaleString()})`,
+            data: tx,
+          });
+        }
+      });
+      updatedProducts.forEach((p) => saveProductToCloud(p).catch(() => {}));
+      updatedCustomers.forEach((c) => saveCustomerToCloud(c).catch(() => {}));
+    }
   };
 
   const handleAddCustomer = (newCust: Customer) => {
     setCustomers((prev) => [...prev, newCust]);
-    saveCustomerToCloud(newCust).catch(() => {});
+    if (!getIsOnline()) {
+      addPendingSyncItem({
+        type: 'customer',
+        description: `Add Customer: ${newCust.name} (${newCust.phone})`,
+        data: newCust,
+      });
+    } else {
+      saveCustomerToCloud(newCust).catch(() => {
+        addPendingSyncItem({
+          type: 'customer',
+          description: `Add Customer: ${newCust.name} (${newCust.phone})`,
+          data: newCust,
+        });
+      });
+    }
   };
 
   const handleSaveCustomer = (cust: Customer) => {
@@ -992,7 +1093,21 @@ export default function App() {
       }
       return [cust, ...prev];
     });
-    saveCustomerToCloud(cust).catch(() => {});
+    if (!getIsOnline()) {
+      addPendingSyncItem({
+        type: 'customer',
+        description: `Update Customer: ${cust.name} (${cust.phone})`,
+        data: cust,
+      });
+    } else {
+      saveCustomerToCloud(cust).catch(() => {
+        addPendingSyncItem({
+          type: 'customer',
+          description: `Update Customer: ${cust.name} (${cust.phone})`,
+          data: cust,
+        });
+      });
+    }
   };
 
   const handleDeleteCustomer = (customerId: string) => {
@@ -1009,7 +1124,21 @@ export default function App() {
       }
       return [...prev, sup];
     });
-    saveSupplierToCloud(sup).catch(() => {});
+    if (!getIsOnline()) {
+      addPendingSyncItem({
+        type: 'supplier',
+        description: `Supplier: ${sup.name}`,
+        data: sup,
+      });
+    } else {
+      saveSupplierToCloud(sup).catch(() => {
+        addPendingSyncItem({
+          type: 'supplier',
+          description: `Supplier: ${sup.name}`,
+          data: sup,
+        });
+      });
+    }
   };
 
   const handleDeleteSupplier = (supplierId: string) => {
@@ -1137,7 +1266,21 @@ export default function App() {
       });
 
       // Real-Time Cloud Sync to Firestore
-      saveProductToCloud(prod).catch(() => {});
+      if (!getIsOnline()) {
+        addPendingSyncItem({
+          type: 'product',
+          description: `Product: ${prod.name} (${prod.stockQuantity} ${prod.unit})`,
+          data: prod,
+        });
+      } else {
+        saveProductToCloud(prod).catch(() => {
+          addPendingSyncItem({
+            type: 'product',
+            description: `Product: ${prod.name} (${prod.stockQuantity} ${prod.unit})`,
+            data: prod,
+          });
+        });
+      }
 
       if (existing && authorizingRole) {
         const diff = computeProductDiff(existing, prod);
@@ -1401,7 +1544,21 @@ export default function App() {
 
   const handleAddExpense = (exp: Expense) => {
     setExpenses((prev) => [exp, ...prev]);
-    saveExpenseToCloud(exp).catch(() => {});
+    if (!getIsOnline()) {
+      addPendingSyncItem({
+        type: 'expense',
+        description: `Expense: ${exp.category} (KSh ${exp.amount.toLocaleString()})`,
+        data: exp,
+      });
+    } else {
+      saveExpenseToCloud(exp).catch(() => {
+        addPendingSyncItem({
+          type: 'expense',
+          description: `Expense: ${exp.category} (KSh ${exp.amount.toLocaleString()})`,
+          data: exp,
+        });
+      });
+    }
   };
 
   const handleDeleteExpense = (expId: string) => {
@@ -2181,6 +2338,7 @@ export default function App() {
           onNewSale={handleGlobalNewSale}
           onOpenCloudSync={() => setShowCloudSyncModal(true)}
           cloudSyncStatus={cloudSyncStatus}
+          onTriggerSync={syncPendingQueueToCloud}
         >
           {renderActiveTabContent()}
         </PhoneDeviceFrame>
@@ -2733,6 +2891,9 @@ export default function App() {
 
       {/* Main Container */}
       <main className="flex-1 flex flex-col min-w-0 overflow-hidden">
+        {/* Real-Time Offline and Cloud Sync Notification Banner */}
+        <OfflineSyncBanner onTriggerSync={syncPendingQueueToCloud} />
+
         {/* Firestore Quota Notice Banner */}
         {isCloudQuotaExceeded && showQuotaBanner && (
           <div className="bg-amber-500 text-slate-950 px-5 py-2 text-xs font-semibold flex items-center justify-between shadow-sm z-30 shrink-0">
@@ -2784,6 +2945,9 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-1.5 shrink-0">
+            {/* Real-Time Network & Offline Status Indicator */}
+            <NetworkStatusBadge onClick={() => setShowCloudSyncModal(true)} />
+
             {/* Always Visible Share & Sync Button on Mobile */}
             <button
               onClick={() => setShowCloudSyncModal(true)}
@@ -2870,6 +3034,9 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end">
+            {/* Real-Time Network & Offline Status Indicator */}
+            <NetworkStatusBadge onClick={() => setShowCloudSyncModal(true)} />
+
             {/* Direct "+ New Sale" Button in Top Header */}
             <button
               id="btn-top-new-sale"

@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
-import { UserCheck, Clock, CheckCircle2, AlertCircle, Calendar, Plus, User, FileSpreadsheet, Award, Percent, CreditCard, Users } from 'lucide-react';
+import { UserCheck, Clock, CheckCircle2, AlertCircle, Calendar, Plus, User, FileSpreadsheet, Award, Percent, CreditCard, Users, BarChart3, ArrowUpRight } from 'lucide-react';
 import { AttendanceRecord, User as Employee, Transaction, StaffCommissionPayout, WorkerLoan, WorkerLoanRepayment } from '../../types';
 import { StaffCommissionView } from './StaffCommissionView';
 import { WorkerLoansView } from './WorkerLoansView';
 import { WorkerDirectoryView } from './WorkerDirectoryView';
+import { StaffPerformanceDashboard } from './StaffPerformanceDashboard';
 
 interface AttendanceViewProps {
   attendanceRecords: AttendanceRecord[];
@@ -48,7 +49,7 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
   onDeleteUser,
   onOpenStaffModal,
 }) => {
-  const [activeTab, setActiveTab] = useState<'attendance' | 'workers' | 'commission' | 'loans'>('attendance');
+  const [activeTab, setActiveTab] = useState<'attendance' | 'performance' | 'workers' | 'commission' | 'loans'>('attendance');
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().slice(0, 10));
   const [showClockModal, setShowClockModal] = useState(false);
 
@@ -119,7 +120,7 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
       {/* View Switcher Tabs */}
-      <div className="flex bg-slate-900 p-1.5 rounded-2xl border border-slate-800 w-fit gap-2 shadow-md">
+      <div className="flex bg-slate-900 p-1.5 rounded-2xl border border-slate-800 w-fit gap-2 shadow-md flex-wrap">
         <button
           onClick={() => setActiveTab('attendance')}
           className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 ${
@@ -130,6 +131,21 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
         >
           <UserCheck className="w-4 h-4" />
           <span>Shift Register & Clock-Ins</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('performance')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 ${
+            activeTab === 'performance'
+              ? 'bg-gradient-to-r from-sky-600 to-indigo-600 text-white shadow-lg shadow-sky-600/30 ring-1 ring-sky-400'
+              : 'text-slate-400 hover:text-white hover:bg-slate-800'
+          }`}
+        >
+          <BarChart3 className="w-4 h-4 text-sky-400" />
+          <span>Staff Performance Dashboard</span>
+          <span className="bg-sky-950 text-sky-300 border border-sky-800 text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold">
+            Charts
+          </span>
         </button>
 
         <button
@@ -172,7 +188,16 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
         </button>
       </div>
 
-      {activeTab === 'workers' ? (
+      {activeTab === 'performance' ? (
+        <StaffPerformanceDashboard
+          allUsers={allUsers}
+          transactions={transactions}
+          attendanceRecords={attendanceRecords}
+          commissionPayouts={commissionPayouts}
+          currentUser={currentUser}
+          onNavigateToTab={(tab) => setActiveTab(tab)}
+        />
+      ) : activeTab === 'workers' ? (
         <WorkerDirectoryView
           allUsers={allUsers}
           currentUser={currentUser}
@@ -252,6 +277,31 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
             </span>
           )}
         </div>
+      </div>
+
+      {/* Quick Jump Callout to Staff Performance Dashboard */}
+      <div className="bg-gradient-to-r from-slate-900 via-sky-950/30 to-indigo-950/30 border border-sky-900/40 p-3.5 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-md">
+        <div className="flex items-center gap-2.5">
+          <div className="p-2 bg-sky-500/20 text-sky-400 rounded-xl border border-sky-500/30">
+            <BarChart3 className="w-4 h-4" />
+          </div>
+          <div>
+            <div className="text-xs font-bold text-slate-100 flex items-center gap-1.5">
+              <span>Staff Performance Dashboard</span>
+              <span className="text-[10px] bg-sky-950 text-sky-300 border border-sky-800 px-1.5 py-0.2 rounded font-mono font-bold">Bar Charts</span>
+            </div>
+            <p className="text-[11px] text-slate-400">
+              Visualize sales volume generated, commissions earned, and shift attendance reliability for each worker side-by-side.
+            </p>
+          </div>
+        </div>
+        <button
+          onClick={() => setActiveTab('performance')}
+          className="px-3.5 py-1.5 bg-sky-600 hover:bg-sky-500 text-white rounded-xl text-xs font-extrabold transition flex items-center gap-1.5 shadow-md shadow-sky-600/25 shrink-0 cursor-pointer"
+        >
+          <span>View Performance Charts</span>
+          <ArrowUpRight className="w-3.5 h-3.5" />
+        </button>
       </div>
 
       {/* Date Filter & Log Manual Attendance Button */}

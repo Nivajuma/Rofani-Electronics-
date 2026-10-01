@@ -85,10 +85,10 @@ async function startServer() {
     throw lastError;
   };
 
-  // API Endpoint: AI Multimodal Product Camera Identification
+  // API Endpoint: AI Multimodal Product Camera Identification with Local Catalog Context Matching (0 Firestore Reads)
   app.post('/api/ai/identify-product', async (req, res) => {
     try {
-      const { imageBase64 } = req.body;
+      const { imageBase64, existingProducts } = req.body;
 
       if (!imageBase64 || typeof imageBase64 !== 'string') {
         res.status(400).json({ error: 'imageBase64 is required' });
@@ -100,7 +100,7 @@ async function startServer() {
       if (!ai) {
         // Fallback response if GEMINI_API_KEY is not set
         res.json({
-          name: 'Identified Store Item',
+          name: 'Scanned Item',
           category: 'Electronics',
           subcategory: 'General Accessories',
           suggestedPriceKSh: 1500,
@@ -108,6 +108,8 @@ async function startServer() {
           description: 'Product photo captured. Please adjust details if needed.',
           suggestedSku: `SKU-${Math.floor(1000 + Math.random() * 9000)}`,
           confidenceScore: 0.85,
+          isExistingMatch: false,
+          matchedProductId: null,
           note: 'Offline mode active.'
         });
         return;
@@ -135,6 +137,15 @@ async function startServer() {
         cleanData = imageBase64.trim();
       }
 
+      // Prepare local catalog context if provided (Zero Firestore reads)
+      let catalogContextStr = '';
+      if (Array.isArray(existingProducts) && existingProducts.length > 0) {
+        const sample = existingProducts.slice(0, 60).map((p: any) => 
+          `- ID: ${p.id} | Name: "${p.name}" | Category: ${p.category} | SKU: ${p.sku} | Barcode: ${p.barcode || 'N/A'} | Price: KSh ${p.sellingPrice}`
+        ).join('\n');
+        catalogContextStr = `\nExisting Local Product Catalog Context (Total: ${existingProducts.length} items):\n${sample}\n\nTask: First compare the photo against the above local catalog items. If the photographed item matches an existing item, set "isExistingMatch": true and "matchedProductId" to that item's ID. Otherwise set "isExistingMatch": false and "matchedProductId": null.\n`;
+      }
+
       const prompt = `Analyze this camera photo of a product taken in a Kenya retail store.
 Identify the product accurately and provide stock entry data. Select "category" strictly from one of these exact store categories:
 - Household
@@ -144,16 +155,18 @@ Identify the product accurately and provide stock entry data. Select "category" 
 - Phones & Accessories
 - Clothes (Men, Women & Kids Wear)
 - Shoes
-
+${catalogContextStr}
 Provide:
-1. "name": Always write exactly "Scanned Item".
+1. "name": Accurately identified product brand, model, or descriptive name (or matched product name if matching existing catalog). E.g. "Oraimo 20W Fast Charger", "Men Leather Loafers", "Electric Kettle 2L".
 2. "category": Must be one of the exact categories above.
 3. "subcategory": Specific subcategory matching the category.
 4. "suggestedPriceKSh": Estimated retail selling price in Kenya Shillings (numeric integer).
 5. "suggestedCostKSh": Estimated wholesale purchase cost in Kenya Shillings (numeric integer).
 6. "description": Concise 1-2 sentence specification or description.
 7. "suggestedSku": A short 6-digit stock code (e.g. "SKU-8821").
-8. "confidenceScore": Confidence score between 0.0 and 1.0.`;
+8. "confidenceScore": Confidence score between 0.0 and 1.0.
+9. "isExistingMatch": Boolean indicating if it matches an item from the local catalog context.
+10. "matchedProductId": String ID of the matched product if isExistingMatch is true, otherwise null.`;
 
       const response = await generateContentWithFallback(ai, {
         contents: {
@@ -182,6 +195,8 @@ Provide:
               description: { type: Type.STRING },
               suggestedSku: { type: Type.STRING },
               confidenceScore: { type: Type.NUMBER },
+              isExistingMatch: { type: Type.BOOLEAN },
+              matchedProductId: { type: Type.STRING },
             },
             required: ['name', 'category', 'suggestedPriceKSh', 'suggestedCostKSh', 'description', 'suggestedSku'],
           },
@@ -191,7 +206,7 @@ Provide:
       const replyText = response.text || '{}';
       try {
         const parsed = JSON.parse(replyText);
-        parsed.name = 'Scanned Item';
+        parsed.name = parsed.name?.trim() || 'Scanned Item';
         res.json(parsed);
       } catch (parseErr) {
         res.json({
@@ -201,7 +216,9 @@ Provide:
           suggestedPriceKSh: 1200,
           suggestedCostKSh: 800,
           description: replyText.slice(0, 200) || 'Scanned retail item.',
-          suggestedSku: `SKU-${Math.floor(1000 + Math.random() * 9000)}`
+          suggestedSku: `SKU-${Math.floor(1000 + Math.random() * 9000)}`,
+          isExistingMatch: false,
+          matchedProductId: null,
         });
       }
     } catch (err: any) {

@@ -573,12 +573,12 @@ export const BarcodeScanHistoryContent: React.FC<BarcodeScanHistoryProps> = ({
   const innerContent = (
     <>
       <div
-        className={`bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl flex flex-col transition-all duration-200 overflow-hidden text-slate-100 ${
+        className={`bg-slate-900 border border-slate-800 shadow-2xl flex flex-col transition-all duration-200 overflow-hidden text-slate-100 ${
           isEmbedded
-            ? 'w-full min-h-[600px] shadow-xl'
+            ? 'w-full min-h-[600px] shadow-xl rounded-2xl'
             : isFullScreen
             ? 'w-full h-full rounded-none'
-            : 'w-full max-w-6xl max-h-[92vh]'
+            : 'w-full max-w-6xl h-full sm:h-auto sm:max-h-[94vh] rounded-none sm:rounded-3xl'
         }`}
       >
         {/* MODAL HEADER */}
@@ -1511,7 +1511,7 @@ export const BarcodeScanHistoryContent: React.FC<BarcodeScanHistoryProps> = ({
   }
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4 overflow-hidden">
+    <div className="fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-sm flex items-center justify-center p-0 sm:p-4 overflow-hidden">
       {innerContent}
     </div>
   );

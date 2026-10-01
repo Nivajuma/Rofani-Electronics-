@@ -5,7 +5,6 @@ import {
   deleteDoc,
   onSnapshot,
   writeBatch,
-  getDocs,
 } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from './firebase';
 import { Product, Transaction, Customer, Supplier, Expense, RestockRecord, User, SensitiveActionLog } from '../types';
@@ -78,6 +77,15 @@ export async function deleteProductFromCloud(productId: string): Promise<void> {
 
 // Bulk upload initial products to cloud
 export async function bulkUploadProductsToCloud(products: Product[]): Promise<number> {
+  return batchSaveProductsToCloud(products);
+}
+
+/**
+ * Commits staged / draft products to Firestore in a SINGLE atomic writeBatch()
+ * Eliminates redundant network calls and prevents quota exhaustion.
+ */
+export async function batchSaveProductsToCloud(products: Product[]): Promise<number> {
+  if (!products || products.length === 0) return 0;
   try {
     const batch = writeBatch(db);
     let count = 0;
@@ -93,12 +101,56 @@ export async function bulkUploadProductsToCloud(products: Product[]): Promise<nu
     await batch.commit();
     return count;
   } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, 'products/batch');
+    handleFirestoreError(error, OperationType.WRITE, 'products/writeBatch');
     throw error;
   }
 }
 
 // ---------------- TRANSACTIONS (SALES) LIVE SYNC ----------------
+
+/**
+ * Commits an entire completed sale, along with updated product stock levels and customer stats,
+ * inside a SINGLE atomic writeBatch(). Replaces multiple individual doc writes.
+ */
+export async function commitSaleToCloudBatch(
+  tx: Transaction,
+  updatedProducts: Product[],
+  updatedCustomer?: Customer
+): Promise<void> {
+  try {
+    const batch = writeBatch(db);
+
+    // 1. Transaction doc
+    const txRef = doc(db, 'transactions', tx.id);
+    batch.set(txRef, cleanForFirestore({
+      ...tx,
+      syncedAt: new Date().toISOString(),
+    }), { merge: true });
+
+    // 2. Stock updates for products purchased in this sale
+    for (const p of updatedProducts) {
+      const pRef = doc(db, 'products', p.id);
+      batch.set(pRef, cleanForFirestore({
+        ...p,
+        updatedAt: new Date().toISOString(),
+      }), { merge: true });
+    }
+
+    // 3. Customer loyalty points / balance update if applicable
+    if (updatedCustomer && updatedCustomer.id) {
+      const cRef = doc(db, 'customers', updatedCustomer.id);
+      batch.set(cRef, cleanForFirestore({
+        ...updatedCustomer,
+        updatedAt: new Date().toISOString(),
+      }), { merge: true });
+    }
+
+    await batch.commit();
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, 'sales/writeBatch');
+    throw error;
+  }
+}
 
 export function subscribeToTransactions(
   onUpdate: (transactions: Transaction[]) => void,

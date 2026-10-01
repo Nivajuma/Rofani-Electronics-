@@ -43,7 +43,8 @@ import {
   TrendingUp,
   DollarSign,
   Award,
-  ShieldAlert
+  ShieldAlert,
+  Save
 } from 'lucide-react';
 import { Product, Supplier, BarcodeScanLog, User, Transaction } from '../../types';
 import { generateAutoBarcode, printBarcodeLabels, printBatchBarcodes } from '../../utils/barcode';
@@ -64,6 +65,8 @@ import {
 import { PredictiveRestockModal } from './PredictiveRestockModal';
 import { calculateReplenishmentPlan } from '../../utils/replenishment';
 import { AiReceiptScannerModal } from '../POS/AiReceiptScannerModal';
+import { safeGetJSON, safeSetJSON } from '../../utils/safeStorage';
+import { batchSaveProductsToCloud } from '../../lib/cloudSync';
 
 interface InventoryViewProps {
   products: Product[];
@@ -216,6 +219,45 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   const [showReceiptScanModal, setShowReceiptScanModal] = useState<boolean>(false);
   const [isDragOverPhoto, setIsDragOverPhoto] = useState<boolean>(false);
   const [previewImage, setPreviewImage] = useState<{ url: string; title: string } | null>(null);
+
+  // Core Requirement 2: Local Staged Draft Items from Camera/Gallery AI Scans (0 Quota Waste)
+  const [draftItems, setDraftItems] = useState<Product[]>(() =>
+    safeGetJSON<Product[]>('retail_pos_draft_items', [])
+  );
+  const [isCommittingDrafts, setIsCommittingDrafts] = useState(false);
+
+  useEffect(() => {
+    safeSetJSON('retail_pos_draft_items', draftItems);
+  }, [draftItems]);
+
+  const handleCommitDraftItems = async () => {
+    if (draftItems.length === 0) return;
+    setIsCommittingDrafts(true);
+    try {
+      const itemsToCommit = [...draftItems];
+      if (onBatchImportProducts) {
+        onBatchImportProducts(itemsToCommit, false);
+      } else {
+        await batchSaveProductsToCloud(itemsToCommit);
+        itemsToCommit.forEach((p) => onSaveProduct(p));
+      }
+      setDraftItems([]);
+      setAutoAddSuccessToast(
+        `⚡ Successfully saved & synced ${itemsToCommit.length} staged draft item(s) to inventory via single atomic writeBatch! 0 quota wasted.`
+      );
+      setTimeout(() => setAutoAddSuccessToast(null), 8000);
+    } catch (err) {
+      console.error('Error committing draft items in batch:', err);
+      setAutoAddSuccessToast('⚠️ Error syncing batch. Items are preserved in local draft storage.');
+      setTimeout(() => setAutoAddSuccessToast(null), 8000);
+    } finally {
+      setIsCommittingDrafts(false);
+    }
+  };
+
+  const handleRemoveDraftItem = (draftId: string) => {
+    setDraftItems((prev) => prev.filter((d) => d.id !== draftId));
+  };
 
   const duplicateGroups = detectDuplicateProducts(products);
   const totalDuplicateItemsToDelete = duplicateGroups.reduce((acc, g) => acc + g.duplicateItems.length, 0);
@@ -443,10 +485,25 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     setAiIdentifyResult(null);
 
     try {
+      // Core Requirement 1: Local Cache Matching
+      // Send existing product catalog from local React state/IndexedDB as context (ZERO Firestore reads)
       const response = await fetch('/api/ai/identify-product', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ imageBase64: imageDataUrl }),
+        body: JSON.stringify({
+          imageBase64: imageDataUrl,
+          existingProducts: products.map((p) => ({
+            id: p.id,
+            name: p.name,
+            sku: p.sku,
+            barcode: p.barcode,
+            sellingPrice: p.sellingPrice,
+            costPrice: p.costPrice,
+            category: p.category,
+            stockQuantity: p.stockQuantity,
+            unit: p.unit,
+          })),
+        }),
       });
 
       let data: any = null;
@@ -455,9 +512,9 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
       }
 
       const current = targetProduct || editingProduct;
-      const itemName = 'Scanned Item';
+      const itemName = data?.name && data.name !== 'Scanned Item' ? data.name : (data?.matchedProductName || current?.name || 'Scanned Item');
       const itemCategory = data?.category || categories[0]?.name || 'Electronics';
-      const itemSubcategory = data?.subcategory || categories[0]?.subcategories[0] || 'General';
+      const itemSubcategory = data?.subcategory || categories[0]?.subcategories?.[0] || 'General';
       const itemPrice = data?.suggestedPriceKSh || 1200;
       const itemCost = data?.suggestedCostKSh || 800;
       const itemDescription = data?.description || 'Product photo captured from camera.';
@@ -467,10 +524,11 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
       const targetSupplierId = isManualInModal && current?.supplierId ? current.supplierId : (activeSupplier?.id || '');
       const targetSupplierName = isManualInModal && current?.supplierName ? current.supplierName : (activeSupplier?.name || 'Direct Wholesale');
 
-      if (autoSaveOnCameraSnap && showAiScanModal && !isManualInModal && !showModal) {
-        // Construct auto-saved product and save immediately from Quick Scanner
-        const autoSavedProduct: Product = {
-          id: current?.id && !current.id.startsWith('prod-') ? current.id : `prod-${Date.now()}`,
+      if (showAiScanModal && !isManualInModal && !showModal) {
+        // Core Requirement 2: Batched / Draft Item Creation
+        // Save new item to local draft state (draftItems) - Do NOT call setDoc/addDoc directly to Firestore on every photo scan!
+        const stagedDraftItem: Product = {
+          id: current?.id && !current.id.startsWith('prod-') ? current.id : `prod-draft-${Date.now()}-${Math.floor(100 + Math.random() * 900)}`,
           name: itemName,
           sku: itemSku,
           barcode: current?.barcode || generateAutoBarcode(),
@@ -490,11 +548,11 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           updatedAt: new Date().toISOString().slice(0, 10),
         };
 
-        onSaveProduct(autoSavedProduct);
-        setShowModal(false);
-        setShowAiScanModal(false);
+        setDraftItems((prev) => [stagedDraftItem, ...prev]);
         setEditingProduct(null);
-        setAutoAddSuccessToast(`⚡ AI AUTO-ADDED TO INVENTORY: "${autoSavedProduct.name}" (${autoSavedProduct.category}) @ KSh ${autoSavedProduct.sellingPrice.toLocaleString()} - Stock: ${autoSavedProduct.stockQuantity} pcs`);
+        setAutoAddSuccessToast(
+          `📦 Staged in local draft: "${stagedDraftItem.name}" (${stagedDraftItem.category}) @ KSh ${stagedDraftItem.sellingPrice.toLocaleString()}. Click "Save & Sync Items" to commit via single batch write.`
+        );
         setTimeout(() => setAutoAddSuccessToast(null), 8000);
       } else {
         // Populate fields and show modal with photo intact for review
@@ -654,7 +712,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     setIsBatchScanning(true);
     setBatchProgress({ current: 0, total: fileList.length });
 
-    let addedCount = 0;
+    const newBatchDrafts: Product[] = [];
 
     for (let i = 0; i < fileList.length; i++) {
       const file: File = fileList[i];
@@ -668,24 +726,38 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
         const compressedDataUrl = await optimizeImageFile(file, 640, 0.75);
         if (!compressedDataUrl) continue;
 
+        // Core Requirement 1: Local Cache Matching (0 Firestore reads)
         const response = await fetch('/api/ai/identify-product', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ imageBase64: compressedDataUrl }),
+          body: JSON.stringify({
+            imageBase64: compressedDataUrl,
+            existingProducts: products.map((p) => ({
+              id: p.id,
+              name: p.name,
+              sku: p.sku,
+              barcode: p.barcode,
+              sellingPrice: p.sellingPrice,
+              costPrice: p.costPrice,
+              category: p.category,
+              stockQuantity: p.stockQuantity,
+              unit: p.unit,
+            })),
+          }),
         });
 
         if (response.ok) {
           const data = await response.json();
           const activeSupplier = suppliers.find((s) => s.id === selectedScanSupplierId) || suppliers[0];
           const autoProduct: Product = {
-            id: `prod-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-            name: 'Scanned Item',
+            id: `prod-draft-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+            name: data?.name && data.name !== 'Scanned Item' ? data.name : (data?.matchedProductName || 'Scanned Item'),
             sku: data?.suggestedSku || `SKU-${Math.floor(1000 + Math.random() * 9000)}`,
             barcode: generateAutoBarcode(),
             category: data?.category || categories[0]?.name || 'Electronics',
-            subcategory: data?.subcategory || categories[0]?.subcategories[0] || 'General',
+            subcategory: data?.subcategory || categories[0]?.subcategories?.[0] || 'General',
             sizeCapacity: '',
-            description: data?.description || 'Auto-added from mobile photo gallery.',
+            description: data?.description || 'Auto-identified from mobile photo gallery.',
             costPrice: data?.suggestedCostKSh || 1000,
             sellingPrice: data?.suggestedPriceKSh || 1500,
             stockQuantity: 10,
@@ -698,19 +770,23 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
             updatedAt: new Date().toISOString().slice(0, 10),
           };
 
-          onSaveProduct(autoProduct);
-          addedCount++;
+          // Core Requirement 2: Save to local draft state - DO NOT call setDoc directly to Firestore!
+          newBatchDrafts.push(autoProduct);
         }
       } catch (err) {
         console.error('Error processing batch gallery file:', file.name, err);
       }
     }
 
+    if (newBatchDrafts.length > 0) {
+      setDraftItems((prev) => [...newBatchDrafts, ...prev]);
+    }
+
     setIsBatchScanning(false);
     setShowAiScanModal(false);
-    if (addedCount > 0) {
+    if (newBatchDrafts.length > 0) {
       setAutoAddSuccessToast(
-        `⚡ AI AUTO-ADDED ${addedCount} ITEM${addedCount > 1 ? 'S' : ''} FROM YOUR PHONE GALLERY DIRECTLY INTO INVENTORY!`
+        `📦 Staged ${newBatchDrafts.length} item${newBatchDrafts.length > 1 ? 's' : ''} from gallery into local drafts! Click "Save & Sync Items" to commit via single batch write.`
       );
       setTimeout(() => setAutoAddSuccessToast(null), 8000);
     }
@@ -1255,6 +1331,102 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           )}
         </div>
       </div>
+
+      {/* Core Requirement 2: Staged AI Draft Items Banner & Single Atomic writeBatch Commit */}
+      {draftItems.length > 0 && (
+        <div className="bg-gradient-to-r from-emerald-950/95 via-slate-900 to-teal-950/90 border-2 border-emerald-500/70 p-4 sm:p-5 rounded-2xl shadow-2xl space-y-4 animate-in fade-in">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="w-11 h-11 rounded-xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 flex items-center justify-center font-bold shrink-0">
+                <Sparkles className="w-6 h-6 text-emerald-400 animate-pulse" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h3 className="font-black text-sm sm:text-base text-white">
+                    Staged AI Scanned Draft Items ({draftItems.length})
+                  </h3>
+                  <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-[10px] px-2.5 py-0.5 rounded-full font-mono font-bold">
+                    0 Quota Wasted (Local Staging)
+                  </span>
+                </div>
+                <p className="text-xs text-slate-300 mt-0.5">
+                  Extracted product details from camera & gallery scans are staged locally. Commit all items to Firestore in a single atomic <code className="text-emerald-300 font-mono">writeBatch()</code>.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                type="button"
+                onClick={handleCommitDraftItems}
+                disabled={isCommittingDrafts}
+                className="px-4 py-2.5 bg-gradient-to-r from-emerald-600 via-emerald-500 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-slate-950 font-black text-xs sm:text-sm rounded-xl shadow-lg shadow-emerald-900/50 flex items-center gap-2 transition cursor-pointer disabled:opacity-50"
+              >
+                {isCommittingDrafts ? (
+                  <Loader2 className="w-4 h-4 animate-spin text-slate-950" />
+                ) : (
+                  <Save className="w-4 h-4 text-slate-950" />
+                )}
+                <span>Save & Sync Items ({draftItems.length})</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  if (window.confirm('Discard all staged draft items?')) {
+                    setDraftItems([]);
+                  }
+                }}
+                className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-rose-400 font-bold text-xs rounded-xl border border-slate-700 transition cursor-pointer"
+              >
+                Discard All
+              </button>
+            </div>
+          </div>
+
+          {/* Staged Items Preview Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 pt-3 border-t border-slate-800/80">
+            {draftItems.map((item, idx) => (
+              <div
+                key={item.id || idx}
+                className="bg-slate-900/90 border border-slate-800 hover:border-slate-700 rounded-xl p-3 flex items-center gap-3 relative group shadow-sm"
+              >
+                <div className="w-12 h-12 rounded-lg bg-slate-950 border border-slate-800 overflow-hidden shrink-0 flex items-center justify-center">
+                  {item.imageUrl ? (
+                    <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover" />
+                  ) : (
+                    <Package className="w-5 h-5 text-slate-600" />
+                  )}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <h4 className="text-xs font-bold text-slate-100 truncate" title={item.name}>
+                    {item.name}
+                  </h4>
+                  <div className="text-[10px] text-slate-400 flex items-center gap-1.5 mt-0.5">
+                    <span className="bg-slate-800 px-1.5 py-0.5 rounded text-sky-300 font-mono">
+                      {item.category}
+                    </span>
+                    <span className="font-extrabold text-emerald-400 font-mono">
+                      KSh {item.sellingPrice.toLocaleString()}
+                    </span>
+                  </div>
+                  <div className="text-[10px] text-slate-400 mt-0.5 font-mono">
+                    Stock: {item.stockQuantity} {item.unit || 'pcs'}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleRemoveDraftItem(item.id)}
+                  className="p-1 text-slate-500 hover:text-rose-400 hover:bg-slate-800 rounded-lg transition cursor-pointer"
+                  title="Remove this draft item"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Repeated / Duplicate Items Alert Banner */}
       {duplicateGroups.length > 0 && (
@@ -3616,25 +3788,47 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                 </div>
               </div>
 
-              {/* Auto-Add Option Toggle */}
-              <div className="bg-slate-950/80 border border-slate-800 p-3 rounded-2xl flex items-center justify-between gap-3">
-                <label className="flex items-center gap-2 cursor-pointer text-slate-300 font-bold text-xs select-none">
-                  <input
-                    type="checkbox"
-                    checked={autoSaveOnCameraSnap}
-                    onChange={(e) => setAutoSaveOnCameraSnap(e.target.checked)}
-                    className="w-4 h-4 accent-emerald-500 bg-slate-950 border-slate-700 rounded cursor-pointer"
-                  />
-                  <span>⚡ Instant Auto-Save into Inventory</span>
-                </label>
-                <span className="text-[10px] text-slate-400 hidden sm:inline">
-                  {autoSaveOnCameraSnap ? 'Auto-adds to stock immediately' : 'Open review modal first'}
-                </span>
-              </div>
+              {/* Core Requirement 2: Staged Draft Items in Modal */}
+              {draftItems.length > 0 && (
+                <div className="bg-emerald-950/80 border border-emerald-500/60 p-3.5 rounded-2xl space-y-2.5 shadow-md">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-bold text-white flex items-center gap-1.5">
+                      <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
+                      <span>{draftItems.length} Staged Draft Item{draftItems.length > 1 ? 's' : ''} Ready</span>
+                    </span>
+                    <span className="text-[10px] text-emerald-300 font-mono">
+                      Single writeBatch()
+                    </span>
+                  </div>
+                  <div className="max-h-40 overflow-y-auto space-y-1.5 pr-1">
+                    {draftItems.map((d) => (
+                      <div key={d.id} className="flex items-center justify-between gap-2 p-2 bg-slate-900/90 rounded-xl border border-slate-800 text-xs">
+                        <div className="flex items-center gap-2 min-w-0">
+                          {d.imageUrl && (
+                            <img src={d.imageUrl} alt="" className="w-8 h-8 rounded-lg object-cover border border-slate-700 shrink-0" />
+                          )}
+                          <div className="min-w-0">
+                            <p className="font-bold text-slate-100 truncate text-[11px]">{d.name}</p>
+                            <p className="text-[10px] text-slate-400 font-mono">KSh {d.sellingPrice.toLocaleString()} • {d.stockQuantity} pcs</p>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveDraftItem(d.id)}
+                          className="text-slate-500 hover:text-rose-400 p-1 transition cursor-pointer"
+                          title="Remove draft"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Footer */}
-            <div className="p-4 bg-slate-950 border-t border-slate-800 flex items-center justify-end">
+            <div className="p-4 bg-slate-950 border-t border-slate-800 flex items-center justify-between gap-2">
               <button
                 type="button"
                 onClick={() => {
@@ -3644,8 +3838,27 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                 }}
                 className="bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold px-4 py-2 rounded-xl text-xs transition cursor-pointer"
               >
-                Cancel
+                Close
               </button>
+
+              {draftItems.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleCommitDraftItems();
+                    setShowAiScanModal(false);
+                  }}
+                  disabled={isCommittingDrafts}
+                  className="bg-gradient-to-r from-emerald-600 via-emerald-500 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-slate-950 font-black px-4 py-2 rounded-xl text-xs transition flex items-center gap-2 shadow-lg shadow-emerald-900/40 cursor-pointer disabled:opacity-50"
+                >
+                  {isCommittingDrafts ? (
+                    <Loader2 className="w-4 h-4 animate-spin text-slate-950" />
+                  ) : (
+                    <Save className="w-4 h-4 text-slate-950" />
+                  )}
+                  <span>Save & Sync Items ({draftItems.length})</span>
+                </button>
+              )}
             </div>
           </div>
         </div>

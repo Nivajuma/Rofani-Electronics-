@@ -139,8 +139,10 @@ import {
   saveProductToCloud,
   deleteProductFromCloud,
   bulkUploadProductsToCloud,
+  batchSaveProductsToCloud,
   subscribeToTransactions,
   saveTransactionToCloud,
+  commitSaleToCloudBatch,
   subscribeToCustomers,
   saveCustomerToCloud,
   subscribeToSuppliers,
@@ -743,15 +745,15 @@ export default function App() {
 
     return () => {
       active = false;
-      unsubProducts();
-      unsubTransactions();
-      unsubCustomers();
-      unsubSuppliers();
-      unsubExpenses();
-      unsubRestock();
-      unsubSecurity();
-      unsubUsers();
-      unsubAudit();
+      try { unsubProducts(); } catch (e) { console.warn('unsubProducts error:', e); }
+      try { unsubTransactions(); } catch (e) { console.warn('unsubTransactions error:', e); }
+      try { unsubCustomers(); } catch (e) { console.warn('unsubCustomers error:', e); }
+      try { unsubSuppliers(); } catch (e) { console.warn('unsubSuppliers error:', e); }
+      try { unsubExpenses(); } catch (e) { console.warn('unsubExpenses error:', e); }
+      try { unsubRestock(); } catch (e) { console.warn('unsubRestock error:', e); }
+      try { unsubSecurity(); } catch (e) { console.warn('unsubSecurity error:', e); }
+      try { unsubUsers(); } catch (e) { console.warn('unsubUsers error:', e); }
+      try { unsubAudit(); } catch (e) { console.warn('unsubAudit error:', e); }
     };
   }, []);
 
@@ -1044,23 +1046,45 @@ export default function App() {
           data: p,
         });
       });
+      const customerToUpdate = updatedCustomers.find((c) => c.id === tx.customerId);
+      if (customerToUpdate) {
+        addPendingSyncItem({
+          type: 'customer',
+          description: `Customer Update: ${customerToUpdate.name}`,
+          data: customerToUpdate,
+        });
+      }
     } else {
-      // Real-Time Cloud Sync to Firestore for all connected worker mobile devices
-      saveTransactionToCloud(tx).catch((err) => {
+      // Real-Time Atomic Cloud Sync via SINGLE writeBatch() (Zero quota waste)
+      const customerToUpdate = updatedCustomers.find((c) => c.id === tx.customerId);
+      commitSaleToCloudBatch(tx, updatedProducts, customerToUpdate).catch((err) => {
         if (isQuotaExceededError(err)) {
           setIsCloudQuotaExceeded(true);
           setCloudSyncStatus('quota_exceeded');
         } else {
-          // Cloud save failed (e.g. intermittent drop), queue for sync when connection stabilizes
+          console.warn('[Sale Cloud Sync Notice] Offline fallback queued:', err);
+        }
+        // Graceful offline fallback queue so sale completes smoothly with 0 interruption
+        addPendingSyncItem({
+          type: 'sale',
+          description: `POS Sale #${tx.receiptNumber} (KSh ${tx.grandTotal.toLocaleString()})`,
+          data: tx,
+        });
+        updatedProducts.forEach((p) => {
           addPendingSyncItem({
-            type: 'sale',
-            description: `POS Sale #${tx.receiptNumber} (KSh ${tx.grandTotal.toLocaleString()})`,
-            data: tx,
+            type: 'product',
+            description: `Stock Update: ${p.name} (${p.stockQuantity} ${p.unit})`,
+            data: p,
+          });
+        });
+        if (customerToUpdate) {
+          addPendingSyncItem({
+            type: 'customer',
+            description: `Customer Update: ${customerToUpdate.name}`,
+            data: customerToUpdate,
           });
         }
       });
-      updatedProducts.forEach((p) => saveProductToCloud(p).catch(() => {}));
-      updatedCustomers.forEach((c) => saveCustomerToCloud(c).catch(() => {}));
     }
   };
 

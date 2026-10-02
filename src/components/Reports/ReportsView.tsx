@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   FileText,
   Download,
@@ -25,6 +25,7 @@ import {
   exportKRATaxReportPDF
 } from '../../utils/pdfGenerator';
 import { AuditLogsView } from './AuditLogsView';
+import { safeGetJSON, safeSetJSON } from '../../utils/safeStorage';
 
 interface ReportsViewProps {
   transactions: Transaction[];
@@ -43,11 +44,33 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   expenses,
   auditLogs = [],
 }) => {
-  const [activeReportTab, setActiveReportTab] = useState<
-    'sales' | 'profit' | 'kra_tax' | 'item_movement' | 'customers' | 'suppliers' | 'audit_trail'
-  >('sales');
+  const VALID_REPORT_TABS = [
+    'sales',
+    'profit',
+    'kra_tax',
+    'item_movement',
+    'customers',
+    'suppliers',
+    'audit_trail',
+  ] as const;
 
-  const [dateFilter, setDateFilter] = useState<'all' | 'today' | 'week' | 'month'>('all');
+  type ReportTab = (typeof VALID_REPORT_TABS)[number];
+
+  const [activeReportTab, setActiveReportTab] = useState<ReportTab>(() =>
+    safeGetJSON<ReportTab>('retail_pos_reports_tab', 'sales', (val) => VALID_REPORT_TABS.includes(val))
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_reports_tab', activeReportTab);
+  }, [activeReportTab]);
+
+  const [dateFilter, setDateFilter] = useState<'all' | 'today' | 'week' | 'month'>(() =>
+    safeGetJSON<'all' | 'today' | 'week' | 'month'>('retail_pos_reports_date_filter', 'all', (val) =>
+      ['all', 'today', 'week', 'month'].includes(val)
+    )
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_reports_date_filter', dateFilter);
+  }, [dateFilter]);
 
   // Filter transactions by date range
   const filteredTransactions = transactions.filter((tx) => {

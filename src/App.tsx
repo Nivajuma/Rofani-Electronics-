@@ -180,18 +180,65 @@ import {
 
 export default function App() {
   // Navigation & Display Layout State
-  const [activeTab, setActiveTab] = useState<
-    'pos' | 'inventory' | 'stocktake' | 'contacts' | 'cashmanagement' | 'expenses' | 'attendance' | 'reports' | 'onlinestore' | 'onlineorders' | 'settings' | 'auditlogs'
-  >('pos');
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const VALID_TABS = [
+    'pos',
+    'inventory',
+    'stocktake',
+    'contacts',
+    'cashmanagement',
+    'expenses',
+    'attendance',
+    'reports',
+    'onlinestore',
+    'onlineorders',
+    'settings',
+    'auditlogs',
+  ] as const;
+
+  type AppTab = (typeof VALID_TABS)[number];
+
+  const [activeTab, setActiveTab] = useState<AppTab>(() =>
+    safeGetJSON<AppTab>('retail_pos_active_tab', 'pos', (val) => VALID_TABS.includes(val))
+  );
+
+  useEffect(() => {
+    safeSetJSON('retail_pos_active_tab', activeTab);
+  }, [activeTab]);
+
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(() =>
+    safeGetJSON<boolean>('retail_pos_sidebar_collapsed', false, (val) => typeof val === 'boolean')
+  );
+
+  useEffect(() => {
+    safeSetJSON('retail_pos_sidebar_collapsed', isSidebarCollapsed);
+  }, [isSidebarCollapsed]);
+
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [displayTheme, setDisplayTheme] = useState<'light' | 'dark' | 'contrast'>('light');
-  const [fontScale, setFontScale] = useState<'normal' | 'large'>('normal');
+
+  const [displayTheme, setDisplayTheme] = useState<'light' | 'dark' | 'contrast'>(() =>
+    safeGetJSON<'light' | 'dark' | 'contrast'>('retail_pos_display_theme', 'light', (val) =>
+      ['light', 'dark', 'contrast'].includes(val)
+    )
+  );
+
+  useEffect(() => {
+    safeSetJSON('retail_pos_display_theme', displayTheme);
+  }, [displayTheme]);
+
+  const [fontScale, setFontScale] = useState<'normal' | 'large'>(() =>
+    safeGetJSON<'normal' | 'large'>('retail_pos_font_scale', 'normal', (val) =>
+      ['normal', 'large'].includes(val)
+    )
+  );
+
+  useEffect(() => {
+    safeSetJSON('retail_pos_font_scale', fontScale);
+  }, [fontScale]);
 
   // Format Switcher State (Computer / Desktop vs Mobile Phone Frame)
   const [deviceFormat, setDeviceFormat] = useState<'computer' | 'phone'>(() => {
-    const saved = safeGetJSON('retail_pos_device_format', null);
+    const saved = safeGetJSON('retail_pos_device_format', null, (val) => val === 'computer' || val === 'phone');
     if (saved === 'computer' || saved === 'phone') return saved;
     // Auto-detect mobile phone screens on first visit
     if (typeof window !== 'undefined' && window.innerWidth < 768) {
@@ -204,11 +251,34 @@ export default function App() {
     safeSetJSON('retail_pos_device_format', deviceFormat);
   }, [deviceFormat]);
 
-  const [phoneOrientation, setPhoneOrientation] = useState<'portrait' | 'landscape'>('portrait');
-  const [phoneModel, setPhoneModel] = useState<'iphone15pro' | 'galaxyS24' | 'pixel8'>('iphone15pro');
+  const [phoneOrientation, setPhoneOrientation] = useState<'portrait' | 'landscape'>(() =>
+    safeGetJSON<'portrait' | 'landscape'>('retail_pos_phone_orientation', 'portrait', (val) =>
+      ['portrait', 'landscape'].includes(val)
+    )
+  );
+
+  useEffect(() => {
+    safeSetJSON('retail_pos_phone_orientation', phoneOrientation);
+  }, [phoneOrientation]);
+
+  const [phoneModel, setPhoneModel] = useState<'iphone15pro' | 'galaxyS24' | 'pixel8'>(() =>
+    safeGetJSON<'iphone15pro' | 'galaxyS24' | 'pixel8'>('retail_pos_phone_model', 'iphone15pro', (val) =>
+      ['iphone15pro', 'galaxyS24', 'pixel8'].includes(val)
+    )
+  );
+
+  useEffect(() => {
+    safeSetJSON('retail_pos_phone_model', phoneModel);
+  }, [phoneModel]);
 
   // Stock alert filter toggle state
-  const [inventoryLowStockOnly, setInventoryLowStockOnly] = useState<boolean>(false);
+  const [inventoryLowStockOnly, setInventoryLowStockOnly] = useState<boolean>(() =>
+    safeGetJSON<boolean>('retail_pos_low_stock_only', false, (val) => typeof val === 'boolean')
+  );
+
+  useEffect(() => {
+    safeSetJSON('retail_pos_low_stock_only', inventoryLowStockOnly);
+  }, [inventoryLowStockOnly]);
 
   const toggleFullscreen = () => {
     if (!document.fullscreenElement) {

@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   Users,
   Building2,
@@ -36,6 +36,7 @@ import { SupplierDetailsModal } from './SupplierDetailsModal';
 import { ContactsImportExportModal } from './ContactsImportExportModal';
 import { PhonebookImportModal } from './PhonebookImportModal';
 import { CustomerPromotionGeneratorModal } from '../Marketing/CustomerPromotionGeneratorModal';
+import { safeGetJSON, safeSetJSON } from '../../utils/safeStorage';
 
 interface CustomersSuppliersViewProps {
   customers: Customer[];
@@ -83,13 +84,45 @@ export const CustomersSuppliersView: React.FC<CustomersSuppliersViewProps> = ({
   onNavigateToRestock,
 }) => {
   // Main Tab: 'customers' or 'suppliers'
-  const [activeTab, setActiveTab] = useState<'customers' | 'suppliers'>('customers');
+  const [activeTab, setActiveTab] = useState<'customers' | 'suppliers'>(() =>
+    safeGetJSON<'customers' | 'suppliers'>('retail_pos_contacts_active_tab', 'customers', (val) =>
+      val === 'customers' || val === 'suppliers'
+    )
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_contacts_active_tab', activeTab);
+  }, [activeTab]);
 
   // Search & Filters
-  const [searchQuery, setSearchQuery] = useState('');
-  const [customerFilter, setCustomerFilter] = useState<'all' | 'debt' | 'clear' | 'vip' | 'wholesaler' | 'corporate'>('all');
-  const [supplierFilter, setSupplierFilter] = useState<'all' | 'payable' | 'clear'>('all');
-  const [sortBy, setSortBy] = useState<'name' | 'debt' | 'volume'>('debt');
+  const [searchQuery, setSearchQuery] = useState(() =>
+    safeGetJSON<string>('retail_pos_contacts_search', '', (val) => typeof val === 'string')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_contacts_search', searchQuery);
+  }, [searchQuery]);
+
+  const [customerFilter, setCustomerFilter] = useState<'all' | 'debt' | 'clear' | 'vip' | 'wholesaler' | 'corporate'>(() =>
+    safeGetJSON('retail_pos_contacts_cust_filter', 'all')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_contacts_cust_filter', customerFilter);
+  }, [customerFilter]);
+
+  const [supplierFilter, setSupplierFilter] = useState<'all' | 'payable' | 'clear'>(() =>
+    safeGetJSON('retail_pos_contacts_supp_filter', 'all')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_contacts_supp_filter', supplierFilter);
+  }, [supplierFilter]);
+
+  const [sortBy, setSortBy] = useState<'name' | 'debt' | 'volume'>(() =>
+    safeGetJSON<'name' | 'debt' | 'volume'>('retail_pos_contacts_sort_by', 'debt', (val) =>
+      ['name', 'debt', 'volume'].includes(val)
+    )
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_contacts_sort_by', sortBy);
+  }, [sortBy]);
 
   // Modal States
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);

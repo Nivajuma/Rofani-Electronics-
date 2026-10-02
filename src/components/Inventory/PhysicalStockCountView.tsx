@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { ClipboardList, CheckCircle2, AlertTriangle, RefreshCw, Scan, Save, Search, X, Filter, Package } from 'lucide-react';
 import { Product, StockCountItem, StockCountAudit } from '../../types';
+import { safeGetJSON, safeSetJSON } from '../../utils/safeStorage';
 
 interface PhysicalStockCountViewProps {
   products: Product[];
@@ -11,29 +12,92 @@ export const PhysicalStockCountView: React.FC<PhysicalStockCountViewProps> = ({
   products,
   onApplyStockAdjustment,
 }) => {
-  const [counts, setCounts] = useState<Record<string, number>>(() => {
-    // initialize physical count with system stock
-    const initial: Record<string, number> = {};
+  const [counts, setCounts] = useState<Record<string, number | null>>(() => {
+    const saved = safeGetJSON<Record<string, number | null> | null>(
+      'retail_pos_stocktake_counts',
+      null,
+      (val) => Boolean(val && typeof val === 'object' && !Array.isArray(val))
+    );
+    if (saved) return saved;
+
+    // Start blank before adding any figure as requested
+    const initial: Record<string, number | null> = {};
     products.forEach((p) => {
-      initial[p.id] = p.stockQuantity;
+      initial[p.id] = null;
     });
     return initial;
   });
 
-  const [auditorName, setAuditorName] = useState('Sarah Miller');
-  const [auditNotes, setAuditNotes] = useState('');
-  const [filterCategory, setFilterCategory] = useState('All');
-  const [searchTerm, setSearchTerm] = useState('');
-  const [showDiscrepanciesOnly, setShowDiscrepanciesOnly] = useState(false);
+  useEffect(() => {
+    safeSetJSON('retail_pos_stocktake_counts', counts);
+  }, [counts]);
+
+  const [auditorName, setAuditorName] = useState(() =>
+    safeGetJSON<string>('retail_pos_stocktake_auditor', 'Sarah Miller', (val) => typeof val === 'string')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_stocktake_auditor', auditorName);
+  }, [auditorName]);
+
+  const [auditNotes, setAuditNotes] = useState(() =>
+    safeGetJSON<string>('retail_pos_stocktake_notes', '', (val) => typeof val === 'string')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_stocktake_notes', auditNotes);
+  }, [auditNotes]);
+
+  const [filterCategory, setFilterCategory] = useState(() =>
+    safeGetJSON<string>('retail_pos_stocktake_category', 'All', (val) => typeof val === 'string')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_stocktake_category', filterCategory);
+  }, [filterCategory]);
+
+  const [searchTerm, setSearchTerm] = useState(() =>
+    safeGetJSON<string>('retail_pos_stocktake_search', '', (val) => typeof val === 'string')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_stocktake_search', searchTerm);
+  }, [searchTerm]);
+
+  const [showDiscrepanciesOnly, setShowDiscrepanciesOnly] = useState(() =>
+    safeGetJSON<boolean>('retail_pos_stocktake_discrepancies_only', false, (val) => typeof val === 'boolean')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_stocktake_discrepancies_only', showDiscrepanciesOnly);
+  }, [showDiscrepanciesOnly]);
 
   const categories = Array.from(new Set(products.map((p) => p.category)));
 
   const handlePhysicalCountChange = (productId: string, val: string) => {
+    if (val.trim() === '') {
+      setCounts((prev) => ({
+        ...prev,
+        [productId]: null
+      }));
+      return;
+    }
     const qty = parseInt(val, 10);
     setCounts((prev) => ({
       ...prev,
-      [productId]: isNaN(qty) ? 0 : Math.max(0, qty)
+      [productId]: isNaN(qty) ? null : Math.max(0, qty)
     }));
+  };
+
+  const handleClearAllToBlank = () => {
+    const blank: Record<string, number | null> = {};
+    products.forEach((p) => {
+      blank[p.id] = null;
+    });
+    setCounts(blank);
+  };
+
+  const handlePrefillSystemStock = () => {
+    const prefilled: Record<string, number | null> = {};
+    products.forEach((p) => {
+      prefilled[p.id] = p.stockQuantity;
+    });
+    setCounts(prefilled);
   };
 
   const filteredProducts = products.filter((p) => {
@@ -46,8 +110,9 @@ export const PhysicalStockCountView: React.FC<PhysicalStockCountViewProps> = ({
       p.sku.toLowerCase().includes(query) ||
       (p.barcode && p.barcode.toLowerCase().includes(query));
 
-    const physical = counts[p.id] ?? p.stockQuantity;
-    const hasDiscrepancy = physical !== p.stockQuantity;
+    const rawPhysical = counts[p.id];
+    const physical = rawPhysical !== null && rawPhysical !== undefined ? rawPhysical : p.stockQuantity;
+    const hasDiscrepancy = rawPhysical !== null && rawPhysical !== undefined && physical !== p.stockQuantity;
     const matchesDiscrepancy = !showDiscrepanciesOnly || hasDiscrepancy;
 
     return matchesCategory && matchesSearch && matchesDiscrepancy;
@@ -55,9 +120,11 @@ export const PhysicalStockCountView: React.FC<PhysicalStockCountViewProps> = ({
 
   // Compute Variances
   const auditItems: StockCountItem[] = filteredProducts.map((p) => {
-    const physical = counts[p.id] ?? p.stockQuantity;
-    const variance = physical - p.stockQuantity;
-    const varianceCost = variance * p.costPrice;
+    const rawVal = counts[p.id];
+    const isCounted = rawVal !== null && rawVal !== undefined;
+    const physical = isCounted ? rawVal : p.stockQuantity;
+    const variance = isCounted ? physical - p.stockQuantity : 0;
+    const varianceCost = Math.round(variance * (p.costPrice || 0));
 
     return {
       productId: p.id,
@@ -73,14 +140,15 @@ export const PhysicalStockCountView: React.FC<PhysicalStockCountViewProps> = ({
     };
   });
 
-  const totalVarianceCount = auditItems.reduce((sum, item) => sum + Math.abs(item.variance), 0);
-  const totalVarianceCost = auditItems.reduce((sum, item) => sum + item.varianceCost, 0);
+  const countedAuditItems = auditItems.filter((item) => counts[item.productId] !== null && counts[item.productId] !== undefined);
+  const totalVarianceCount = countedAuditItems.reduce((sum, item) => sum + Math.abs(item.variance), 0);
+  const totalVarianceCost = Math.round(countedAuditItems.reduce((sum, item) => sum + item.varianceCost, 0));
 
   const handleCommitAudit = () => {
     if (confirm('Apply physical stock count to system inventory? This will overwrite system stock quantities.')) {
       const updatedProducts = products.map((p) => {
         const counted = counts[p.id];
-        if (counted !== undefined) {
+        if (counted !== null && counted !== undefined) {
           return {
             ...p,
             stockQuantity: counted,
@@ -117,14 +185,14 @@ export const PhysicalStockCountView: React.FC<PhysicalStockCountViewProps> = ({
           <div>
             <h2 className="font-bold text-lg text-slate-100">Physical Stock Counting (Stocktaking)</h2>
             <p className="text-xs text-slate-400">
-              Conduct physical inventory audit, detect shrinkage/discrepancies & auto-adjust stock
+              Conduct physical inventory audit in Kenya Shillings (KSh), detect shrinkage & auto-adjust stock
             </p>
           </div>
         </div>
 
         <button
           onClick={handleCommitAudit}
-          className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-5 py-2.5 rounded-xl text-xs transition flex items-center gap-2 shadow-lg shadow-emerald-600/20"
+          className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-5 py-2.5 rounded-xl text-xs transition flex items-center gap-2 shadow-lg shadow-emerald-600/20 cursor-pointer"
         >
           <Save className="w-4 h-4" /> Apply Stock Adjustments
         </button>
@@ -133,9 +201,9 @@ export const PhysicalStockCountView: React.FC<PhysicalStockCountViewProps> = ({
       {/* Variance Summary Bar */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl">
-          <div className="text-xs text-slate-400 font-medium">Total Items Audited</div>
+          <div className="text-xs text-slate-400 font-medium">Physical Items Counted</div>
           <div className="text-2xl font-extrabold text-slate-100 font-mono mt-1">
-            {filteredProducts.length} <span className="text-xs font-normal text-slate-500">products</span>
+            {countedAuditItems.length} <span className="text-xs font-normal text-slate-500">/ {filteredProducts.length} items ({filteredProducts.length - countedAuditItems.length} blank)</span>
           </div>
         </div>
 
@@ -147,9 +215,9 @@ export const PhysicalStockCountView: React.FC<PhysicalStockCountViewProps> = ({
         </div>
 
         <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl">
-          <div className="text-xs text-slate-400 font-medium">Financial Impact / Variance Cost</div>
+          <div className="text-xs text-slate-400 font-medium">Financial Impact / Variance Cost (KSh)</div>
           <div className={`text-2xl font-extrabold font-mono mt-1 ${totalVarianceCost < 0 ? 'text-rose-400' : totalVarianceCost > 0 ? 'text-emerald-400' : 'text-slate-200'}`}>
-            ${totalVarianceCost.toFixed(2)}
+            KSh {Math.round(totalVarianceCost).toLocaleString()}
           </div>
         </div>
       </div>
@@ -180,8 +248,27 @@ export const PhysicalStockCountView: React.FC<PhysicalStockCountViewProps> = ({
 
           <div className="flex items-center gap-2 flex-wrap">
             <button
+              type="button"
+              onClick={handleClearAllToBlank}
+              className="px-3 py-2 bg-slate-950 hover:bg-slate-850 text-sky-300 font-semibold rounded-xl border border-slate-800 transition cursor-pointer text-xs flex items-center gap-1.5"
+              title="Clear all physical counts to blank so staff can count from scratch without sticky figures"
+            >
+              <span>Make All Blank (Fresh Count)</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handlePrefillSystemStock}
+              className="px-3 py-2 bg-slate-950 hover:bg-slate-850 text-slate-300 font-semibold rounded-xl border border-slate-800 transition cursor-pointer text-xs"
+              title="Prefill all fields with current system stock quantities"
+            >
+              <span>Prefill System Stock</span>
+            </button>
+
+            <button
+              type="button"
               onClick={() => setShowDiscrepanciesOnly(!showDiscrepanciesOnly)}
-              className={`px-3 py-2 rounded-xl text-xs font-semibold transition flex items-center gap-1.5 border ${
+              className={`px-3 py-2 rounded-xl text-xs font-semibold transition flex items-center gap-1.5 border cursor-pointer ${
                 showDiscrepanciesOnly
                   ? 'bg-amber-950 border-amber-700 text-amber-300 font-bold'
                   : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
@@ -249,7 +336,7 @@ export const PhysicalStockCountView: React.FC<PhysicalStockCountViewProps> = ({
                 <th className="p-3.5 text-center">System Stock</th>
                 <th className="p-3.5 text-center">Physical Count</th>
                 <th className="p-3.5 text-center">Variance (Units)</th>
-                <th className="p-3.5 text-right">Cost Variance ($)</th>
+                <th className="p-3.5 text-right">Cost Variance (KSh)</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/60">
@@ -277,7 +364,9 @@ export const PhysicalStockCountView: React.FC<PhysicalStockCountViewProps> = ({
                 </tr>
               ) : (
                 auditItems.map((item) => {
-                  const hasMismatch = item.variance !== 0;
+                  const rawVal = counts[item.productId];
+                  const isCounted = rawVal !== null && rawVal !== undefined;
+                  const hasMismatch = isCounted && item.variance !== 0;
                   const prod = products.find((p) => p.id === item.productId);
 
                   return (
@@ -307,6 +396,9 @@ export const PhysicalStockCountView: React.FC<PhysicalStockCountViewProps> = ({
                             <div className="text-[10px] text-slate-400 font-mono">
                               SKU: {item.sku} | Barcode: {item.barcode}
                             </div>
+                            <div className="text-[11px] text-emerald-400 font-mono font-semibold mt-0.5">
+                              Price: KSh {Math.round(prod?.sellingPrice || 0).toLocaleString()} • Cost: KSh {Math.round(prod?.costPrice || 0).toLocaleString()}
+                            </div>
                           </div>
                         </div>
                       </td>
@@ -321,14 +413,22 @@ export const PhysicalStockCountView: React.FC<PhysicalStockCountViewProps> = ({
                       <input
                         type="number"
                         min="0"
-                        value={counts[item.productId] ?? item.systemQuantity}
+                        step="1"
+                        placeholder="Blank"
+                        value={rawVal === null || rawVal === undefined ? '' : rawVal}
+                        onFocus={(e) => {
+                          e.target.select();
+                        }}
                         onChange={(e) => handlePhysicalCountChange(item.productId, e.target.value)}
-                        className="w-24 bg-slate-950 border border-slate-700 text-center font-bold font-mono text-sky-400 text-sm py-1.5 rounded-xl focus:outline-none focus:border-sky-500"
+                        className="w-24 bg-slate-950 border border-slate-700 text-center font-bold font-mono text-sky-400 text-sm py-1.5 rounded-xl focus:outline-none focus:border-sky-500 placeholder-slate-600"
+                        title="Enter physical count (blank before adding figure)"
                       />
                     </td>
 
                     <td className="p-3.5 text-center font-mono font-extrabold text-sm">
-                      {item.variance === 0 ? (
+                      {!isCounted ? (
+                        <span className="text-slate-500 font-normal text-xs italic">Uncounted</span>
+                      ) : item.variance === 0 ? (
                         <span className="text-emerald-400">0 (Matched)</span>
                       ) : item.variance > 0 ? (
                         <span className="text-emerald-400">+{item.variance} (Overage)</span>
@@ -338,9 +438,13 @@ export const PhysicalStockCountView: React.FC<PhysicalStockCountViewProps> = ({
                     </td>
 
                     <td className="p-3.5 text-right font-mono font-bold text-sm">
-                      <span className={item.varianceCost < 0 ? 'text-rose-400' : item.varianceCost > 0 ? 'text-emerald-400' : 'text-slate-400'}>
-                        ${item.varianceCost.toFixed(2)}
-                      </span>
+                      {!isCounted ? (
+                        <span className="text-slate-500">—</span>
+                      ) : (
+                        <span className={item.varianceCost < 0 ? 'text-rose-400' : item.varianceCost > 0 ? 'text-emerald-400' : 'text-slate-400'}>
+                          KSh {Math.round(item.varianceCost).toLocaleString()}
+                        </span>
+                      )}
                     </td>
                   </tr>
                 );

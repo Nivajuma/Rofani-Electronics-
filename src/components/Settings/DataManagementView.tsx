@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Database,
   Download,
@@ -37,6 +37,7 @@ import { Product, Customer, Supplier, Transaction, Expense, AttendanceRecord, Us
 import { detectDuplicateProducts, deduplicateProducts } from '../../utils/deduplicate';
 import { DataSnapshotModal } from './DataSnapshotModal';
 import { CameraPermissionsCard } from './CameraPermissionsCard';
+import { safeGetJSON, safeSetJSON } from '../../utils/safeStorage';
 
 interface DataManagementViewProps {
   products: Product[];
@@ -109,11 +110,41 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
   const [showMasterPin, setShowMasterPin] = useState(false);
 
   // Business settings state stored in local state for header/receipt customization
-  const [storeName, setStoreName] = useState('ROFANI ELECTRONICS & BOUTIQUE');
-  const [kraPin, setKraPin] = useState('P051234567X');
-  const [storePhone, setStorePhone] = useState('+254 700 000 000');
-  const [paybillTillNumber, setPaybillTillNumber] = useState('522522 / Till 890123');
-  const [kraTaxRate, setKraTaxRate] = useState(1.5);
+  const [storeName, setStoreName] = useState(() =>
+    safeGetJSON<string>('retail_pos_store_name', 'ROFANI ELECTRONICS & BOUTIQUE', (val) => typeof val === 'string' && val.trim().length > 0)
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_store_name', storeName);
+  }, [storeName]);
+
+  const [kraPin, setKraPin] = useState(() =>
+    safeGetJSON<string>('retail_pos_kra_pin', 'P051234567X', (val) => typeof val === 'string')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_kra_pin', kraPin);
+  }, [kraPin]);
+
+  const [storePhone, setStorePhone] = useState(() =>
+    safeGetJSON<string>('retail_pos_store_phone', '+254 700 000 000', (val) => typeof val === 'string')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_store_phone', storePhone);
+  }, [storePhone]);
+
+  const [paybillTillNumber, setPaybillTillNumber] = useState(() =>
+    safeGetJSON<string>('retail_pos_store_paybill', '522522 / Till 890123', (val) => typeof val === 'string')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_store_paybill', paybillTillNumber);
+  }, [paybillTillNumber]);
+
+  const [kraTaxRate, setKraTaxRate] = useState(() =>
+    safeGetJSON<number>('retail_pos_kra_tax_rate', 1.5, (val) => typeof val === 'number')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_kra_tax_rate', kraTaxRate);
+  }, [kraTaxRate]);
+
   const [isSavedSettings, setIsSavedSettings] = useState(false);
 
   // Confirm dialogs state

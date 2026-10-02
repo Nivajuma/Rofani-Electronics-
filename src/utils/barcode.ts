@@ -149,7 +149,7 @@ export const printBarcodeLabels = (
         </div>
         ${includePrice ? `
         <div style="font-size: 13px; font-weight: 800; color: #1e293b; font-family: sans-serif; margin: 2px 0;">
-          KSh ${numPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          KSh ${Math.round(numPrice).toLocaleString()}
         </div>
         ` : ''}
         <img src="${dataUrl}" style="max-width: 100%; height: 48px; display: block; margin: 0 auto;" />
@@ -175,7 +175,7 @@ export const printBarcodeLabels = (
         <div class="no-print" style="margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center;">
           <div>
             <h2 style="margin: 0; font-size: 18px; color: #0f172a;">Barcode Label Sheet (${count} labels)</h2>
-            <p style="margin: 4px 0 0 0; color: #64748b; font-size: 12px;">Format: <strong>Only Item Name + Barcode</strong></p>
+            <p style="margin: 4px 0 0 0; color: #64748b; font-size: 12px;">Format: <strong>${includePrice ? `Item Name + Price (KSh ${Math.round(numPrice).toLocaleString()}) + Barcode` : 'Only Item Name + Barcode'}</strong></p>
           </div>
           <button onclick="window.print()" style="padding: 10px 20px; background: #0284c7; color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer;">Print Labels</button>
         </div>
@@ -234,10 +234,7 @@ export const printBatchBarcodes = (
           </div>
           ${
             includePrice && item.price !== undefined
-              ? `<div class="product-price">KSh ${Number(item.price).toLocaleString(undefined, {
-                  minimumFractionDigits: 2,
-                  maximumFractionDigits: 2,
-                })}</div>`
+              ? `<div class="product-price">KSh ${Math.round(Number(item.price)).toLocaleString()}</div>`
               : ''
           }
           <div class="barcode-wrapper">

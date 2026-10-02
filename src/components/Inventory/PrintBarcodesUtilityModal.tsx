@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   Printer,
   Barcode,
@@ -24,6 +24,7 @@ import {
   ChevronRight,
   LayoutGrid,
   List,
+  AlignJustify,
   Ruler,
   Info,
   Check,
@@ -42,6 +43,7 @@ import {
   LABEL_SHEET_PRESETS,
   LabelSheetPreset
 } from '../../utils/barcode';
+import { safeGetJSON, safeSetJSON } from '../../utils/safeStorage';
 
 export interface PrintBarcodesUtilityModalProps {
   isOpen: boolean;
@@ -77,16 +79,79 @@ export const PrintBarcodesUtilityModal: React.FC<PrintBarcodesUtilityModalProps>
   });
   const [searchTerm, setSearchTerm] = useState('');
   const [scanTimeFilter, setScanTimeFilter] = useState<'all' | 'today' | 'recent_50'>('all');
-  const [selectedIds, setSelectedIds] = useState<Record<string, boolean>>({});
-  const [labelCounts, setLabelCounts] = useState<Record<string, number>>({});
+
+  const [selectedIds, setSelectedIds] = useState<Record<string, boolean>>(() =>
+    safeGetJSON<Record<string, boolean>>('retail_pos_print_selected_ids', {}, (val) => Boolean(val && typeof val === 'object'))
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_print_selected_ids', selectedIds);
+  }, [selectedIds]);
+
+  const [labelCounts, setLabelCounts] = useState<Record<string, number>>(() =>
+    safeGetJSON<Record<string, number>>('retail_pos_print_label_counts', {}, (val) => Boolean(val && typeof val === 'object'))
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_print_label_counts', labelCounts);
+  }, [labelCounts]);
+
   const [sheetTitle, setSheetTitle] = useState(`${storeName} Barcode Labels Sheet`);
   const [previewItemId, setPreviewItemId] = useState<string | null>(null);
-  const [includePrice, setIncludePrice] = useState(false);
-  const [selectedFormatId, setSelectedFormatId] = useState<string>('a4_64');
-  const [labelFontSize, setLabelFontSize] = useState<'small' | 'medium' | 'large'>('medium');
-  const [showStoreNameOnLabel, setShowStoreNameOnLabel] = useState<boolean>(false);
+
+  const [includePrice, setIncludePrice] = useState(() =>
+    safeGetJSON<boolean>('retail_pos_print_include_price', false, (val) => typeof val === 'boolean')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_print_include_price', includePrice);
+  }, [includePrice]);
+
+  const [customLabelPrices, setCustomLabelPrices] = useState<Record<string, number | null>>(() =>
+    safeGetJSON<Record<string, number | null>>('retail_pos_print_custom_prices', {}, (val) => Boolean(val && typeof val === 'object'))
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_print_custom_prices', customLabelPrices);
+  }, [customLabelPrices]);
+
+  const [selectedFormatId, setSelectedFormatId] = useState<string>(() =>
+    safeGetJSON<string>('retail_pos_print_format_id', 'a4_64', (val) => typeof val === 'string')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_print_format_id', selectedFormatId);
+  }, [selectedFormatId]);
+
+  const [labelFontSize, setLabelFontSize] = useState<'small' | 'medium' | 'large'>(() =>
+    safeGetJSON<'small' | 'medium' | 'large'>('retail_pos_print_font_size', 'medium', (val) =>
+      ['small', 'medium', 'large'].includes(val)
+    )
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_print_font_size', labelFontSize);
+  }, [labelFontSize]);
+
+  const [showStoreNameOnLabel, setShowStoreNameOnLabel] = useState<boolean>(() =>
+    safeGetJSON<boolean>('retail_pos_print_show_store_name', false, (val) => typeof val === 'boolean')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_print_show_store_name', showStoreNameOnLabel);
+  }, [showStoreNameOnLabel]);
+
   const [activeModalTab, setActiveModalTab] = useState<'items' | 'preview'>('items');
-  const [viewLayout, setViewLayout] = useState<'list' | 'grid'>('list');
+
+  const [viewLayout, setViewLayout] = useState<'list' | 'compact' | 'grid'>(() =>
+    safeGetJSON<'list' | 'compact' | 'grid'>('retail_pos_print_view_layout', 'list', (val) =>
+      ['list', 'compact', 'grid'].includes(val)
+    )
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_print_view_layout', viewLayout);
+  }, [viewLayout]);
+
+  const [selectedCategory, setSelectedCategory] = useState<string>(() =>
+    safeGetJSON<string>('retail_pos_print_category', 'all', (val) => typeof val === 'string')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_print_category', selectedCategory);
+  }, [selectedCategory]);
+
   const [filterSelectedOnly, setFilterSelectedOnly] = useState<boolean>(false);
   const [showOptionsDrawer, setShowOptionsDrawer] = useState<boolean>(false);
   const [showLivePreview, setShowLivePreview] = useState<boolean>(true);
@@ -206,11 +271,26 @@ export const PrintBarcodesUtilityModal: React.FC<PrintBarcodesUtilityModalProps>
     return Array.from(map.values());
   }, [catalogItems, scanHistoryItems]);
 
-  // Currently displayed items list based on active tab, search, and selected-only filter
+  // Unique categories list for quick mobile filtering
+  const availableCategories = useMemo(() => {
+    const cats = new Set<string>();
+    catalogItems.forEach((item) => {
+      if (item.category && item.category.trim()) cats.add(item.category.trim());
+    });
+    scanHistoryItems.forEach((item) => {
+      if (item.category && item.category.trim()) cats.add(item.category.trim());
+    });
+    return Array.from(cats).sort();
+  }, [catalogItems, scanHistoryItems]);
+
+  // Currently displayed items list based on active tab, search, category, and selected-only filter
   const displayedItems = useMemo(() => {
     let list = activeSource === 'scan_history' ? scanHistoryItems : catalogItems;
     if (filterSelectedOnly) {
       list = allAvailableItems.filter((item) => !!selectedIds[item.barcode]);
+    }
+    if (selectedCategory !== 'all') {
+      list = list.filter((item) => item.category === selectedCategory);
     }
     if (!searchTerm.trim()) return list;
     const term = searchTerm.toLowerCase().trim();
@@ -222,7 +302,7 @@ export const PrintBarcodesUtilityModal: React.FC<PrintBarcodesUtilityModalProps>
         (item.category && item.category.toLowerCase().includes(term)) ||
         (item.lastScannedBy && item.lastScannedBy.toLowerCase().includes(term))
     );
-  }, [activeSource, scanHistoryItems, catalogItems, allAvailableItems, filterSelectedOnly, selectedIds, searchTerm]);
+  }, [activeSource, scanHistoryItems, catalogItems, allAvailableItems, filterSelectedOnly, selectedCategory, selectedIds, searchTerm]);
 
   // Selection statistics
   const selectedItemsList = useMemo(() => {
@@ -398,12 +478,19 @@ export const PrintBarcodesUtilityModal: React.FC<PrintBarcodesUtilityModalProps>
       return;
     }
 
-    const batchData = selectedItemsList.map((item) => ({
-      name: item.name,
-      price: item.price,
-      barcode: item.barcode,
-      count: labelCounts[item.barcode] ?? 1,
-    }));
+    const batchData = selectedItemsList.map((item) => {
+      const customPrice = customLabelPrices[item.barcode];
+      const effectivePrice =
+        customPrice !== null && customPrice !== undefined
+          ? customPrice
+          : item.price;
+      return {
+        name: item.name,
+        price: Math.round(Number(effectivePrice || 0)),
+        barcode: item.barcode,
+        count: labelCounts[item.barcode] ?? 1,
+      };
+    });
 
     const finalTitle = sheetTitle.trim() || `${storeName} Barcode Labels`;
     printBatchBarcodes(
@@ -424,11 +511,11 @@ export const PrintBarcodesUtilityModal: React.FC<PrintBarcodesUtilityModalProps>
       role="dialog"
       aria-modal="true"
     >
-      <div className="bg-slate-900 border-0 sm:border sm:border-slate-700 rounded-none sm:rounded-2xl shadow-2xl w-full max-w-6xl h-full sm:h-auto sm:max-h-[95vh] flex flex-col overflow-hidden text-slate-100 animate-in fade-in zoom-in-95 duration-200">
+      <div className="bg-slate-900 border-0 sm:border sm:border-slate-700 rounded-none sm:rounded-2xl shadow-2xl w-full max-w-6xl h-full sm:h-auto sm:max-h-[96vh] flex flex-col overflow-hidden text-slate-100 animate-in fade-in zoom-in-95 duration-200">
         {/* MODAL HEADER */}
-        <div className="p-3 sm:p-4 border-b border-slate-800 flex items-center justify-between bg-slate-900/95 shrink-0">
-          <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
-            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-tr from-sky-600 to-blue-500 flex items-center justify-center text-white shadow-md shadow-sky-600/30 shrink-0">
+        <div className="px-3 py-2 sm:p-4 border-b border-slate-800 flex items-center justify-between bg-slate-900/95 shrink-0">
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+            <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-tr from-sky-600 to-blue-500 flex items-center justify-center text-white shadow-md shadow-sky-600/30 shrink-0">
               <Printer className="w-4 h-4 sm:w-5 sm:h-5" />
             </div>
             <div className="min-w-0">
@@ -447,12 +534,12 @@ export const PrintBarcodesUtilityModal: React.FC<PrintBarcodesUtilityModalProps>
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
-            <div className="sm:hidden text-[11px] font-mono font-bold text-sky-300 bg-sky-950/80 px-2.5 py-1 rounded-lg border border-sky-800/60">
-              {selectedItemsList.length} sel ({totalLabelsCount} pcs)
+            <div className="text-[11px] font-mono font-bold text-sky-300 bg-sky-950/80 px-2.5 py-1 rounded-lg border border-sky-800/60">
+              {selectedItemsList.length} <span className="hidden xs:inline">selected</span> ({totalLabelsCount} pcs)
             </div>
             <button
               onClick={onClose}
-              className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition cursor-pointer"
+              className="p-1.5 sm:p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition cursor-pointer"
               title="Close modal"
             >
               <X className="w-5 h-5" />
@@ -461,35 +548,35 @@ export const PrintBarcodesUtilityModal: React.FC<PrintBarcodesUtilityModalProps>
         </div>
 
         {/* STEP TABS: 1. SELECT PRODUCTS vs 2. LIVE SHEET PREVIEW */}
-        <div className="flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-4 py-2 bg-slate-950 border-b border-slate-800 shrink-0">
+        <div className="flex items-center gap-1.5 sm:gap-2 px-2 sm:px-4 py-1.5 sm:py-2 bg-slate-950 border-b border-slate-800 shrink-0">
           <button
             type="button"
             onClick={() => setActiveModalTab('items')}
-            className={`flex-1 py-2 sm:py-2.5 px-2.5 sm:px-4 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition cursor-pointer ${
+            className={`flex-1 py-1.5 sm:py-2.5 px-2 sm:px-4 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 sm:gap-2 transition cursor-pointer ${
               activeModalTab === 'items'
                 ? 'bg-gradient-to-r from-sky-600 to-blue-600 text-white shadow-lg shadow-sky-900/40 ring-1 ring-sky-400'
                 : 'bg-slate-850 hover:bg-slate-800 text-slate-300'
             }`}
           >
-            <CheckSquare className="w-4 h-4 text-sky-300 shrink-0" />
+            <CheckSquare className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-sky-300 shrink-0" />
             <span className="truncate">1. Select Products</span>
-            <span className="bg-sky-950 text-sky-200 border border-sky-400/50 px-2 py-0.5 rounded-full text-[10px] font-mono font-bold shrink-0">
-              {selectedItemsList.length} items ({totalLabelsCount} labels)
+            <span className="bg-sky-950 text-sky-200 border border-sky-400/50 px-1.5 sm:px-2 py-0.5 rounded-full text-[10px] font-mono font-bold shrink-0">
+              {selectedItemsList.length}
             </span>
           </button>
 
           <button
             type="button"
             onClick={() => setActiveModalTab('preview')}
-            className={`flex-1 py-2 sm:py-2.5 px-2.5 sm:px-4 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition cursor-pointer ${
+            className={`flex-1 py-1.5 sm:py-2.5 px-2 sm:px-4 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 sm:gap-2 transition cursor-pointer ${
               activeModalTab === 'preview'
                 ? 'bg-gradient-to-r from-sky-600 to-blue-600 text-white shadow-lg shadow-sky-900/40 ring-1 ring-sky-400'
                 : 'bg-slate-850 hover:bg-slate-800 text-slate-300'
             }`}
           >
-            <Eye className="w-4 h-4 text-sky-300 shrink-0" />
+            <Eye className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-sky-300 shrink-0" />
             <span className="truncate">2. Live Sheet Preview</span>
-            <span className="bg-sky-950 text-sky-200 border border-sky-400/50 px-2 py-0.5 rounded-full text-[10px] font-mono font-bold shrink-0">
+            <span className="bg-sky-950 text-sky-200 border border-sky-400/50 px-1.5 sm:px-2 py-0.5 rounded-full text-[10px] font-mono font-bold shrink-0">
               {activePreset.shortName}
             </span>
           </button>
@@ -497,148 +584,198 @@ export const PrintBarcodesUtilityModal: React.FC<PrintBarcodesUtilityModalProps>
 
         {/* TABS & CONTROLS TOOLBAR (Rendered on 1. Select Products Tab) */}
         {activeModalTab === 'items' && (
-          <div className="p-2.5 sm:p-3.5 border-b border-slate-800 bg-slate-950/70 space-y-2.5 shrink-0">
-            {/* Top Toolbar Row: Search + Source Switcher + Layout Switcher */}
-            <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="p-2 sm:p-3 border-b border-slate-800 bg-slate-950/80 space-y-2 shrink-0">
+            {/* Top Toolbar Row: Search + Category + Options Drawer Toggle */}
+            <div className="flex items-center gap-2">
               {/* Search Bar */}
-              <div className="relative flex-1 min-w-[200px] max-w-md">
-                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+              <div className="relative flex-1 min-w-0">
+                <Search className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-slate-400 absolute left-2.5 sm:left-3 top-2.5" />
                 <input
                   type="text"
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  placeholder="Search products by name, barcode, SKU, category..."
-                  className="w-full bg-slate-900 border border-slate-700/80 rounded-xl pl-9 pr-8 py-1.5 sm:py-2 text-xs text-slate-100 placeholder-slate-400 focus:outline-none focus:border-sky-500 shadow-inner"
+                  placeholder="Search products by name, barcode, SKU..."
+                  className="w-full bg-slate-900 border border-slate-700/80 rounded-xl pl-8 sm:pl-9 pr-7 py-1.5 sm:py-2 text-xs text-slate-100 placeholder-slate-400 focus:outline-none focus:border-sky-500 shadow-inner"
                 />
                 {searchTerm && (
                   <button
                     onClick={() => setSearchTerm('')}
-                    className="absolute right-2.5 top-2 text-slate-400 hover:text-white"
+                    className="absolute right-2 top-2 text-slate-400 hover:text-white"
                   >
                     <X className="w-3.5 h-3.5" />
                   </button>
                 )}
               </div>
 
-              {/* Source Switcher Pills */}
-              <div className="flex items-center gap-1.5 flex-wrap">
-                <div className="flex items-center p-1 bg-slate-900 rounded-xl border border-slate-800">
-                  <button
-                    onClick={() => {
-                      setActiveSource('catalog');
-                      setFilterSelectedOnly(false);
-                    }}
-                    className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
-                      activeSource === 'catalog' && !filterSelectedOnly
-                        ? 'bg-sky-600 text-white shadow-sm'
-                        : 'text-slate-400 hover:text-slate-200'
-                    }`}
+              {/* Category Dropdown Filter */}
+              {availableCategories.length > 0 && (
+                <div className="shrink-0">
+                  <select
+                    value={selectedCategory}
+                    onChange={(e) => setSelectedCategory(e.target.value)}
+                    className="bg-slate-900 border border-slate-700/80 rounded-xl px-2 py-1.5 sm:py-2 text-xs text-slate-200 focus:outline-none focus:border-sky-500 max-w-[125px] sm:max-w-[170px] truncate cursor-pointer font-medium"
+                    title="Filter items by category"
                   >
-                    <Package className="w-3.5 h-3.5" />
-                    <span>Catalog ({catalogItems.length})</span>
-                  </button>
-
-                  <button
-                    onClick={() => {
-                      setActiveSource('scan_history');
-                      setFilterSelectedOnly(false);
-                    }}
-                    className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
-                      activeSource === 'scan_history' && !filterSelectedOnly
-                        ? 'bg-sky-600 text-white shadow-sm'
-                        : 'text-slate-400 hover:text-slate-200'
-                    }`}
-                  >
-                    <Clock className="w-3.5 h-3.5" />
-                    <span>Scans ({scanHistoryItems.length})</span>
-                  </button>
-
-                  <button
-                    onClick={() => setFilterSelectedOnly(!filterSelectedOnly)}
-                    className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
-                      filterSelectedOnly
-                        ? 'bg-emerald-600 text-white shadow-sm'
-                        : selectedItemsList.length > 0
-                        ? 'text-emerald-400 hover:text-emerald-300'
-                        : 'text-slate-500 hover:text-slate-300'
-                    }`}
-                  >
-                    <CheckSquare className="w-3.5 h-3.5" />
-                    <span>Selected ({selectedItemsList.length})</span>
-                  </button>
+                    <option value="all">All Categories ({allAvailableItems.length})</option>
+                    {availableCategories.map((cat) => (
+                      <option key={cat} value={cat}>
+                        {cat}
+                      </option>
+                    ))}
+                  </select>
                 </div>
+              )}
 
-                {/* View Layout Toggle: Spacious List vs Grid Cards */}
-                <div className="flex items-center p-1 bg-slate-900 rounded-xl border border-slate-800">
-                  <button
-                    onClick={() => setViewLayout('list')}
-                    className={`p-1.5 rounded-lg transition cursor-pointer ${
-                      viewLayout === 'list'
-                        ? 'bg-sky-600 text-white shadow-sm'
-                        : 'text-slate-400 hover:text-slate-200'
-                    }`}
-                    title="Spacious List View (Easy scrolling & clear item selection)"
-                  >
-                    <List className="w-4 h-4" />
-                  </button>
-                  <button
-                    onClick={() => setViewLayout('grid')}
-                    className={`p-1.5 rounded-lg transition cursor-pointer ${
-                      viewLayout === 'grid'
-                        ? 'bg-sky-600 text-white shadow-sm'
-                        : 'text-slate-400 hover:text-slate-200'
-                    }`}
-                    title="Grid Card View"
-                  >
-                    <LayoutGrid className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
+              {/* Collapsible Options Drawer Toggle */}
+              <button
+                type="button"
+                onClick={() => setShowOptionsDrawer(!showOptionsDrawer)}
+                className={`px-2.5 py-1.5 sm:py-2 rounded-xl border transition flex items-center gap-1.5 text-xs font-bold shrink-0 cursor-pointer ${
+                  showOptionsDrawer
+                    ? 'bg-sky-950 text-sky-300 border-sky-600 shadow-sm'
+                    : 'bg-slate-900 text-slate-300 border-slate-700/80 hover:text-white hover:bg-slate-850'
+                }`}
+                title="Sticker sheets preset, label copies, and font sizing"
+              >
+                <SlidersHorizontal className="w-3.5 h-3.5 text-sky-400" />
+                <span className="hidden sm:inline">Options & Copies</span>
+                {showOptionsDrawer ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+              </button>
             </div>
 
-            {/* Quick Actions & Options Row */}
-            <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-slate-800/80 text-xs">
-              <div className="flex items-center gap-2 flex-wrap">
+            {/* Sub Toolbar: Source Switcher (Catalog / Scans / Selected) + Quick Select/Clear + Layout View */}
+            <div className="flex items-center justify-between gap-1.5 overflow-x-auto no-scrollbar py-0.5">
+              {/* Source Switcher Chips */}
+              <div className="flex items-center p-0.5 sm:p-1 bg-slate-900 rounded-xl border border-slate-800 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveSource('catalog');
+                    setFilterSelectedOnly(false);
+                  }}
+                  className={`flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1 rounded-lg text-xs font-bold transition cursor-pointer shrink-0 ${
+                    activeSource === 'catalog' && !filterSelectedOnly
+                      ? 'bg-sky-600 text-white shadow-sm'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <Package className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+                  <span>Catalog ({catalogItems.length})</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveSource('scan_history');
+                    setFilterSelectedOnly(false);
+                  }}
+                  className={`flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1 rounded-lg text-xs font-bold transition cursor-pointer shrink-0 ${
+                    activeSource === 'scan_history' && !filterSelectedOnly
+                      ? 'bg-sky-600 text-white shadow-sm'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <Clock className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+                  <span>Scans ({scanHistoryItems.length})</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setFilterSelectedOnly(!filterSelectedOnly)}
+                  className={`flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1 rounded-lg text-xs font-bold transition cursor-pointer shrink-0 ${
+                    filterSelectedOnly
+                      ? 'bg-emerald-600 text-white shadow-sm ring-1 ring-emerald-400'
+                      : selectedItemsList.length > 0
+                      ? 'text-emerald-400 hover:text-emerald-300'
+                      : 'text-slate-500 hover:text-slate-300'
+                  }`}
+                  title="Show only items currently selected for printing"
+                >
+                  <CheckSquare className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+                  <span>Selected ({selectedItemsList.length})</span>
+                </button>
+              </div>
+
+              {/* Price Labelling Toggle & Quick Select Buttons */}
+              <div className="flex items-center gap-1.5 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setIncludePrice(!includePrice)}
+                  className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-bold transition cursor-pointer border ${
+                    includePrice
+                      ? 'bg-emerald-950 text-emerald-300 border-emerald-600 shadow-sm'
+                      : 'bg-slate-900 text-slate-400 border-slate-700/80 hover:text-slate-200'
+                  }`}
+                  title="Toggle Price Labelling on barcode stickers (Kenya Shillings, zero decimals)"
+                >
+                  <Tag className="w-3 h-3 text-emerald-400" />
+                  <span>Price Labelling (KSh)</span>
+                  {includePrice && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>}
+                </button>
+
                 <button
                   type="button"
                   onClick={handleSelectAllVisible}
-                  className="px-2.5 py-1.5 bg-slate-900 hover:bg-slate-850 text-sky-300 font-bold rounded-lg border border-slate-700/80 transition flex items-center gap-1.5 cursor-pointer text-xs"
+                  className="px-2 py-1 bg-slate-900 hover:bg-slate-850 text-sky-300 font-bold rounded-lg border border-slate-700/80 transition flex items-center gap-1 cursor-pointer text-[11px]"
+                  title="Select all products currently visible in search"
                 >
-                  <CheckSquare className="w-3.5 h-3.5" />
-                  <span>Select All Visible ({displayedItems.length})</span>
+                  <CheckSquare className="w-3 h-3" />
+                  <span className="hidden sm:inline">Select All</span>
+                  <span className="sm:hidden">All</span> ({displayedItems.length})
                 </button>
 
                 {selectedItemsList.length > 0 && (
                   <button
                     type="button"
                     onClick={handleDeselectAll}
-                    className="px-2.5 py-1.5 bg-slate-900 hover:bg-slate-850 text-rose-300 hover:text-rose-200 font-semibold rounded-lg border border-slate-700/80 transition cursor-pointer text-xs"
+                    className="px-2 py-1 bg-slate-900 hover:bg-slate-850 text-rose-300 hover:text-rose-200 font-semibold rounded-lg border border-slate-700/80 transition cursor-pointer text-[11px]"
+                    title="Uncheck all selected items"
                   >
-                    Clear Selection
+                    Clear
                   </button>
                 )}
 
-                {/* Collapsible Options Drawer Toggle */}
-                <button
-                  type="button"
-                  onClick={() => setShowOptionsDrawer(!showOptionsDrawer)}
-                  className={`px-2.5 py-1.5 rounded-lg border transition flex items-center gap-1.5 font-bold cursor-pointer text-xs ${
-                    showOptionsDrawer
-                      ? 'bg-sky-950 text-sky-300 border-sky-700'
-                      : 'bg-slate-900 text-slate-300 border-slate-700/80 hover:text-white'
-                  }`}
-                >
-                  <SlidersHorizontal className="w-3.5 h-3.5 text-sky-400" />
-                  <span>Label Options & Copies</span>
-                  {showOptionsDrawer ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-                </button>
-              </div>
+                {/* View Layout Switcher: Spacious List vs Compact Rows vs Grid */}
+                <div className="flex items-center p-0.5 bg-slate-900 rounded-lg border border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => setViewLayout('list')}
+                    className={`p-1 rounded-md transition cursor-pointer ${
+                      viewLayout === 'list'
+                        ? 'bg-sky-600 text-white shadow-sm'
+                        : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                    title="Spacious List (Comfortable touch cards with full details)"
+                  >
+                    <List className="w-3.5 h-3.5" />
+                  </button>
 
-              {/* Selection summary hint */}
-              <div className="text-[11px] text-slate-400 flex items-center gap-1.5">
-                <span className="text-slate-300 font-semibold">{displayedItems.length} items shown</span>
-                <span>•</span>
-                <span className="text-emerald-400 font-bold">{selectedItemsList.length} selected for print</span>
+                  <button
+                    type="button"
+                    onClick={() => setViewLayout('compact')}
+                    className={`p-1 rounded-md transition cursor-pointer ${
+                      viewLayout === 'compact'
+                        ? 'bg-sky-600 text-white shadow-sm'
+                        : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                    title="Compact Mode (Ultra-compact rows for fast multi-selection on mobile)"
+                  >
+                    <AlignJustify className="w-3.5 h-3.5" />
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setViewLayout('grid')}
+                    className={`hidden sm:block p-1 rounded-md transition cursor-pointer ${
+                      viewLayout === 'grid'
+                        ? 'bg-sky-600 text-white shadow-sm'
+                        : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                    title="Grid Card View"
+                  >
+                    <LayoutGrid className="w-3.5 h-3.5" />
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -685,8 +822,8 @@ export const PrintBarcodesUtilityModal: React.FC<PrintBarcodesUtilityModalProps>
 
                   {/* Sticker Content Format: Only Item Name vs Include Price */}
                   <div className="flex items-center gap-1.5 flex-wrap">
-                    <Tag className="w-3.5 h-3.5 text-sky-400 shrink-0" />
-                    <span className="text-slate-400 font-semibold text-[11px]">Sticker Content:</span>
+                    <Tag className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                    <span className="text-slate-400 font-semibold text-[11px]">Price Labelling:</span>
                     <div className="flex items-center p-1 bg-slate-950 rounded-lg border border-slate-800">
                       <button
                         type="button"
@@ -704,11 +841,11 @@ export const PrintBarcodesUtilityModal: React.FC<PrintBarcodesUtilityModalProps>
                         onClick={() => setIncludePrice(true)}
                         className={`px-2.5 py-1 rounded text-xs font-bold transition cursor-pointer ${
                           includePrice
-                            ? 'bg-sky-600 text-white shadow-sm'
+                            ? 'bg-emerald-600 text-white shadow-sm'
                             : 'text-slate-400 hover:text-white'
                         }`}
                       >
-                        Name + Price
+                        Name + Price (KSh, 0 Decimals)
                       </button>
                     </div>
                   </div>
@@ -1016,7 +1153,7 @@ export const PrintBarcodesUtilityModal: React.FC<PrintBarcodesUtilityModalProps>
                                   </div>
                                   {includePrice && (
                                     <div className="text-[7px] font-black text-sky-700 leading-none">
-                                      KSh {Number(item.price || 0).toLocaleString()}
+                                      KSh {Math.round(Number((customLabelPrices[item.barcode] !== null && customLabelPrices[item.barcode] !== undefined ? customLabelPrices[item.barcode] : item.price) || 0)).toLocaleString()}
                                     </div>
                                   )}
                                   {barcodeUrl ? (
@@ -1164,7 +1301,11 @@ export const PrintBarcodesUtilityModal: React.FC<PrintBarcodesUtilityModalProps>
                           {/* Optional Selling Price */}
                           {includePrice && (
                             <div className="text-[11px] font-black text-sky-700 text-center font-mono my-0.5 leading-none">
-                              KSh {Number(activePreviewItem?.price || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                              KSh {Math.round(Number(
+                                (activePreviewItem && (customLabelPrices[activePreviewItem.barcode] !== null && customLabelPrices[activePreviewItem.barcode] !== undefined)
+                                  ? customLabelPrices[activePreviewItem.barcode]
+                                  : activePreviewItem?.price) || 0
+                              )).toLocaleString()}
                             </div>
                           )}
 
@@ -1344,7 +1485,7 @@ export const PrintBarcodesUtilityModal: React.FC<PrintBarcodesUtilityModalProps>
 
       {/* ITEMS SELECTION TABLE / LIST (Rendered on 1. Select Products Tab) */}
       {activeModalTab === 'items' && (
-        <div className="flex-1 overflow-y-auto p-3 sm:p-5 space-y-3 min-h-0">
+        <div className="flex-1 overflow-y-auto p-2 sm:p-4 space-y-2 min-h-0">
           {displayedItems.length === 0 ? (
             <div className="h-64 flex flex-col items-center justify-center text-center p-6 text-slate-400 border-2 border-dashed border-slate-800 rounded-2xl">
               <Barcode className="w-12 h-12 text-slate-600 mb-3" />
@@ -1393,8 +1534,8 @@ export const PrintBarcodesUtilityModal: React.FC<PrintBarcodesUtilityModalProps>
               </div>
             </div>
           ) : viewLayout === 'list' ? (
-            /* SPACIOUS LIST VIEW (Recommended: Maximum clarity & comfortable touch targets) */
-            <div className="space-y-2.5">
+            /* SPACIOUS HORIZONTAL LIST (Optimized for Mobile Phone & Touch Targets) */
+            <div className="space-y-2">
               {displayedItems.map((item) => {
                 const isSelected = !!selectedIds[item.barcode];
                 const count = labelCounts[item.barcode] ?? 1;
@@ -1407,87 +1548,112 @@ export const PrintBarcodesUtilityModal: React.FC<PrintBarcodesUtilityModalProps>
                       toggleItemSelection(item.barcode);
                       setPreviewItemId(item.barcode);
                     }}
-                    className={`p-3 sm:p-3.5 rounded-2xl border transition-all cursor-pointer flex flex-col sm:flex-row sm:items-center justify-between gap-3 select-none shadow-sm ${
+                    className={`p-2.5 sm:p-3.5 rounded-xl sm:rounded-2xl border transition-all cursor-pointer flex items-center justify-between gap-2.5 sm:gap-4 select-none shadow-sm ${
                       isSelected
-                        ? 'bg-sky-950/60 border-sky-500/90 shadow-md shadow-sky-950/60 ring-2 ring-sky-500/50'
+                        ? 'bg-sky-950/70 border-sky-400 shadow-md shadow-sky-950/60 ring-2 ring-sky-500/50'
                         : 'bg-slate-800/80 border-slate-700/70 hover:border-slate-600 hover:bg-slate-800'
                     }`}
                   >
-                    {/* Left: Checkbox + Product Details */}
-                    <div className="flex items-center gap-3 min-w-0 flex-1">
-                      {/* Checkbox Tap Zone */}
+                    {/* Left: Large Checkbox Tap Zone + Product Info */}
+                    <div className="flex items-center gap-2.5 sm:gap-3.5 min-w-0 flex-1">
+                      {/* Generous touch target for checkbox */}
                       <div
-                        className={`w-7 h-7 sm:w-8 sm:h-8 rounded-xl flex items-center justify-center shrink-0 border transition-all ${
+                        className={`w-8 h-8 sm:w-9 sm:h-9 rounded-xl flex items-center justify-center shrink-0 border transition-all ${
                           isSelected
-                            ? 'bg-sky-500 border-sky-400 text-slate-950 shadow-md'
+                            ? 'bg-sky-500 border-sky-400 text-slate-950 shadow-md ring-2 ring-sky-300/40'
                             : 'border-slate-600 bg-slate-900 text-transparent hover:border-slate-400'
                         }`}
                       >
-                        <Check className="w-4 h-4 sm:w-5 sm:h-5 stroke-[3]" />
+                        <Check className="w-5 h-5 stroke-[3]" />
                       </div>
 
-                      {/* Product Name, Barcode & Tags */}
+                      {/* Product Details */}
                       <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-sm sm:text-base font-bold text-slate-100 truncate">
+                        <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
+                          <span className="text-xs sm:text-base font-bold text-slate-100 truncate">
                             {item.name}
                           </span>
                           {isSelected && (
-                            <span className="bg-sky-500/20 text-sky-300 border border-sky-500/40 text-[10px] px-2 py-0.5 rounded-full font-bold shrink-0">
-                              Selected for Print ({count} copies)
+                            <span className="bg-sky-500/20 text-sky-300 border border-sky-500/40 text-[9px] sm:text-[10px] px-1.5 py-0.2 rounded-full font-bold shrink-0">
+                              {count} {count === 1 ? 'copy' : 'copies'}
                             </span>
                           )}
                           {isPreviewing && (
-                            <span className="bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[10px] px-2 py-0.5 rounded-full font-bold flex items-center gap-1 shrink-0">
-                              <Eye className="w-3 h-3" /> Previewing on Sticker
+                            <span className="hidden xs:inline-flex bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[9px] sm:text-[10px] px-1.5 py-0.2 rounded-full font-bold items-center gap-1 shrink-0">
+                              <Eye className="w-2.5 h-2.5" /> Previewing
                             </span>
                           )}
                         </div>
 
-                        <div className="flex items-center gap-2 text-xs text-slate-400 font-mono mt-1 flex-wrap">
-                          <span className="bg-slate-950 px-2.5 py-0.5 rounded-lg border border-slate-800 text-sky-300 font-bold">
+                        <div className="flex items-center gap-1.5 sm:gap-2 text-[11px] sm:text-xs text-slate-400 font-mono mt-0.5 flex-wrap">
+                          <span className="bg-slate-950 px-1.5 sm:px-2 py-0.5 rounded border border-slate-800 text-sky-300 font-bold shrink-0">
                             {item.barcode}
                           </span>
-                          <span className="bg-slate-800 px-2 py-0.5 rounded-lg text-slate-300 text-[11px] font-sans">
-                            {item.category}
-                          </span>
-                          {item.sku && item.sku !== item.barcode && (
-                            <span className="text-slate-400 truncate text-[11px]">SKU: {item.sku}</span>
+                          {includePrice ? (
+                            <div
+                              className="flex items-center gap-1 bg-slate-950 px-2 py-0.5 rounded-lg border border-emerald-500/40 shrink-0"
+                              onClick={(e) => e.stopPropagation()}
+                              title="Sticker price in Kenya Shillings (blank before adding figure, zero decimals)"
+                            >
+                              <span className="text-[10px] text-emerald-400 font-bold font-mono">KSh</span>
+                              <input
+                                type="number"
+                                min="0"
+                                step="1"
+                                placeholder="0"
+                                value={
+                                  customLabelPrices[item.barcode] === null
+                                    ? ''
+                                    : customLabelPrices[item.barcode] !== undefined
+                                    ? (customLabelPrices[item.barcode] === 0 ? '' : customLabelPrices[item.barcode])
+                                    : (item.price === 0 ? '' : Math.round(item.price))
+                                }
+                                onFocus={(e) => e.target.select()}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  if (val.trim() === '') {
+                                    setCustomLabelPrices((prev) => ({ ...prev, [item.barcode]: null }));
+                                  } else {
+                                    const parsed = parseInt(val, 10);
+                                    setCustomLabelPrices((prev) => ({
+                                      ...prev,
+                                      [item.barcode]: isNaN(parsed) ? null : Math.max(0, parsed),
+                                    }));
+                                  }
+                                }}
+                                className="w-16 bg-transparent text-emerald-300 font-mono font-bold text-xs focus:outline-none placeholder-slate-600"
+                              />
+                            </div>
+                          ) : (
+                            <span className="text-emerald-400 font-bold font-sans">
+                              KSh {Math.round(Number((customLabelPrices[item.barcode] !== null && customLabelPrices[item.barcode] !== undefined ? customLabelPrices[item.barcode] : item.price) || 0)).toLocaleString()}
+                            </span>
                           )}
-                          {item.lastScannedAt && (
-                            <span className="text-slate-400 text-[11px] flex items-center gap-1 font-sans">
-                              <Clock className="w-3 h-3 text-sky-400 shrink-0" />
-                              Scanned {new Date(item.lastScannedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          <span className="text-slate-400 text-[10px] sm:text-[11px] font-sans">
+                            Stock: <strong className={item.stockQuantity <= 5 ? 'text-rose-400' : 'text-slate-300'}>{item.stockQuantity}</strong>
+                          </span>
+                          {item.category && (
+                            <span className="hidden md:inline bg-slate-800/80 px-1.5 py-0.5 rounded text-slate-300 text-[10px] font-sans">
+                              {item.category}
                             </span>
                           )}
                         </div>
                       </div>
                     </div>
 
-                    {/* Right: Price & Stock + Label Copies Stepper + Preview Button */}
+                    {/* Right: Quantity Stepper & Preview Button */}
                     <div
-                      className="flex items-center justify-between sm:justify-end gap-3 shrink-0 pt-2 sm:pt-0 border-t sm:border-t-0 border-slate-700/60"
+                      className="flex items-center gap-1.5 sm:gap-2 shrink-0"
                       onClick={(e) => e.stopPropagation()}
                     >
-                      {/* Price & Stock info */}
-                      <div className="text-left sm:text-right pr-1">
-                        <div className="text-sm sm:text-base font-black text-emerald-400 font-mono">
-                          KSh {item.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                        </div>
-                        <div className="text-xs text-slate-400 font-mono">
-                          Stock: <strong className={item.stockQuantity <= 5 ? 'text-rose-400' : 'text-slate-300'}>{item.stockQuantity}</strong>
-                        </div>
-                      </div>
-
-                      {/* Copies Stepper */}
-                      <div className="flex items-center gap-1 bg-slate-900 border border-slate-700/80 rounded-xl p-1 shadow-sm">
+                      <div className="flex items-center bg-slate-900 border border-slate-700/80 rounded-xl p-0.5 shadow-sm">
                         <button
                           type="button"
                           onClick={() => {
                             if (!isSelected) toggleItemSelection(item.barcode);
                             updateLabelCount(item.barcode, -1);
                           }}
-                          className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-slate-800 text-slate-300 hover:text-white transition cursor-pointer"
+                          className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg flex items-center justify-center hover:bg-slate-800 text-slate-300 hover:text-white transition cursor-pointer"
                           title="Decrease copies"
                         >
                           <Minus className="w-3.5 h-3.5" />
@@ -1498,12 +1664,13 @@ export const PrintBarcodesUtilityModal: React.FC<PrintBarcodesUtilityModalProps>
                           max="500"
                           value={count}
                           onClick={(e) => e.stopPropagation()}
+                          onFocus={(e) => e.target.select()}
                           onChange={(e) => {
                             const val = Math.max(1, Math.min(500, parseInt(e.target.value, 10) || 1));
                             if (!isSelected) toggleItemSelection(item.barcode);
                             setLabelCounts((prev) => ({ ...prev, [item.barcode]: val }));
                           }}
-                          className="w-10 text-center bg-transparent text-xs font-mono font-bold text-sky-300 focus:outline-none"
+                          className="w-8 sm:w-10 text-center bg-transparent text-xs font-mono font-bold text-sky-300 focus:outline-none"
                           title="Label copies count"
                         />
                         <button
@@ -1512,30 +1679,140 @@ export const PrintBarcodesUtilityModal: React.FC<PrintBarcodesUtilityModalProps>
                             if (!isSelected) toggleItemSelection(item.barcode);
                             updateLabelCount(item.barcode, 1);
                           }}
-                          className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-slate-800 text-slate-300 hover:text-white transition cursor-pointer"
+                          className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg flex items-center justify-center hover:bg-slate-800 text-slate-300 hover:text-white transition cursor-pointer"
                           title="Increase copies"
                         >
                           <Plus className="w-3.5 h-3.5" />
                         </button>
                       </div>
 
-                      {/* Single Sticker Preview Button */}
                       <button
                         type="button"
                         onClick={() => {
                           setPreviewItemId(item.barcode);
                           setActiveModalTab('preview');
                         }}
-                        className={`px-3 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shrink-0 ${
-                          isPreviewing
-                            ? 'bg-sky-600 text-white shadow-sm ring-1 ring-sky-400'
-                            : 'bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-700'
-                        }`}
-                        title="Preview this item on sticker"
+                        className="p-1.5 sm:px-2.5 sm:py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-white border border-slate-700 text-xs font-semibold transition cursor-pointer"
+                        title="Preview single sticker"
                       >
                         <Eye className="w-3.5 h-3.5 text-sky-400" />
-                        <span className="hidden sm:inline">Preview</span>
+                        <span className="hidden md:inline ml-1">Preview</span>
                       </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : viewLayout === 'compact' ? (
+            /* COMPACT CHECKLIST ROWS (Ultra dense for fast multi-selection of dozens of items on mobile) */
+            <div className="divide-y divide-slate-800/80 bg-slate-900/60 rounded-xl border border-slate-800 overflow-hidden">
+              {displayedItems.map((item) => {
+                const isSelected = !!selectedIds[item.barcode];
+                const count = labelCounts[item.barcode] ?? 1;
+
+                return (
+                  <div
+                    key={item.barcode}
+                    onClick={() => {
+                      toggleItemSelection(item.barcode);
+                      setPreviewItemId(item.barcode);
+                    }}
+                    className={`px-2.5 py-2 flex items-center justify-between gap-2 cursor-pointer transition select-none ${
+                      isSelected
+                        ? 'bg-sky-950/70 border-l-4 border-l-sky-400'
+                        : 'hover:bg-slate-800/60 border-l-4 border-l-transparent'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                      <div
+                        className={`w-5 h-5 rounded-md flex items-center justify-center shrink-0 border transition-all ${
+                          isSelected
+                            ? 'bg-sky-500 border-sky-400 text-slate-950 font-bold'
+                            : 'border-slate-600 bg-slate-900 text-transparent'
+                        }`}
+                      >
+                        <Check className="w-3.5 h-3.5 stroke-[3]" />
+                      </div>
+
+                      <div className="min-w-0 flex-1 flex items-center gap-2">
+                        <span className="text-xs font-semibold text-slate-200 truncate">
+                          {item.name}
+                        </span>
+                        <span className="font-mono text-[10px] text-sky-400 font-bold bg-slate-950 px-1 py-0.2 rounded border border-slate-800 shrink-0">
+                          {item.barcode}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div
+                      className="flex items-center gap-2 shrink-0"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      {includePrice ? (
+                        <div
+                          className="flex items-center gap-1 bg-slate-950 px-1.5 py-0.5 rounded border border-emerald-500/40"
+                          title="Price in Kenya Shillings (blank before adding figure, zero decimals)"
+                        >
+                          <span className="text-[9px] text-emerald-400 font-bold font-mono">KSh</span>
+                          <input
+                            type="number"
+                            min="0"
+                            step="1"
+                            placeholder="0"
+                            value={
+                              customLabelPrices[item.barcode] === null
+                                ? ''
+                                : customLabelPrices[item.barcode] !== undefined
+                                ? (customLabelPrices[item.barcode] === 0 ? '' : customLabelPrices[item.barcode])
+                                : (item.price === 0 ? '' : Math.round(item.price))
+                            }
+                            onFocus={(e) => e.target.select()}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              if (val.trim() === '') {
+                                setCustomLabelPrices((prev) => ({ ...prev, [item.barcode]: null }));
+                              } else {
+                                const parsed = parseInt(val, 10);
+                                setCustomLabelPrices((prev) => ({
+                                  ...prev,
+                                  [item.barcode]: isNaN(parsed) ? null : Math.max(0, parsed),
+                                }));
+                              }
+                            }}
+                            className="w-14 bg-transparent text-emerald-300 font-mono font-bold text-xs focus:outline-none placeholder-slate-600"
+                          />
+                        </div>
+                      ) : (
+                        <span className="text-emerald-400 font-mono text-xs font-bold">
+                          KSh {Math.round(Number((customLabelPrices[item.barcode] !== null && customLabelPrices[item.barcode] !== undefined ? customLabelPrices[item.barcode] : item.price) || 0)).toLocaleString()}
+                        </span>
+                      )}
+
+                      <div className="flex items-center bg-slate-950 border border-slate-800 rounded-lg p-0.5">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (!isSelected) toggleItemSelection(item.barcode);
+                            updateLabelCount(item.barcode, -1);
+                          }}
+                          className="w-5 h-5 rounded flex items-center justify-center text-slate-400 hover:text-white"
+                        >
+                          <Minus className="w-3 h-3" />
+                        </button>
+                        <span className="w-6 text-center text-xs font-mono font-bold text-sky-300">
+                          {count}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (!isSelected) toggleItemSelection(item.barcode);
+                            updateLabelCount(item.barcode, 1);
+                          }}
+                          className="w-5 h-5 rounded flex items-center justify-center text-slate-400 hover:text-white"
+                        >
+                          <Plus className="w-3 h-3" />
+                        </button>
+                      </div>
                     </div>
                   </div>
                 );
@@ -1543,7 +1820,7 @@ export const PrintBarcodesUtilityModal: React.FC<PrintBarcodesUtilityModalProps>
             </div>
           ) : (
             /* CARD GRID VIEW */
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 sm:gap-3.5">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 sm:gap-3">
               {displayedItems.map((item) => {
                 const isSelected = !!selectedIds[item.barcode];
                 const count = labelCounts[item.barcode] ?? 1;
@@ -1556,14 +1833,14 @@ export const PrintBarcodesUtilityModal: React.FC<PrintBarcodesUtilityModalProps>
                       toggleItemSelection(item.barcode);
                       setPreviewItemId(item.barcode);
                     }}
-                    className={`p-3.5 sm:p-4 rounded-2xl border transition-all cursor-pointer flex flex-col justify-between select-none shadow-sm ${
+                    className={`p-3 sm:p-3.5 rounded-xl border transition-all cursor-pointer flex flex-col justify-between select-none shadow-sm ${
                       isSelected
-                        ? 'bg-sky-950/60 border-sky-500/90 shadow-md shadow-sky-950/60 ring-2 ring-sky-500/50'
+                        ? 'bg-sky-950/70 border-sky-400 shadow-md shadow-sky-950/60 ring-2 ring-sky-500/50'
                         : 'bg-slate-800/80 border-slate-700/70 hover:border-slate-600 hover:bg-slate-800'
                     }`}
                   >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="flex items-start gap-3 min-w-0">
+                    <div className="flex items-start justify-between gap-2.5">
+                      <div className="flex items-start gap-2.5 min-w-0">
                         <div
                           className={`w-7 h-7 rounded-xl flex items-center justify-center shrink-0 border mt-0.5 transition-all ${
                             isSelected
@@ -1575,93 +1852,100 @@ export const PrintBarcodesUtilityModal: React.FC<PrintBarcodesUtilityModalProps>
                         </div>
 
                         <div className="min-w-0">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="text-sm font-bold text-slate-100 truncate">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="text-xs sm:text-sm font-bold text-slate-100 truncate">
                               {item.name}
                             </span>
                             {isPreviewing && (
-                              <span className="bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[9px] px-2 py-0.5 rounded-full font-bold flex items-center gap-1 shrink-0">
-                                <Eye className="w-2.5 h-2.5" /> Previewing on Sticker
+                              <span className="bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[9px] px-1.5 py-0.2 rounded-full font-bold flex items-center gap-0.5 shrink-0">
+                                <Eye className="w-2.5 h-2.5" /> Previewing
                               </span>
                             )}
                           </div>
-                          <div className="flex items-center gap-2 text-xs text-slate-400 font-mono mt-1 flex-wrap">
-                            <span className="bg-slate-900 px-2 py-0.5 rounded-lg border border-slate-700/80 text-sky-300 font-bold">
+                          <div className="flex items-center gap-1.5 text-xs text-slate-400 font-mono mt-0.5 flex-wrap">
+                            <span className="bg-slate-950 px-1.5 py-0.5 rounded border border-slate-800 text-sky-300 font-bold">
                               {item.barcode}
                             </span>
-                            <span className="bg-slate-800 px-2 py-0.5 rounded-lg text-slate-300 text-[11px] font-sans">
+                            <span className="text-slate-300 text-[11px] font-sans">
                               {item.category}
                             </span>
-                            {item.sku && item.sku !== item.barcode && (
-                              <span className="text-slate-400 truncate">SKU: {item.sku}</span>
-                            )}
                           </div>
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-2 shrink-0">
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setPreviewItemId(item.barcode);
-                            setActiveModalTab('preview');
-                          }}
-                          className={`px-2.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shrink-0 ${
-                            isPreviewing
-                              ? 'bg-sky-600 text-white shadow-sm ring-1 ring-sky-400'
-                              : 'bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-700'
-                          }`}
-                          title="Preview this item on sticker"
-                        >
-                          <Eye className="w-3.5 h-3.5 text-sky-400" />
-                          <span>Preview</span>
-                        </button>
-
-                        <div className="text-right">
-                          <div className="text-sm font-black text-emerald-400 font-mono">
-                            KSh {item.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      <div className="text-right shrink-0">
+                        {includePrice ? (
+                          <div
+                            className="flex items-center gap-1 bg-slate-950 px-2 py-0.5 rounded-lg border border-emerald-500/40"
+                            onClick={(e) => e.stopPropagation()}
+                            title="Price in Kenya Shillings (blank before adding figure, zero decimals)"
+                          >
+                            <span className="text-[10px] text-emerald-400 font-bold font-mono">KSh</span>
+                            <input
+                              type="number"
+                              min="0"
+                              step="1"
+                              placeholder="0"
+                              value={
+                                customLabelPrices[item.barcode] === null
+                                  ? ''
+                                  : customLabelPrices[item.barcode] !== undefined
+                                  ? (customLabelPrices[item.barcode] === 0 ? '' : customLabelPrices[item.barcode])
+                                  : (item.price === 0 ? '' : Math.round(item.price))
+                              }
+                              onFocus={(e) => e.target.select()}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                if (val.trim() === '') {
+                                  setCustomLabelPrices((prev) => ({ ...prev, [item.barcode]: null }));
+                                } else {
+                                  const parsed = parseInt(val, 10);
+                                  setCustomLabelPrices((prev) => ({
+                                    ...prev,
+                                    [item.barcode]: isNaN(parsed) ? null : Math.max(0, parsed),
+                                  }));
+                                }
+                              }}
+                              className="w-16 bg-transparent text-emerald-300 font-mono font-bold text-xs focus:outline-none placeholder-slate-600 text-right"
+                            />
                           </div>
-                          <div className="text-xs text-slate-400 font-mono mt-0.5">
-                            Stock: <strong className={item.stockQuantity <= 5 ? 'text-rose-400' : 'text-slate-300'}>{item.stockQuantity}</strong>
+                        ) : (
+                          <div className="text-xs sm:text-sm font-black text-emerald-400 font-mono">
+                            KSh {Math.round(Number((customLabelPrices[item.barcode] !== null && customLabelPrices[item.barcode] !== undefined ? customLabelPrices[item.barcode] : item.price) || 0)).toLocaleString()}
                           </div>
+                        )}
+                        <div className="text-[10px] text-slate-400 font-mono mt-0.5">
+                          Stock: <strong className={item.stockQuantity <= 5 ? 'text-rose-400' : 'text-slate-300'}>{item.stockQuantity}</strong>
                         </div>
                       </div>
                     </div>
 
-                    {/* Meta info & Quantity control */}
                     <div
-                      className="mt-3.5 pt-2.5 border-t border-slate-700/60 flex items-center justify-between text-xs"
+                      className="mt-2.5 pt-2 border-t border-slate-700/60 flex items-center justify-between text-xs"
                       onClick={(e) => e.stopPropagation()}
                     >
-                      <div className="flex items-center gap-2 text-xs text-slate-400 truncate">
-                        {item.lastScannedAt ? (
-                          <span className="flex items-center gap-1.5 text-slate-400 truncate">
-                            <Clock className="w-3.5 h-3.5 text-sky-400 shrink-0" />
-                            <span>
-                              Scanned {new Date(item.lastScannedAt).toLocaleTimeString([], {
-                                hour: '2-digit',
-                                minute: '2-digit',
-                              })}
-                            </span>
-                          </span>
-                        ) : (
-                          <span className="text-slate-400">Inventory Product</span>
-                        )}
-                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPreviewItemId(item.barcode);
+                          setActiveModalTab('preview');
+                        }}
+                        className="text-[11px] text-sky-400 hover:text-sky-300 font-bold flex items-center gap-1"
+                      >
+                        <Eye className="w-3 h-3" />
+                        <span>Preview Sticker</span>
+                      </button>
 
-                      {/* Label Count Stepper */}
-                      <div className="flex items-center gap-1.5 shrink-0 bg-slate-900/90 border border-slate-700/80 rounded-xl p-1">
+                      <div className="flex items-center gap-1 shrink-0 bg-slate-900 border border-slate-700/80 rounded-lg p-0.5">
                         <button
                           type="button"
                           onClick={() => {
                             if (!isSelected) toggleItemSelection(item.barcode);
                             updateLabelCount(item.barcode, -1);
                           }}
-                          className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-slate-800 text-slate-300 hover:text-white transition cursor-pointer"
-                          title="Decrease label copies"
+                          className="w-6 h-6 rounded flex items-center justify-center hover:bg-slate-800 text-slate-300 hover:text-white"
                         >
-                          <Minus className="w-3.5 h-3.5" />
+                          <Minus className="w-3 h-3" />
                         </button>
                         <input
                           type="number"
@@ -1669,12 +1953,13 @@ export const PrintBarcodesUtilityModal: React.FC<PrintBarcodesUtilityModalProps>
                           max="500"
                           value={count}
                           onClick={(e) => e.stopPropagation()}
+                          onFocus={(e) => e.target.select()}
                           onChange={(e) => {
                             const val = Math.max(1, Math.min(500, parseInt(e.target.value, 10) || 1));
                             if (!isSelected) toggleItemSelection(item.barcode);
                             setLabelCounts((prev) => ({ ...prev, [item.barcode]: val }));
                           }}
-                          className="w-12 text-center bg-transparent text-xs font-bold text-white focus:outline-none"
+                          className="w-8 text-center bg-transparent text-xs font-bold text-white focus:outline-none"
                         />
                         <button
                           type="button"
@@ -1682,12 +1967,10 @@ export const PrintBarcodesUtilityModal: React.FC<PrintBarcodesUtilityModalProps>
                             if (!isSelected) toggleItemSelection(item.barcode);
                             updateLabelCount(item.barcode, 1);
                           }}
-                          className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-slate-800 text-slate-300 hover:text-white transition cursor-pointer"
-                          title="Increase label copies"
+                          className="w-6 h-6 rounded flex items-center justify-center hover:bg-slate-800 text-slate-300 hover:text-white"
                         >
-                          <Plus className="w-3.5 h-3.5" />
+                          <Plus className="w-3 h-3" />
                         </button>
-                        <span className="text-[11px] text-slate-400 pr-1.5 font-mono">labels</span>
                       </div>
                     </div>
                   </div>
@@ -1695,31 +1978,21 @@ export const PrintBarcodesUtilityModal: React.FC<PrintBarcodesUtilityModalProps>
               })}
             </div>
           )}
-
-          {/* Sticky summary bar on items tab */}
-          {selectedItemsList.length > 0 && (
-            <div className="sticky bottom-0 bg-slate-900/95 backdrop-blur-md border border-sky-500/50 p-3 sm:p-3.5 rounded-2xl shadow-2xl flex flex-col sm:flex-row items-center justify-between gap-3 mt-4">
-              <div className="text-xs text-slate-200">
-                <strong className="text-sky-400 font-mono text-sm">{selectedItemsList.length}</strong> products selected (
-                <strong className="text-emerald-400 font-mono text-sm">{totalLabelsCount}</strong> stickers total, requires{' '}
-                <strong className="text-amber-300 font-mono">{totalSheetsNeeded}</strong> {activePreset.category === 'thermal_roll' ? 'cuts' : 'sheets'})
-              </div>
-              <button
-                type="button"
-                onClick={() => setActiveModalTab('preview')}
-                className="w-full sm:w-auto px-4 py-2.5 bg-gradient-to-r from-sky-600 to-blue-600 hover:from-sky-500 hover:to-blue-500 text-white text-xs font-black rounded-xl transition flex items-center justify-center gap-1.5 shadow-md shadow-sky-600/30 cursor-pointer"
-              >
-                <Eye className="w-4 h-4" />
-                <span>Proceed to Label Sheet Preview ➔</span>
-              </button>
-            </div>
-          )}
         </div>
       )}
 
-      {/* MODAL FOOTER & ACTION BAR */}
-      <div className="p-4 border-t border-slate-800 bg-slate-900/95 flex flex-wrap items-center justify-between gap-3 shrink-0">
-        <div className="flex items-center gap-3">
+      {/* MODAL FOOTER & ACTION BAR (Streamlined & Mobile-Responsive) */}
+      <div className="px-3 py-2.5 sm:p-4 border-t border-slate-800 bg-slate-900/95 flex items-center justify-between gap-2 sm:gap-3 shrink-0">
+        {/* Mobile Summary: Clean & Compact */}
+        <div className="flex sm:hidden flex-col min-w-0">
+          <span className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">Total to Print</span>
+          <span className="text-xs font-bold text-white font-mono truncate">
+            <strong className="text-sky-400">{selectedItemsList.length}</strong> items ({totalLabelsCount} pcs)
+          </span>
+        </div>
+
+        {/* Desktop Summary: Detailed Breakdown */}
+        <div className="hidden sm:flex items-center gap-3">
           <div className="flex flex-col">
             <span className="text-xs text-slate-400">
               Selected for Batch Printing:
@@ -1736,16 +2009,17 @@ export const PrintBarcodesUtilityModal: React.FC<PrintBarcodesUtilityModalProps>
               </span>
               <span className="text-slate-500">•</span>
               <span className="text-[11px] text-emerald-300 bg-emerald-950/80 border border-emerald-800/80 px-2 py-0.5 rounded-full font-sans font-semibold">
-                {includePrice ? 'Name + Price' : 'Only Item Name'}
+                {includePrice ? 'Name + Price (KSh)' : 'Only Item Name'}
               </span>
             </span>
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        {/* Action Buttons */}
+        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
           <button
             onClick={onClose}
-            className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold transition cursor-pointer"
+            className="px-3 sm:px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold transition cursor-pointer"
           >
             Close
           </button>
@@ -1755,9 +2029,9 @@ export const PrintBarcodesUtilityModal: React.FC<PrintBarcodesUtilityModalProps>
               type="button"
               onClick={() => setActiveModalTab('preview')}
               disabled={selectedItemsList.length === 0}
-              className={`px-5 py-2.5 rounded-xl text-xs font-black flex items-center gap-2 shadow-lg transition-all ${
+              className={`px-3.5 sm:px-5 py-2 sm:py-2.5 rounded-xl text-xs font-black flex items-center gap-1.5 sm:gap-2 shadow-lg transition-all ${
                 selectedItemsList.length > 0
-                  ? 'bg-gradient-to-r from-sky-600 via-blue-600 to-indigo-600 hover:from-sky-500 hover:to-indigo-500 text-white shadow-sky-600/30 cursor-pointer'
+                  ? 'bg-gradient-to-r from-sky-600 via-blue-600 to-indigo-600 hover:from-sky-500 hover:to-indigo-500 text-white shadow-sky-600/30 cursor-pointer active:scale-95'
                   : 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700'
               }`}
             >
@@ -1769,24 +2043,25 @@ export const PrintBarcodesUtilityModal: React.FC<PrintBarcodesUtilityModalProps>
               <button
                 type="button"
                 onClick={() => setActiveModalTab('items')}
-                className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+                className="px-2.5 sm:px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
               >
                 <ChevronLeft className="w-4 h-4" />
-                <span>Back to Products</span>
+                <span className="hidden xs:inline">Back to Products</span>
+                <span className="xs:hidden">Back</span>
               </button>
 
               <button
                 id="btn-confirm-batch-print-barcodes"
                 onClick={handleExecuteBatchPrint}
                 disabled={selectedItemsList.length === 0}
-                className={`px-5 py-2.5 rounded-xl text-xs font-extrabold flex items-center gap-2 shadow-lg transition-all ${
+                className={`px-3.5 sm:px-5 py-2 sm:py-2.5 rounded-xl text-xs font-extrabold flex items-center gap-1.5 sm:gap-2 shadow-lg transition-all ${
                   selectedItemsList.length > 0
                     ? 'bg-gradient-to-r from-sky-600 via-blue-600 to-indigo-600 hover:from-sky-500 hover:to-indigo-500 text-white shadow-sky-600/30 active:scale-95 cursor-pointer'
                     : 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700'
                 }`}
               >
                 <Printer className="w-4 h-4" />
-                <span>Print Barcode Labels ({totalLabelsCount})</span>
+                <span>Print Barcodes ({totalLabelsCount})</span>
               </button>
             </>
           )}

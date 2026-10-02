@@ -49,6 +49,7 @@ import { computeProductsPerformance, ProductPerformanceInfo } from '../../utils/
 import { hasWorkerPermission } from '../../utils/permissions';
 import { isContactPickerSupported, pickFromDevicePhonebook, parseContactFile } from '../../utils/phoneContacts';
 import { useNetworkStatus } from '../../utils/offlineSync';
+import { safeGetJSON, safeSetJSON } from '../../utils/safeStorage';
 
 interface POSViewProps {
   products: Product[];
@@ -85,13 +86,41 @@ export const POSView: React.FC<POSViewProps> = ({
   const { isOnline } = useNetworkStatus();
 
   // Search & Filter State
-  const [searchTerm, setSearchTerm] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState<string>('All');
-  const [viewMode, setViewMode] = useState<'list' | 'grid'>('list');
-  const [performanceFilter, setPerformanceFilter] = useState<'All' | 'high_sales_high_profit' | 'low_sales' | 'high_sales_low_profit' | 'low_sales_high_profit'>('All');
+  const [searchTerm, setSearchTerm] = useState(() =>
+    safeGetJSON<string>('retail_pos_pos_search', '', (val) => typeof val === 'string')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_pos_search', searchTerm);
+  }, [searchTerm]);
+
+  const [selectedCategory, setSelectedCategory] = useState<string>(() =>
+    safeGetJSON<string>('retail_pos_pos_category', 'All', (val) => typeof val === 'string')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_pos_category', selectedCategory);
+  }, [selectedCategory]);
+
+  const [viewMode, setViewMode] = useState<'list' | 'grid'>(() =>
+    safeGetJSON<'list' | 'grid'>('retail_pos_pos_view_mode', 'list', (val) => val === 'list' || val === 'grid')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_pos_view_mode', viewMode);
+  }, [viewMode]);
+
+  const [performanceFilter, setPerformanceFilter] = useState<'All' | 'high_sales_high_profit' | 'low_sales' | 'high_sales_low_profit' | 'low_sales_high_profit'>(() =>
+    safeGetJSON('retail_pos_pos_perf_filter', 'All')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_pos_perf_filter', performanceFilter);
+  }, [performanceFilter]);
 
   // Mobile responsive view mode ('catalog' or 'cart') for effortless mobile POS operation
-  const [mobileTab, setMobileTab] = useState<'catalog' | 'cart'>('catalog');
+  const [mobileTab, setMobileTab] = useState<'catalog' | 'cart'>(() =>
+    safeGetJSON<'catalog' | 'cart'>('retail_pos_pos_mobile_tab', 'catalog', (val) => val === 'catalog' || val === 'cart')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_pos_mobile_tab', mobileTab);
+  }, [mobileTab]);
 
   // Sales Velocity and Margin Performance Map
   const performanceMap = React.useMemo(() => {
@@ -115,12 +144,48 @@ export const POSView: React.FC<POSViewProps> = ({
     return { highSalesHighProfit, lowSales, highVolume, highMargin };
   }, [performanceMap]);
 
-  // Cart State
-  const [cart, setCart] = useState<CartItem[]>([]);
-  const [selectedCustomer, setSelectedCustomer] = useState<Customer>(customers[0] || { id: 'cust-1', name: 'Walk-in Customer', phone: 'N/A', totalPurchases: 0, currentBalanceDue: 0 });
-  const [discountAmount, setDiscountAmount] = useState<number>(0);
-  const [discountMode, setDiscountMode] = useState<'fixed' | 'percentage'>('fixed');
-  const [discountInputVal, setDiscountInputVal] = useState<string>('');
+  // Cart State - Persisted to LocalStorage so active order is never lost on refresh
+  const [cart, setCart] = useState<CartItem[]>(() =>
+    safeGetJSON<CartItem[]>('retail_pos_active_cart', [], (val) => Array.isArray(val))
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_active_cart', cart);
+  }, [cart]);
+
+  const [selectedCustomer, setSelectedCustomer] = useState<Customer>(() => {
+    const defaultCust = customers[0] || { id: 'cust-1', name: 'Walk-in Customer', phone: 'N/A', totalPurchases: 0, currentBalanceDue: 0 };
+    const saved = safeGetJSON<Customer | null>('retail_pos_active_pos_customer', null, (val) => Boolean(val && val.id));
+    if (saved) {
+      const fresh = customers.find((c) => c.id === saved.id);
+      return fresh || saved;
+    }
+    return defaultCust;
+  });
+  useEffect(() => {
+    safeSetJSON('retail_pos_active_pos_customer', selectedCustomer);
+  }, [selectedCustomer]);
+
+  const [discountAmount, setDiscountAmount] = useState<number>(() =>
+    safeGetJSON<number>('retail_pos_pos_discount_amount', 0, (val) => typeof val === 'number')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_pos_discount_amount', discountAmount);
+  }, [discountAmount]);
+
+  const [discountMode, setDiscountMode] = useState<'fixed' | 'percentage'>(() =>
+    safeGetJSON<'fixed' | 'percentage'>('retail_pos_pos_discount_mode', 'fixed', (val) => val === 'fixed' || val === 'percentage')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_pos_discount_mode', discountMode);
+  }, [discountMode]);
+
+  const [discountInputVal, setDiscountInputVal] = useState<string>(() =>
+    safeGetJSON<string>('retail_pos_pos_discount_input', '', (val) => typeof val === 'string')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_pos_discount_input', discountInputVal);
+  }, [discountInputVal]);
+
   const [taxRate, setTaxRate] = useState<number>(0); // e.g. 0% by default or configurable
 
   // Item-Level Manual Discount State

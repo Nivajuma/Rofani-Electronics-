@@ -31,6 +31,7 @@ import {
   Laptop
 } from 'lucide-react';
 import { BarcodeScanLog, Product, User } from '../../types';
+import { printBarcodeLabels } from '../../utils/barcode';
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
 
 export interface BarcodeScanHistoryProps {
@@ -1311,6 +1312,21 @@ export const BarcodeScanHistoryContent: React.FC<BarcodeScanHistoryProps> = ({
                               </button>
                             )}
                             <button
+                              onClick={() => {
+                                printBarcodeLabels(
+                                  log.productName,
+                                  log.sellingPrice || 0,
+                                  log.barcode,
+                                  12,
+                                  true
+                                );
+                              }}
+                              className="p-1 hover:bg-slate-800 text-slate-400 hover:text-sky-400 rounded-lg transition"
+                              title="Print 12 Barcode Labels with Kenya Shillings price for this scanned product"
+                            >
+                              <Printer className="w-3.5 h-3.5" />
+                            </button>
+                            <button
                               onClick={() => setSelectedLogDetail(log)}
                               className="p-1 hover:bg-slate-800 text-slate-400 hover:text-slate-200 rounded-lg transition"
                               title="View full audit log details"
@@ -1493,6 +1509,22 @@ export const BarcodeScanHistoryContent: React.FC<BarcodeScanHistoryProps> = ({
                   <span>Edit Product in Inventory</span>
                 </button>
               )}
+              <button
+                onClick={() => {
+                  printBarcodeLabels(
+                    selectedLogDetail.productName,
+                    selectedLogDetail.sellingPrice || 0,
+                    selectedLogDetail.barcode,
+                    12,
+                    true
+                  );
+                }}
+                className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl transition flex items-center gap-1.5 shadow cursor-pointer"
+                title="Print 12 barcode stickers with Kenya Shilling price label"
+              >
+                <Printer className="w-3.5 h-3.5" />
+                <span>Print Barcodes (12)</span>
+              </button>
               <button
                 onClick={() => setSelectedLogDetail(null)}
                 className="px-4 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-xl transition"

@@ -2,21 +2,60 @@
  * Safe LocalStorage Helpers with Quota Guard & Corruption Recovery
  * Backed by high-capacity IndexedDB for heavy image data
  */
+import React, { useState, useEffect } from 'react';
 import { saveAllProductImagesToIndexedDB } from './imageStorage';
 
-export function safeGetJSON<T>(key: string, defaultValue: T): T {
+/**
+ * Safely retrieve and parse a JSON value from localStorage with fallback and optional validation.
+ */
+export function safeGetJSON<T>(key: string, defaultValue: T, validator?: (val: any) => boolean): T {
+  if (typeof window === 'undefined' || !window.localStorage) {
+    return defaultValue;
+  }
+
   try {
     const raw = localStorage.getItem(key);
-    if (!raw) return defaultValue;
+    if (raw === null || raw === undefined || raw.trim() === '') {
+      return defaultValue;
+    }
+
     const parsed = JSON.parse(raw);
-    return parsed !== null && parsed !== undefined ? parsed : defaultValue;
+    if (parsed === null || parsed === undefined) {
+      return defaultValue;
+    }
+
+    if (validator && typeof validator === 'function') {
+      try {
+        if (!validator(parsed)) {
+          console.warn(`Validation failed for localStorage key "${key}", falling back to initial state.`);
+          return defaultValue;
+        }
+      } catch (valErr) {
+        console.warn(`Validator threw error for key "${key}":`, valErr);
+        return defaultValue;
+      }
+    }
+
+    return parsed as T;
   } catch (err) {
-    console.warn(`Error parsing localStorage key "${key}", falling back to default:`, err);
+    console.warn(`Error parsing localStorage key "${key}", falling back to initial state:`, err);
     return defaultValue;
   }
 }
 
+/**
+ * Safely store a value in localStorage as JSON with QuotaExceeded guard.
+ */
 export function safeSetJSON(key: string, value: any): boolean {
+  if (typeof window === 'undefined' || !window.localStorage) {
+    return false;
+  }
+
+  // If value is undefined, remove from storage
+  if (value === undefined) {
+    return safeRemove(key);
+  }
+
   // If saving products, proactively ensure all images are safely recorded in IndexedDB
   if (key === 'retail_pos_products' && Array.isArray(value)) {
     try {
@@ -59,4 +98,38 @@ export function safeSetJSON(key: string, value: any): boolean {
     }
     return false;
   }
+}
+
+/**
+ * Safely remove a key from localStorage
+ */
+export function safeRemove(key: string): boolean {
+  if (typeof window === 'undefined' || !window.localStorage) {
+    return false;
+  }
+  try {
+    localStorage.removeItem(key);
+    return true;
+  } catch (err) {
+    console.warn(`Error removing localStorage key "${key}":`, err);
+    return false;
+  }
+}
+
+/**
+ * Custom React hook to automatically synchronize active state with localStorage.
+ * Restores saved state on load/reopen with safety validation and fallback.
+ */
+export function usePersistedState<T>(
+  key: string,
+  defaultValue: T,
+  validator?: (val: any) => boolean
+): [T, React.Dispatch<React.SetStateAction<T>>] {
+  const [state, setState] = useState<T>(() => safeGetJSON<T>(key, defaultValue, validator));
+
+  useEffect(() => {
+    safeSetJSON(key, state);
+  }, [key, state]);
+
+  return [state, setState];
 }

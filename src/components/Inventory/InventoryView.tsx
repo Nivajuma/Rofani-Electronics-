@@ -115,11 +115,40 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   storeName = 'Main Store',
   onOpenAiAssistantWithPrompt,
 }) => {
-  const [searchTerm, setSearchTerm] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState('All');
-  const [selectedSubcategory, setSelectedSubcategory] = useState('All');
-  const [showLowStockOnly, setShowLowStockOnly] = useState(initialShowLowStockOnly);
-  const [performanceFilter, setPerformanceFilter] = useState<'All' | 'high_sales_high_profit' | 'low_sales' | 'high_sales_low_profit' | 'low_sales_high_profit' | 'unranked_no_sales'>('All');
+  const [searchTerm, setSearchTerm] = useState(() =>
+    safeGetJSON<string>('retail_pos_inv_search', '', (val) => typeof val === 'string')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_inv_search', searchTerm);
+  }, [searchTerm]);
+
+  const [selectedCategory, setSelectedCategory] = useState(() =>
+    safeGetJSON<string>('retail_pos_inv_category', 'All', (val) => typeof val === 'string')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_inv_category', selectedCategory);
+  }, [selectedCategory]);
+
+  const [selectedSubcategory, setSelectedSubcategory] = useState(() =>
+    safeGetJSON<string>('retail_pos_inv_subcategory', 'All', (val) => typeof val === 'string')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_inv_subcategory', selectedSubcategory);
+  }, [selectedSubcategory]);
+
+  const [showLowStockOnly, setShowLowStockOnly] = useState(() =>
+    safeGetJSON<boolean>('retail_pos_inv_low_stock', initialShowLowStockOnly, (val) => typeof val === 'boolean')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_inv_low_stock', showLowStockOnly);
+  }, [showLowStockOnly]);
+
+  const [performanceFilter, setPerformanceFilter] = useState<'All' | 'high_sales_high_profit' | 'low_sales' | 'high_sales_low_profit' | 'low_sales_high_profit' | 'unranked_no_sales'>(() =>
+    safeGetJSON('retail_pos_inv_perf_filter', 'All')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_inv_perf_filter', performanceFilter);
+  }, [performanceFilter]);
 
   // Sales Velocity & Profit Performance Analytics
   const performanceMap = React.useMemo(() => {
@@ -161,7 +190,17 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   }, [initialShowLowStockOnly]);
 
   // View Mode: 'standard' (table) vs 'excel' (grid) vs 'grouped' (hierarchy) vs 'scan_history' (barcode scan log)
-  const [inventoryViewMode, setInventoryViewMode] = useState<'standard' | 'excel' | 'grouped' | 'scan_history'>('standard');
+  const [inventoryViewMode, setInventoryViewMode] = useState<'standard' | 'excel' | 'grouped' | 'scan_history'>(() =>
+    safeGetJSON<'standard' | 'excel' | 'grouped' | 'scan_history'>(
+      'retail_pos_inventory_view_mode',
+      'standard',
+      (val) => ['standard', 'excel', 'grouped', 'scan_history'].includes(val)
+    )
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_inventory_view_mode', inventoryViewMode);
+  }, [inventoryViewMode]);
+
   const [showScanHistoryModal, setShowScanHistoryModal] = useState<boolean>(false);
 
   // Custom Category & Subcategory Creation in Modal
@@ -186,11 +225,27 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   }, [suppliers, selectedScanSupplierId]);
 
   // Grouped View Collapsed Accordions State
-  const [collapsedCategories, setCollapsedCategories] = useState<Record<string, boolean>>({});
+  const [collapsedCategories, setCollapsedCategories] = useState<Record<string, boolean>>(() =>
+    safeGetJSON<Record<string, boolean>>('retail_pos_inv_collapsed_cats', {}, (val) => Boolean(val && typeof val === 'object'))
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_inv_collapsed_cats', collapsedCategories);
+  }, [collapsedCategories]);
 
   // Pagination & View State for 300+ items
-  const [itemsPerPage, setItemsPerPage] = useState<number>(50);
-  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [itemsPerPage, setItemsPerPage] = useState<number>(() =>
+    safeGetJSON<number>('retail_pos_inv_items_per_page', 50, (val) => typeof val === 'number' && val > 0)
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_inv_items_per_page', itemsPerPage);
+  }, [itemsPerPage]);
+
+  const [currentPage, setCurrentPage] = useState<number>(() =>
+    safeGetJSON<number>('retail_pos_inv_current_page', 1, (val) => typeof val === 'number' && val > 0)
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_inv_current_page', currentPage);
+  }, [currentPage]);
   const [showSheetImportModal, setShowSheetImportModal] = useState<boolean>(false);
   const [showImageStudioModal, setShowImageStudioModal] = useState<boolean>(false);
 

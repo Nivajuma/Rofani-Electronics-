@@ -125,23 +125,89 @@ export const CustomersSuppliersView: React.FC<CustomersSuppliersViewProps> = ({
   }, [sortBy]);
 
   // Modal States
-  const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
-  const [isCustomerEditOpen, setIsCustomerEditOpen] = useState(false);
+  const [editingCustomer, setEditingCustomer] = useState<Customer | null>(() =>
+    safeGetJSON<Customer | null>('retail_pos_contacts_edit_cust', null, (val) => Boolean(val && val.id))
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_contacts_edit_cust', editingCustomer);
+  }, [editingCustomer]);
 
-  const [payingCustomer, setPayingCustomer] = useState<Customer | null>(null);
-  const [isCustomerPayOpen, setIsCustomerPayOpen] = useState(false);
+  const [isCustomerEditOpen, setIsCustomerEditOpen] = useState<boolean>(() =>
+    safeGetJSON<boolean>('retail_pos_contacts_edit_cust_open', false, (val) => typeof val === 'boolean')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_contacts_edit_cust_open', isCustomerEditOpen);
+  }, [isCustomerEditOpen]);
 
-  const [viewingCustomer, setViewingCustomer] = useState<Customer | null>(null);
-  const [isCustomerDetailsOpen, setIsCustomerDetailsOpen] = useState(false);
+  const [payingCustomer, setPayingCustomer] = useState<Customer | null>(() =>
+    safeGetJSON<Customer | null>('retail_pos_contacts_pay_cust', null, (val) => Boolean(val && val.id))
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_contacts_pay_cust', payingCustomer);
+  }, [payingCustomer]);
 
-  const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null);
-  const [isSupplierEditOpen, setIsSupplierEditOpen] = useState(false);
+  const [isCustomerPayOpen, setIsCustomerPayOpen] = useState<boolean>(() =>
+    safeGetJSON<boolean>('retail_pos_contacts_pay_cust_open', false, (val) => typeof val === 'boolean')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_contacts_pay_cust_open', isCustomerPayOpen);
+  }, [isCustomerPayOpen]);
 
-  const [payingSupplier, setPayingSupplier] = useState<Supplier | null>(null);
-  const [isSupplierPayOpen, setIsSupplierPayOpen] = useState(false);
+  const [viewingCustomer, setViewingCustomer] = useState<Customer | null>(() =>
+    safeGetJSON<Customer | null>('retail_pos_contacts_view_cust', null, (val) => Boolean(val && val.id))
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_contacts_view_cust', viewingCustomer);
+  }, [viewingCustomer]);
 
-  const [viewingSupplier, setViewingSupplier] = useState<Supplier | null>(null);
-  const [isSupplierDetailsOpen, setIsSupplierDetailsOpen] = useState(false);
+  const [isCustomerDetailsOpen, setIsCustomerDetailsOpen] = useState<boolean>(() =>
+    safeGetJSON<boolean>('retail_pos_contacts_view_cust_open', false, (val) => typeof val === 'boolean')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_contacts_view_cust_open', isCustomerDetailsOpen);
+  }, [isCustomerDetailsOpen]);
+
+  const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(() =>
+    safeGetJSON<Supplier | null>('retail_pos_contacts_edit_supp', null, (val) => Boolean(val && val.id))
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_contacts_edit_supp', editingSupplier);
+  }, [editingSupplier]);
+
+  const [isSupplierEditOpen, setIsSupplierEditOpen] = useState<boolean>(() =>
+    safeGetJSON<boolean>('retail_pos_contacts_edit_supp_open', false, (val) => typeof val === 'boolean')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_contacts_edit_supp_open', isSupplierEditOpen);
+  }, [isSupplierEditOpen]);
+
+  const [payingSupplier, setPayingSupplier] = useState<Supplier | null>(() =>
+    safeGetJSON<Supplier | null>('retail_pos_contacts_pay_supp', null, (val) => Boolean(val && val.id))
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_contacts_pay_supp', payingSupplier);
+  }, [payingSupplier]);
+
+  const [isSupplierPayOpen, setIsSupplierPayOpen] = useState<boolean>(() =>
+    safeGetJSON<boolean>('retail_pos_contacts_pay_supp_open', false, (val) => typeof val === 'boolean')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_contacts_pay_supp_open', isSupplierPayOpen);
+  }, [isSupplierPayOpen]);
+
+  const [viewingSupplier, setViewingSupplier] = useState<Supplier | null>(() =>
+    safeGetJSON<Supplier | null>('retail_pos_contacts_view_supp', null, (val) => Boolean(val && val.id))
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_contacts_view_supp', viewingSupplier);
+  }, [viewingSupplier]);
+
+  const [isSupplierDetailsOpen, setIsSupplierDetailsOpen] = useState<boolean>(() =>
+    safeGetJSON<boolean>('retail_pos_contacts_view_supp_open', false, (val) => typeof val === 'boolean')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_contacts_view_supp_open', isSupplierDetailsOpen);
+  }, [isSupplierDetailsOpen]);
 
   const [isImportExportOpen, setIsImportExportOpen] = useState(false);
   const [isPhonebookModalOpen, setIsPhonebookModalOpen] = useState(false);

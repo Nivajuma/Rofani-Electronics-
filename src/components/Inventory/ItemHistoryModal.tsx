@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   X,
   History,
@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { Product, RestockRecord, Transaction, Supplier, User } from '../../types';
 import { calculateProfitMargin } from '../../utils/margin';
+import { safeGetJSON, safeSetJSON } from '../../utils/safeStorage';
 
 interface ItemHistoryModalProps {
   isOpen: boolean;
@@ -45,15 +46,55 @@ export const ItemHistoryModal: React.FC<ItemHistoryModalProps> = ({
   currentUser,
   onAddRestock,
 }) => {
-  const [activeTab, setActiveTab] = useState<'restock' | 'sales'>('restock');
-  const [showAddRestockForm, setShowAddRestockForm] = useState(false);
+  const [activeTab, setActiveTab] = useState<'restock' | 'sales'>(() =>
+    safeGetJSON<'restock' | 'sales'>('retail_pos_item_hist_tab', 'restock', (val) => val === 'restock' || val === 'sales')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_item_hist_tab', activeTab);
+  }, [activeTab]);
+
+  const [showAddRestockForm, setShowAddRestockForm] = useState<boolean>(() =>
+    safeGetJSON<boolean>('retail_pos_item_hist_show_form', false, (val) => typeof val === 'boolean')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_item_hist_show_form', showAddRestockForm);
+  }, [showAddRestockForm]);
 
   // Form state for adding restock
-  const [quantityAdded, setQuantityAdded] = useState<string>('');
-  const [unitCost, setUnitCost] = useState<string>('');
-  const [supplierName, setSupplierName] = useState<string>('');
-  const [batchNo, setBatchNo] = useState<string>('');
-  const [notes, setNotes] = useState<string>('');
+  const [quantityAdded, setQuantityAdded] = useState<string>(() =>
+    safeGetJSON<string>('retail_pos_item_hist_qty', '', (val) => typeof val === 'string')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_item_hist_qty', quantityAdded);
+  }, [quantityAdded]);
+
+  const [unitCost, setUnitCost] = useState<string>(() =>
+    safeGetJSON<string>('retail_pos_item_hist_cost', '', (val) => typeof val === 'string')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_item_hist_cost', unitCost);
+  }, [unitCost]);
+
+  const [supplierName, setSupplierName] = useState<string>(() =>
+    safeGetJSON<string>('retail_pos_item_hist_supp', '', (val) => typeof val === 'string')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_item_hist_supp', supplierName);
+  }, [supplierName]);
+
+  const [batchNo, setBatchNo] = useState<string>(() =>
+    safeGetJSON<string>('retail_pos_item_hist_batch', '', (val) => typeof val === 'string')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_item_hist_batch', batchNo);
+  }, [batchNo]);
+
+  const [notes, setNotes] = useState<string>(() =>
+    safeGetJSON<string>('retail_pos_item_hist_notes', '', (val) => typeof val === 'string')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_item_hist_notes', notes);
+  }, [notes]);
 
   if (!isOpen || !product) return null;
 

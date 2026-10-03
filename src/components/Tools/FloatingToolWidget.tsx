@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { safeGetJSON, safeSetJSON } from '../../utils/safeStorage';
 import {
   Calculator,
   DollarSign,
@@ -32,25 +33,98 @@ interface FloatingToolWidgetProps {
 }
 
 export const FloatingToolWidget: React.FC<FloatingToolWidgetProps> = ({ onNavigateTab }) => {
-  const [isOpen, setIsOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<'calc' | 'currency' | 'units'>('calc');
+  const [isOpen, setIsOpen] = useState<boolean>(() =>
+    safeGetJSON<boolean>('retail_pos_float_tool_open', false, (val) => typeof val === 'boolean')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_float_tool_open', isOpen);
+  }, [isOpen]);
+
+  const [activeTab, setActiveTab] = useState<'calc' | 'currency' | 'units'>(() =>
+    safeGetJSON<'calc' | 'currency' | 'units'>('retail_pos_float_tool_tab', 'calc', (val) =>
+      ['calc', 'currency', 'units'].includes(val)
+    )
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_float_tool_tab', activeTab);
+  }, [activeTab]);
+
   const [copied, setCopied] = useState(false);
 
   // Calculator State
-  const [calcDisplay, setCalcDisplay] = useState('0');
-  const [calcTotalPaid, setCalcTotalPaid] = useState('');
-  const [calcChangeDue, setCalcChangeDue] = useState<number | null>(null);
+  const [calcDisplay, setCalcDisplay] = useState<string>(() =>
+    safeGetJSON<string>('retail_pos_float_calc_display', '0', (val) => typeof val === 'string')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_float_calc_display', calcDisplay);
+  }, [calcDisplay]);
+
+  const [calcTotalPaid, setCalcTotalPaid] = useState<string>(() =>
+    safeGetJSON<string>('retail_pos_float_calc_paid', '', (val) => typeof val === 'string')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_float_calc_paid', calcTotalPaid);
+  }, [calcTotalPaid]);
+
+  const [calcChangeDue, setCalcChangeDue] = useState<number | null>(() =>
+    safeGetJSON<number | null>('retail_pos_float_calc_change', null, (val) => typeof val === 'number')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_float_calc_change', calcChangeDue);
+  }, [calcChangeDue]);
 
   // Currency Converter State
-  const [fromCurr, setFromCurr] = useState('USD');
-  const [toCurr, setToCurr] = useState('KES');
-  const [currAmount, setCurrAmount] = useState('100');
+  const [fromCurr, setFromCurr] = useState<string>(() =>
+    safeGetJSON<string>('retail_pos_float_from_curr', 'USD', (val) => typeof val === 'string')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_float_from_curr', fromCurr);
+  }, [fromCurr]);
+
+  const [toCurr, setToCurr] = useState<string>(() =>
+    safeGetJSON<string>('retail_pos_float_to_curr', 'KES', (val) => typeof val === 'string')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_float_to_curr', toCurr);
+  }, [toCurr]);
+
+  const [currAmount, setCurrAmount] = useState<string>(() =>
+    safeGetJSON<string>('retail_pos_float_curr_amount', '100', (val) => typeof val === 'string')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_float_curr_amount', currAmount);
+  }, [currAmount]);
 
   // Unit Converter State
-  const [unitCategory, setUnitCategory] = useState<'mass' | 'volume' | 'length'>('mass');
-  const [fromUnit, setFromUnit] = useState('kg');
-  const [toUnit, setToUnit] = useState('lbs');
-  const [unitVal, setUnitVal] = useState('1');
+  const [unitCategory, setUnitCategory] = useState<'mass' | 'volume' | 'length'>(() =>
+    safeGetJSON<'mass' | 'volume' | 'length'>('retail_pos_float_unit_cat', 'mass', (val) =>
+      ['mass', 'volume', 'length'].includes(val)
+    )
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_float_unit_cat', unitCategory);
+  }, [unitCategory]);
+
+  const [fromUnit, setFromUnit] = useState<string>(() =>
+    safeGetJSON<string>('retail_pos_float_from_unit', 'kg', (val) => typeof val === 'string')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_float_from_unit', fromUnit);
+  }, [fromUnit]);
+
+  const [toUnit, setToUnit] = useState<string>(() =>
+    safeGetJSON<string>('retail_pos_float_to_unit', 'lbs', (val) => typeof val === 'string')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_float_to_unit', toUnit);
+  }, [toUnit]);
+
+  const [unitVal, setUnitVal] = useState<string>(() =>
+    safeGetJSON<string>('retail_pos_float_unit_val', '1', (val) => typeof val === 'string')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_float_unit_val', unitVal);
+  }, [unitVal]);
 
   const handleCopyResult = (val: string) => {
     navigator.clipboard.writeText(val);

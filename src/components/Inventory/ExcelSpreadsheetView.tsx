@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   FileSpreadsheet,
   Search,
@@ -33,6 +33,7 @@ import { calculateProfitMargin } from '../../utils/margin';
 import { ImageGeneratorModal } from './ImageGeneratorModal';
 import { computeProductsPerformance } from '../../utils/salesPerformance';
 import { detectRepeatedItemPhotos, resolveRepeatedCatalogPhotos } from '../../utils/productImages';
+import { safeGetJSON, safeSetJSON } from '../../utils/safeStorage';
 
 interface ExcelSpreadsheetViewProps {
   products: Product[];
@@ -59,9 +60,26 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
   onToggleLowStockOnly,
   onViewProductHistory,
 }) => {
-  const [searchTerm, setSearchTerm] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState('All');
-  const [localLowStockOnly, setLocalLowStockOnly] = useState(showLowStockOnly);
+  const [searchTerm, setSearchTerm] = useState<string>(() =>
+    safeGetJSON<string>('retail_pos_excel_search', '', (val) => typeof val === 'string')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_excel_search', searchTerm);
+  }, [searchTerm]);
+
+  const [selectedCategory, setSelectedCategory] = useState<string>(() =>
+    safeGetJSON<string>('retail_pos_excel_category', 'All', (val) => typeof val === 'string')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_excel_category', selectedCategory);
+  }, [selectedCategory]);
+
+  const [localLowStockOnly, setLocalLowStockOnly] = useState<boolean>(() =>
+    safeGetJSON<boolean>('retail_pos_excel_low_stock', showLowStockOnly, (val) => typeof val === 'boolean')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_excel_low_stock', localLowStockOnly);
+  }, [localLowStockOnly]);
 
   const performanceMap = useMemo(() => {
     return computeProductsPerformance(products, transactions);
@@ -86,8 +104,19 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
   const [selectedProductForImage, setSelectedProductForImage] = useState<Product | null>(null);
 
   // Column Sort State
-  const [sortField, setSortField] = useState<keyof Product>('name');
-  const [sortAsc, setSortAsc] = useState<boolean>(true);
+  const [sortField, setSortField] = useState<keyof Product>(() =>
+    safeGetJSON<keyof Product>('retail_pos_excel_sort_field', 'name', (val) => typeof val === 'string')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_excel_sort_field', sortField);
+  }, [sortField]);
+
+  const [sortAsc, setSortAsc] = useState<boolean>(() =>
+    safeGetJSON<boolean>('retail_pos_excel_sort_asc', true, (val) => typeof val === 'boolean')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_excel_sort_asc', sortAsc);
+  }, [sortAsc]);
 
   // Row Selection for Excel actions
   const [selectedRowIds, setSelectedRowIds] = useState<Set<string>>(new Set());

@@ -186,7 +186,12 @@ export const POSView: React.FC<POSViewProps> = ({
     safeSetJSON('retail_pos_pos_discount_input', discountInputVal);
   }, [discountInputVal]);
 
-  const [taxRate, setTaxRate] = useState<number>(0); // e.g. 0% by default or configurable
+  const [taxRate, setTaxRate] = useState<number>(() =>
+    safeGetJSON<number>('retail_pos_pos_tax_rate', 0, (val) => typeof val === 'number')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_pos_tax_rate', taxRate);
+  }, [taxRate]);
 
   // Item-Level Manual Discount State
   const [editingItemDiscountId, setEditingItemDiscountId] = useState<string | null>(null);
@@ -206,7 +211,13 @@ export const POSView: React.FC<POSViewProps> = ({
   const [tempDiscountVal, setTempDiscountVal] = useState<number>(100);
 
   // Sales Representative Attributed to this Sale (defaults to current logged-in user)
-  const [selectedSalesRepId, setSelectedSalesRepId] = useState<string>(currentUser.id);
+  const [selectedSalesRepId, setSelectedSalesRepId] = useState<string>(() =>
+    safeGetJSON<string>('retail_pos_pos_sales_rep_id', currentUser.id, (val) => typeof val === 'string')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_pos_sales_rep_id', selectedSalesRepId);
+  }, [selectedSalesRepId]);
+
   const selectedSalesRep = (allUsers || []).find((u) => u.id === selectedSalesRepId) || currentUser;
 
   // Active Sales Rep Today's Commission Stats
@@ -281,7 +292,13 @@ export const POSView: React.FC<POSViewProps> = ({
   // Modals State
   const [showScanner, setShowScanner] = useState(false);
   const [showAiReceiptScanner, setShowAiReceiptScanner] = useState(false);
-  const [showCheckoutModal, setShowCheckoutModal] = useState(false);
+  const [showCheckoutModal, setShowCheckoutModal] = useState<boolean>(() =>
+    safeGetJSON<boolean>('retail_pos_pos_show_checkout', false, (val) => typeof val === 'boolean')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_pos_show_checkout', showCheckoutModal);
+  }, [showCheckoutModal]);
+
   const [completedTx, setCompletedTx] = useState<Transaction | null>(null);
   const [showAddCustomerModal, setShowAddCustomerModal] = useState(false);
   const [showNewSaleConfirmModal, setShowNewSaleConfirmModal] = useState(false);
@@ -400,6 +417,9 @@ export const POSView: React.FC<POSViewProps> = ({
     setShowCheckoutModal(false);
     setShowMpesaPromptModal(false);
     setShowNewSaleConfirmModal(false);
+    setPaymentEntries([{ method: 'cash', amount: 0, reference: '' }]);
+    setSaleNotes('');
+    setSaleDate('');
     setMobileTab('catalog');
     setPosNotice({ message: 'New sale initialized! Register is fresh and ready for items.', type: 'success' });
     setTimeout(() => {
@@ -483,11 +503,30 @@ export const POSView: React.FC<POSViewProps> = ({
   };
 
   // Payment Breakdown State for Partial Payments
-  const [paymentEntries, setPaymentEntries] = useState<PaymentBreakdown[]>([
-    { method: 'cash', amount: 0, reference: '' }
-  ]);
-  const [saleNotes, setSaleNotes] = useState('');
-  const [saleDate, setSaleDate] = useState<string>('');
+  const [paymentEntries, setPaymentEntries] = useState<PaymentBreakdown[]>(() =>
+    safeGetJSON<PaymentBreakdown[]>(
+      'retail_pos_pos_payment_entries',
+      [{ method: 'cash', amount: 0, reference: '' }],
+      (val) => Array.isArray(val) && val.length > 0
+    )
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_pos_payment_entries', paymentEntries);
+  }, [paymentEntries]);
+
+  const [saleNotes, setSaleNotes] = useState<string>(() =>
+    safeGetJSON<string>('retail_pos_pos_sale_notes', '', (val) => typeof val === 'string')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_pos_sale_notes', saleNotes);
+  }, [saleNotes]);
+
+  const [saleDate, setSaleDate] = useState<string>(() =>
+    safeGetJSON<string>('retail_pos_pos_sale_date', '', (val) => typeof val === 'string')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_pos_sale_date', saleDate);
+  }, [saleDate]);
 
   // Consolidate categories from categories prop and all unique categories in products
   const allCategoryNames = React.useMemo(() => {

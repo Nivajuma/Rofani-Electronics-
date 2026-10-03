@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   Wallet,
   ArrowUpRight,
@@ -52,6 +52,7 @@ import {
 } from '../../types';
 import { LoansAndChamaView } from './LoansAndChamaView';
 import { DenominationReconciliationView } from './DenominationReconciliationView';
+import { safeGetJSON, safeSetJSON } from '../../utils/safeStorage';
 
 interface CashManagementViewProps {
   cashTransactions: CashTransaction[];
@@ -116,17 +117,63 @@ export const CashManagementView: React.FC<CashManagementViewProps> = ({
   onDisburseFacilityFunds,
 }) => {
   // Main Tab Navigation
-  const [activeTab, setActiveTab] = useState<'ledger' | 'loans' | 'payables' | 'denominations' | 'balancesheet'>('ledger');
+  const VALID_CASH_TABS = ['ledger', 'loans', 'payables', 'denominations', 'balancesheet'] as const;
+  type CashTab = (typeof VALID_CASH_TABS)[number];
+
+  const [activeTab, setActiveTab] = useState<CashTab>(() =>
+    safeGetJSON<CashTab>('retail_pos_cash_active_tab', 'ledger', (val) => VALID_CASH_TABS.includes(val))
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_cash_active_tab', activeTab);
+  }, [activeTab]);
 
   // Search and Filter States for Ledger
-  const [searchTerm, setSearchTerm] = useState('');
-  const [typeFilter, setTypeFilter] = useState<'ALL' | 'CASH_IN' | 'CASH_OUT'>('ALL');
-  const [categoryFilter, setCategoryFilter] = useState<string>('ALL');
-  const [dateFilter, setDateFilter] = useState<'ALL' | 'TODAY' | 'WEEK' | 'MONTH'>('ALL');
+  const [searchTerm, setSearchTerm] = useState(() =>
+    safeGetJSON<string>('retail_pos_cash_search', '', (val) => typeof val === 'string')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_cash_search', searchTerm);
+  }, [searchTerm]);
+
+  const [typeFilter, setTypeFilter] = useState<'ALL' | 'CASH_IN' | 'CASH_OUT'>(() =>
+    safeGetJSON<'ALL' | 'CASH_IN' | 'CASH_OUT'>('retail_pos_cash_type_filter', 'ALL', (val) =>
+      ['ALL', 'CASH_IN', 'CASH_OUT'].includes(val)
+    )
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_cash_type_filter', typeFilter);
+  }, [typeFilter]);
+
+  const [categoryFilter, setCategoryFilter] = useState<string>(() =>
+    safeGetJSON<string>('retail_pos_cash_cat_filter', 'ALL', (val) => typeof val === 'string')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_cash_cat_filter', categoryFilter);
+  }, [categoryFilter]);
+
+  const [dateFilter, setDateFilter] = useState<'ALL' | 'TODAY' | 'WEEK' | 'MONTH'>(() =>
+    safeGetJSON<'ALL' | 'TODAY' | 'WEEK' | 'MONTH'>('retail_pos_cash_date_filter', 'ALL', (val) =>
+      ['ALL', 'TODAY', 'WEEK', 'MONTH'].includes(val)
+    )
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_cash_date_filter', dateFilter);
+  }, [dateFilter]);
 
   // Modal States
-  const [showCashInModal, setShowCashInModal] = useState(false);
-  const [showCashOutModal, setShowCashOutModal] = useState(false);
+  const [showCashInModal, setShowCashInModal] = useState<boolean>(() =>
+    safeGetJSON<boolean>('retail_pos_cash_show_cash_in', false, (val) => typeof val === 'boolean')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_cash_show_cash_in', showCashInModal);
+  }, [showCashInModal]);
+
+  const [showCashOutModal, setShowCashOutModal] = useState<boolean>(() =>
+    safeGetJSON<boolean>('retail_pos_cash_show_cash_out', false, (val) => typeof val === 'boolean')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_cash_show_cash_out', showCashOutModal);
+  }, [showCashOutModal]);
   const [selectedTxForVoucher, setSelectedTxForVoucher] = useState<CashTransaction | null>(null);
   const [selectedSupplierForPay, setSelectedSupplierForPay] = useState<Supplier | null>(null);
   const [supplierPayAmount, setSupplierPayAmount] = useState('');

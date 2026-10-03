@@ -1,4 +1,5 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
+import { safeGetJSON, safeSetJSON } from '../../utils/safeStorage';
 import {
   Sparkles,
   Bot,
@@ -105,16 +106,30 @@ export const AIAssistantModal: React.FC<AIAssistantModalProps> = ({
   transactions = [],
   onOpenPredictiveRestock
 }) => {
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: 'init-1',
-      sender: 'assistant',
-      text: `Hujambo! 👋 Welcome to **ROFANI Electronics & Boutique**.\n\nI am your **Gemini AI Staff Co-Pilot & Inventory Strategist**. I analyze real-time sales velocity across customer transactions to give you **predictive inventory replenishment suggestions**, stockout forecasts, and step-by-step guides for POS sales, KRA tax invoices, and branch transfers.\n\nClick any quick topic below or ask me any question!`,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    }
-  ]);
+  const [messages, setMessages] = useState<Message[]>(() =>
+    safeGetJSON<Message[]>(
+      'retail_pos_ai_messages',
+      [
+        {
+          id: 'init-1',
+          sender: 'assistant',
+          text: `Hujambo! 👋 Welcome to **ROFANI Electronics & Boutique**.\n\nI am your **Gemini AI Staff Co-Pilot & Inventory Strategist**. I analyze real-time sales velocity across customer transactions to give you **predictive inventory replenishment suggestions**, stockout forecasts, and step-by-step guides for POS sales, KRA tax invoices, and branch transfers.\n\nClick any quick topic below or ask me any question!`,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        }
+      ],
+      (val) => Array.isArray(val) && val.length > 0
+    )
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_ai_messages', messages);
+  }, [messages]);
 
-  const [inputQuery, setInputQuery] = useState('');
+  const [inputQuery, setInputQuery] = useState<string>(() =>
+    safeGetJSON<string>('retail_pos_ai_query', '', (val) => typeof val === 'string')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_ai_query', inputQuery);
+  }, [inputQuery]);
   const [loading, setLoading] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
 

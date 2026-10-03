@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   DollarSign,
   Plus,
@@ -21,6 +21,7 @@ import {
   Calendar
 } from 'lucide-react';
 import { WorkerLoan, WorkerLoanRepayment, User as Employee, PaymentMethod } from '../../types';
+import { safeGetJSON, safeSetJSON } from '../../utils/safeStorage';
 
 interface WorkerLoansViewProps {
   loans: WorkerLoan[];
@@ -39,11 +40,29 @@ export const WorkerLoansView: React.FC<WorkerLoansViewProps> = ({
   onRepayLoan,
   onUpdateLoanStatus,
 }) => {
-  const [searchTerm, setSearchTerm] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'All' | 'Active' | 'Fully Repaid' | 'Overdue' | 'Written Off'>('All');
+  const [searchTerm, setSearchTerm] = useState<string>(() =>
+    safeGetJSON<string>('retail_pos_worker_loans_search', '', (val) => typeof val === 'string')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_worker_loans_search', searchTerm);
+  }, [searchTerm]);
+
+  const [statusFilter, setStatusFilter] = useState<'All' | 'Active' | 'Fully Repaid' | 'Overdue' | 'Written Off'>(() =>
+    safeGetJSON<'All' | 'Active' | 'Fully Repaid' | 'Overdue' | 'Written Off'>('retail_pos_worker_loans_status', 'All', (val) =>
+      ['All', 'Active', 'Fully Repaid', 'Overdue', 'Written Off'].includes(val)
+    )
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_worker_loans_status', statusFilter);
+  }, [statusFilter]);
 
   // Modal States
-  const [showIssueModal, setShowIssueModal] = useState(false);
+  const [showIssueModal, setShowIssueModal] = useState<boolean>(() =>
+    safeGetJSON<boolean>('retail_pos_worker_loans_show_issue', false, (val) => typeof val === 'boolean')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_worker_loans_show_issue', showIssueModal);
+  }, [showIssueModal]);
   const [showRepayModal, setShowRepayModal] = useState(false);
   const [selectedLoanForRepay, setSelectedLoanForRepay] = useState<WorkerLoan | null>(null);
   const [selectedLoanForStatement, setSelectedLoanForStatement] = useState<WorkerLoan | null>(null);

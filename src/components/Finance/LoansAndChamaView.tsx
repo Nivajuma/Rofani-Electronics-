@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Landmark,
   Building2,
@@ -26,6 +26,7 @@ import {
   Scale
 } from 'lucide-react';
 import { FinancingFacility, FacilityRepayment, FacilityType, User, CashTransaction } from '../../types';
+import { safeGetJSON, safeSetJSON } from '../../utils/safeStorage';
 
 interface LoansAndChamaViewProps {
   facilities: FinancingFacility[];
@@ -46,12 +47,36 @@ export const LoansAndChamaView: React.FC<LoansAndChamaViewProps> = ({
   onDisburseFunds,
   onAddCashTransaction,
 }) => {
-  const [searchTerm, setSearchTerm] = useState('');
-  const [typeFilter, setTypeFilter] = useState<string>('ALL');
-  const [statusFilter, setStatusFilter] = useState<'ALL' | 'ACTIVE' | 'CLEARED'>('ALL');
+  const [searchTerm, setSearchTerm] = useState<string>(() =>
+    safeGetJSON<string>('retail_pos_loans_search', '', (val) => typeof val === 'string')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_loans_search', searchTerm);
+  }, [searchTerm]);
+
+  const [typeFilter, setTypeFilter] = useState<string>(() =>
+    safeGetJSON<string>('retail_pos_loans_type_filter', 'ALL', (val) => typeof val === 'string')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_loans_type_filter', typeFilter);
+  }, [typeFilter]);
+
+  const [statusFilter, setStatusFilter] = useState<'ALL' | 'ACTIVE' | 'CLEARED'>(() =>
+    safeGetJSON<'ALL' | 'ACTIVE' | 'CLEARED'>('retail_pos_loans_status_filter', 'ALL', (val) =>
+      ['ALL', 'ACTIVE', 'CLEARED'].includes(val)
+    )
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_loans_status_filter', statusFilter);
+  }, [statusFilter]);
 
   // Modal States
-  const [showAddFacilityModal, setShowAddFacilityModal] = useState(false);
+  const [showAddFacilityModal, setShowAddFacilityModal] = useState<boolean>(() =>
+    safeGetJSON<boolean>('retail_pos_loans_show_add_modal', false, (val) => typeof val === 'boolean')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_loans_show_add_modal', showAddFacilityModal);
+  }, [showAddFacilityModal]);
   const [selectedFacilityForPay, setSelectedFacilityForPay] = useState<FinancingFacility | null>(null);
   const [selectedFacilityForDisburse, setSelectedFacilityForDisburse] = useState<FinancingFacility | null>(null);
   const [selectedFacilityForStatement, setSelectedFacilityForStatement] = useState<FinancingFacility | null>(null);

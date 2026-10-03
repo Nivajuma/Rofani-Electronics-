@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { StoreLocation, Product, StockTransferRecord } from '../../types';
+import { safeGetJSON, safeSetJSON } from '../../utils/safeStorage';
 import {
   Store,
   Plus,
@@ -60,11 +61,27 @@ export const StoreManagerModal: React.FC<StoreManagerModalProps> = ({
   onTransferStock,
   onUpdateTransferStatus
 }) => {
-  const [activeTab, setActiveTab] = useState<'outlets' | 'transfers'>('outlets');
-  const [searchQuery, setSearchQuery] = useState('');
+  const [activeTab, setActiveTab] = useState<'outlets' | 'transfers'>(() =>
+    safeGetJSON<'outlets' | 'transfers'>('retail_pos_store_mgr_tab', 'outlets', (val) => val === 'outlets' || val === 'transfers')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_store_mgr_tab', activeTab);
+  }, [activeTab]);
+
+  const [searchQuery, setSearchQuery] = useState<string>(() =>
+    safeGetJSON<string>('retail_pos_store_mgr_search', '', (val) => typeof val === 'string')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_store_mgr_search', searchQuery);
+  }, [searchQuery]);
 
   // Branch creation form
-  const [showAddForm, setShowAddForm] = useState(false);
+  const [showAddForm, setShowAddForm] = useState<boolean>(() =>
+    safeGetJSON<boolean>('retail_pos_store_mgr_show_add', false, (val) => typeof val === 'boolean')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_store_mgr_show_add', showAddForm);
+  }, [showAddForm]);
   const [newStoreName, setNewStoreName] = useState('');
   const [newStoreCode, setNewStoreCode] = useState('');
   const [newStoreCity, setNewStoreCity] = useState('');
@@ -94,12 +111,48 @@ export const StoreManagerModal: React.FC<StoreManagerModalProps> = ({
   const [showKeepSingleConfirm, setShowKeepSingleConfirm] = useState<StoreLocation | null>(null);
 
   // Stock Transfer Form state
-  const [showTransferForm, setShowTransferForm] = useState(false);
-  const [sourceStoreId, setSourceStoreId] = useState<string>(stores[0]?.id || '');
-  const [targetStoreId, setTargetStoreId] = useState<string>(stores[1]?.id || stores[0]?.id || '');
-  const [selectedProductId, setSelectedProductId] = useState<string>(products[0]?.id || '');
-  const [transferQty, setTransferQty] = useState<number>(1);
-  const [transferNotes, setTransferNotes] = useState<string>('');
+  const [showTransferForm, setShowTransferForm] = useState<boolean>(() =>
+    safeGetJSON<boolean>('retail_pos_store_mgr_show_transfer', false, (val) => typeof val === 'boolean')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_store_mgr_show_transfer', showTransferForm);
+  }, [showTransferForm]);
+
+  const [sourceStoreId, setSourceStoreId] = useState<string>(() =>
+    safeGetJSON<string>('retail_pos_store_mgr_src_store', stores[0]?.id || '', (val) => typeof val === 'string')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_store_mgr_src_store', sourceStoreId);
+  }, [sourceStoreId]);
+
+  const [targetStoreId, setTargetStoreId] = useState<string>(() =>
+    safeGetJSON<string>('retail_pos_store_mgr_tgt_store', stores[1]?.id || stores[0]?.id || '', (val) => typeof val === 'string')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_store_mgr_tgt_store', targetStoreId);
+  }, [targetStoreId]);
+
+  const [selectedProductId, setSelectedProductId] = useState<string>(() =>
+    safeGetJSON<string>('retail_pos_store_mgr_prod_id', products[0]?.id || '', (val) => typeof val === 'string')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_store_mgr_prod_id', selectedProductId);
+  }, [selectedProductId]);
+
+  const [transferQty, setTransferQty] = useState<number>(() =>
+    safeGetJSON<number>('retail_pos_store_mgr_qty', 1, (val) => typeof val === 'number' && val > 0)
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_store_mgr_qty', transferQty);
+  }, [transferQty]);
+
+  const [transferNotes, setTransferNotes] = useState<string>(() =>
+    safeGetJSON<string>('retail_pos_store_mgr_notes', '', (val) => typeof val === 'string')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_store_mgr_notes', transferNotes);
+  }, [transferNotes]);
+
   const [transferredBy, setTransferredBy] = useState<string>('Manager');
 
   if (!isOpen) return null;

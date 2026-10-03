@@ -27,6 +27,7 @@ import {
   ChevronDown
 } from 'lucide-react';
 import { Customer, Product, User } from '../../types';
+import { safeGetJSON, safeSetJSON } from '../../utils/safeStorage';
 
 interface CustomerPromotionGeneratorModalProps {
   isOpen: boolean;
@@ -176,11 +177,7 @@ export const CustomerPromotionGeneratorModal: React.FC<CustomerPromotionGenerato
         // Update history
         const updated = [data, ...savedCampaigns.slice(0, 9)];
         setSavedCampaigns(updated);
-        try {
-          localStorage.setItem('rofani_ai_promotions_history', JSON.stringify(updated));
-        } catch (e) {
-          // ignore storage error
-        }
+        safeSetJSON('rofani_ai_promotions_history', updated);
       }
     } catch (err) {
       console.error('Failed to generate promotion:', err);

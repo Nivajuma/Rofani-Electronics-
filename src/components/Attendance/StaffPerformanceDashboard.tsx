@@ -1,4 +1,5 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
+import { safeGetJSON, safeSetJSON } from '../../utils/safeStorage';
 import {
   BarChart3,
   TrendingUp,
@@ -80,18 +81,62 @@ export const StaffPerformanceDashboard: React.FC<StaffPerformanceDashboardProps>
   onNavigateToTab,
 }) => {
   // Filters & State
-  const [timeframe, setTimeframe] = useState<TimeframePreset>('all');
+  const [timeframe, setTimeframe] = useState<TimeframePreset>(() =>
+    safeGetJSON<TimeframePreset>('retail_pos_perf_timeframe', 'all', (val) =>
+      ['today', 'yesterday', 'week', 'month', 'all', 'custom'].includes(val)
+    )
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_perf_timeframe', timeframe);
+  }, [timeframe]);
+
   const [customStartDate, setCustomStartDate] = useState(
     new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10)
   );
   const [customEndDate, setCustomEndDate] = useState(
     new Date().toISOString().slice(0, 10)
   );
-  const [metricMode, setMetricMode] = useState<ChartMetricMode>('all_grouped');
-  const [chartOrientation, setChartOrientation] = useState<ChartOrientation>('vertical');
-  const [sortBy, setSortBy] = useState<SortOption>('sales_desc');
-  const [roleFilter, setRoleFilter] = useState<string>('All');
-  const [searchQuery, setSearchQuery] = useState<string>('');
+
+  const [metricMode, setMetricMode] = useState<ChartMetricMode>(() =>
+    safeGetJSON<ChartMetricMode>('retail_pos_perf_metric_mode', 'all_grouped', (val) =>
+      ['all_grouped', 'sales', 'commission', 'reliability'].includes(val)
+    )
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_perf_metric_mode', metricMode);
+  }, [metricMode]);
+
+  const [chartOrientation, setChartOrientation] = useState<ChartOrientation>(() =>
+    safeGetJSON<ChartOrientation>('retail_pos_perf_chart_orient', 'vertical', (val) =>
+      val === 'vertical' || val === 'horizontal'
+    )
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_perf_chart_orient', chartOrientation);
+  }, [chartOrientation]);
+
+  const [sortBy, setSortBy] = useState<SortOption>(() =>
+    safeGetJSON<SortOption>('retail_pos_perf_sort_by', 'sales_desc', (val) =>
+      ['sales_desc', 'commission_desc', 'reliability_desc', 'name_asc'].includes(val)
+    )
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_perf_sort_by', sortBy);
+  }, [sortBy]);
+
+  const [roleFilter, setRoleFilter] = useState<string>(() =>
+    safeGetJSON<string>('retail_pos_perf_role_filter', 'All', (val) => typeof val === 'string')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_perf_role_filter', roleFilter);
+  }, [roleFilter]);
+
+  const [searchQuery, setSearchQuery] = useState<string>(() =>
+    safeGetJSON<string>('retail_pos_perf_search', '', (val) => typeof val === 'string')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_perf_search', searchQuery);
+  }, [searchQuery]);
   const [showAverageBenchmark, setShowAverageBenchmark] = useState<boolean>(true);
   const [selectedWorkerDetail, setSelectedWorkerDetail] = useState<WorkerPerformanceStat | null>(null);
   const [hoveredBarInfo, setHoveredBarInfo] = useState<{

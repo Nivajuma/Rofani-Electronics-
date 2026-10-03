@@ -167,7 +167,12 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   const criticalRestockCount =
     replenishmentAnalysis.summary.outOfStockCount + replenishmentAnalysis.summary.criticalCount;
 
-  const [showPredictiveRestockModal, setShowPredictiveRestockModal] = useState<boolean>(false);
+  const [showPredictiveRestockModal, setShowPredictiveRestockModal] = useState<boolean>(() =>
+    safeGetJSON<boolean>('retail_pos_inv_show_restock_modal', false, (val) => typeof val === 'boolean')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_inv_show_restock_modal', showPredictiveRestockModal);
+  }, [showPredictiveRestockModal]);
 
   const handleQuickRestockProduct = (productId: string, addedQuantity: number, reason?: string) => {
     const existing = products.find((p) => p.id === productId);
@@ -201,7 +206,12 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     safeSetJSON('retail_pos_inventory_view_mode', inventoryViewMode);
   }, [inventoryViewMode]);
 
-  const [showScanHistoryModal, setShowScanHistoryModal] = useState<boolean>(false);
+  const [showScanHistoryModal, setShowScanHistoryModal] = useState<boolean>(() =>
+    safeGetJSON<boolean>('retail_pos_inv_show_scan_history_modal', false, (val) => typeof val === 'boolean')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_inv_show_scan_history_modal', showScanHistoryModal);
+  }, [showScanHistoryModal]);
 
   // Custom Category & Subcategory Creation in Modal
   const [isCustomCategoryInput, setIsCustomCategoryInput] = useState(false);
@@ -214,9 +224,13 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   const [customSupplierName, setCustomSupplierName] = useState('');
 
   // Selected Supplier for AI Item Scans (Camera / Gallery / Batch)
-  const [selectedScanSupplierId, setSelectedScanSupplierId] = useState<string>(
-    suppliers[0]?.id || ''
+  const [selectedScanSupplierId, setSelectedScanSupplierId] = useState<string>(() =>
+    safeGetJSON<string>('retail_pos_inv_scan_supplier_id', suppliers[0]?.id || '', (val) => typeof val === 'string')
   );
+
+  useEffect(() => {
+    safeSetJSON('retail_pos_inv_scan_supplier_id', selectedScanSupplierId);
+  }, [selectedScanSupplierId]);
 
   useEffect(() => {
     if (!selectedScanSupplierId && suppliers.length > 0) {
@@ -246,12 +260,35 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   useEffect(() => {
     safeSetJSON('retail_pos_inv_current_page', currentPage);
   }, [currentPage]);
-  const [showSheetImportModal, setShowSheetImportModal] = useState<boolean>(false);
-  const [showImageStudioModal, setShowImageStudioModal] = useState<boolean>(false);
+
+  const [showSheetImportModal, setShowSheetImportModal] = useState<boolean>(() =>
+    safeGetJSON<boolean>('retail_pos_inv_show_sheet_import', false, (val) => typeof val === 'boolean')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_inv_show_sheet_import', showSheetImportModal);
+  }, [showSheetImportModal]);
+
+  const [showImageStudioModal, setShowImageStudioModal] = useState<boolean>(() =>
+    safeGetJSON<boolean>('retail_pos_inv_show_image_studio', false, (val) => typeof val === 'boolean')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_inv_show_image_studio', showImageStudioModal);
+  }, [showImageStudioModal]);
 
   // Modal State for New/Edit Item
-  const [showModal, setShowModal] = useState(false);
-  const [editingProduct, setEditingProduct] = useState<Partial<Product> | null>(null);
+  const [showModal, setShowModal] = useState<boolean>(() =>
+    safeGetJSON<boolean>('retail_pos_inv_show_modal', false, (val) => typeof val === 'boolean')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_inv_show_modal', showModal);
+  }, [showModal]);
+
+  const [editingProduct, setEditingProduct] = useState<Partial<Product> | null>(() =>
+    safeGetJSON<Partial<Product> | null>('retail_pos_inv_editing_product', null, (val) => Boolean(val && typeof val === 'object'))
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_inv_editing_product', editingProduct);
+  }, [editingProduct]);
 
   // Camera & Gallery Upload Refs & State
   const cameraInputRef = useRef<HTMLInputElement>(null);

@@ -75,10 +75,31 @@ export const PrintBarcodesUtilityModal: React.FC<PrintBarcodesUtilityModalProps>
   storeName = 'ROFANI Retail',
 }) => {
   const [activeSource, setActiveSource] = useState<'scan_history' | 'catalog'>(() => {
-    return scanLogs && scanLogs.length > 0 ? 'scan_history' : 'catalog';
+    return safeGetJSON<'scan_history' | 'catalog'>(
+      'retail_pos_print_active_source',
+      scanLogs && scanLogs.length > 0 ? 'scan_history' : 'catalog',
+      (val) => val === 'scan_history' || val === 'catalog'
+    );
   });
-  const [searchTerm, setSearchTerm] = useState('');
-  const [scanTimeFilter, setScanTimeFilter] = useState<'all' | 'today' | 'recent_50'>('all');
+  useEffect(() => {
+    safeSetJSON('retail_pos_print_active_source', activeSource);
+  }, [activeSource]);
+
+  const [searchTerm, setSearchTerm] = useState<string>(() =>
+    safeGetJSON<string>('retail_pos_print_search', '', (val) => typeof val === 'string')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_print_search', searchTerm);
+  }, [searchTerm]);
+
+  const [scanTimeFilter, setScanTimeFilter] = useState<'all' | 'today' | 'recent_50'>(() =>
+    safeGetJSON<'all' | 'today' | 'recent_50'>('retail_pos_print_scan_filter', 'all', (val) =>
+      ['all', 'today', 'recent_50'].includes(val)
+    )
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_print_scan_filter', scanTimeFilter);
+  }, [scanTimeFilter]);
 
   const [selectedIds, setSelectedIds] = useState<Record<string, boolean>>(() =>
     safeGetJSON<Record<string, boolean>>('retail_pos_print_selected_ids', {}, (val) => Boolean(val && typeof val === 'object'))
@@ -134,7 +155,12 @@ export const PrintBarcodesUtilityModal: React.FC<PrintBarcodesUtilityModalProps>
     safeSetJSON('retail_pos_print_show_store_name', showStoreNameOnLabel);
   }, [showStoreNameOnLabel]);
 
-  const [activeModalTab, setActiveModalTab] = useState<'items' | 'preview'>('items');
+  const [activeModalTab, setActiveModalTab] = useState<'items' | 'preview'>(() =>
+    safeGetJSON<'items' | 'preview'>('retail_pos_print_modal_tab', 'items', (val) => val === 'items' || val === 'preview')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_print_modal_tab', activeModalTab);
+  }, [activeModalTab]);
 
   const [viewLayout, setViewLayout] = useState<'list' | 'compact' | 'grid'>(() =>
     safeGetJSON<'list' | 'compact' | 'grid'>('retail_pos_print_view_layout', 'list', (val) =>
@@ -152,10 +178,21 @@ export const PrintBarcodesUtilityModal: React.FC<PrintBarcodesUtilityModalProps>
     safeSetJSON('retail_pos_print_category', selectedCategory);
   }, [selectedCategory]);
 
-  const [filterSelectedOnly, setFilterSelectedOnly] = useState<boolean>(false);
+  const [filterSelectedOnly, setFilterSelectedOnly] = useState<boolean>(() =>
+    safeGetJSON<boolean>('retail_pos_print_filter_selected_only', false, (val) => typeof val === 'boolean')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_print_filter_selected_only', filterSelectedOnly);
+  }, [filterSelectedOnly]);
+
   const [showOptionsDrawer, setShowOptionsDrawer] = useState<boolean>(false);
   const [showLivePreview, setShowLivePreview] = useState<boolean>(true);
-  const [previewViewMode, setPreviewViewMode] = useState<'single' | 'sheet'>('single');
+  const [previewViewMode, setPreviewViewMode] = useState<'single' | 'sheet'>(() =>
+    safeGetJSON<'single' | 'sheet'>('retail_pos_print_preview_mode', 'single', (val) => val === 'single' || val === 'sheet')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_print_preview_mode', previewViewMode);
+  }, [previewViewMode]);
   const [sheetPageIndex, setSheetPageIndex] = useState<number>(0);
   const [sheetZoom, setSheetZoom] = useState<number>(100);
   const [showHpGuide, setShowHpGuide] = useState<boolean>(false);

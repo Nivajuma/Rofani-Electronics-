@@ -1,6 +1,7 @@
 // Mock SMS Gateway Service for Automated POS Transaction Summary Notifications
 import { Transaction } from '../types';
 import { normalizeKenyanPhone } from './mpesa';
+import { safeGetJSON, safeSetJSON } from './safeStorage';
 
 export interface SmsDeliveryRecord {
   id: string; // e.g. "MSG-AT-984210"
@@ -46,37 +47,23 @@ export const isAutoSmsEnabled = (): boolean => {
  * Set automated SMS setting
  */
 export const setAutoSmsEnabled = (enabled: boolean): void => {
-  try {
-    localStorage.setItem(AUTO_SMS_CONFIG_KEY, String(enabled));
-  } catch (err) {
-    console.error('Error saving auto SMS setting:', err);
-  }
+  safeSetJSON(AUTO_SMS_CONFIG_KEY, enabled);
 };
 
 /**
  * Load sent SMS history from local storage
  */
 export const getSmsDeliveryLogs = (): SmsDeliveryRecord[] => {
-  try {
-    const raw = localStorage.getItem(SMS_STORAGE_KEY);
-    if (!raw) return [];
-    return JSON.parse(raw);
-  } catch {
-    return [];
-  }
+  return safeGetJSON<SmsDeliveryRecord[]>(SMS_STORAGE_KEY, []);
 };
 
 /**
  * Save new SMS record to local history
  */
 export const saveSmsDeliveryLog = (record: SmsDeliveryRecord): void => {
-  try {
-    const current = getSmsDeliveryLogs();
-    const updated = [record, ...current.filter((r) => r.id !== record.id)].slice(0, 100);
-    localStorage.setItem(SMS_STORAGE_KEY, JSON.stringify(updated));
-  } catch (err) {
-    console.error('Failed to save SMS log:', err);
-  }
+  const current = getSmsDeliveryLogs();
+  const updated = [record, ...current.filter((r) => r.id !== record.id)].slice(0, 50);
+  safeSetJSON(SMS_STORAGE_KEY, updated);
 };
 
 /**

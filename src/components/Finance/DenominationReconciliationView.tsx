@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Coins,
   Wallet,
@@ -16,6 +16,7 @@ import {
   Sparkles
 } from 'lucide-react';
 import { User } from '../../types';
+import { safeGetJSON, safeSetJSON } from '../../utils/safeStorage';
 
 interface DenominationReconciliationViewProps {
   systemCashBalance: number;
@@ -45,23 +46,44 @@ export const DenominationReconciliationView: React.FC<DenominationReconciliation
   systemCashBalance,
   currentUser,
 }) => {
-  const [counts, setCounts] = useState<{ [key: number]: number }>({
-    1000: 0,
-    500: 0,
-    200: 0,
-    100: 0,
-    50: 0,
-    40: 0,
-    20: 0,
-    10: 0,
-    5: 0,
-    1: 0,
-  });
+  const [counts, setCounts] = useState<{ [key: number]: number }>(() =>
+    safeGetJSON<{ [key: number]: number }>(
+      'retail_pos_denom_counts',
+      { 1000: 0, 500: 0, 200: 0, 100: 0, 50: 0, 40: 0, 20: 0, 10: 0, 5: 0, 1: 0 },
+      (val) => Boolean(val && typeof val === 'object' && !Array.isArray(val))
+    )
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_denom_counts', counts);
+  }, [counts]);
 
-  const [registerLocation, setRegisterLocation] = useState('Main CBD Cash Vault & Drawer');
-  const [supervisorName, setSupervisorName] = useState('Sarah Miller (Manager)');
-  const [notes, setNotes] = useState('');
-  const [showSlipModal, setShowSlipModal] = useState(false);
+  const [registerLocation, setRegisterLocation] = useState<string>(() =>
+    safeGetJSON<string>('retail_pos_denom_location', 'Main CBD Cash Vault & Drawer', (val) => typeof val === 'string')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_denom_location', registerLocation);
+  }, [registerLocation]);
+
+  const [supervisorName, setSupervisorName] = useState<string>(() =>
+    safeGetJSON<string>('retail_pos_denom_supervisor', 'Sarah Miller (Manager)', (val) => typeof val === 'string')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_denom_supervisor', supervisorName);
+  }, [supervisorName]);
+
+  const [notes, setNotes] = useState<string>(() =>
+    safeGetJSON<string>('retail_pos_denom_notes', '', (val) => typeof val === 'string')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_denom_notes', notes);
+  }, [notes]);
+
+  const [showSlipModal, setShowSlipModal] = useState<boolean>(() =>
+    safeGetJSON<boolean>('retail_pos_denom_slip_modal', false, (val) => typeof val === 'boolean')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_denom_slip_modal', showSlipModal);
+  }, [showSlipModal]);
 
   // Handle count change
   const handleCountChange = (denomValue: number, quantity: string) => {

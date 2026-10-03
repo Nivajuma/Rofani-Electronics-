@@ -1,4 +1,5 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
+import { safeGetJSON, safeSetJSON } from '../../utils/safeStorage';
 import {
   Users,
   UserPlus,
@@ -78,11 +79,33 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
   onDeleteUser,
   currentUser,
 }) => {
-  const [searchTerm, setSearchTerm] = useState('');
-  const [selectedRoleFilter, setSelectedRoleFilter] = useState<string>('all');
-  const [selectedStatusFilter, setSelectedStatusFilter] = useState<string>('all');
+  const [searchTerm, setSearchTerm] = useState<string>(() =>
+    safeGetJSON<string>('retail_pos_staff_search', '', (val) => typeof val === 'string')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_staff_search', searchTerm);
+  }, [searchTerm]);
 
-  const [currentView, setCurrentView] = useState<'cards' | 'matrix'>('cards');
+  const [selectedRoleFilter, setSelectedRoleFilter] = useState<string>(() =>
+    safeGetJSON<string>('retail_pos_staff_role_filter', 'all', (val) => typeof val === 'string')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_staff_role_filter', selectedRoleFilter);
+  }, [selectedRoleFilter]);
+
+  const [selectedStatusFilter, setSelectedStatusFilter] = useState<string>(() =>
+    safeGetJSON<string>('retail_pos_staff_status_filter', 'all', (val) => typeof val === 'string')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_staff_status_filter', selectedStatusFilter);
+  }, [selectedStatusFilter]);
+
+  const [currentView, setCurrentView] = useState<'cards' | 'matrix'>(() =>
+    safeGetJSON<'cards' | 'matrix'>('retail_pos_staff_view', 'cards', (val) => val === 'cards' || val === 'matrix')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_staff_view', currentView);
+  }, [currentView]);
   const [adjustingPermissionsUser, setAdjustingPermissionsUser] = useState<User | null>(null);
 
   const [showAddModal, setShowAddModal] = useState(false);

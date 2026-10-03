@@ -1,4 +1,5 @@
 // Safaricom M-PESA Daraja & Express STK Push Utility
+import { safeGetJSON, safeSetJSON } from './safeStorage';
 
 export interface MpesaConfig {
   shortcode: string; // Till or Paybill number e.g. "174379"
@@ -56,21 +57,11 @@ export const DEFAULT_MPESA_CONFIG: MpesaConfig = {
 };
 
 export const loadMpesaConfig = (): MpesaConfig => {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return DEFAULT_MPESA_CONFIG;
-    return { ...DEFAULT_MPESA_CONFIG, ...JSON.parse(raw) };
-  } catch {
-    return DEFAULT_MPESA_CONFIG;
-  }
+  return safeGetJSON<MpesaConfig>(STORAGE_KEY, DEFAULT_MPESA_CONFIG);
 };
 
 export const saveMpesaConfig = (config: MpesaConfig): void => {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
-  } catch (err) {
-    console.error('Failed to save M-Pesa config:', err);
-  }
+  safeSetJSON(STORAGE_KEY, config);
 };
 
 /**

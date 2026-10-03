@@ -1,8 +1,7 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import {
   initializeFirestore,
-  persistentLocalCache,
-  persistentMultipleTabManager,
+  memoryLocalCache,
   getFirestore,
   doc,
   getDocFromServer,
@@ -14,15 +13,20 @@ import firebaseConfig from '../../firebase-applet-config.json';
 // Initialize Firebase App instance safely
 export const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 
-// Initialize Firestore database using persistentLocalCache to prevent redundant network read quota usage
+// Initialize Firestore database using memoryLocalCache.
+// Using memoryLocalCache keeps query caches in memory without writing cross-tab state to localStorage.
+// This prevents WebStorageSharedClientState from allocating client heartbeat keys in window.localStorage,
+// completely eliminating browser QuotaExceededError and Firestore internal assertion crash (ID: b815).
 export const db: Firestore = (() => {
   try {
-    return initializeFirestore(app, {
-      localCache: persistentLocalCache({
-        tabManager: persistentMultipleTabManager(),
-      }),
-    }, firebaseConfig.firestoreDatabaseId);
-  } catch (err) {
+    return initializeFirestore(
+      app,
+      {
+        localCache: memoryLocalCache(),
+      },
+      firebaseConfig.firestoreDatabaseId
+    );
+  } catch {
     // If already initialized in hot reload or previous instance, fallback to getFirestore
     return getFirestore(app, firebaseConfig.firestoreDatabaseId);
   }
@@ -47,6 +51,7 @@ export async function testFirestoreConnection(): Promise<boolean> {
         return false;
       }
     }
+    console.warn('[Firebase] Connection check:', error);
     return false;
   }
 }

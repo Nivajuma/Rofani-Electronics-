@@ -15,6 +15,41 @@
   </head>
   <body>
     <div id="root"></div>
+    <script>
+      (function() {
+        try {
+          if (window.localStorage) {
+            // Pre-emptively purge legacy firestore client synchronization keys
+            var keysToRemove = [];
+            for (var i = 0; i < localStorage.length; i++) {
+              var k = localStorage.key(i);
+              if (k && (k.indexOf('firestore_clients_') === 0 || k.indexOf('__sak') === 0 || k.indexOf('firebase:firestore:') === 0)) {
+                keysToRemove.push(k);
+              }
+            }
+            for (var j = 0; j < keysToRemove.length; j++) {
+              try { localStorage.removeItem(keysToRemove[j]); } catch(e) {}
+            }
+            // Strip oversized embedded image data from retail_pos_products
+            var p = localStorage.getItem('retail_pos_products');
+            if (p && p.indexOf('data:') !== -1) {
+              try {
+                var arr = JSON.parse(p);
+                if (Array.isArray(arr)) {
+                  var clean = arr.map(function(item) {
+                    if (item && item.imageUrl && item.imageUrl.indexOf('data:') === 0) {
+                      item.imageUrl = '';
+                    }
+                    return item;
+                  });
+                  localStorage.setItem('retail_pos_products', JSON.stringify(clean));
+                }
+              } catch(e) {}
+            }
+          }
+        } catch(e) {}
+      })();
+    </script>
     <script type="module" src="/src/main.tsx"></script>
     <script>
       if ('serviceWorker' in navigator) {

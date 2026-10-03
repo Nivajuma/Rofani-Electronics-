@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { OnlineOrder, OfferDeal, StoreLocation, Customer, Product } from '../../types';
 import {
   ShoppingBag,
@@ -25,6 +25,7 @@ import {
   Share2
 } from 'lucide-react';
 import { WhatsAppMarketingHub } from './WhatsAppMarketingHub';
+import { safeGetJSON, safeSetJSON } from '../../utils/safeStorage';
 
 interface OnlineOrdersManagerViewProps {
   orders: OnlineOrder[];
@@ -53,12 +54,37 @@ export const OnlineOrdersManagerView: React.FC<OnlineOrdersManagerViewProps> = (
   onDeleteOffer,
   onUpdateStoreWhatsApp
 }) => {
-  const [activeTab, setActiveTab] = useState<'orders' | 'offers' | 'whatsapp'>('orders');
+  const VALID_ONLINE_TABS = ['orders', 'offers', 'whatsapp'] as const;
+  type OnlineTab = (typeof VALID_ONLINE_TABS)[number];
+
+  const [activeTab, setActiveTab] = useState<OnlineTab>(() =>
+    safeGetJSON<OnlineTab>('retail_pos_online_active_tab', 'orders', (val) => VALID_ONLINE_TABS.includes(val))
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_online_active_tab', activeTab);
+  }, [activeTab]);
 
   // Orders filters
-  const [orderStatusFilter, setOrderStatusFilter] = useState<string>('All');
-  const [orderStoreFilter, setOrderStoreFilter] = useState<string>('All');
-  const [orderSearch, setOrderSearch] = useState('');
+  const [orderStatusFilter, setOrderStatusFilter] = useState<string>(() =>
+    safeGetJSON<string>('retail_pos_order_status_filter', 'All', (val) => typeof val === 'string')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_order_status_filter', orderStatusFilter);
+  }, [orderStatusFilter]);
+
+  const [orderStoreFilter, setOrderStoreFilter] = useState<string>(() =>
+    safeGetJSON<string>('retail_pos_order_store_filter', 'All', (val) => typeof val === 'string')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_order_store_filter', orderStoreFilter);
+  }, [orderStoreFilter]);
+
+  const [orderSearch, setOrderSearch] = useState(() =>
+    safeGetJSON<string>('retail_pos_order_search', '', (val) => typeof val === 'string')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_order_search', orderSearch);
+  }, [orderSearch]);
 
   // New Offer Form modal
   const [showOfferModal, setShowOfferModal] = useState(false);

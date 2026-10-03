@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { UserCheck, Clock, CheckCircle2, AlertCircle, Calendar, Plus, User, FileSpreadsheet, Award, Percent, CreditCard, Users, BarChart3, ArrowUpRight } from 'lucide-react';
 import { AttendanceRecord, User as Employee, Transaction, StaffCommissionPayout, WorkerLoan, WorkerLoanRepayment } from '../../types';
 import { StaffCommissionView } from './StaffCommissionView';
 import { WorkerLoansView } from './WorkerLoansView';
 import { WorkerDirectoryView } from './WorkerDirectoryView';
 import { StaffPerformanceDashboard } from './StaffPerformanceDashboard';
+import { safeGetJSON, safeSetJSON } from '../../utils/safeStorage';
 
 interface AttendanceViewProps {
   attendanceRecords: AttendanceRecord[];
@@ -49,12 +50,38 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
   onDeleteUser,
   onOpenStaffModal,
 }) => {
-  const [activeTab, setActiveTab] = useState<'attendance' | 'performance' | 'workers' | 'commission' | 'loans'>('attendance');
-  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().slice(0, 10));
-  const [showClockModal, setShowClockModal] = useState(false);
+  const VALID_ATTENDANCE_TABS = ['attendance', 'performance', 'workers', 'commission', 'loans'] as const;
+  type AttendanceTab = (typeof VALID_ATTENDANCE_TABS)[number];
+
+  const [activeTab, setActiveTab] = useState<AttendanceTab>(() =>
+    safeGetJSON<AttendanceTab>('retail_pos_attendance_tab', 'attendance', (val) =>
+      VALID_ATTENDANCE_TABS.includes(val)
+    )
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_attendance_tab', activeTab);
+  }, [activeTab]);
+
+  const [selectedDate, setSelectedDate] = useState(() =>
+    safeGetJSON<string>('retail_pos_attendance_date', new Date().toISOString().slice(0, 10), (val) => typeof val === 'string')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_attendance_date', selectedDate);
+  }, [selectedDate]);
+  const [showClockModal, setShowClockModal] = useState<boolean>(() =>
+    safeGetJSON<boolean>('retail_pos_attendance_show_clock_modal', false, (val) => typeof val === 'boolean')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_attendance_show_clock_modal', showClockModal);
+  }, [showClockModal]);
 
   // New manual attendance entry state
-  const [selectedStaffId, setSelectedStaffId] = useState(allUsers[0]?.id || '');
+  const [selectedStaffId, setSelectedStaffId] = useState<string>(() =>
+    safeGetJSON<string>('retail_pos_attendance_staff_id', allUsers[0]?.id || '', (val) => typeof val === 'string')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_attendance_staff_id', selectedStaffId);
+  }, [selectedStaffId]);
   const [clockInTime, setClockInTime] = useState('08:00');
   const [attendanceStatus, setAttendanceStatus] = useState<AttendanceRecord['status']>('Present');
   const [attendanceNotes, setAttendanceNotes] = useState('');

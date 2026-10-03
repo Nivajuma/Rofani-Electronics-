@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { DollarSign, Plus, Calendar, Tag, CreditCard, Trash2, X, TrendingDown, RefreshCw, Clock, Repeat, Sparkles, AlertTriangle, CheckCircle2, ShieldAlert } from 'lucide-react';
 import { Expense, PaymentMethod, User, RecurringFrequency } from '../../types';
 import { detectDuplicateExpenses, deduplicateExpenses, processDueRecurringExpenses, computeNextDueDate } from '../../utils/deduplicate';
 import { hasWorkerPermission } from '../../utils/permissions';
+import { safeGetJSON, safeSetJSON } from '../../utils/safeStorage';
 
 interface ExpensesViewProps {
   expenses: Expense[];
@@ -21,21 +22,75 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
   onBatchUpdateExpenses,
   onOpenAuditLogs,
 }) => {
-  const [showModal, setShowModal] = useState(false);
-  const [filterCategory, setFilterCategory] = useState<string>('All');
-  const [filterRecurring, setFilterRecurring] = useState<'All' | 'Recurring' | 'One-Time'>('All');
+  const [showModal, setShowModal] = useState<boolean>(() =>
+    safeGetJSON<boolean>('retail_pos_expenses_show_modal', false, (val) => typeof val === 'boolean')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_expenses_show_modal', showModal);
+  }, [showModal]);
+
+  const [filterCategory, setFilterCategory] = useState<string>(() =>
+    safeGetJSON<string>('retail_pos_expenses_cat_filter', 'All', (val) => typeof val === 'string')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_expenses_cat_filter', filterCategory);
+  }, [filterCategory]);
+
+  const [filterRecurring, setFilterRecurring] = useState<'All' | 'Recurring' | 'One-Time'>(() =>
+    safeGetJSON<'All' | 'Recurring' | 'One-Time'>('retail_pos_expenses_rec_filter', 'All', (val) =>
+      ['All', 'Recurring', 'One-Time'].includes(val)
+    )
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_expenses_rec_filter', filterRecurring);
+  }, [filterRecurring]);
   const [actionToast, setActionToast] = useState<string | null>(null);
 
   // Auto Deduplicate Repeated Expenses Modal State
   const [showDeduplicateModal, setShowDeduplicateModal] = useState<boolean>(false);
 
   // Form state
-  const [category, setCategory] = useState<Expense['category']>('Utilities');
-  const [description, setDescription] = useState('');
-  const [amount, setAmount] = useState('');
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('cash');
-  const [receiptNo, setReceiptNo] = useState('');
-  const [recurringType, setRecurringType] = useState<RecurringFrequency>('One-Time');
+  const [category, setCategory] = useState<Expense['category']>(() =>
+    safeGetJSON<Expense['category']>('retail_pos_expenses_draft_cat', 'Utilities', (val) => typeof val === 'string')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_expenses_draft_cat', category);
+  }, [category]);
+
+  const [description, setDescription] = useState<string>(() =>
+    safeGetJSON<string>('retail_pos_expenses_draft_desc', '', (val) => typeof val === 'string')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_expenses_draft_desc', description);
+  }, [description]);
+
+  const [amount, setAmount] = useState<string>(() =>
+    safeGetJSON<string>('retail_pos_expenses_draft_amt', '', (val) => typeof val === 'string')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_expenses_draft_amt', amount);
+  }, [amount]);
+
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>(() =>
+    safeGetJSON<PaymentMethod>('retail_pos_expenses_draft_pm', 'cash', (val) => typeof val === 'string')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_expenses_draft_pm', paymentMethod);
+  }, [paymentMethod]);
+
+  const [receiptNo, setReceiptNo] = useState<string>(() =>
+    safeGetJSON<string>('retail_pos_expenses_draft_receipt', '', (val) => typeof val === 'string')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_expenses_draft_receipt', receiptNo);
+  }, [receiptNo]);
+
+  const [recurringType, setRecurringType] = useState<RecurringFrequency>(() =>
+    safeGetJSON<RecurringFrequency>('retail_pos_expenses_draft_rec', 'One-Time', (val) => typeof val === 'string')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_expenses_draft_rec', recurringType);
+  }, [recurringType]);
 
   const todayStr = new Date().toISOString().slice(0, 10);
 

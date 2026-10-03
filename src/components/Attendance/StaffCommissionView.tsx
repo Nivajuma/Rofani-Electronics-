@@ -1,4 +1,5 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
+import { safeGetJSON, safeSetJSON } from '../../utils/safeStorage';
 import {
   DollarSign,
   Award,
@@ -68,14 +69,56 @@ export const StaffCommissionView: React.FC<StaffCommissionViewProps> = ({
   onReattributeSale,
 }) => {
   // Active Navigation Sub-tab
-  const [subTab, setSubTab] = useState<'roster' | 'per_sale_log' | 'payout_history' | 'rules_simulator'>('roster');
+  const [subTab, setSubTab] = useState<'roster' | 'per_sale_log' | 'payout_history' | 'rules_simulator'>(() =>
+    safeGetJSON<'roster' | 'per_sale_log' | 'payout_history' | 'rules_simulator'>(
+      'retail_pos_comm_subtab',
+      'roster',
+      (val) => ['roster', 'per_sale_log', 'payout_history', 'rules_simulator'].includes(val)
+    )
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_comm_subtab', subTab);
+  }, [subTab]);
 
   // Timeframe and Filters
-  const [periodPreset, setPeriodPreset] = useState<'today' | 'yesterday' | 'week' | 'month' | 'custom'>('today');
-  const [customStartDate, setCustomStartDate] = useState(new Date().toISOString().slice(0, 10));
-  const [customEndDate, setCustomEndDate] = useState(new Date().toISOString().slice(0, 10));
-  const [filterEmployee, setFilterEmployee] = useState<string>('All');
-  const [saleSearchQuery, setSaleSearchQuery] = useState('');
+  const [periodPreset, setPeriodPreset] = useState<'today' | 'yesterday' | 'week' | 'month' | 'custom'>(() =>
+    safeGetJSON<'today' | 'yesterday' | 'week' | 'month' | 'custom'>(
+      'retail_pos_comm_period_preset',
+      'today',
+      (val) => ['today', 'yesterday', 'week', 'month', 'custom'].includes(val)
+    )
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_comm_period_preset', periodPreset);
+  }, [periodPreset]);
+
+  const [customStartDate, setCustomStartDate] = useState<string>(() =>
+    safeGetJSON<string>('retail_pos_comm_start_date', new Date().toISOString().slice(0, 10), (val) => typeof val === 'string')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_comm_start_date', customStartDate);
+  }, [customStartDate]);
+
+  const [customEndDate, setCustomEndDate] = useState<string>(() =>
+    safeGetJSON<string>('retail_pos_comm_end_date', new Date().toISOString().slice(0, 10), (val) => typeof val === 'string')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_comm_end_date', customEndDate);
+  }, [customEndDate]);
+
+  const [filterEmployee, setFilterEmployee] = useState<string>(() =>
+    safeGetJSON<string>('retail_pos_comm_filter_employee', 'All', (val) => typeof val === 'string')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_comm_filter_employee', filterEmployee);
+  }, [filterEmployee]);
+
+  const [saleSearchQuery, setSaleSearchQuery] = useState<string>(() =>
+    safeGetJSON<string>('retail_pos_comm_search', '', (val) => typeof val === 'string')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_comm_search', saleSearchQuery);
+  }, [saleSearchQuery]);
 
   // Modals State
   const [payoutModalItem, setPayoutModalItem] = useState<{

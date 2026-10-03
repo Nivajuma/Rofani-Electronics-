@@ -349,18 +349,50 @@ export default function App() {
   );
 
   const [showRoleSwitcher, setShowRoleSwitcher] = useState(false);
-  // If requirePinOnStartup is true, lock the terminal immediately on startup
+  // Restore terminal locked state or default to requirePinOnStartup
   const [isTerminalLocked, setIsTerminalLocked] = useState<boolean>(() =>
-    safeGetJSON('retail_pos_require_pin_startup', true)
+    safeGetJSON<boolean>('retail_pos_terminal_locked', safeGetJSON('retail_pos_require_pin_startup', true), (val) => typeof val === 'boolean')
   );
+
+  useEffect(() => {
+    safeSetJSON('retail_pos_terminal_locked', isTerminalLocked);
+  }, [isTerminalLocked]);
+
   // Target user when switching workers via PIN lock modal
   const [pinModalTargetUser, setPinModalTargetUser] = useState<User | null>(null);
   // Set of tabs temporarily authorized by supervisor PIN during active session
-  const [temporarilyUnlockedTabs, setTemporarilyUnlockedTabs] = useState<Set<TabKey>>(new Set());
-  const [showStaffModal, setShowStaffModal] = useState(false);
+  const [temporarilyUnlockedTabs, setTemporarilyUnlockedTabs] = useState<Set<TabKey>>(() => {
+    const saved = safeGetJSON<string[]>('retail_pos_unlocked_tabs', [], (val) => Array.isArray(val));
+    return new Set(saved as TabKey[]);
+  });
+
+  useEffect(() => {
+    safeSetJSON('retail_pos_unlocked_tabs', Array.from(temporarilyUnlockedTabs));
+  }, [temporarilyUnlockedTabs]);
+
+  const [showStaffModal, setShowStaffModal] = useState<boolean>(() =>
+    safeGetJSON<boolean>('retail_pos_show_staff_modal', false, (val) => typeof val === 'boolean')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_show_staff_modal', showStaffModal);
+  }, [showStaffModal]);
+
   const [showInstallModal, setShowInstallModal] = useState(false);
-  const [showCloudSyncModal, setShowCloudSyncModal] = useState(false);
-  const [showPrintBarcodesModal, setShowPrintBarcodesModal] = useState(false);
+
+  const [showCloudSyncModal, setShowCloudSyncModal] = useState<boolean>(() =>
+    safeGetJSON<boolean>('retail_pos_show_cloud_sync_modal', false, (val) => typeof val === 'boolean')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_show_cloud_sync_modal', showCloudSyncModal);
+  }, [showCloudSyncModal]);
+
+  const [showPrintBarcodesModal, setShowPrintBarcodesModal] = useState<boolean>(() =>
+    safeGetJSON<boolean>('retail_pos_show_print_modal', false, (val) => typeof val === 'boolean')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_show_print_modal', showPrintBarcodesModal);
+  }, [showPrintBarcodesModal]);
+
   const [cloudSyncStatus, setCloudSyncStatus] = useState<'synced' | 'syncing' | 'offline' | 'error' | 'quota_exceeded'>('syncing');
   const [isCloudQuotaExceeded, setIsCloudQuotaExceeded] = useState<boolean>(false);
   const [showQuotaBanner, setShowQuotaBanner] = useState<boolean>(true);
@@ -494,8 +526,19 @@ export default function App() {
 
   const [stockTransfers, setStockTransfers] = useState<StockTransferRecord[]>(() => safeGetJSON('retail_pos_stock_transfers', INITIAL_STOCK_TRANSFERS));
 
-  const [showStoreManagerModal, setShowStoreManagerModal] = useState(false);
-  const [showAiAssistantModal, setShowAiAssistantModal] = useState(false);
+  const [showStoreManagerModal, setShowStoreManagerModal] = useState<boolean>(() =>
+    safeGetJSON<boolean>('retail_pos_show_store_modal', false, (val) => typeof val === 'boolean')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_show_store_modal', showStoreManagerModal);
+  }, [showStoreManagerModal]);
+
+  const [showAiAssistantModal, setShowAiAssistantModal] = useState<boolean>(() =>
+    safeGetJSON<boolean>('retail_pos_show_ai_modal', false, (val) => typeof val === 'boolean')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_show_ai_modal', showAiAssistantModal);
+  }, [showAiAssistantModal]);
 
   // New Sale global trigger counter
   const [newSaleTrigger, setNewSaleTrigger] = useState(0);
@@ -512,8 +555,19 @@ export default function App() {
   }, [activeTab]);
 
   // Selected product for Restock & Sales History audit modal
-  const [selectedHistoryProduct, setSelectedHistoryProduct] = useState<Product | null>(null);
-  const [showHistoryModal, setShowHistoryModal] = useState<boolean>(false);
+  const [selectedHistoryProduct, setSelectedHistoryProduct] = useState<Product | null>(() =>
+    safeGetJSON<Product | null>('retail_pos_history_product', null, (val) => Boolean(val && val.id))
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_history_product', selectedHistoryProduct);
+  }, [selectedHistoryProduct]);
+
+  const [showHistoryModal, setShowHistoryModal] = useState<boolean>(() =>
+    safeGetJSON<boolean>('retail_pos_show_history_modal', false, (val) => typeof val === 'boolean')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_show_history_modal', showHistoryModal);
+  }, [showHistoryModal]);
 
   // Save changes to LocalStorage
   useEffect(() => {
@@ -521,9 +575,7 @@ export default function App() {
   }, [stores]);
 
   useEffect(() => {
-    try {
-      localStorage.setItem('retail_pos_active_store_id', activeStoreId);
-    } catch {}
+    safeSetJSON('retail_pos_active_store_id', activeStoreId);
   }, [activeStoreId]);
 
   useEffect(() => {

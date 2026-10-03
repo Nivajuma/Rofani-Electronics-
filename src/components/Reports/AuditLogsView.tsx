@@ -1,4 +1,5 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
+import { safeGetJSON, safeSetJSON } from '../../utils/safeStorage';
 import {
   ShieldAlert,
   ShieldCheck,
@@ -36,11 +37,42 @@ export const AuditLogsView: React.FC<AuditLogsViewProps> = ({
   initialCategory,
   initialRoleFilter,
 }) => {
-  const [searchTerm, setSearchTerm] = useState('');
-  const [selectedRole, setSelectedRole] = useState<string>(initialRoleFilter || 'All');
-  const [selectedCategory, setSelectedCategory] = useState<string>(initialCategory || 'All');
-  const [selectedWorker, setSelectedWorker] = useState<string>('All');
-  const [dateFilter, setDateFilter] = useState<'all' | 'today' | '7days' | '30days'>('all');
+  const [searchTerm, setSearchTerm] = useState<string>(() =>
+    safeGetJSON<string>('retail_pos_audit_search', '', (val) => typeof val === 'string')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_audit_search', searchTerm);
+  }, [searchTerm]);
+
+  const [selectedRole, setSelectedRole] = useState<string>(() =>
+    safeGetJSON<string>('retail_pos_audit_role', initialRoleFilter || 'All', (val) => typeof val === 'string')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_audit_role', selectedRole);
+  }, [selectedRole]);
+
+  const [selectedCategory, setSelectedCategory] = useState<string>(() =>
+    safeGetJSON<string>('retail_pos_audit_cat', initialCategory || 'All', (val) => typeof val === 'string')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_audit_cat', selectedCategory);
+  }, [selectedCategory]);
+
+  const [selectedWorker, setSelectedWorker] = useState<string>(() =>
+    safeGetJSON<string>('retail_pos_audit_worker', 'All', (val) => typeof val === 'string')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_audit_worker', selectedWorker);
+  }, [selectedWorker]);
+
+  const [dateFilter, setDateFilter] = useState<'all' | 'today' | '7days' | '30days'>(() =>
+    safeGetJSON<'all' | 'today' | '7days' | '30days'>('retail_pos_audit_date', 'all', (val) =>
+      ['all', 'today', '7days', '30days'].includes(val)
+    )
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_audit_date', dateFilter);
+  }, [dateFilter]);
   const [expandedLogId, setExpandedLogId] = useState<string | null>(null);
 
   // Extract unique roles that were actually used for authorization

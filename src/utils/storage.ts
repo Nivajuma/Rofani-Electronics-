@@ -36,85 +36,77 @@ export const saveProducts = (products: Product[]) => {
 };
 
 export const getStoredCategories = () => {
-  const data = localStorage.getItem(KEYS.CATEGORIES);
-  return data ? JSON.parse(data) : INITIAL_CATEGORIES;
+  return safeGetJSON(KEYS.CATEGORIES, INITIAL_CATEGORIES);
 };
 
 export const saveCategories = (categories: any[]) => {
-  localStorage.setItem(KEYS.CATEGORIES, JSON.stringify(categories));
+  safeSetJSON(KEYS.CATEGORIES, categories);
 };
 
 export const getStoredSuppliers = (): Supplier[] => {
-  const data = localStorage.getItem(KEYS.SUPPLIERS);
-  return data ? JSON.parse(data) : INITIAL_SUPPLIERS;
+  return safeGetJSON<Supplier[]>(KEYS.SUPPLIERS, INITIAL_SUPPLIERS);
 };
 
 export const saveSuppliers = (suppliers: Supplier[]) => {
-  localStorage.setItem(KEYS.SUPPLIERS, JSON.stringify(suppliers));
+  safeSetJSON(KEYS.SUPPLIERS, suppliers);
 };
 
 export const getStoredCustomers = (): Customer[] => {
-  const data = localStorage.getItem(KEYS.CUSTOMERS);
-  return data ? JSON.parse(data) : INITIAL_CUSTOMERS;
+  return safeGetJSON<Customer[]>(KEYS.CUSTOMERS, INITIAL_CUSTOMERS);
 };
 
 export const saveCustomers = (customers: Customer[]) => {
-  localStorage.setItem(KEYS.CUSTOMERS, JSON.stringify(customers));
+  safeSetJSON(KEYS.CUSTOMERS, customers);
 };
 
 export const getStoredExpenses = (): Expense[] => {
-  const data = localStorage.getItem(KEYS.EXPENSES);
-  return data ? JSON.parse(data) : INITIAL_EXPENSES;
+  return safeGetJSON<Expense[]>(KEYS.EXPENSES, INITIAL_EXPENSES);
 };
 
 export const saveExpenses = (expenses: Expense[]) => {
-  localStorage.setItem(KEYS.EXPENSES, JSON.stringify(expenses));
+  safeSetJSON(KEYS.EXPENSES, expenses);
 };
 
 export const getStoredAttendance = (): AttendanceRecord[] => {
-  const data = localStorage.getItem(KEYS.ATTENDANCE);
-  return data ? JSON.parse(data) : INITIAL_ATTENDANCE;
+  return safeGetJSON<AttendanceRecord[]>(KEYS.ATTENDANCE, INITIAL_ATTENDANCE);
 };
 
 export const saveAttendance = (records: AttendanceRecord[]) => {
-  localStorage.setItem(KEYS.ATTENDANCE, JSON.stringify(records));
+  safeSetJSON(KEYS.ATTENDANCE, records);
 };
 
 export const getStoredTransactions = (): Transaction[] => {
-  const data = localStorage.getItem(KEYS.TRANSACTIONS);
-  return data ? JSON.parse(data) : INITIAL_TRANSACTIONS;
+  return safeGetJSON<Transaction[]>(KEYS.TRANSACTIONS, INITIAL_TRANSACTIONS);
 };
 
 export const saveTransactions = (txs: Transaction[]) => {
-  localStorage.setItem(KEYS.TRANSACTIONS, JSON.stringify(txs));
+  safeSetJSON(KEYS.TRANSACTIONS, txs);
 };
 
 export const getStoredUsers = (): User[] => {
-  const data = localStorage.getItem(KEYS.USERS);
-  return data ? JSON.parse(data) : INITIAL_USERS;
+  return safeGetJSON<User[]>(KEYS.USERS, INITIAL_USERS);
 };
 
 export const saveUsers = (users: User[]) => {
-  localStorage.setItem(KEYS.USERS, JSON.stringify(users));
+  safeSetJSON(KEYS.USERS, users);
 };
 
 export const getCurrentUser = (): User => {
-  const data = localStorage.getItem(KEYS.CURRENT_USER);
-  return data ? JSON.parse(data) : INITIAL_USERS[0]; // Admin by default
+  return safeGetJSON<User>(KEYS.CURRENT_USER, INITIAL_USERS[0]);
 };
 
 export const setCurrentUser = (user: User) => {
-  localStorage.setItem(KEYS.CURRENT_USER, JSON.stringify(user));
+  safeSetJSON(KEYS.CURRENT_USER, user);
 };
 
 export const resetToSampleData = () => {
-  localStorage.setItem(KEYS.PRODUCTS, JSON.stringify(INITIAL_PRODUCTS));
-  localStorage.setItem(KEYS.CATEGORIES, JSON.stringify(INITIAL_CATEGORIES));
-  localStorage.setItem(KEYS.SUPPLIERS, JSON.stringify(INITIAL_SUPPLIERS));
-  localStorage.setItem(KEYS.CUSTOMERS, JSON.stringify(INITIAL_CUSTOMERS));
-  localStorage.setItem(KEYS.EXPENSES, JSON.stringify(INITIAL_EXPENSES));
-  localStorage.setItem(KEYS.ATTENDANCE, JSON.stringify(INITIAL_ATTENDANCE));
-  localStorage.setItem(KEYS.TRANSACTIONS, JSON.stringify(INITIAL_TRANSACTIONS));
-  localStorage.setItem(KEYS.USERS, JSON.stringify(INITIAL_USERS));
-  localStorage.setItem(KEYS.CURRENT_USER, JSON.stringify(INITIAL_USERS[0]));
+  saveProducts(INITIAL_PRODUCTS);
+  safeSetJSON(KEYS.CATEGORIES, INITIAL_CATEGORIES);
+  safeSetJSON(KEYS.SUPPLIERS, INITIAL_SUPPLIERS);
+  safeSetJSON(KEYS.CUSTOMERS, INITIAL_CUSTOMERS);
+  safeSetJSON(KEYS.EXPENSES, INITIAL_EXPENSES);
+  safeSetJSON(KEYS.ATTENDANCE, INITIAL_ATTENDANCE);
+  safeSetJSON(KEYS.TRANSACTIONS, INITIAL_TRANSACTIONS);
+  safeSetJSON(KEYS.USERS, INITIAL_USERS);
+  safeSetJSON(KEYS.CURRENT_USER, INITIAL_USERS[0]);
 };

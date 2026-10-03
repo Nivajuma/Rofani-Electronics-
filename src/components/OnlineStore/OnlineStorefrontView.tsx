@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Product, OfferDeal, OnlineOrder, StoreLocation, CartItem } from '../../types';
 import {
   ShoppingBag,
@@ -24,6 +24,7 @@ import {
   ShoppingBasket,
   MessageSquare
 } from 'lucide-react';
+import { safeGetJSON, safeSetJSON } from '../../utils/safeStorage';
 
 interface OnlineStorefrontViewProps {
   products: Product[];
@@ -41,25 +42,97 @@ export const OnlineStorefrontView: React.FC<OnlineStorefrontViewProps> = ({
   activeStore
 }) => {
   // Shopping Cart state
-  const [cart, setCart] = useState<CartItem[]>([]);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState<string>('All');
+  const [cart, setCart] = useState<CartItem[]>(() =>
+    safeGetJSON<CartItem[]>('retail_pos_online_cart', [], (val) => Array.isArray(val))
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_online_cart', cart);
+  }, [cart]);
+
+  const [searchQuery, setSearchQuery] = useState(() =>
+    safeGetJSON<string>('retail_pos_online_search', '', (val) => typeof val === 'string')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_online_search', searchQuery);
+  }, [searchQuery]);
+
+  const [selectedCategory, setSelectedCategory] = useState<string>(() =>
+    safeGetJSON<string>('retail_pos_online_category', 'All', (val) => typeof val === 'string')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_online_category', selectedCategory);
+  }, [selectedCategory]);
 
   // Checkout modal & Promo state
-  const [showCheckoutModal, setShowCheckoutModal] = useState(false);
+  const [showCheckoutModal, setShowCheckoutModal] = useState<boolean>(() =>
+    safeGetJSON<boolean>('retail_pos_online_show_checkout', false, (val) => typeof val === 'boolean')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_online_show_checkout', showCheckoutModal);
+  }, [showCheckoutModal]);
   const [promoCodeInput, setPromoCodeInput] = useState('');
   const [appliedOffer, setAppliedOffer] = useState<OfferDeal | null>(null);
   const [promoError, setPromoError] = useState('');
 
   // Checkout Form fields
-  const [customerName, setCustomerName] = useState('');
-  const [customerPhone, setCustomerPhone] = useState('');
-  const [customerEmail, setCustomerEmail] = useState('');
-  const [deliveryType, setDeliveryType] = useState<'Delivery' | 'Store Pickup'>('Delivery');
-  const [pickupStoreId, setPickupStoreId] = useState<string>(activeStore.id);
-  const [deliveryAddress, setDeliveryAddress] = useState('');
-  const [paymentMethod, setPaymentMethod] = useState<'mpesa' | 'card' | 'cash_on_delivery'>('mpesa');
-  const [orderNotes, setOrderNotes] = useState('');
+  const [customerName, setCustomerName] = useState(() =>
+    safeGetJSON<string>('retail_pos_online_cust_name', '', (val) => typeof val === 'string')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_online_cust_name', customerName);
+  }, [customerName]);
+
+  const [customerPhone, setCustomerPhone] = useState(() =>
+    safeGetJSON<string>('retail_pos_online_cust_phone', '', (val) => typeof val === 'string')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_online_cust_phone', customerPhone);
+  }, [customerPhone]);
+
+  const [customerEmail, setCustomerEmail] = useState(() =>
+    safeGetJSON<string>('retail_pos_online_cust_email', '', (val) => typeof val === 'string')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_online_cust_email', customerEmail);
+  }, [customerEmail]);
+
+  const [deliveryType, setDeliveryType] = useState<'Delivery' | 'Store Pickup'>(() =>
+    safeGetJSON<'Delivery' | 'Store Pickup'>('retail_pos_online_delivery_type', 'Delivery', (val) =>
+      val === 'Delivery' || val === 'Store Pickup'
+    )
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_online_delivery_type', deliveryType);
+  }, [deliveryType]);
+
+  const [pickupStoreId, setPickupStoreId] = useState<string>(() =>
+    safeGetJSON<string>('retail_pos_online_pickup_store', activeStore.id, (val) => typeof val === 'string')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_online_pickup_store', pickupStoreId);
+  }, [pickupStoreId]);
+
+  const [deliveryAddress, setDeliveryAddress] = useState(() =>
+    safeGetJSON<string>('retail_pos_online_delivery_addr', '', (val) => typeof val === 'string')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_online_delivery_addr', deliveryAddress);
+  }, [deliveryAddress]);
+  const [paymentMethod, setPaymentMethod] = useState<'mpesa' | 'card' | 'cash_on_delivery'>(() =>
+    safeGetJSON<'mpesa' | 'card' | 'cash_on_delivery'>('retail_pos_online_payment_method', 'mpesa', (val) =>
+      ['mpesa', 'card', 'cash_on_delivery'].includes(val)
+    )
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_online_payment_method', paymentMethod);
+  }, [paymentMethod]);
+
+  const [orderNotes, setOrderNotes] = useState<string>(() =>
+    safeGetJSON<string>('retail_pos_online_notes', '', (val) => typeof val === 'string')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_online_notes', orderNotes);
+  }, [orderNotes]);
 
   // Order Placement Success state
   const [createdOrder, setCreatedOrder] = useState<OnlineOrder | null>(null);

@@ -77,7 +77,8 @@ export const PhysicalStockCountView: React.FC<PhysicalStockCountViewProps> = ({
       }));
       return;
     }
-    const qty = parseInt(val, 10);
+    const cleaned = val.replace(/^0+(?=\d)/, '');
+    const qty = parseInt(cleaned, 10);
     setCounts((prev) => ({
       ...prev,
       [productId]: isNaN(qty) ? null : Math.max(0, qty)

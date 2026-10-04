@@ -101,28 +101,101 @@ export const generateAutoBarcode = (): string => {
 };
 
 /**
- * Render a barcode onto an HTML SVG or Canvas element or return base64 Data URL
+ * Render a barcode onto an HTML SVG (crisp vector) or Canvas element and return Data URL.
+ * Produces 100% sharp vector SVG with #000000 on #FFFFFF, quiet zones (>=10px),
+ * and optimized bar proportions for camera and hardware laser scanners.
  */
-export const generateBarcodeDataUrl = (barcodeValue: string, text?: string): string => {
-  try {
-    const canvas = document.createElement('canvas');
-    JsBarcode(canvas, barcodeValue, {
-      format: 'CODE128',
-      lineColor: '#0f172a',
-      width: 2,
-      height: 60,
-      displayValue: true,
-      text: text || barcodeValue,
-      fontSize: 14,
-      fontOptions: 'bold',
-      margin: 10,
-      background: '#ffffff'
-    });
-    return canvas.toDataURL('image/png');
-  } catch (err) {
-    console.error('Failed to generate barcode:', err);
-    return '';
+export const generateBarcodeDataUrl = (
+  barcodeValue: string,
+  text?: string,
+  options?: {
+    height?: number;
+    quietZone?: number;
+    fontSize?: number;
   }
+): string => {
+  if (!barcodeValue) return '';
+
+  const quietZone = Math.max(10, options?.quietZone ?? 12); // At least 10px quiet zone on both sides
+  const height = options?.height ?? 58; // Increased bar height relative to sticker height
+  const fontSize = options?.fontSize ?? 8.5; // Compact font size to maximize vertical bar visibility
+  const displayText = text !== undefined ? text : barcodeValue;
+
+  // 1. Try vector SVG first: infinite DPI, mathematically crisp edges, zero blurring on any printer
+  if (typeof document !== 'undefined' && typeof XMLSerializer !== 'undefined') {
+    try {
+      const svgNode = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      JsBarcode(svgNode, barcodeValue, {
+        format: 'CODE128',
+        lineColor: '#000000',
+        background: '#FFFFFF',
+        width: 2,
+        height,
+        displayValue: true,
+        text: displayText,
+        fontSize,
+        font: 'monospace',
+        fontOptions: 'bold',
+        textMargin: 1,
+        margin: 0,
+        marginLeft: quietZone,
+        marginRight: quietZone,
+        marginTop: 2,
+        marginBottom: 2,
+      });
+
+      svgNode.setAttribute('preserveAspectRatio', 'none');
+      svgNode.setAttribute('shape-rendering', 'crispEdges');
+      // Ensure all child rects inside the SVG also have crispEdges
+      const rects = svgNode.querySelectorAll('rect');
+      rects.forEach((r) => r.setAttribute('shape-rendering', 'crispEdges'));
+
+      const serializer = new XMLSerializer();
+      const svgString = serializer.serializeToString(svgNode);
+      if (svgString && svgString.includes('<svg')) {
+        return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgString);
+      }
+    } catch {
+      // Fallback to high-DPI canvas
+    }
+  }
+
+  // 2. High-DPI Canvas fallback with smoothing disabled for razor sharp bars
+  if (typeof document !== 'undefined') {
+    try {
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.imageSmoothingEnabled = false;
+        (ctx as any).webkitImageSmoothingEnabled = false;
+        (ctx as any).mozImageSmoothingEnabled = false;
+        (ctx as any).msImageSmoothingEnabled = false;
+      }
+      JsBarcode(canvas, barcodeValue, {
+        format: 'CODE128',
+        lineColor: '#000000',
+        background: '#FFFFFF',
+        width: 2,
+        height,
+        displayValue: true,
+        text: displayText,
+        fontSize,
+        font: 'monospace',
+        fontOptions: 'bold',
+        textMargin: 1,
+        margin: 0,
+        marginLeft: quietZone,
+        marginRight: quietZone,
+        marginTop: 2,
+        marginBottom: 2,
+      });
+      return canvas.toDataURL('image/png');
+    } catch (canvasErr) {
+      console.error('Failed to generate barcode canvas:', canvasErr);
+    }
+  }
+
+  return '';
 };
 
 /**
@@ -136,23 +209,25 @@ export const printBarcodeLabels = (
   includePrice: boolean = false
 ) => {
   const numPrice = typeof price === 'number' ? price : (parseFloat(String(price)) || 0);
-  const dataUrl = generateBarcodeDataUrl(barcode, barcode);
+  const dataUrl = generateBarcodeDataUrl(barcode, barcode, { height: 56, quietZone: 12, fontSize: 8.5 });
   const printWindow = window.open('', '_blank');
   if (!printWindow) return;
 
   let labelsHtml = '';
   for (let i = 0; i < count; i++) {
     labelsHtml += `
-      <div style="border: 1px dashed #cbd5e1; padding: 8px 10px; border-radius: 6px; text-align: center; width: 180px; box-sizing: border-box; background: #ffffff; page-break-inside: avoid;">
-        <div style="font-size: 12px; font-weight: 800; font-family: sans-serif; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #0f172a; margin-bottom: 4px; letter-spacing: -0.2px;">
+      <div style="border: 1px dashed #cbd5e1; padding: 4px 6px; border-radius: 4px; text-align: center; width: 180px; box-sizing: border-box; background: #ffffff; page-break-inside: avoid; display: flex; flex-direction: column; justify-content: space-between; align-items: center; min-height: 80px;">
+        <div style="font-size: clamp(8px, 2.2vw, 11px); font-weight: 800; font-family: sans-serif; white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; color: #000000; line-height: 1.1; word-break: break-word; text-align: center; width: 100%; margin-bottom: 2px;">
           ${productName}
         </div>
         ${includePrice ? `
-        <div style="font-size: 13px; font-weight: 800; color: #1e293b; font-family: sans-serif; margin: 2px 0;">
+        <div style="font-size: 11px; font-weight: 800; color: #0284c7; font-family: sans-serif; margin: 1px 0; line-height: 1;">
           KSh ${Math.round(numPrice).toLocaleString()}
         </div>
         ` : ''}
-        <img src="${dataUrl}" style="max-width: 100%; height: 48px; display: block; margin: 0 auto;" />
+        <div style="width: 100%; flex: 1 1 auto; display: flex; align-items: center; justify-content: center; overflow: hidden; min-height: 0;">
+          <img src="${dataUrl}" style="max-width: 100%; width: 100%; height: auto; max-height: 48px; display: block; margin: 0 auto; object-fit: contain; image-rendering: -webkit-optimize-contrast; image-rendering: crisp-edges; image-rendering: pixelated;" alt="${barcode}" />
+        </div>
       </div>
     `;
   }
@@ -163,18 +238,19 @@ export const printBarcodeLabels = (
       <head>
         <title>Print Barcode Labels - ${productName}</title>
         <style>
-          body { font-family: sans-serif; margin: 20px; background: #fff; }
+          * { box-sizing: border-box; margin: 0; padding: 0; }
+          body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; margin: 20px; background: #fff; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
           .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; }
           @media print {
-            body { margin: 0; }
-            .no-print { display: none; }
+            body { margin: 0; background: transparent; }
+            .no-print { display: none !important; }
           }
         </style>
       </head>
       <body>
         <div class="no-print" style="margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center;">
           <div>
-            <h2 style="margin: 0; font-size: 18px; color: #0f172a;">Barcode Label Sheet (${count} labels)</h2>
+            <h2 style="margin: 0; font-size: 18px; color: #000000;">Barcode Label Sheet (${count} labels)</h2>
             <p style="margin: 4px 0 0 0; color: #64748b; font-size: 12px;">Format: <strong>${includePrice ? `Item Name + Price (KSh ${Math.round(numPrice).toLocaleString()}) + Barcode` : 'Only Item Name + Barcode'}</strong></p>
           </div>
           <button onclick="window.print()" style="padding: 10px 20px; background: #0284c7; color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer;">Print Labels</button>
@@ -208,21 +284,24 @@ export const printBatchBarcodes = (
   let labelsHtml = '';
   let totalLabels = 0;
 
-  // Font size styles based on preference and label height
-  const nameFontSize =
+  // Dynamic font sizing for labels
+  const nameClamp =
     fontSize === 'small' || preset.heightMm < 20
-      ? '9px'
+      ? 'clamp(7.5px, 1.8vw, 9.5px)'
       : fontSize === 'large'
-      ? '13px'
-      : '11px';
+      ? 'clamp(9px, 2.5vw, 12.5px)'
+      : 'clamp(8px, 2.2vw, 11px)';
 
-  const barcodeImgHeight =
-    preset.heightMm <= 18 ? '26px' : preset.heightMm <= 25 ? '34px' : '44px';
+  const barHeight = preset.heightMm <= 18 ? 44 : preset.heightMm <= 26 ? 56 : 64;
 
   items.forEach((item) => {
     if (!item.barcode) return;
     const count = item.count && item.count > 0 ? item.count : 1;
-    const dataUrl = generateBarcodeDataUrl(item.barcode, item.barcode);
+    const dataUrl = generateBarcodeDataUrl(item.barcode, item.barcode, {
+      height: barHeight,
+      quietZone: 12,
+      fontSize: 8.5,
+    });
 
     for (let i = 0; i < count; i++) {
       totalLabels++;
@@ -259,7 +338,7 @@ export const printBatchBarcodes = (
           body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
             background: #f8fafc;
-            color: #0f172a;
+            color: #000000;
             -webkit-print-color-adjust: exact;
             print-color-adjust: exact;
           }
@@ -328,12 +407,17 @@ export const printBatchBarcodes = (
             align-items: center;
             overflow: hidden;
             page-break-inside: avoid;
+            box-sizing: border-box;
           }
 
           .label-header {
             width: 100%;
             overflow: hidden;
             line-height: 1.1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            flex-shrink: 0;
           }
 
           .store-tag {
@@ -344,17 +428,23 @@ export const printBatchBarcodes = (
             letter-spacing: 0.5px;
             display: block;
             margin-bottom: 1px;
+            line-height: 1;
           }
 
           .product-name {
-            font-size: ${nameFontSize};
+            font-size: ${nameClamp};
             font-weight: 800;
-            color: #0f172a;
-            white-space: nowrap;
+            color: #000000;
+            white-space: normal;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
             overflow: hidden;
-            text-overflow: ellipsis;
+            line-height: 1.1;
+            word-break: break-word;
             width: 100%;
             letter-spacing: -0.2px;
+            text-align: center;
           }
 
           .product-price {
@@ -363,21 +453,30 @@ export const printBatchBarcodes = (
             color: #0284c7;
             margin: 0.5mm 0;
             line-height: 1;
+            flex-shrink: 0;
           }
 
           .barcode-wrapper {
             width: 100%;
+            flex: 1 1 auto;
             display: flex;
             justify-content: center;
             align-items: center;
             overflow: hidden;
+            min-height: 0;
+            margin-top: 1px;
           }
 
           .barcode-img {
-            max-width: 98%;
-            height: ${barcodeImgHeight};
+            width: 100%;
+            max-width: 100%;
+            height: 100%;
+            max-height: ${preset.heightMm <= 18 ? '26px' : preset.heightMm <= 26 ? '38px' : '48px'};
             display: block;
             object-fit: contain;
+            image-rendering: -webkit-optimize-contrast;
+            image-rendering: crisp-edges;
+            image-rendering: pixelated;
           }
 
           @media print {

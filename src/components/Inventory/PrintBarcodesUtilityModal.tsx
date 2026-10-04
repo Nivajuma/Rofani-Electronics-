@@ -348,7 +348,7 @@ export const PrintBarcodesUtilityModal: React.FC<PrintBarcodesUtilityModalProps>
 
   const totalLabelsCount = useMemo(() => {
     return selectedItemsList.reduce((sum, item) => {
-      const count = labelCounts[item.barcode] ?? 1;
+      const count = Math.max(1, parseInt(String(labelCounts[item.barcode] || 1), 10) || 1);
       return sum + count;
     }, 0);
   }, [selectedItemsList, labelCounts]);
@@ -429,8 +429,12 @@ export const PrintBarcodesUtilityModal: React.FC<PrintBarcodesUtilityModalProps>
   // Real-time Barcode Image Data URL for single label preview
   const previewBarcodeUrl = useMemo(() => {
     if (!activePreviewItem?.barcode) return '';
-    return generateBarcodeDataUrl(activePreviewItem.barcode, activePreviewItem.barcode);
-  }, [activePreviewItem]);
+    return generateBarcodeDataUrl(activePreviewItem.barcode, activePreviewItem.barcode, {
+      height: activePreset.heightMm <= 18 ? 44 : activePreset.heightMm <= 26 ? 56 : 64,
+      quietZone: 12,
+      fontSize: 8.5,
+    });
+  }, [activePreviewItem, activePreset.heightMm]);
 
   // Sheets count and capacity calculations
   const totalSheetsNeeded = useMemo(() => {
@@ -453,7 +457,7 @@ export const PrintBarcodesUtilityModal: React.FC<PrintBarcodesUtilityModalProps>
     const list: PrintableItem[] = [];
     if (selectedItemsList.length > 0) {
       selectedItemsList.forEach((item) => {
-        const count = labelCounts[item.barcode] ?? 1;
+        const count = Math.max(1, parseInt(String(labelCounts[item.barcode] || 1), 10) || 1);
         for (let i = 0; i < count; i++) {
           list.push(item);
         }
@@ -481,16 +485,25 @@ export const PrintBarcodesUtilityModal: React.FC<PrintBarcodesUtilityModalProps>
   // Barcode image URLs for the current sheet preview items
   const sheetBarcodeUrls = useMemo(() => {
     const map: Record<string, string> = {};
+    const barHeight = activePreset.heightMm <= 18 ? 44 : activePreset.heightMm <= 26 ? 56 : 64;
     if (activePreviewItem?.barcode) {
-      map[activePreviewItem.barcode] = generateBarcodeDataUrl(activePreviewItem.barcode, activePreviewItem.barcode);
+      map[activePreviewItem.barcode] = generateBarcodeDataUrl(activePreviewItem.barcode, activePreviewItem.barcode, {
+        height: barHeight,
+        quietZone: 12,
+        fontSize: 8.5,
+      });
     }
     currentSheetPageItems.forEach((item) => {
       if (item.barcode && !map[item.barcode]) {
-        map[item.barcode] = generateBarcodeDataUrl(item.barcode, item.barcode);
+        map[item.barcode] = generateBarcodeDataUrl(item.barcode, item.barcode, {
+          height: barHeight,
+          quietZone: 12,
+          fontSize: 8.5,
+        });
       }
     });
     return map;
-  }, [activePreviewItem, currentSheetPageItems]);
+  }, [activePreviewItem, currentSheetPageItems, activePreset.heightMm]);
 
   // Cycle previewed item
   const handleCyclePreview = (direction: 'next' | 'prev') => {
@@ -525,7 +538,7 @@ export const PrintBarcodesUtilityModal: React.FC<PrintBarcodesUtilityModalProps>
         name: item.name,
         price: Math.round(Number(effectivePrice || 0)),
         barcode: item.barcode,
-        count: labelCounts[item.barcode] ?? 1,
+        count: Math.max(1, parseInt(String(labelCounts[item.barcode] || 1), 10) || 1),
       };
     });
 
@@ -1169,9 +1182,10 @@ export const PrintBarcodesUtilityModal: React.FC<PrintBarcodesUtilityModalProps>
                                 }
                               }}
                               style={{
-                                minHeight: activePreset.heightMm <= 18 ? '44px' : '58px',
+                                minHeight: activePreset.heightMm <= 18 ? '46px' : '60px',
+                                boxSizing: 'border-box',
                               }}
-                              className={`p-1 rounded-[3px] border flex flex-col justify-between items-center text-center transition ${
+                              className={`p-1 rounded-[3px] border flex flex-col justify-between items-center text-center transition overflow-hidden ${
                                 isFilled
                                   ? 'border-slate-300 bg-white hover:border-sky-500 hover:shadow-md cursor-pointer'
                                   : 'border-dashed border-slate-200 bg-slate-50/50 opacity-50'
@@ -1180,35 +1194,56 @@ export const PrintBarcodesUtilityModal: React.FC<PrintBarcodesUtilityModalProps>
                             >
                               {isFilled ? (
                                 <>
-                                  {showStoreNameOnLabel && (
-                                    <div className="text-[6px] font-black uppercase text-slate-400 tracking-wider leading-none">
-                                      {storeName}
-                                    </div>
-                                  )}
-                                  <div className="text-[8px] sm:text-[9px] font-black text-slate-900 truncate w-full leading-tight px-0.5">
-                                    {item.name}
-                                  </div>
-                                  {includePrice && (
-                                    <div className="text-[7px] font-black text-sky-700 leading-none">
-                                      KSh {Math.round(Number((customLabelPrices[item.barcode] !== null && customLabelPrices[item.barcode] !== undefined ? customLabelPrices[item.barcode] : item.price) || 0)).toLocaleString()}
-                                    </div>
-                                  )}
-                                  {barcodeUrl ? (
-                                    <img
-                                      src={barcodeUrl}
-                                      alt={item.barcode}
+                                  <div className="w-full flex-shrink-0 flex flex-col items-center overflow-hidden">
+                                    {showStoreNameOnLabel && (
+                                      <div className="text-[6px] font-black uppercase text-slate-500 tracking-wider leading-none mb-0.5">
+                                        {storeName}
+                                      </div>
+                                    )}
+                                    <div
                                       style={{
-                                        height: activePreset.heightMm <= 18 ? '18px' : '24px',
-                                        maxWidth: '95%',
-                                        objectFit: 'contain',
+                                        fontSize: 'clamp(8px, 2.2vw, 11px)',
+                                        lineHeight: '1.1',
+                                        display: '-webkit-box',
+                                        WebkitLineClamp: 2,
+                                        WebkitBoxOrient: 'vertical',
+                                        overflow: 'hidden',
+                                        wordBreak: 'break-word',
+                                        whiteSpace: 'normal',
                                       }}
-                                      className="block"
-                                    />
-                                  ) : (
-                                    <div className="text-[7px] text-slate-400 font-mono">
-                                      {item.barcode}
+                                      className="font-black text-slate-950 text-center w-full px-0.5 tracking-tight"
+                                      title={item.name}
+                                    >
+                                      {item.name}
                                     </div>
-                                  )}
+                                    {includePrice && (
+                                      <div className="text-[7.5px] font-black text-sky-700 leading-none mt-0.5">
+                                        KSh {Math.round(Number((customLabelPrices[item.barcode] !== null && customLabelPrices[item.barcode] !== undefined ? customLabelPrices[item.barcode] : item.price) || 0)).toLocaleString()}
+                                      </div>
+                                    )}
+                                  </div>
+
+                                  <div className="w-full flex-1 flex items-center justify-center overflow-hidden min-h-0 py-0.5">
+                                    {barcodeUrl ? (
+                                      <img
+                                        src={barcodeUrl}
+                                        alt={item.barcode}
+                                        style={{
+                                          height: '100%',
+                                          maxHeight: activePreset.heightMm <= 18 ? '22px' : activePreset.heightMm <= 26 ? '32px' : '42px',
+                                          maxWidth: '98%',
+                                          width: '100%',
+                                          objectFit: 'contain',
+                                          imageRendering: 'pixelated',
+                                        }}
+                                        className="block"
+                                      />
+                                    ) : (
+                                      <div className="text-[7px] text-slate-400 font-mono">
+                                        {item.barcode}
+                                      </div>
+                                    )}
+                                  </div>
                                 </>
                               ) : (
                                 <div className="h-full flex items-center justify-center text-[7px] text-slate-300 font-mono">
@@ -1308,28 +1343,36 @@ export const PrintBarcodesUtilityModal: React.FC<PrintBarcodesUtilityModalProps>
                           style={{
                             width: '100%',
                             maxWidth: activePreset.category === 'thermal_roll' ? '280px' : '320px',
-                            minHeight: activePreset.heightMm <= 18 ? '68px' : '86px',
+                            minHeight: activePreset.heightMm <= 18 ? '72px' : '92px',
+                            boxSizing: 'border-box',
                           }}
-                          className="bg-white text-slate-950 rounded-lg p-2 shadow-2xl border border-slate-300 flex flex-col justify-between items-center transition-all duration-150 transform hover:scale-[1.02]"
+                          className="bg-white text-slate-950 rounded-lg p-2.5 shadow-2xl border border-slate-300 flex flex-col justify-between items-center transition-all duration-150 transform hover:scale-[1.02] overflow-hidden"
                         >
                           {/* Optional Store Brand Header */}
                           {showStoreNameOnLabel && (
-                            <div className="text-[8px] font-black uppercase text-slate-500 tracking-wider mb-0.5 leading-none">
+                            <div className="text-[8px] font-black uppercase text-slate-500 tracking-wider mb-0.5 leading-none flex-shrink-0">
                               {storeName}
                             </div>
                           )}
 
-                          {/* Product Name (Bold & Crisp) */}
+                          {/* Product Name (Bold & Crisp with multi-line wrap and dynamic sizing) */}
                           <div
                             style={{
                               fontSize:
                                 labelFontSize === 'small' || activePreset.heightMm < 20
-                                  ? '11px'
+                                  ? 'clamp(8px, 2.2vw, 10px)'
                                   : labelFontSize === 'large'
-                                  ? '14px'
-                                  : '12px',
+                                  ? 'clamp(10px, 2.8vw, 13px)'
+                                  : 'clamp(8px, 2.2vw, 11px)',
+                              lineHeight: '1.1',
+                              display: '-webkit-box',
+                              WebkitLineClamp: 2,
+                              WebkitBoxOrient: 'vertical',
+                              overflow: 'hidden',
+                              wordBreak: 'break-word',
+                              whiteSpace: 'normal',
                             }}
-                            className="font-black text-slate-950 text-center w-full truncate leading-tight tracking-tight px-1"
+                            className="font-black text-slate-950 text-center w-full leading-tight tracking-tight px-1 flex-shrink-0"
                             title={activePreviewItem?.name || 'Product Name'}
                           >
                             {activePreviewItem?.name || 'Sample Product Name'}
@@ -1337,7 +1380,7 @@ export const PrintBarcodesUtilityModal: React.FC<PrintBarcodesUtilityModalProps>
 
                           {/* Optional Selling Price */}
                           {includePrice && (
-                            <div className="text-[11px] font-black text-sky-700 text-center font-mono my-0.5 leading-none">
+                            <div className="text-[11px] font-black text-sky-700 text-center font-mono my-0.5 leading-none flex-shrink-0">
                               KSh {Math.round(Number(
                                 (activePreviewItem && (customLabelPrices[activePreviewItem.barcode] !== null && customLabelPrices[activePreviewItem.barcode] !== undefined)
                                   ? customLabelPrices[activePreviewItem.barcode]
@@ -1348,14 +1391,17 @@ export const PrintBarcodesUtilityModal: React.FC<PrintBarcodesUtilityModalProps>
 
                           {/* Barcode Graphic */}
                           {previewBarcodeUrl ? (
-                            <div className="w-full flex flex-col items-center justify-center my-0.5">
+                            <div className="w-full flex-1 flex flex-col items-center justify-center my-0.5 overflow-hidden min-h-0">
                               <img
                                 src={previewBarcodeUrl}
                                 alt={activePreviewItem?.barcode || 'Barcode'}
                                 style={{
-                                  height: activePreset.heightMm <= 18 ? '28px' : '38px',
-                                  maxWidth: '100%',
+                                  height: '100%',
+                                  maxHeight: activePreset.heightMm <= 18 ? '36px' : activePreset.heightMm <= 26 ? '48px' : '56px',
+                                  maxWidth: '98%',
+                                  width: '100%',
                                   objectFit: 'contain',
+                                  imageRendering: 'pixelated',
                                 }}
                                 className="block"
                               />
@@ -1585,29 +1631,34 @@ export const PrintBarcodesUtilityModal: React.FC<PrintBarcodesUtilityModalProps>
                       toggleItemSelection(item.barcode);
                       setPreviewItemId(item.barcode);
                     }}
-                    className={`p-2.5 sm:p-3.5 rounded-xl sm:rounded-2xl border transition-all cursor-pointer flex items-center justify-between gap-2.5 sm:gap-4 select-none shadow-sm ${
+                    style={{ boxSizing: 'border-box' }}
+                    className={`p-2.5 sm:p-3.5 rounded-xl sm:rounded-2xl border-2 transition-all cursor-pointer flex items-center justify-between gap-2.5 sm:gap-4 select-none shadow-sm box-border outline-none relative overflow-hidden ${
                       isSelected
-                        ? 'bg-sky-950/70 border-sky-400 shadow-md shadow-sky-950/60 ring-2 ring-sky-500/50'
+                        ? 'bg-sky-950/70 border-sky-400 shadow-md shadow-sky-950/40 ring-1 ring-inset ring-sky-400/50'
                         : 'bg-slate-800/80 border-slate-700/70 hover:border-slate-600 hover:bg-slate-800'
                     }`}
                   >
-                    {/* Left: Large Checkbox Tap Zone + Product Info */}
+                    {/* Left: Compact 32px Checkbox + Product Info */}
                     <div className="flex items-center gap-2.5 sm:gap-3.5 min-w-0 flex-1">
-                      {/* Generous touch target for checkbox */}
+                      {/* Compact 32x32px touch target for checkbox */}
                       <div
-                        className={`w-8 h-8 sm:w-9 sm:h-9 rounded-xl flex items-center justify-center shrink-0 border transition-all ${
+                        style={{ width: '32px', height: '32px', minWidth: '32px', minHeight: '32px', boxSizing: 'border-box' }}
+                        className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 border-2 transition-all box-border ${
                           isSelected
-                            ? 'bg-sky-500 border-sky-400 text-slate-950 shadow-md ring-2 ring-sky-300/40'
+                            ? 'bg-sky-500 border-sky-400 text-slate-950 shadow-sm'
                             : 'border-slate-600 bg-slate-900 text-transparent hover:border-slate-400'
                         }`}
                       >
-                        <Check className="w-5 h-5 stroke-[3]" />
+                        <Check className="w-4 h-4 stroke-[3]" />
                       </div>
 
-                      {/* Product Details */}
+                      {/* Product Details with Full Name Wrapping */}
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
-                          <span className="text-xs sm:text-base font-bold text-slate-100 truncate">
+                          <span
+                            style={{ whiteSpace: 'normal', wordBreak: 'break-word' }}
+                            className="text-xs sm:text-sm md:text-base font-bold text-slate-100 whitespace-normal break-words leading-snug"
+                          >
                             {item.name}
                           </span>
                           {isSelected && (
@@ -1639,16 +1690,26 @@ export const PrintBarcodesUtilityModal: React.FC<PrintBarcodesUtilityModalProps>
                                 step="1"
                                 placeholder="0"
                                 value={
-                                  customLabelPrices[item.barcode] === null
-                                    ? ''
-                                    : customLabelPrices[item.barcode] !== undefined
-                                    ? (customLabelPrices[item.barcode] === 0 ? '' : customLabelPrices[item.barcode])
+                                  customLabelPrices[item.barcode] !== undefined && customLabelPrices[item.barcode] !== null
+                                    ? customLabelPrices[item.barcode]
                                     : (item.price === 0 ? '' : Math.round(item.price))
                                 }
                                 onFocus={(e) => e.target.select()}
                                 onChange={(e) => {
-                                  const val = e.target.value;
+                                  let val = e.target.value;
                                   if (val.trim() === '') {
+                                    setCustomLabelPrices((prev) => ({ ...prev, [item.barcode]: '' as any }));
+                                    return;
+                                  }
+                                  val = val.replace(/^0+(?=\d)/, '');
+                                  setCustomLabelPrices((prev) => ({
+                                    ...prev,
+                                    [item.barcode]: val as any,
+                                  }));
+                                }}
+                                onBlur={(e) => {
+                                  const val = String(e.target.value).trim();
+                                  if (val === '') {
                                     setCustomLabelPrices((prev) => ({ ...prev, [item.barcode]: null }));
                                   } else {
                                     const parsed = parseInt(val, 10);
@@ -1699,13 +1760,26 @@ export const PrintBarcodesUtilityModal: React.FC<PrintBarcodesUtilityModalProps>
                           type="number"
                           min="1"
                           max="500"
-                          value={count}
+                          value={labelCounts[item.barcode] === undefined ? count : labelCounts[item.barcode]}
                           onClick={(e) => e.stopPropagation()}
                           onFocus={(e) => e.target.select()}
                           onChange={(e) => {
-                            const val = Math.max(1, Math.min(500, parseInt(e.target.value, 10) || 1));
+                            let raw = e.target.value;
+                            if (raw === '') {
+                              if (!isSelected) toggleItemSelection(item.barcode);
+                              setLabelCounts((prev) => ({ ...prev, [item.barcode]: '' as any }));
+                              return;
+                            }
+                            raw = raw.replace(/^0+(?=\d)/, '');
+                            const num = parseInt(raw, 10);
                             if (!isSelected) toggleItemSelection(item.barcode);
-                            setLabelCounts((prev) => ({ ...prev, [item.barcode]: val }));
+                            setLabelCounts((prev) => ({ ...prev, [item.barcode]: isNaN(num) ? ('' as any) : num }));
+                          }}
+                          onBlur={(e) => {
+                            const raw = String(e.target.value).trim();
+                            const num = parseInt(raw, 10);
+                            const finalVal = isNaN(num) || num < 1 ? 1 : Math.min(500, num);
+                            setLabelCounts((prev) => ({ ...prev, [item.barcode]: finalVal }));
                           }}
                           className="w-8 sm:w-10 text-center bg-transparent text-xs font-mono font-bold text-sky-300 focus:outline-none"
                           title="Label copies count"
@@ -1742,7 +1816,7 @@ export const PrintBarcodesUtilityModal: React.FC<PrintBarcodesUtilityModalProps>
             </div>
           ) : viewLayout === 'compact' ? (
             /* COMPACT CHECKLIST ROWS (Ultra dense for fast multi-selection of dozens of items on mobile) */
-            <div className="divide-y divide-slate-800/80 bg-slate-900/60 rounded-xl border border-slate-800 overflow-hidden">
+            <div className="divide-y divide-slate-800/80 bg-slate-900/60 rounded-xl border border-slate-800 overflow-hidden box-border">
               {displayedItems.map((item) => {
                 const isSelected = !!selectedIds[item.barcode];
                 const count = labelCounts[item.barcode] ?? 1;
@@ -1754,7 +1828,8 @@ export const PrintBarcodesUtilityModal: React.FC<PrintBarcodesUtilityModalProps>
                       toggleItemSelection(item.barcode);
                       setPreviewItemId(item.barcode);
                     }}
-                    className={`px-2.5 py-2 flex items-center justify-between gap-2 cursor-pointer transition select-none ${
+                    style={{ boxSizing: 'border-box' }}
+                    className={`px-3 py-2 flex items-center justify-between gap-2.5 cursor-pointer transition select-none box-border ${
                       isSelected
                         ? 'bg-sky-950/70 border-l-4 border-l-sky-400'
                         : 'hover:bg-slate-800/60 border-l-4 border-l-transparent'
@@ -1762,17 +1837,21 @@ export const PrintBarcodesUtilityModal: React.FC<PrintBarcodesUtilityModalProps>
                   >
                     <div className="flex items-center gap-2.5 min-w-0 flex-1">
                       <div
-                        className={`w-5 h-5 rounded-md flex items-center justify-center shrink-0 border transition-all ${
+                        style={{ width: '32px', height: '32px', minWidth: '32px', minHeight: '32px', boxSizing: 'border-box' }}
+                        className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 border transition-all box-border ${
                           isSelected
-                            ? 'bg-sky-500 border-sky-400 text-slate-950 font-bold'
-                            : 'border-slate-600 bg-slate-900 text-transparent'
+                            ? 'bg-sky-500 border-sky-400 text-slate-950 font-bold shadow-sm'
+                            : 'border-slate-600 bg-slate-900 text-transparent hover:border-slate-400'
                         }`}
                       >
-                        <Check className="w-3.5 h-3.5 stroke-[3]" />
+                        <Check className="w-4 h-4 stroke-[3]" />
                       </div>
 
-                      <div className="min-w-0 flex-1 flex items-center gap-2">
-                        <span className="text-xs font-semibold text-slate-200 truncate">
+                      <div className="min-w-0 flex-1 flex items-center gap-2 flex-wrap">
+                        <span
+                          style={{ whiteSpace: 'normal', wordBreak: 'break-word' }}
+                          className="text-xs font-semibold text-slate-200 whitespace-normal break-words leading-tight"
+                        >
                           {item.name}
                         </span>
                         <span className="font-mono text-[10px] text-sky-400 font-bold bg-slate-950 px-1 py-0.2 rounded border border-slate-800 shrink-0">
@@ -1797,16 +1876,26 @@ export const PrintBarcodesUtilityModal: React.FC<PrintBarcodesUtilityModalProps>
                             step="1"
                             placeholder="0"
                             value={
-                              customLabelPrices[item.barcode] === null
-                                ? ''
-                                : customLabelPrices[item.barcode] !== undefined
-                                ? (customLabelPrices[item.barcode] === 0 ? '' : customLabelPrices[item.barcode])
+                              customLabelPrices[item.barcode] !== undefined && customLabelPrices[item.barcode] !== null
+                                ? customLabelPrices[item.barcode]
                                 : (item.price === 0 ? '' : Math.round(item.price))
                             }
                             onFocus={(e) => e.target.select()}
                             onChange={(e) => {
-                              const val = e.target.value;
+                              let val = e.target.value;
                               if (val.trim() === '') {
+                                setCustomLabelPrices((prev) => ({ ...prev, [item.barcode]: '' as any }));
+                                return;
+                              }
+                              val = val.replace(/^0+(?=\d)/, '');
+                              setCustomLabelPrices((prev) => ({
+                                ...prev,
+                                [item.barcode]: val as any,
+                              }));
+                            }}
+                            onBlur={(e) => {
+                              const val = String(e.target.value).trim();
+                              if (val === '') {
                                 setCustomLabelPrices((prev) => ({ ...prev, [item.barcode]: null }));
                               } else {
                                 const parsed = parseInt(val, 10);
@@ -1870,27 +1959,32 @@ export const PrintBarcodesUtilityModal: React.FC<PrintBarcodesUtilityModalProps>
                       toggleItemSelection(item.barcode);
                       setPreviewItemId(item.barcode);
                     }}
-                    className={`p-3 sm:p-3.5 rounded-xl border transition-all cursor-pointer flex flex-col justify-between select-none shadow-sm ${
+                    style={{ boxSizing: 'border-box' }}
+                    className={`p-3 sm:p-3.5 rounded-xl border-2 transition-all cursor-pointer flex flex-col justify-between select-none shadow-sm box-border outline-none relative overflow-hidden ${
                       isSelected
-                        ? 'bg-sky-950/70 border-sky-400 shadow-md shadow-sky-950/60 ring-2 ring-sky-500/50'
+                        ? 'bg-sky-950/70 border-sky-400 shadow-md shadow-sky-950/40 ring-1 ring-inset ring-sky-400/50'
                         : 'bg-slate-800/80 border-slate-700/70 hover:border-slate-600 hover:bg-slate-800'
                     }`}
                   >
                     <div className="flex items-start justify-between gap-2.5">
-                      <div className="flex items-start gap-2.5 min-w-0">
+                      <div className="flex items-start gap-2.5 min-w-0 flex-1">
                         <div
-                          className={`w-7 h-7 rounded-xl flex items-center justify-center shrink-0 border mt-0.5 transition-all ${
+                          style={{ width: '32px', height: '32px', minWidth: '32px', minHeight: '32px', boxSizing: 'border-box' }}
+                          className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 border-2 mt-0.5 transition-all box-border ${
                             isSelected
-                              ? 'bg-sky-500 border-sky-400 text-slate-950 shadow-md'
+                              ? 'bg-sky-500 border-sky-400 text-slate-950 shadow-sm'
                               : 'border-slate-600 bg-slate-900 text-transparent hover:border-slate-400'
                           }`}
                         >
                           <Check className="w-4 h-4 stroke-[3]" />
                         </div>
 
-                        <div className="min-w-0">
+                        <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-1.5 flex-wrap">
-                            <span className="text-xs sm:text-sm font-bold text-slate-100 truncate">
+                            <span
+                              style={{ whiteSpace: 'normal', wordBreak: 'break-word' }}
+                              className="text-xs sm:text-sm font-bold text-slate-100 whitespace-normal break-words leading-snug"
+                            >
                               {item.name}
                             </span>
                             {isPreviewing && (
@@ -1924,16 +2018,26 @@ export const PrintBarcodesUtilityModal: React.FC<PrintBarcodesUtilityModalProps>
                               step="1"
                               placeholder="0"
                               value={
-                                customLabelPrices[item.barcode] === null
-                                  ? ''
-                                  : customLabelPrices[item.barcode] !== undefined
-                                  ? (customLabelPrices[item.barcode] === 0 ? '' : customLabelPrices[item.barcode])
+                                customLabelPrices[item.barcode] !== undefined && customLabelPrices[item.barcode] !== null
+                                  ? customLabelPrices[item.barcode]
                                   : (item.price === 0 ? '' : Math.round(item.price))
                               }
                               onFocus={(e) => e.target.select()}
                               onChange={(e) => {
-                                const val = e.target.value;
+                                let val = e.target.value;
                                 if (val.trim() === '') {
+                                  setCustomLabelPrices((prev) => ({ ...prev, [item.barcode]: '' as any }));
+                                  return;
+                                }
+                                val = val.replace(/^0+(?=\d)/, '');
+                                setCustomLabelPrices((prev) => ({
+                                  ...prev,
+                                  [item.barcode]: val as any,
+                                }));
+                              }}
+                              onBlur={(e) => {
+                                const val = String(e.target.value).trim();
+                                if (val === '') {
                                   setCustomLabelPrices((prev) => ({ ...prev, [item.barcode]: null }));
                                 } else {
                                   const parsed = parseInt(val, 10);
@@ -1988,13 +2092,26 @@ export const PrintBarcodesUtilityModal: React.FC<PrintBarcodesUtilityModalProps>
                           type="number"
                           min="1"
                           max="500"
-                          value={count}
+                          value={labelCounts[item.barcode] === undefined ? count : labelCounts[item.barcode]}
                           onClick={(e) => e.stopPropagation()}
                           onFocus={(e) => e.target.select()}
                           onChange={(e) => {
-                            const val = Math.max(1, Math.min(500, parseInt(e.target.value, 10) || 1));
+                            let raw = e.target.value;
+                            if (raw === '') {
+                              if (!isSelected) toggleItemSelection(item.barcode);
+                              setLabelCounts((prev) => ({ ...prev, [item.barcode]: '' as any }));
+                              return;
+                            }
+                            raw = raw.replace(/^0+(?=\d)/, '');
+                            const num = parseInt(raw, 10);
                             if (!isSelected) toggleItemSelection(item.barcode);
-                            setLabelCounts((prev) => ({ ...prev, [item.barcode]: val }));
+                            setLabelCounts((prev) => ({ ...prev, [item.barcode]: isNaN(num) ? ('' as any) : num }));
+                          }}
+                          onBlur={(e) => {
+                            const raw = String(e.target.value).trim();
+                            const num = parseInt(raw, 10);
+                            const finalVal = isNaN(num) || num < 1 ? 1 : Math.min(500, num);
+                            setLabelCounts((prev) => ({ ...prev, [item.barcode]: finalVal }));
                           }}
                           className="w-8 text-center bg-transparent text-xs font-bold text-white focus:outline-none"
                         />

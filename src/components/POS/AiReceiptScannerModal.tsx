@@ -142,26 +142,55 @@ export const AiReceiptScannerModal: React.FC<AiReceiptScannerModalProps> = ({
       setCameraError(null);
       stopCamera();
 
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode,
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-        },
-      });
+      if (typeof navigator === 'undefined' || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        throw new Error('DEVICE_UNSUPPORTED');
+      }
+
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode,
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+          },
+          audio: false,
+        });
+      } catch (firstErr: any) {
+        if (firstErr?.name === 'OverconstrainedError' || firstErr?.name === 'ConstraintNotSatisfiedError') {
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: true,
+            audio: false,
+          });
+        } else {
+          throw firstErr;
+        }
+      }
 
       streamRef.current = stream;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
-        await videoRef.current.play();
+        videoRef.current.onloadedmetadata = () => {
+          videoRef.current?.play().catch(() => {});
+        };
+        await videoRef.current.play().catch(() => {});
         setCameraActive(true);
       }
     } catch (err: any) {
       console.warn('Camera stream error:', err);
       setCameraActive(false);
-      let msg = 'Could not access phone camera for AI scan.';
-      if (err.name === 'NotAllowedError') {
-        msg = 'Camera permission was denied. Please allow camera access in browser settings or pick from gallery.';
+      let msg = 'Could not access phone camera for AI scan. Please pick from photo gallery.';
+      const errName = err?.name || '';
+      const errMsg = String(err?.message || '');
+
+      if (errName === 'NotAllowedError' || errName === 'PermissionDeniedError' || errMsg.toLowerCase().includes('denied')) {
+        msg = 'Camera permission was denied. Please allow camera access in browser site settings or pick from gallery.';
+      } else if (errName === 'NotFoundError' || errName === 'DevicesNotFoundError' || errMsg.toLowerCase().includes('not found')) {
+        msg = 'No camera or video capture hardware found on this system. Please upload a receipt photo from gallery.';
+      } else if (errName === 'NotReadableError' || errName === 'TrackStartError') {
+        msg = 'Camera is currently in use by another app or browser tab. Please close other camera apps and retry.';
+      } else if (errMsg === 'DEVICE_UNSUPPORTED' || errName === 'TypeError') {
+        msg = 'Camera streaming is not supported on this device/browser. Please pick an image from your gallery.';
       }
       setCameraError(msg);
     }

@@ -309,7 +309,7 @@ export const ItemHistoryModal: React.FC<ItemHistoryModalProps> = ({
                     required
                     placeholder="e.g. 25"
                     value={quantityAdded}
-                    onChange={(e) => setQuantityAdded(e.target.value)}
+                    onChange={(e) => setQuantityAdded(e.target.value.replace(/^0+(?=\d)/, ''))}
                     className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-slate-100 font-mono text-sm focus:outline-none"
                   />
                 </div>
@@ -322,7 +322,7 @@ export const ItemHistoryModal: React.FC<ItemHistoryModalProps> = ({
                     required
                     placeholder="e.g. 2800"
                     value={unitCost}
-                    onChange={(e) => setUnitCost(e.target.value)}
+                    onChange={(e) => setUnitCost(e.target.value.replace(/^0+(?=\d)/, ''))}
                     className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-slate-100 font-mono text-sm focus:outline-none"
                   />
                 </div>

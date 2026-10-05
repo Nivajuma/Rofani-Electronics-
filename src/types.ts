@@ -101,6 +101,8 @@ export interface User {
   commissionTiers?: CommissionTier[]; // e.g. [{minSales: 0, maxSales: 30000, rate: 5}, {minSales: 30000, maxSales: 70000, rate: 7.5}, {minSales: 70000, rate: 10}]
   dailySalesTarget?: number; // e.g. 25000
   profitShareRate?: number; // percentage of gross profit e.g. 15%
+  biometricEnrolled?: boolean; // Fingerprint / Touch ID biometric authentication enabled
+  biometricEnrolledAt?: string; // Timestamp of biometric registration
 }
 
 export type PaymentMethod = 'cash' | 'credit_card' | 'cheque' | 'mpesa' | 'upi' | 'bank_transfer';

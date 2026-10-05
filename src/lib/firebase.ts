@@ -86,6 +86,18 @@ export interface FirestoreErrorInfo {
   };
 }
 
+export const FIREBASE_UPGRADE_URL = `https://console.firebase.google.com/project/${firebaseConfig.projectId}/firestore/databases/${firebaseConfig.firestoreDatabaseId}/data?openUpgradeDialog=true`;
+
+let isQuotaExceededFlag = false;
+
+export function markQuotaExceeded(): void {
+  isQuotaExceededFlag = true;
+}
+
+export function getIsQuotaExceeded(): boolean {
+  return isQuotaExceededFlag;
+}
+
 export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
   const errInfo: FirestoreErrorInfo = {
     error: error instanceof Error ? error.message : String(error),
@@ -98,6 +110,17 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
     operationType,
     path,
   };
+
+  // Quota exceeded is an account-level tier threshold, not an application code defect or security rule failure
+  if (isQuotaExceededError(error)) {
+    markQuotaExceeded();
+    console.warn(
+      `[Firestore Quota Notice] Free daily read units limit reached for path "${path}". Operating safely in offline local storage mode. Upgrade URL: ${FIREBASE_UPGRADE_URL}`,
+      JSON.stringify(errInfo)
+    );
+    return errInfo;
+  }
+
   console.error('[Firestore Error]:', JSON.stringify(errInfo));
   return errInfo;
 }

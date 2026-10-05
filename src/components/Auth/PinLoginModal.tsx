@@ -22,7 +22,8 @@ import {
   Search,
   Users,
   Filter,
-  X
+  X,
+  Fingerprint
 } from 'lucide-react';
 import { User, Role } from '../../types';
 import {
@@ -31,6 +32,8 @@ import {
   DEFAULT_ROLE_WORKER_PERMISSIONS,
   ALL_ROLES,
 } from '../../utils/permissions';
+import { BiometricScannerModal } from './BiometricScannerModal';
+import { isUserBiometricEnrolled } from '../../utils/biometricAuth';
 
 interface PinLoginModalProps {
   users: User[];
@@ -71,6 +74,7 @@ export const PinLoginModal: React.FC<PinLoginModalProps> = ({
   const [errorMsg, setErrorMsg] = useState<string>('');
   const [showPinText, setShowPinText] = useState<boolean>(false);
   const [loginMode, setLoginMode] = useState<'staff' | 'master'>('staff');
+  const [showBiometricModal, setShowBiometricModal] = useState<boolean>(false);
 
   // Worker search and filter state for selecting workers easily
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -134,8 +138,23 @@ export const PinLoginModal: React.FC<PinLoginModalProps> = ({
       setShowNewAdminPin(false);
       setRecoveryError('');
       setRecoverySuccessNotice('');
+      setShowBiometricModal(false);
     }
   }, [isOpen, isMandatory, currentUser, initialTargetUser]);
+
+  const handleBiometricSuccess = (user: User) => {
+    setShowBiometricModal(false);
+    let finalUser = user;
+    if (hasRole(user, 'Admin') || user.id === 'usr-1') {
+      finalUser = {
+        ...user,
+        role: user.role === 'Admin' ? user.role : 'Admin',
+        roles: Array.from(new Set([...(user.roles || []), 'Admin' as Role])),
+        permissions: { ...DEFAULT_ROLE_WORKER_PERMISSIONS['Admin'] },
+      };
+    }
+    onLoginSuccess(finalUser);
+  };
 
   const handleSelectUser = (user: User) => {
     setSelectedUser(user);
@@ -903,7 +922,19 @@ export const PinLoginModal: React.FC<PinLoginModalProps> = ({
                                   </div>
                                 </div>
 
-                                <div className="flex items-center gap-1 shrink-0">
+                                <div className="flex items-center gap-1.5 shrink-0">
+                                  <button
+                                    type="button"
+                                    title={`Fingerprint login as ${u.name}`}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setSelectedUser(u);
+                                      setShowBiometricModal(true);
+                                    }}
+                                    className="p-1.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/25 text-emerald-400 hover:text-emerald-300 border border-emerald-500/30 transition cursor-pointer"
+                                  >
+                                    <Fingerprint className="w-3.5 h-3.5" />
+                                  </button>
                                   {isSelected ? (
                                     <CheckCircle2 className="w-4 h-4 text-sky-400" />
                                   ) : (
@@ -1021,14 +1052,22 @@ export const PinLoginModal: React.FC<PinLoginModalProps> = ({
 
                   {/* PIN Bullet Dots Display or Placeholder */}
                   {!selectedUser && loginMode === 'staff' ? (
-                    <div className="py-4 px-4 bg-slate-950/80 border border-dashed border-slate-800 rounded-2xl text-center">
+                    <div className="py-4 px-4 bg-slate-950/80 border border-dashed border-slate-800 rounded-2xl text-center space-y-2">
                       <div className="text-sky-400 font-semibold text-xs flex items-center justify-center gap-1.5 mb-1">
                         <UserIcon className="w-4 h-4" />
                         <span>Choose Your Account First</span>
                       </div>
-                      <p className="text-[11px] text-slate-400 mb-2">
-                        Select your name from the staff directory. The numeric keypad will activate for your account.
+                      <p className="text-[11px] text-slate-400">
+                        Select your name from the staff directory, or tap below to authenticate with your fingerprint scanner.
                       </p>
+                      <button
+                        type="button"
+                        onClick={() => setShowBiometricModal(true)}
+                        className="w-full py-2 px-3 bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/35 text-emerald-300 font-bold rounded-xl text-xs flex items-center justify-center gap-2 transition cursor-pointer"
+                      >
+                        <Fingerprint className="w-4 h-4 text-emerald-400" />
+                        <span>Biometric Fingerprint Log In</span>
+                      </button>
                       <button
                         type="button"
                         onClick={() => setActiveMobileTab('workers')}
@@ -1039,6 +1078,18 @@ export const PinLoginModal: React.FC<PinLoginModalProps> = ({
                     </div>
                   ) : (
                     <div className="py-1">
+                      {selectedUser && (
+                        <div className="mb-2">
+                          <button
+                            type="button"
+                            onClick={() => setShowBiometricModal(true)}
+                            className="w-full py-2 px-3 bg-gradient-to-r from-emerald-950/70 via-slate-900 to-sky-950/70 hover:from-emerald-900/80 hover:to-sky-900/80 border border-emerald-500/40 hover:border-emerald-400 text-emerald-300 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition shadow-md cursor-pointer active:scale-98"
+                          >
+                            <Fingerprint className="w-4 h-4 text-emerald-400 animate-pulse" />
+                            <span>Log In with Fingerprint ({selectedUser.name})</span>
+                          </button>
+                        </div>
+                      )}
                       <div className="flex justify-center items-center gap-2">
                         {Array.from({
                           length: Math.max(
@@ -1149,6 +1200,14 @@ export const PinLoginModal: React.FC<PinLoginModalProps> = ({
                       <KeyRound className="w-3.5 h-3.5" />
                       <span>Unlock Terminal / Sign In</span>
                     </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowBiometricModal(true)}
+                      className="w-full mt-2 py-2 rounded-xl text-xs font-semibold text-emerald-300 hover:text-emerald-200 bg-emerald-950/40 hover:bg-emerald-900/40 border border-emerald-500/30 flex items-center justify-center gap-2 transition cursor-pointer shadow-sm active:scale-[0.98]"
+                    >
+                      <Fingerprint className="w-4 h-4 text-emerald-400" />
+                      <span>Use Biometric Fingerprint Recognition</span>
+                    </button>
                   </div>
 
                   <p className="text-[10px] text-slate-500">
@@ -1187,6 +1246,16 @@ export const PinLoginModal: React.FC<PinLoginModalProps> = ({
           </div>
         )}
       </div>
+
+      {showBiometricModal && (
+        <BiometricScannerModal
+          isOpen={showBiometricModal}
+          onClose={() => setShowBiometricModal(false)}
+          targetUser={selectedUser}
+          users={users}
+          onAuthenticated={handleBiometricSuccess}
+        />
+      )}
     </div>
   );
 };

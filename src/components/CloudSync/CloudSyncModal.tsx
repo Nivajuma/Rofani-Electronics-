@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import QRCode from 'qrcode';
 import { bulkUploadProductsToCloud, bulkUploadUsersToCloud } from '../../lib/cloudSync';
+import { FIREBASE_UPGRADE_URL } from '../../lib/firebase';
 import { Product, User } from '../../types';
 import { useNetworkStatus } from '../../utils/offlineSync';
 
@@ -225,19 +226,33 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
 
           {/* Quota Exceeded Alert Banner (if applicable) */}
           {(cloudSyncStatus === 'quota_exceeded' || isQuotaExceeded) && (
-            <div className="bg-amber-950/80 border border-amber-700/80 p-3.5 sm:p-4 rounded-2xl space-y-2.5">
+            <div className="bg-amber-950/80 border border-amber-700/80 p-3.5 sm:p-4 rounded-2xl space-y-3">
               <div className="flex items-start gap-2.5">
                 <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
-                <div className="space-y-1">
+                <div className="space-y-1.5 flex-1 min-w-0">
                   <div className="text-xs font-bold text-amber-200 flex items-center gap-2 flex-wrap">
-                    <span>Firestore Daily Read Quota Reached</span>
+                    <span>Firestore Daily Free Read Quota Reached</span>
                     <span className="bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[10px] px-2 py-0.5 rounded-full font-mono font-bold">
                       Offline Storage Safe
                     </span>
                   </div>
                   <p className="text-xs text-amber-200/90 leading-relaxed">
-                    Store POS terminal remains 100% active in Offline / Local Storage Mode. All sales, receipts, worker loans, and inventory continue saving safely to this device.
+                    The Google Cloud free tier daily read limit (50,000 reads/day) has been reached for this project. <strong>Store POS terminal remains 100% active in Offline Local Storage Mode</strong>. All sales, receipts, worker loans, and inventory continue saving safely to this device.
                   </p>
+                  <p className="text-[11px] text-amber-300/80">
+                    Free quota resets automatically tomorrow at midnight UTC. To enable unlimited continuous sync now, upgrade to the Blaze pay-as-you-go plan in the Firebase Console.
+                  </p>
+                  <div className="pt-1">
+                    <a
+                      href={FIREBASE_UPGRADE_URL}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-xl text-xs font-bold transition shadow-sm cursor-pointer"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5" />
+                      <span>Upgrade Plan in Firebase Console</span>
+                    </a>
+                  </div>
                 </div>
               </div>
             </div>

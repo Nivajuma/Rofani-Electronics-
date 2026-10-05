@@ -28,9 +28,15 @@ import {
   Award,
   RefreshCw,
   Clock,
-  Plus
+  Plus,
+  Fingerprint
 } from 'lucide-react';
 import { User, Role, Transaction, AttendanceRecord, WorkerLoan } from '../../types';
+import {
+  enrollUserBiometric,
+  unenrollUserBiometric,
+  isUserBiometricEnrolled,
+} from '../../utils/biometricAuth';
 import {
   DEFAULT_ROLE_WORKER_PERMISSIONS,
   applyRoleToWorker,
@@ -146,6 +152,27 @@ export const WorkerDirectoryView: React.FC<WorkerDirectoryViewProps> = ({
       status: newStatus,
     });
     showToast(`Worker ${user.name} is now ${newStatus.toUpperCase()}`, newStatus === 'active' ? 'success' : 'info');
+  };
+
+  const handleToggleWorkerBiometric = (user: User) => {
+    if (!onUpdateUser) return;
+    const isEnrolled = isUserBiometricEnrolled(user.id) || Boolean(user.biometricEnrolled);
+    if (isEnrolled) {
+      unenrollUserBiometric(user.id);
+      onUpdateUser({
+        ...user,
+        biometricEnrolled: false,
+      });
+      showToast(`Biometric fingerprint disabled for ${user.name}`, 'info');
+    } else {
+      enrollUserBiometric(user, 'platform_fingerprint');
+      onUpdateUser({
+        ...user,
+        biometricEnrolled: true,
+        biometricEnrolledAt: new Date().toISOString(),
+      });
+      showToast(`Biometric fingerprint successfully enrolled for ${user.name}`, 'success');
+    }
   };
 
   const handleOpenAdd = () => {
@@ -578,46 +605,85 @@ export const WorkerDirectoryView: React.FC<WorkerDirectoryViewProps> = ({
                 </div>
 
                 {/* PIN and Security Box */}
-                <div className="bg-slate-950 border border-slate-800/90 p-2.5 rounded-2xl flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <KeyRound className="w-4 h-4 text-sky-400 shrink-0" />
-                    <span className="text-[11px] text-slate-400 font-semibold">Security PIN:</span>
-                    <span className="font-mono font-black text-sm text-sky-300 tracking-wider">
-                      {isPinVisible ? u.pin : '••••'}
-                    </span>
+                <div className="bg-slate-950 border border-slate-800/90 p-2.5 rounded-2xl space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <KeyRound className="w-4 h-4 text-sky-400 shrink-0" />
+                      <span className="text-[11px] text-slate-400 font-semibold">Security PIN:</span>
+                      <span className="font-mono font-black text-sm text-sky-300 tracking-wider">
+                        {isPinVisible ? u.pin : '••••'}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-1">
+                      <button
+                        title={isPinVisible ? 'Hide PIN' : 'Show PIN'}
+                        onClick={() => togglePinVisibility(u.id)}
+                        className="p-1.5 hover:bg-slate-800 text-slate-400 hover:text-white rounded-lg transition"
+                      >
+                        {isPinVisible ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                      </button>
+
+                      <button
+                        title="Copy Security PIN"
+                        onClick={() => handleCopyPin(u)}
+                        className="p-1.5 hover:bg-slate-800 text-slate-400 hover:text-sky-400 rounded-lg transition"
+                      >
+                        {isCopied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                      </button>
+
+                      <button
+                        title="Generate New Security PIN"
+                        onClick={() => handleRegenerateWorkerPin(u)}
+                        className="p-1.5 hover:bg-slate-800 text-slate-400 hover:text-amber-400 rounded-lg transition"
+                      >
+                        <RefreshCw className="w-3.5 h-3.5" />
+                      </button>
+
+                      <button
+                        title="Print Worker Credential Card"
+                        onClick={() => setPrintedUser(u)}
+                        className="p-1.5 hover:bg-slate-800 text-slate-400 hover:text-emerald-400 rounded-lg transition"
+                      >
+                        <Printer className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   </div>
 
-                  <div className="flex items-center gap-1">
-                    <button
-                      title={isPinVisible ? 'Hide PIN' : 'Show PIN'}
-                      onClick={() => togglePinVisibility(u.id)}
-                      className="p-1.5 hover:bg-slate-800 text-slate-400 hover:text-white rounded-lg transition"
-                    >
-                      {isPinVisible ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                    </button>
+                  {/* Fingerprint Biometric Row */}
+                  <div className="pt-2 border-t border-slate-900 flex items-center justify-between text-[11px]">
+                    <div className="flex items-center gap-1.5 text-slate-400">
+                      <Fingerprint
+                        className={`w-3.5 h-3.5 ${
+                          isUserBiometricEnrolled(u.id) || u.biometricEnrolled
+                            ? 'text-emerald-400'
+                            : 'text-slate-500'
+                        }`}
+                      />
+                      <span>Fingerprint:</span>
+                      <span
+                        className={`font-semibold ${
+                          isUserBiometricEnrolled(u.id) || u.biometricEnrolled
+                            ? 'text-emerald-400'
+                            : 'text-slate-500'
+                        }`}
+                      >
+                        {isUserBiometricEnrolled(u.id) || u.biometricEnrolled
+                          ? 'Enrolled'
+                          : 'Not Enrolled'}
+                      </span>
+                    </div>
 
                     <button
-                      title="Copy Security PIN"
-                      onClick={() => handleCopyPin(u)}
-                      className="p-1.5 hover:bg-slate-800 text-slate-400 hover:text-sky-400 rounded-lg transition"
+                      type="button"
+                      onClick={() => handleToggleWorkerBiometric(u)}
+                      className={`px-2 py-0.5 rounded text-[10px] font-semibold transition cursor-pointer ${
+                        isUserBiometricEnrolled(u.id) || u.biometricEnrolled
+                          ? 'bg-rose-500/10 text-rose-300 hover:bg-rose-500/20'
+                          : 'bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25'
+                      }`}
                     >
-                      {isCopied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                    </button>
-
-                    <button
-                      title="Generate New Security PIN"
-                      onClick={() => handleRegenerateWorkerPin(u)}
-                      className="p-1.5 hover:bg-slate-800 text-slate-400 hover:text-amber-400 rounded-lg transition"
-                    >
-                      <RefreshCw className="w-3.5 h-3.5" />
-                    </button>
-
-                    <button
-                      title="Print Worker Credential Card"
-                      onClick={() => setPrintedUser(u)}
-                      className="p-1.5 hover:bg-slate-800 text-slate-400 hover:text-emerald-400 rounded-lg transition"
-                    >
-                      <Printer className="w-3.5 h-3.5" />
+                      {isUserBiometricEnrolled(u.id) || u.biometricEnrolled ? 'Disable' : 'Enroll Fingerprint'}
                     </button>
                   </div>
                 </div>

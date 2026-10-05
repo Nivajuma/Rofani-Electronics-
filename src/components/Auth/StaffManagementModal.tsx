@@ -34,8 +34,14 @@ import {
   CheckSquare,
   Square,
   Plus,
+  Fingerprint,
 } from 'lucide-react';
 import { User, Role, WorkerPermissions } from '../../types';
+import {
+  enrollUserBiometric,
+  unenrollUserBiometric,
+  isUserBiometricEnrolled,
+} from '../../utils/biometricAuth';
 import {
   canManageStaff,
   getWorkerPermissions,
@@ -226,6 +232,26 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
       `Worker ${user.name} is now marked as ${newStatus.toUpperCase()}`,
       newStatus === 'active' ? 'success' : 'info'
     );
+  };
+
+  const handleToggleBiometric = (targetUser: User) => {
+    const isEnrolled = isUserBiometricEnrolled(targetUser.id) || Boolean(targetUser.biometricEnrolled);
+    if (isEnrolled) {
+      unenrollUserBiometric(targetUser.id);
+      onUpdateUser({
+        ...targetUser,
+        biometricEnrolled: false,
+      });
+      showNotification(`Biometric fingerprint disabled for ${targetUser.name}`, 'info');
+    } else {
+      enrollUserBiometric(targetUser, 'platform_fingerprint');
+      onUpdateUser({
+        ...targetUser,
+        biometricEnrolled: true,
+        biometricEnrolledAt: new Date().toISOString(),
+      });
+      showNotification(`Biometric fingerprint successfully enrolled for ${targetUser.name}`, 'success');
+    }
   };
 
   const handleOpenAddModal = () => {
@@ -1193,6 +1219,27 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
                         >
                           <Sliders className="w-3.5 h-3.5" />
                           <span className="hidden sm:inline">Roles</span>
+                        </button>
+
+                        {/* Biometric Fingerprint Enrollment */}
+                        <button
+                          type="button"
+                          onClick={() => handleToggleBiometric(u)}
+                          title={
+                            isUserBiometricEnrolled(u.id) || u.biometricEnrolled
+                              ? 'Fingerprint Enrolled (Click to toggle)'
+                              : 'Enroll Device Fingerprint'
+                          }
+                          className={`p-1.5 rounded-lg border transition flex items-center gap-1 text-[11px] font-semibold cursor-pointer ${
+                            isUserBiometricEnrolled(u.id) || u.biometricEnrolled
+                              ? 'bg-emerald-950/70 border-emerald-500/50 text-emerald-300 hover:bg-emerald-900/80 shadow-sm'
+                              : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-emerald-400 hover:border-slate-700'
+                          }`}
+                        >
+                          <Fingerprint className="w-3.5 h-3.5" />
+                          <span className="hidden sm:inline">
+                            {isUserBiometricEnrolled(u.id) || u.biometricEnrolled ? 'Fingerprint On' : 'Enroll Biometric'}
+                          </span>
                         </button>
 
                         {/* Toggle Active/Inactive */}

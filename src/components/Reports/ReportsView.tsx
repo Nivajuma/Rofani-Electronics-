@@ -13,7 +13,8 @@ import {
   Sparkles,
   ChevronRight,
   Landmark,
-  ShieldAlert
+  ShieldAlert,
+  BarChart3
 } from 'lucide-react';
 import { Transaction, Product, Customer, Supplier, Expense, SensitiveActionLog } from '../../types';
 import {
@@ -25,6 +26,7 @@ import {
   exportKRATaxReportPDF
 } from '../../utils/pdfGenerator';
 import { AuditLogsView } from './AuditLogsView';
+import { DailySalesPerformanceCard } from './DailySalesPerformanceCard';
 import { safeGetJSON, safeSetJSON } from '../../utils/safeStorage';
 
 interface ReportsViewProps {
@@ -46,6 +48,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
 }) => {
   const VALID_REPORT_TABS = [
     'sales',
+    'daily_performance',
     'profit',
     'kra_tax',
     'item_movement',
@@ -226,6 +229,17 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
         </button>
 
         <button
+          onClick={() => setActiveReportTab('daily_performance')}
+          className={`px-4 py-2 rounded-xl font-bold flex items-center gap-2 transition whitespace-nowrap ${
+            activeReportTab === 'daily_performance'
+              ? 'bg-indigo-600 text-white shadow-md'
+              : 'bg-slate-900 border border-slate-800 text-indigo-300 hover:text-white'
+          }`}
+        >
+          <BarChart3 className="w-4 h-4" /> Daily Performance (Hourly)
+        </button>
+
+        <button
           onClick={() => setActiveReportTab('profit')}
           className={`px-4 py-2 rounded-xl font-bold flex items-center gap-2 transition whitespace-nowrap ${
             activeReportTab === 'profit'
@@ -299,21 +313,30 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
 
       {/* REPORT CONTENT PANEL */}
 
+      {/* 0. DAILY PERFORMANCE DEDICATED TAB */}
+      {activeReportTab === 'daily_performance' && (
+        <DailySalesPerformanceCard transactions={transactions} />
+      )}
+
       {/* 1. SALES REPORT */}
       {activeReportTab === 'sales' && (
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-3">
-            <div>
-              <h3 className="font-bold text-base text-slate-100">Sales Transactions & Payment Modes</h3>
-              <p className="text-xs text-slate-400">Detailed transactions history and payment channels</p>
+        <div className="space-y-6">
+          {/* Daily Sales Performance Card with Recharts Hourly Breakdown */}
+          <DailySalesPerformanceCard transactions={transactions} />
+
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-3">
+              <div>
+                <h3 className="font-bold text-base text-slate-100">Sales Transactions & Payment Modes</h3>
+                <p className="text-xs text-slate-400">Detailed transactions history and payment channels</p>
+              </div>
+              <button
+                onClick={() => exportSalesReportPDF(filteredTransactions, `Filter: ${dateFilter.toUpperCase()}`)}
+                className="bg-sky-600 hover:bg-sky-500 text-white font-bold px-4 py-2 rounded-xl text-xs transition flex items-center gap-2 shadow-md shadow-sky-600/20 cursor-pointer"
+              >
+                <Download className="w-4 h-4" /> Export Sales Report PDF
+              </button>
             </div>
-            <button
-              onClick={() => exportSalesReportPDF(filteredTransactions, `Filter: ${dateFilter.toUpperCase()}`)}
-              className="bg-sky-600 hover:bg-sky-500 text-white font-bold px-4 py-2 rounded-xl text-xs transition flex items-center gap-2 shadow-md shadow-sky-600/20"
-            >
-              <Download className="w-4 h-4" /> Export Sales Report PDF
-            </button>
-          </div>
 
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs text-slate-300">
@@ -346,9 +369,10 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             </table>
           </div>
         </div>
-      )}
+      </div>
+    )}
 
-      {/* 2. PROFIT & LOSS STATEMENT */}
+    {/* 2. PROFIT & LOSS STATEMENT */}
       {activeReportTab === 'profit' && (
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-3">

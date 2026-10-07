@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   FileText,
   Download,
@@ -26,7 +26,8 @@ import {
   exportKRATaxReportPDF
 } from '../../utils/pdfGenerator';
 import { AuditLogsView } from './AuditLogsView';
-import { DailySalesPerformanceCard } from './DailySalesPerformanceCard';
+import { DailySalesPerformanceCard, DateRangePreset } from './DailySalesPerformanceCard';
+import { TopSellingProductsCard } from './TopSellingProductsCard';
 import { safeGetJSON, safeSetJSON } from '../../utils/safeStorage';
 
 interface ReportsViewProps {
@@ -74,6 +75,25 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   useEffect(() => {
     safeSetJSON('retail_pos_reports_date_filter', dateFilter);
   }, [dateFilter]);
+
+  // Synchronized date range for Daily Sales Performance and Top Selling Products
+  const todayStr = useMemo(() => {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, '0');
+    const d = String(now.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }, []);
+
+  const [performanceRange, setPerformanceRange] = useState<{
+    startDate: string;
+    endDate: string;
+    preset: DateRangePreset;
+  }>(() => ({
+    startDate: todayStr,
+    endDate: todayStr,
+    preset: 'today',
+  }));
 
   // Filter transactions by date range
   const filteredTransactions = transactions.filter((tx) => {
@@ -315,14 +335,42 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
 
       {/* 0. DAILY PERFORMANCE DEDICATED TAB */}
       {activeReportTab === 'daily_performance' && (
-        <DailySalesPerformanceCard transactions={transactions} />
+        <div className="space-y-6">
+          <DailySalesPerformanceCard
+            transactions={transactions}
+            startDate={performanceRange.startDate}
+            endDate={performanceRange.endDate}
+            rangePreset={performanceRange.preset}
+            onRangeChange={(range) => setPerformanceRange(range)}
+          />
+          <TopSellingProductsCard
+            transactions={transactions}
+            products={products}
+            startDate={performanceRange.startDate}
+            endDate={performanceRange.endDate}
+          />
+        </div>
       )}
 
       {/* 1. SALES REPORT */}
       {activeReportTab === 'sales' && (
         <div className="space-y-6">
           {/* Daily Sales Performance Card with Recharts Hourly Breakdown */}
-          <DailySalesPerformanceCard transactions={transactions} />
+          <DailySalesPerformanceCard
+            transactions={transactions}
+            startDate={performanceRange.startDate}
+            endDate={performanceRange.endDate}
+            rangePreset={performanceRange.preset}
+            onRangeChange={(range) => setPerformanceRange(range)}
+          />
+
+          {/* Top Selling Products Bar Chart placed below Daily Sales Performance */}
+          <TopSellingProductsCard
+            transactions={transactions}
+            products={products}
+            startDate={performanceRange.startDate}
+            endDate={performanceRange.endDate}
+          />
 
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-3">

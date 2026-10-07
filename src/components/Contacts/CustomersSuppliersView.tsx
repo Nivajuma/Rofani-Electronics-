@@ -30,6 +30,7 @@ import { exportCustomerReportPDF, exportSupplierReportPDF } from '../../utils/pd
 import { CustomerEditModal } from './CustomerEditModal';
 import { CustomerDebtPaymentModal } from './CustomerDebtPaymentModal';
 import { CustomerDetailsModal } from './CustomerDetailsModal';
+import { CustomerContactsListModal } from './CustomerContactsListModal';
 import { SupplierEditModal } from './SupplierEditModal';
 import { SupplierPaymentModal } from './SupplierPaymentModal';
 import { SupplierDetailsModal } from './SupplierDetailsModal';
@@ -214,6 +215,13 @@ export const CustomersSuppliersView: React.FC<CustomersSuppliersViewProps> = ({
   const [isPromoGeneratorOpen, setIsPromoGeneratorOpen] = useState(false);
   const [selectedPromoCustomer, setSelectedPromoCustomer] = useState<Customer | null>(null);
 
+  // Customer contactsList and Delete Confirmation States
+  const [selectedCustomerForContactsList, setSelectedCustomerForContactsList] = useState<Customer | null>(null);
+  const [isCustomerContactsListOpen, setIsCustomerContactsListOpen] = useState(false);
+  const [customerToDelete, setCustomerToDelete] = useState<Customer | null>(null);
+  const [supplierToDelete, setSupplierToDelete] = useState<Supplier | null>(null);
+  const [deleteNoticeMessage, setDeleteNoticeMessage] = useState<string | null>(null);
+
   // 1. Calculate Customer Metrics
   const customerMetrics = useMemo(() => {
     const totalCount = customers.length;
@@ -326,33 +334,26 @@ export const CustomersSuppliersView: React.FC<CustomersSuppliersViewProps> = ({
 
   const handleDeleteCustomerPrompt = (c: Customer) => {
     if (c.id === 'cust-1' || c.name.toLowerCase().includes('walk-in')) {
-      alert('The default Walk-in Customer profile cannot be deleted.');
+      setDeleteNoticeMessage('The default Walk-in Customer profile is required by the POS and cannot be deleted.');
       return;
     }
-    if ((c.currentBalanceDue || 0) > 0) {
-      if (!window.confirm(`Warning: ${c.name} has an outstanding balance of KSh ${c.currentBalanceDue.toLocaleString()}. Are you sure you want to delete this profile?`)) {
-        return;
-      }
-    } else {
-      if (!window.confirm(`Are you sure you want to delete customer "${c.name}"?`)) {
-        return;
-      }
-    }
-    onDeleteCustomer(c.id);
+    setCustomerToDelete(c);
+  };
+
+  const handleConfirmDeleteCustomer = () => {
+    if (!customerToDelete) return;
+    onDeleteCustomer(customerToDelete.id);
+    setCustomerToDelete(null);
   };
 
   const handleDeleteSupplierPrompt = (s: Supplier) => {
-    const linkedProducts = products.filter((p) => p.supplierName?.toLowerCase() === s.name.toLowerCase());
-    if (linkedProducts.length > 0) {
-      if (!window.confirm(`Supplier "${s.name}" is linked to ${linkedProducts.length} inventory products. Deleting will unlink them. Continue?`)) {
-        return;
-      }
-    } else {
-      if (!window.confirm(`Are you sure you want to delete supplier "${s.name}"?`)) {
-        return;
-      }
-    }
-    onDeleteSupplier(s.id);
+    setSupplierToDelete(s);
+  };
+
+  const handleConfirmDeleteSupplier = () => {
+    if (!supplierToDelete) return;
+    onDeleteSupplier(supplierToDelete.id);
+    setSupplierToDelete(null);
   };
 
   return (
@@ -788,7 +789,7 @@ export const CustomersSuppliersView: React.FC<CustomersSuppliersViewProps> = ({
                                   <button
                                     onClick={() => handleQuickWhatsAppCustomer(c)}
                                     title="WhatsApp Customer"
-                                    className="p-1 bg-emerald-950 hover:bg-emerald-900 text-emerald-400 border border-emerald-800/80 rounded-lg transition"
+                                    className="p-1 bg-emerald-950 hover:bg-emerald-900 text-emerald-400 border border-emerald-800/80 rounded-lg transition cursor-pointer"
                                   >
                                     <MessageCircle className="w-3 h-3" />
                                   </button>
@@ -800,6 +801,19 @@ export const CustomersSuppliersView: React.FC<CustomersSuppliersViewProps> = ({
                                 <div className="text-slate-400 font-sans text-[11px] truncate max-w-xs">
                                   {c.email}
                                 </div>
+                              )}
+                              {c.contactsList && c.contactsList.length > 1 && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setSelectedCustomerForContactsList(c);
+                                    setIsCustomerContactsListOpen(true);
+                                  }}
+                                  className="mt-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-sky-500/10 hover:bg-sky-500/20 text-sky-400 border border-sky-500/20 inline-flex items-center gap-1 cursor-pointer transition"
+                                >
+                                  <Users className="w-3 h-3" />
+                                  <span>{c.contactsList.length} Contacts Saved</span>
+                                </button>
                               )}
                             </div>
                           </td>
@@ -873,6 +887,17 @@ export const CustomersSuppliersView: React.FC<CustomersSuppliersViewProps> = ({
                                 className="p-1.5 bg-slate-800 hover:bg-slate-700 text-sky-400 rounded-xl transition"
                               >
                                 <Eye className="w-4 h-4" />
+                              </button>
+
+                              <button
+                                onClick={() => {
+                                  setSelectedCustomerForContactsList(c);
+                                  setIsCustomerContactsListOpen(true);
+                                }}
+                                title={`Manage Contacts List (${c.contactsList?.length || 1}) for ${c.name}`}
+                                className="p-1.5 bg-slate-800 hover:bg-sky-950/80 hover:text-sky-300 text-sky-400 border border-slate-700/80 rounded-xl transition cursor-pointer"
+                              >
+                                <Phone className="w-4 h-4" />
                               </button>
 
                               <button
@@ -1124,6 +1149,24 @@ export const CustomersSuppliersView: React.FC<CustomersSuppliersViewProps> = ({
           setPayingCustomer(c);
           setIsCustomerPayOpen(true);
         }}
+        onOpenContactsList={(c) => {
+          setIsCustomerDetailsOpen(false);
+          setSelectedCustomerForContactsList(c);
+          setIsCustomerContactsListOpen(true);
+        }}
+      />
+
+      <CustomerContactsListModal
+        isOpen={isCustomerContactsListOpen}
+        onClose={() => {
+          setIsCustomerContactsListOpen(false);
+          setSelectedCustomerForContactsList(null);
+        }}
+        customer={selectedCustomerForContactsList}
+        onSaveCustomer={(updated) => {
+          onSaveCustomer(updated);
+          setSelectedCustomerForContactsList(updated);
+        }}
       />
 
       <SupplierEditModal
@@ -1198,6 +1241,164 @@ export const CustomersSuppliersView: React.FC<CustomersSuppliersViewProps> = ({
         initialCustomer={selectedPromoCustomer}
         currentUser={currentUser}
       />
+
+      {/* MODAL: DELETE CUSTOMER CONFIRMATION */}
+      {customerToDelete && (
+        <div
+          className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-4"
+          onClick={() => setCustomerToDelete(null)}
+        >
+          <div
+            className="bg-slate-900 border border-slate-800 rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-4 relative text-slate-100"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 rounded-2xl bg-rose-500/10 border border-rose-500/20 flex items-center justify-center text-rose-400 shrink-0">
+                <Trash2 className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="font-extrabold text-base text-slate-100">
+                  Delete Customer Profile?
+                </h3>
+                <p className="text-xs text-slate-400">
+                  Permanent removal from directory & cloud database
+                </p>
+              </div>
+            </div>
+
+            <div className="p-3.5 bg-slate-950 rounded-2xl border border-slate-800 space-y-2 text-xs">
+              <div className="flex items-center justify-between">
+                <span className="text-slate-400">Customer:</span>
+                <span className="font-bold text-slate-200">{customerToDelete.name}</span>
+              </div>
+              <div className="flex items-center justify-between font-mono">
+                <span className="text-slate-400">Phone:</span>
+                <span className="text-emerald-400">{customerToDelete.phone || 'N/A'}</span>
+              </div>
+              {customerToDelete.contactsList && customerToDelete.contactsList.length > 0 && (
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-400">Saved Contacts:</span>
+                  <span className="text-sky-400 font-semibold">{customerToDelete.contactsList.length} numbers</span>
+                </div>
+              )}
+              {(customerToDelete.currentBalanceDue || 0) > 0 && (
+                <div className="p-2.5 bg-rose-950/50 border border-rose-800/80 rounded-xl text-rose-300 text-xs flex items-center gap-2 mt-2">
+                  <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+                  <span>
+                    Warning: Customer has outstanding debt of <strong>KSh {(customerToDelete.currentBalanceDue || 0).toLocaleString()}</strong>.
+                  </span>
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setCustomerToDelete(null)}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold rounded-xl text-xs transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDeleteCustomer}
+                className="px-5 py-2 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-xl text-xs transition shadow-lg shadow-rose-600/25 cursor-pointer flex items-center gap-1.5"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Delete Customer</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: DELETE SUPPLIER CONFIRMATION */}
+      {supplierToDelete && (
+        <div
+          className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-4"
+          onClick={() => setSupplierToDelete(null)}
+        >
+          <div
+            className="bg-slate-900 border border-slate-800 rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-4 relative text-slate-100"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 rounded-2xl bg-rose-500/10 border border-rose-500/20 flex items-center justify-center text-rose-400 shrink-0">
+                <Trash2 className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="font-extrabold text-base text-slate-100">
+                  Delete Supplier Profile?
+                </h3>
+                <p className="text-xs text-slate-400">
+                  Remove {supplierToDelete.name} from directory
+                </p>
+              </div>
+            </div>
+
+            <div className="p-3.5 bg-slate-950 rounded-2xl border border-slate-800 space-y-2 text-xs">
+              <div className="flex items-center justify-between">
+                <span className="text-slate-400">Supplier:</span>
+                <span className="font-bold text-slate-200">{supplierToDelete.name}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-slate-400">Contact Agent:</span>
+                <span className="text-slate-300">{supplierToDelete.contactPerson || 'N/A'}</span>
+              </div>
+              <div className="flex items-center justify-between font-mono">
+                <span className="text-slate-400">Phone:</span>
+                <span className="text-emerald-400">{supplierToDelete.phone || 'N/A'}</span>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setSupplierToDelete(null)}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold rounded-xl text-xs transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDeleteSupplier}
+                className="px-5 py-2 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-xl text-xs transition shadow-lg shadow-rose-600/25 cursor-pointer flex items-center gap-1.5"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Delete Supplier</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: PROTECTED RECORD NOTICE */}
+      {deleteNoticeMessage && (
+        <div
+          className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4"
+          onClick={() => setDeleteNoticeMessage(null)}
+        >
+          <div
+            className="bg-slate-900 border border-slate-800 rounded-3xl max-w-sm w-full p-6 shadow-2xl text-center space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="w-12 h-12 bg-amber-500/10 border border-amber-500/20 rounded-2xl flex items-center justify-center text-amber-400 mx-auto">
+              <AlertTriangle className="w-6 h-6" />
+            </div>
+            <div>
+              <h4 className="font-bold text-slate-100 text-sm">Protected System Record</h4>
+              <p className="text-xs text-slate-400 mt-1">{deleteNoticeMessage}</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setDeleteNoticeMessage(null)}
+              className="w-full py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold rounded-xl text-xs transition cursor-pointer"
+            >
+              Understood
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

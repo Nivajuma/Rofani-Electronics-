@@ -145,12 +145,22 @@ export interface CartItem {
   total: number;
 }
 
+export interface CustomerContactItem {
+  id: string;
+  name: string; // Contact person or label e.g. "Main Office", "WhatsApp Direct", "Procurement Agent", "Accounts"
+  phone: string;
+  email?: string;
+  role?: string; // e.g. "Primary", "Alternative", "Purchaser", "Finance", "Manager", "Store Delivery"
+  isPrimary?: boolean;
+}
+
 export interface Customer {
   id: string;
   name: string;
   phone: string;
   email?: string;
   address?: string;
+  contactsList?: CustomerContactItem[]; // Associated contacts, alternative numbers, or branch contacts
   totalPurchases: number;
   currentBalanceDue: number; // For credit / partial payments
   debtBalance?: number;

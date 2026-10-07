@@ -14,7 +14,10 @@ import {
   Sparkles,
   Phone,
   Mail,
-  UserPlus
+  UserPlus,
+  Edit2,
+  Trash2,
+  Check
 } from 'lucide-react';
 import { Customer, Supplier } from '../../types';
 import {
@@ -51,6 +54,11 @@ export const PhonebookImportModal: React.FC<PhonebookImportModalProps> = ({
   const [contacts, setContacts] = useState<PickedContact[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [searchTerm, setSearchTerm] = useState('');
+  
+  // Staged contacts editing
+  const [editingContactId, setEditingContactId] = useState<string | null>(null);
+  const [editingName, setEditingName] = useState('');
+  const [editingPhone, setEditingPhone] = useState('');
   
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
@@ -176,6 +184,38 @@ export const PhonebookImportModal: React.FC<PhonebookImportModalProps> = ({
       next.add(id);
     }
     setSelectedIds(next);
+  };
+
+  // Staged contacts edit & delete
+  const handleDeleteStagedContact = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setContacts((prev) => prev.filter((c) => c.id !== id));
+    setSelectedIds((prev) => {
+      const copy = new Set(prev);
+      copy.delete(id);
+      return copy;
+    });
+    if (editingContactId === id) {
+      setEditingContactId(null);
+    }
+  };
+
+  const handleStartEditStaged = (c: PickedContact, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setEditingContactId(c.id);
+    setEditingName(c.name);
+    setEditingPhone(c.phone);
+  };
+
+  const handleSaveEditStaged = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!editingName.trim()) return;
+    setContacts((prev) =>
+      prev.map((c) =>
+        c.id === id ? { ...c, name: editingName.trim(), phone: editingPhone.trim() || c.phone } : c
+      )
+    );
+    setEditingContactId(null);
   };
 
   // Execute Import
@@ -546,6 +586,53 @@ export const PhonebookImportModal: React.FC<PhonebookImportModalProps> = ({
               <div className="border border-slate-800 rounded-2xl overflow-hidden max-h-60 overflow-y-auto divide-y divide-slate-800/60 bg-slate-950/40">
                 {filteredContacts.map((contact) => {
                   const isChecked = selectedIds.has(contact.id);
+                  const isEditingThis = editingContactId === contact.id;
+
+                  if (isEditingThis) {
+                    return (
+                      <div
+                        key={contact.id}
+                        className="p-3 bg-indigo-950/40 border-y border-indigo-700/60 text-xs space-y-2"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <div className="font-bold text-sky-400 text-[11px]">Edit Contact Information</div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          <input
+                            type="text"
+                            value={editingName}
+                            onChange={(e) => setEditingName(e.target.value)}
+                            placeholder="Full Name"
+                            className="bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1 text-slate-100 text-xs focus:border-sky-500 outline-none"
+                          />
+                          <input
+                            type="text"
+                            value={editingPhone}
+                            onChange={(e) => setEditingPhone(e.target.value)}
+                            placeholder="Phone Number"
+                            className="bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1 text-slate-100 text-xs font-mono focus:border-sky-500 outline-none"
+                          />
+                        </div>
+                        <div className="flex items-center justify-end gap-2 pt-1">
+                          <button
+                            type="button"
+                            onClick={() => setEditingContactId(null)}
+                            className="px-2.5 py-1 text-slate-400 hover:text-white text-xs"
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => handleSaveEditStaged(contact.id, e)}
+                            className="px-3 py-1 bg-sky-600 hover:bg-sky-500 text-white rounded-lg text-xs font-bold flex items-center gap-1 cursor-pointer"
+                          >
+                            <Check className="w-3 h-3" />
+                            <span>Save</span>
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  }
+
                   return (
                     <div
                       key={contact.id}
@@ -575,9 +662,29 @@ export const PhonebookImportModal: React.FC<PhonebookImportModalProps> = ({
                         </div>
                       </div>
 
-                      <span className="text-[10px] px-2 py-0.5 rounded-md bg-slate-900 border border-slate-800 text-slate-400 shrink-0 capitalize">
-                        {targetType === 'customers' ? customerType : 'Supplier'}
-                      </span>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <span className="text-[10px] px-2 py-0.5 rounded-md bg-slate-900 border border-slate-800 text-slate-400 shrink-0 capitalize">
+                          {targetType === 'customers' ? customerType : 'Supplier'}
+                        </span>
+
+                        <button
+                          type="button"
+                          onClick={(e) => handleStartEditStaged(contact, e)}
+                          title="Edit this Contact"
+                          className="p-1.5 bg-slate-900 hover:bg-slate-800 text-sky-400 rounded-lg transition cursor-pointer"
+                        >
+                          <Edit2 className="w-3.5 h-3.5" />
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={(e) => handleDeleteStagedContact(contact.id, e)}
+                          title="Remove from import queue"
+                          className="p-1.5 bg-slate-900 hover:bg-rose-950 text-slate-400 hover:text-rose-300 rounded-lg transition cursor-pointer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     </div>
                   );
                 })}

@@ -18,7 +18,9 @@ import {
   Edit2,
   CheckCircle2,
   AlertTriangle,
-  Send
+  Send,
+  Users,
+  Star
 } from 'lucide-react';
 import { Customer, Transaction } from '../../types';
 import { exportCustomerAccountStatementPDF, exportReceiptPDF } from '../../utils/pdfGenerator';
@@ -30,6 +32,7 @@ interface CustomerDetailsModalProps {
   transactions: Transaction[];
   onOpenEdit: (customer: Customer) => void;
   onOpenRepayment: (customer: Customer) => void;
+  onOpenContactsList?: (customer: Customer) => void;
 }
 
 export const CustomerDetailsModal: React.FC<CustomerDetailsModalProps> = ({
@@ -39,6 +42,7 @@ export const CustomerDetailsModal: React.FC<CustomerDetailsModalProps> = ({
   transactions,
   onOpenEdit,
   onOpenRepayment,
+  onOpenContactsList,
 }) => {
   const [activeSubTab, setActiveSubTab] = useState<'purchases' | 'profile'>('purchases');
   const [selectedTxForReceipt, setSelectedTxForReceipt] = useState<Transaction | null>(null);
@@ -334,51 +338,152 @@ export const CustomerDetailsModal: React.FC<CustomerDetailsModalProps> = ({
           )}
 
           {activeSubTab === 'profile' && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
-              <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800 space-y-3">
-                <h4 className="font-bold text-slate-200 uppercase tracking-wider text-[10px] text-sky-400">
-                  Contact & Location
-                </h4>
-                <div>
-                  <span className="text-slate-500 block text-[10px]">Full Name</span>
-                  <span className="text-slate-200 font-semibold">{customer.name}</span>
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+                <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h4 className="font-bold text-slate-200 uppercase tracking-wider text-[10px] text-sky-400">
+                      Primary Contact & Location
+                    </h4>
+                    {onOpenContactsList && (
+                      <button
+                        type="button"
+                        onClick={() => onOpenContactsList(customer)}
+                        className="text-[10px] text-sky-400 hover:text-sky-300 font-semibold underline cursor-pointer"
+                      >
+                        Manage Contacts
+                      </button>
+                    )}
+                  </div>
+                  <div>
+                    <span className="text-slate-500 block text-[10px]">Full Name</span>
+                    <span className="text-slate-200 font-semibold">{customer.name}</span>
+                  </div>
+                  <div>
+                    <span className="text-slate-500 block text-[10px]">Primary Phone</span>
+                    <span className="text-slate-200 font-mono font-bold text-emerald-400">{customer.phone || 'N/A'}</span>
+                  </div>
+                  <div>
+                    <span className="text-slate-500 block text-[10px]">Email Address</span>
+                    <span className="text-slate-200">{customer.email || 'N/A'}</span>
+                  </div>
+                  <div>
+                    <span className="text-slate-500 block text-[10px]">Physical Address / Delivery Area</span>
+                    <span className="text-slate-200">{customer.address || 'N/A'}</span>
+                  </div>
                 </div>
-                <div>
-                  <span className="text-slate-500 block text-[10px]">Phone Number</span>
-                  <span className="text-slate-200 font-mono">{customer.phone || 'N/A'}</span>
-                </div>
-                <div>
-                  <span className="text-slate-500 block text-[10px]">Email Address</span>
-                  <span className="text-slate-200">{customer.email || 'N/A'}</span>
-                </div>
-                <div>
-                  <span className="text-slate-500 block text-[10px]">Physical Address / Delivery Area</span>
-                  <span className="text-slate-200">{customer.address || 'N/A'}</span>
+
+                <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800 space-y-3">
+                  <h4 className="font-bold text-slate-200 uppercase tracking-wider text-[10px] text-sky-400">
+                    Tax & Account Terms
+                  </h4>
+                  <div>
+                    <span className="text-slate-500 block text-[10px]">KRA Tax PIN</span>
+                    <span className="text-slate-200 font-mono font-bold">{customer.kraPin || 'Not Specified'}</span>
+                  </div>
+                  <div>
+                    <span className="text-slate-500 block text-[10px]">Customer Classification</span>
+                    <span className="text-slate-200 font-semibold">{customer.customerType || 'Individual'}</span>
+                  </div>
+                  <div>
+                    <span className="text-slate-500 block text-[10px]">Credit Facility Ceiling</span>
+                    <span className="text-slate-200 font-mono">
+                      {customer.creditLimit ? `KSh ${customer.creditLimit.toLocaleString()}` : 'Standard (KSh 20,000)'}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-slate-500 block text-[10px]">Internal Notes</span>
+                    <span className="text-slate-300 italic">{customer.notes || 'No special notes recorded.'}</span>
+                  </div>
                 </div>
               </div>
 
+              {/* Associated Contacts List */}
               <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800 space-y-3">
-                <h4 className="font-bold text-slate-200 uppercase tracking-wider text-[10px] text-sky-400">
-                  Tax & Account Terms
-                </h4>
-                <div>
-                  <span className="text-slate-500 block text-[10px]">KRA Tax PIN</span>
-                  <span className="text-slate-200 font-mono font-bold">{customer.kraPin || 'Not Specified'}</span>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Users className="w-4 h-4 text-sky-400" />
+                    <h4 className="font-bold text-slate-200 text-xs">
+                      Customer Contacts & Phone Numbers (contactsList)
+                    </h4>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-sky-500/10 text-sky-400 border border-sky-500/20">
+                      {customer.contactsList?.length || (customer.phone && customer.phone !== 'N/A' ? 1 : 0)}
+                    </span>
+                  </div>
+                  {onOpenContactsList && (
+                    <button
+                      type="button"
+                      onClick={() => onOpenContactsList(customer)}
+                      className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-sky-300 border border-slate-700 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer"
+                    >
+                      <Edit2 className="w-3 h-3" />
+                      <span>Edit & Manage Contacts</span>
+                    </button>
+                  )}
                 </div>
-                <div>
-                  <span className="text-slate-500 block text-[10px]">Customer Classification</span>
-                  <span className="text-slate-200 font-semibold">{customer.customerType || 'Individual'}</span>
-                </div>
-                <div>
-                  <span className="text-slate-500 block text-[10px]">Credit Facility Ceiling</span>
-                  <span className="text-slate-200 font-mono">
-                    {customer.creditLimit ? `KSh ${customer.creditLimit.toLocaleString()}` : 'Standard (KSh 20,000)'}
-                  </span>
-                </div>
-                <div>
-                  <span className="text-slate-500 block text-[10px]">Internal Notes</span>
-                  <span className="text-slate-300 italic">{customer.notes || 'No special notes recorded.'}</span>
-                </div>
+
+                {customer.contactsList && customer.contactsList.length > 0 ? (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
+                    {customer.contactsList.map((contact) => {
+                      const cleanPhone = contact.phone.replace(/[^0-9]/g, '');
+                      return (
+                        <div
+                          key={contact.id}
+                          className="p-3 bg-slate-900/80 border border-slate-800 rounded-xl flex items-center justify-between gap-2.5 text-xs"
+                        >
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-1.5">
+                              {contact.isPrimary && (
+                                <Star className="w-3.5 h-3.5 text-amber-400 fill-amber-400 shrink-0" />
+                              )}
+                              <span className="font-bold text-slate-200 truncate">{contact.name}</span>
+                              {contact.role && (
+                                <span className="px-1.5 py-0.5 rounded text-[9px] font-semibold bg-slate-950 text-slate-400 border border-slate-800">
+                                  {contact.role}
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-2 font-mono text-[11px] text-emerald-400 mt-1">
+                              <Phone className="w-3 h-3 text-emerald-500 shrink-0" />
+                              <span>{contact.phone}</span>
+                            </div>
+                            {contact.email && (
+                              <div className="text-[10px] text-slate-500 truncate mt-0.5">
+                                {contact.email}
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="flex items-center gap-1 shrink-0">
+                            <a
+                              href={`https://wa.me/${cleanPhone}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              title="Chat on WhatsApp"
+                              className="p-1.5 bg-emerald-950/80 hover:bg-emerald-900 text-emerald-300 border border-emerald-800/60 rounded-lg transition"
+                            >
+                              <MessageCircle className="w-3.5 h-3.5" />
+                            </a>
+                            <a
+                              href={`tel:${cleanPhone}`}
+                              title="Call phone"
+                              className="p-1.5 bg-slate-800 hover:bg-slate-700 text-sky-400 rounded-lg transition"
+                            >
+                              <Phone className="w-3.5 h-3.5" />
+                            </a>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="p-4 text-center text-slate-500 bg-slate-900/40 rounded-xl border border-slate-800/60 text-xs">
+                    <p>Primary Phone: <strong className="text-emerald-400 font-mono">{customer.phone || 'N/A'}</strong></p>
+                    <p className="text-[11px] text-slate-500 mt-1">
+                      No additional contacts saved yet. Tap "Edit & Manage Contacts" to add alternative numbers or branch contacts.
+                    </p>
+                  </div>
+                )}
               </div>
             </div>
           )}

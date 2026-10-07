@@ -1,6 +1,24 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { X, User, Phone, Mail, MapPin, FileText, CreditCard, ShieldCheck, Smartphone, Upload, Clipboard } from 'lucide-react';
-import { Customer } from '../../types';
+import {
+  X,
+  User,
+  Phone,
+  Mail,
+  MapPin,
+  FileText,
+  CreditCard,
+  ShieldCheck,
+  Smartphone,
+  Upload,
+  Clipboard,
+  Plus,
+  Trash2,
+  Users,
+  Star,
+  Check,
+  Edit2
+} from 'lucide-react';
+import { Customer, CustomerContactItem } from '../../types';
 import {
   isContactPickerSupported,
   pickFromDevicePhonebook,
@@ -34,6 +52,15 @@ export const CustomerEditModal: React.FC<CustomerEditModalProps> = ({
   const [showPasteBox, setShowPasteBox] = useState(false);
   const [pasteInput, setPasteInput] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Contacts List management
+  const [contactsList, setContactsList] = useState<CustomerContactItem[]>([]);
+  const [newContactName, setNewContactName] = useState('');
+  const [newContactPhone, setNewContactPhone] = useState('+254 ');
+  const [newContactEmail, setNewContactEmail] = useState('');
+  const [newContactRole, setNewContactRole] = useState('Alternative');
+  const [showAddContactForm, setShowAddContactForm] = useState(false);
+  const [editingContactIndex, setEditingContactIndex] = useState<number | null>(null);
 
   const handlePickFromPhonebook = async () => {
     setPhonebookNotice('');
@@ -110,6 +137,21 @@ export const CustomerEditModal: React.FC<CustomerEditModalProps> = ({
       setCreditLimit(customer.creditLimit ? customer.creditLimit.toString() : '');
       setCustomerType(customer.customerType || 'Individual');
       setNotes(customer.notes || '');
+
+      let list = customer.contactsList ? [...customer.contactsList] : [];
+      if (list.length === 0 && customer.phone && customer.phone !== 'N/A') {
+        list = [
+          {
+            id: `c-prim-${customer.id}`,
+            name: `${customer.name} (Primary)`,
+            phone: customer.phone,
+            email: customer.email,
+            role: 'Primary',
+            isPrimary: true,
+          },
+        ];
+      }
+      setContactsList(list);
     } else {
       setName('');
       setPhone('+254 ');
@@ -119,9 +161,84 @@ export const CustomerEditModal: React.FC<CustomerEditModalProps> = ({
       setCreditLimit('');
       setCustomerType('Individual');
       setNotes('');
+      setContactsList([]);
     }
     setErrors({});
+    setShowAddContactForm(false);
+    setEditingContactIndex(null);
   }, [customer, isOpen]);
+
+  const handleSaveContactItem = (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanPhone = newContactPhone.trim();
+    if (!cleanPhone || cleanPhone === '+254') {
+      return;
+    }
+    const cleanName = newContactName.trim() || `${name || 'Customer'} (Contact ${contactsList.length + 1})`;
+
+    if (editingContactIndex !== null) {
+      const updated = [...contactsList];
+      updated[editingContactIndex] = {
+        ...updated[editingContactIndex],
+        name: cleanName,
+        phone: cleanPhone,
+        email: newContactEmail.trim() || undefined,
+        role: newContactRole,
+      };
+      setContactsList(updated);
+      setEditingContactIndex(null);
+    } else {
+      const newItem: CustomerContactItem = {
+        id: `c-item-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
+        name: cleanName,
+        phone: cleanPhone,
+        email: newContactEmail.trim() || undefined,
+        role: newContactRole,
+        isPrimary: contactsList.length === 0,
+      };
+      setContactsList([...contactsList, newItem]);
+    }
+
+    setNewContactName('');
+    setNewContactPhone('+254 ');
+    setNewContactEmail('');
+    setNewContactRole('Alternative');
+    setShowAddContactForm(false);
+  };
+
+  const handleStartEditContactItem = (idx: number) => {
+    const item = contactsList[idx];
+    setEditingContactIndex(idx);
+    setNewContactName(item.name || '');
+    setNewContactPhone(item.phone || '+254 ');
+    setNewContactEmail(item.email || '');
+    setNewContactRole(item.role || 'Alternative');
+    setShowAddContactForm(true);
+  };
+
+  const handleDeleteContactItem = (idx: number) => {
+    const item = contactsList[idx];
+    const updated = contactsList.filter((_, i) => i !== idx);
+    if (item.isPrimary && updated.length > 0) {
+      updated[0].isPrimary = true;
+      setPhone(updated[0].phone);
+    }
+    setContactsList(updated);
+    if (editingContactIndex === idx) {
+      setEditingContactIndex(null);
+      setShowAddContactForm(false);
+    }
+  };
+
+  const handleSetPrimaryContactItem = (idx: number) => {
+    const updated = contactsList.map((item, i) => ({
+      ...item,
+      isPrimary: i === idx,
+    }));
+    setContactsList(updated);
+    setPhone(updated[idx].phone);
+    if (updated[idx].email) setEmail(updated[idx].email);
+  };
 
   if (!isOpen) return null;
 
@@ -138,16 +255,20 @@ export const CustomerEditModal: React.FC<CustomerEditModalProps> = ({
       return;
     }
 
+    const primaryItem = contactsList.find((c) => c.isPrimary);
+    const mainPhone = phone.trim() || (primaryItem ? primaryItem.phone : 'N/A');
+
     const updatedCustomer: Customer = {
       id: customer ? customer.id : `cust-${Date.now()}`,
       name: name.trim(),
-      phone: phone.trim() || 'N/A',
-      email: email.trim() || undefined,
+      phone: mainPhone,
+      email: email.trim() || (primaryItem?.email || undefined),
       address: address.trim() || undefined,
       kraPin: kraPin.trim() ? kraPin.trim().toUpperCase() : undefined,
       creditLimit: creditLimit ? parseFloat(creditLimit) : undefined,
       customerType,
       notes: notes.trim() || undefined,
+      contactsList: contactsList.length > 0 ? contactsList : undefined,
       totalPurchases: customer ? customer.totalPurchases : 0,
       currentBalanceDue: customer ? customer.currentBalanceDue : 0,
       updatedAt: new Date().toISOString().slice(0, 10),
@@ -313,7 +434,7 @@ export const CustomerEditModal: React.FC<CustomerEditModalProps> = ({
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="block text-slate-300 font-semibold mb-1">
-                Phone Number (WhatsApp / M-Pesa)
+                Primary Phone Number (WhatsApp / M-Pesa)
               </label>
               <div className="relative">
                 <Phone className="w-4 h-4 text-slate-500 absolute left-3 top-2.5" />
@@ -340,6 +461,169 @@ export const CustomerEditModal: React.FC<CustomerEditModalProps> = ({
                 />
               </div>
             </div>
+          </div>
+
+          {/* Contacts & Numbers List (contactsList) Management Card */}
+          <div className="p-3.5 bg-slate-950 rounded-2xl border border-slate-800 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Users className="w-4 h-4 text-sky-400" />
+                <span className="font-bold text-slate-200 text-xs">
+                  Contacts & Alternative Numbers List
+                </span>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-sky-500/10 text-sky-400 border border-sky-500/20">
+                  {contactsList.length}
+                </span>
+              </div>
+              {!showAddContactForm && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditingContactIndex(null);
+                    setNewContactName('');
+                    setNewContactPhone('+254 ');
+                    setNewContactEmail('');
+                    setNewContactRole('Alternative');
+                    setShowAddContactForm(true);
+                  }}
+                  className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-sky-300 border border-slate-700/80 rounded-xl text-[11px] font-semibold flex items-center gap-1 transition cursor-pointer"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Add Phone / Contact</span>
+                </button>
+              )}
+            </div>
+
+            {/* List of contacts */}
+            {contactsList.length > 0 && (
+              <div className="space-y-1.5 max-h-40 overflow-y-auto divide-y divide-slate-800/60">
+                {contactsList.map((item, idx) => (
+                  <div
+                    key={item.id || idx}
+                    className={`pt-1.5 first:pt-0 flex items-center justify-between gap-2 text-xs py-1 px-1.5 rounded-lg transition ${
+                      item.isPrimary ? 'bg-sky-950/20' : 'hover:bg-slate-900/60'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 min-w-0 flex-1">
+                      <button
+                        type="button"
+                        onClick={() => handleSetPrimaryContactItem(idx)}
+                        title={item.isPrimary ? 'Primary Default Phone' : 'Click to make Primary Phone'}
+                        className={`p-1 rounded transition shrink-0 cursor-pointer ${
+                          item.isPrimary ? 'text-amber-400' : 'text-slate-600 hover:text-amber-400'
+                        }`}
+                      >
+                        <Star className={`w-3.5 h-3.5 ${item.isPrimary ? 'fill-amber-400' : ''}`} />
+                      </button>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5 truncate">
+                          <span className="font-semibold text-slate-200 text-[11px] truncate">
+                            {item.name}
+                          </span>
+                          {item.isPrimary && (
+                            <span className="text-[9px] font-black uppercase text-sky-400">
+                              (Primary)
+                            </span>
+                          )}
+                          <span className="text-[10px] text-slate-500 font-normal">
+                            • {item.role || 'Alt'}
+                          </span>
+                        </div>
+                        <div className="text-[11px] font-mono text-emerald-400 flex items-center gap-2">
+                          <span>{item.phone}</span>
+                          {item.email && <span className="text-slate-500 font-sans text-[10px] truncate">{item.email}</span>}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => handleStartEditContactItem(idx)}
+                        title="Edit this Contact"
+                        className="p-1 bg-slate-900 hover:bg-slate-800 text-sky-400 rounded-lg transition cursor-pointer"
+                      >
+                        <Edit2 className="w-3 h-3" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteContactItem(idx)}
+                        title="Delete this Contact"
+                        className="p-1 bg-slate-900 hover:bg-rose-950 text-slate-400 hover:text-rose-300 rounded-lg transition cursor-pointer"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Inline Add / Edit Form */}
+            {showAddContactForm && (
+              <div className="p-3 bg-slate-900 rounded-xl border border-slate-800/80 space-y-2.5 pt-2 text-xs">
+                <div className="flex items-center justify-between text-[11px] font-bold text-slate-300">
+                  <span>{editingContactIndex !== null ? 'Edit Contact' : 'New Contact Item'}</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowAddContactForm(false);
+                      setEditingContactIndex(null);
+                    }}
+                    className="text-slate-500 hover:text-white"
+                  >
+                    Cancel
+                  </button>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <input
+                    type="text"
+                    value={newContactName}
+                    onChange={(e) => setNewContactName(e.target.value)}
+                    placeholder="Label/Name (e.g. Branch Phone)"
+                    className="bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-slate-100 text-xs focus:border-sky-500 outline-none"
+                  />
+                  <input
+                    type="text"
+                    value={newContactPhone}
+                    onChange={(e) => setNewContactPhone(e.target.value)}
+                    placeholder="Phone (+254 7...)"
+                    className="bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-slate-100 text-xs font-mono focus:border-sky-500 outline-none"
+                  />
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <input
+                    type="email"
+                    value={newContactEmail}
+                    onChange={(e) => setNewContactEmail(e.target.value)}
+                    placeholder="Email (optional)"
+                    className="bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-slate-100 text-xs focus:border-sky-500 outline-none"
+                  />
+                  <select
+                    value={newContactRole}
+                    onChange={(e) => setNewContactRole(e.target.value)}
+                    className="bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-slate-200 text-xs focus:border-sky-500 outline-none cursor-pointer"
+                  >
+                    <option value="Alternative">Alternative Cell</option>
+                    <option value="WhatsApp Direct">WhatsApp Direct</option>
+                    <option value="Procurement">Procurement Agent</option>
+                    <option value="Finance">Finance / Billing</option>
+                    <option value="Branch Delivery">Branch Delivery</option>
+                    <option value="Primary">Primary Phone</option>
+                  </select>
+                </div>
+                <div className="flex justify-end pt-1">
+                  <button
+                    type="button"
+                    onClick={handleSaveContactItem}
+                    className="px-3 py-1.5 bg-sky-600 hover:bg-sky-500 text-white rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer"
+                  >
+                    <Check className="w-3.5 h-3.5" />
+                    <span>{editingContactIndex !== null ? 'Save Contact' : 'Add to List'}</span>
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Physical Address / Delivery Location & KRA PIN */}

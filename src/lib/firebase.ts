@@ -5,24 +5,35 @@ import {
   getFirestore,
   doc,
   getDocFromServer,
+  setLogLevel,
   Firestore
 } from 'firebase/firestore';
 import { getAuth, Auth } from 'firebase/auth';
 import firebaseConfig from '../../firebase-applet-config.json';
 
+// Silence Firestore internal network retry / backend timeout logs in restricted sandbox environments
+try {
+  setLogLevel('silent');
+} catch {
+  // Ignore in environments where setLogLevel is unavailable
+}
+
 // Initialize Firebase App instance safely
 export const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 
-// Initialize Firestore database using memoryLocalCache.
+// Initialize Firestore database using memoryLocalCache and long polling.
 // Using memoryLocalCache keeps query caches in memory without writing cross-tab state to localStorage.
 // This prevents WebStorageSharedClientState from allocating client heartbeat keys in window.localStorage,
 // completely eliminating browser QuotaExceededError and Firestore internal assertion crash (ID: b815).
+// experimentalForceLongPolling avoids duplex stream buffering timeouts behind proxies and sandboxed iframes.
 export const db: Firestore = (() => {
   try {
     return initializeFirestore(
       app,
       {
         localCache: memoryLocalCache(),
+        experimentalForceLongPolling: true,
+        ignoreUndefinedProperties: true,
       },
       firebaseConfig.firestoreDatabaseId
     );
@@ -35,23 +46,28 @@ export const db: Firestore = (() => {
 // Initialize Firebase Auth
 export const auth: Auth = getAuth(app);
 
-// Connection test helper per guidelines
+// Connection test helper with fast fallback timeout to prevent 10s blocking
 export async function testFirestoreConnection(): Promise<boolean> {
   try {
-    await getDocFromServer(doc(db, 'test', 'connection'));
+    const fetchDoc = getDocFromServer(doc(db, 'test', 'connection'));
+    const timeout = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('Connection check timeout')), 2500)
+    );
+    await Promise.race([fetchDoc, timeout]);
     return true;
   } catch (error) {
     if (error instanceof Error) {
       if (
         error.message.includes('the client is offline') ||
         error.message.includes('Quota') ||
-        error.message.includes('quota')
+        error.message.includes('quota') ||
+        error.message.includes('timeout') ||
+        error.message.includes('Could not reach') ||
+        error.message.includes('unavailable')
       ) {
-        console.warn('[Firebase] Offline mode or quota limit reached. Local cache will be used.');
         return false;
       }
     }
-    console.warn('[Firebase] Connection check:', error);
     return false;
   }
 }
@@ -118,6 +134,20 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
       `[Firestore Quota Notice] Free daily read units limit reached for path "${path}". Operating safely in offline local storage mode. Upgrade URL: ${FIREBASE_UPGRADE_URL}`,
       JSON.stringify(errInfo)
     );
+    return errInfo;
+  }
+
+  // Handle transient offline mode and network connection timeouts cleanly
+  const lowerMsg = errInfo.error.toLowerCase();
+  if (
+    lowerMsg.includes("could not reach cloud firestore backend") ||
+    lowerMsg.includes("didn't respond within 10 seconds") ||
+    lowerMsg.includes("the client is offline") ||
+    lowerMsg.includes("failed to get document because the client is offline") ||
+    lowerMsg.includes("unavailable") ||
+    lowerMsg.includes("offline")
+  ) {
+    // POS gracefully runs with local memory/storage when offline
     return errInfo;
   }
 

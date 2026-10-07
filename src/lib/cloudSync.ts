@@ -226,6 +226,17 @@ export async function saveCustomerToCloud(cust: Customer): Promise<void> {
   }
 }
 
+export async function deleteCustomerFromCloud(customerId: string): Promise<void> {
+  const path = `customers/${customerId}`;
+  try {
+    const docRef = doc(db, 'customers', customerId);
+    await deleteDoc(docRef);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+    throw error;
+  }
+}
+
 // ---------------- SUPPLIERS LIVE SYNC ----------------
 
 export function subscribeToSuppliers(
@@ -259,6 +270,17 @@ export async function saveSupplierToCloud(supp: Supplier): Promise<void> {
     await setDoc(docRef, cleaned, { merge: true });
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
+    throw error;
+  }
+}
+
+export async function deleteSupplierFromCloud(supplierId: string): Promise<void> {
+  const path = `suppliers/${supplierId}`;
+  try {
+    const docRef = doc(db, 'suppliers', supplierId);
+    await deleteDoc(docRef);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
     throw error;
   }
 }

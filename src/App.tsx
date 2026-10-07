@@ -145,8 +145,10 @@ import {
   commitSaleToCloudBatch,
   subscribeToCustomers,
   saveCustomerToCloud,
+  deleteCustomerFromCloud,
   subscribeToSuppliers,
   saveSupplierToCloud,
+  deleteSupplierFromCloud,
   subscribeToExpenses,
   saveExpenseToCloud,
   deleteExpenseFromCloud,
@@ -649,9 +651,17 @@ export default function App() {
         } else if (item.type === 'product') {
           await saveProductToCloud(item.data);
         } else if (item.type === 'customer') {
-          await saveCustomerToCloud(item.data);
+          if (item.data?._deleted) {
+            await deleteCustomerFromCloud(item.data.id);
+          } else {
+            await saveCustomerToCloud(item.data);
+          }
         } else if (item.type === 'supplier') {
-          await saveSupplierToCloud(item.data);
+          if (item.data?._deleted) {
+            await deleteSupplierFromCloud(item.data.id);
+          } else {
+            await saveSupplierToCloud(item.data);
+          }
         } else if (item.type === 'expense') {
           await saveExpenseToCloud(item.data);
         } else if (item.type === 'restock') {
@@ -1258,6 +1268,21 @@ export default function App() {
 
   const handleDeleteCustomer = (customerId: string) => {
     setCustomers((prev) => prev.filter((c) => c.id !== customerId));
+    if (!getIsOnline()) {
+      addPendingSyncItem({
+        type: 'customer',
+        description: `Delete Customer (${customerId})`,
+        data: { id: customerId, _deleted: true },
+      });
+    } else {
+      deleteCustomerFromCloud(customerId).catch(() => {
+        addPendingSyncItem({
+          type: 'customer',
+          description: `Delete Customer (${customerId})`,
+          data: { id: customerId, _deleted: true },
+        });
+      });
+    }
   };
 
   const handleSaveSupplier = (sup: Supplier) => {
@@ -1289,6 +1314,21 @@ export default function App() {
 
   const handleDeleteSupplier = (supplierId: string) => {
     setSuppliers((prev) => prev.filter((s) => s.id !== supplierId));
+    if (!getIsOnline()) {
+      addPendingSyncItem({
+        type: 'supplier',
+        description: `Delete Supplier (${supplierId})`,
+        data: { id: supplierId, _deleted: true },
+      });
+    } else {
+      deleteSupplierFromCloud(supplierId).catch(() => {
+        addPendingSyncItem({
+          type: 'supplier',
+          description: `Delete Supplier (${supplierId})`,
+          data: { id: supplierId, _deleted: true },
+        });
+      });
+    }
   };
 
   const handleRecordCustomerDebtPayment = (

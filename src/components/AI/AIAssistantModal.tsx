@@ -74,7 +74,7 @@ const QUICK_QUESTIONS = [
   {
     icon: ArrowRightLeft,
     label: 'Inter-branch stock transfer?',
-    prompt: 'How do I transfer stock inventory from Main Store to another branch outlet?'
+    prompt: 'How do I transfer stock inventory from Rofani Electronics to another branch outlet?'
   },
   {
     icon: Barcode,

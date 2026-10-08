@@ -282,23 +282,25 @@ export const Header: React.FC<HeaderProps> = ({
               </button>
             )}
 
-            {/* Multi-Store Branch Outlet Switcher Button */}
+            {/* Store Outlet Settings & Switcher Button */}
             {onOpenStoreManager && (
               <button
                 onClick={onOpenStoreManager}
-                title="Switch Active Store Branch or Add New Store Outlets & Stock Transfers"
+                title="Store Settings & Branch Management"
                 className="flex items-center gap-1.5 bg-indigo-950/80 hover:bg-indigo-900 text-indigo-200 border border-indigo-700/80 px-2.5 py-1.5 rounded-xl text-xs font-bold transition shadow-sm"
               >
                 <Building2 className="w-4 h-4 text-indigo-400 shrink-0" />
                 <div className="text-left hidden md:block">
-                  <div className="text-[10px] text-indigo-400 uppercase font-mono leading-none">Branch</div>
-                  <div className="text-xs font-bold text-white truncate max-w-[120px]">
-                    {stores.find((s) => s.id === activeStoreId)?.name || 'Main Store'}
+                  <div className="text-[10px] text-indigo-400 uppercase font-mono leading-none">Store</div>
+                  <div className="text-xs font-bold text-white truncate max-w-[130px]">
+                    {stores.find((s) => s.id === activeStoreId)?.name || 'Rofani Electronics'}
                   </div>
                 </div>
-                <span className="bg-indigo-800 text-indigo-200 text-[10px] font-mono px-1.5 py-0.5 rounded-md font-extrabold ml-0.5">
-                  {stores.length > 0 ? stores.length : 1}
-                </span>
+                {stores.length > 1 && (
+                  <span className="bg-indigo-800 text-indigo-200 text-[10px] font-mono px-1.5 py-0.5 rounded-md font-extrabold ml-0.5">
+                    {stores.length}
+                  </span>
+                )}
               </button>
             )}
 

@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import { Customer, Transaction } from '../../types';
 import { exportCustomerAccountStatementPDF, exportReceiptPDF } from '../../utils/pdfGenerator';
+import { formatKSh } from '../../utils/currency';
 
 interface CustomerDetailsModalProps {
   isOpen: boolean;
@@ -71,8 +72,8 @@ export const CustomerDetailsModal: React.FC<CustomerDetailsModalProps> = ({
     const cleanPhone = customer.phone.replace(/[^0-9]/g, '');
     const message = encodeURIComponent(
       `Hello ${customer.name},\n\nThis is a friendly statement from *ROFANI Electronics & Boutique*.\n\n` +
-      `Your current outstanding balance is: *KSh ${balanceDue.toLocaleString(undefined, { minimumFractionDigits: 2 })}*.\n` +
-      `Total Lifetime Purchases: KSh ${totalSpent.toLocaleString()}.\n\n` +
+      `Your current outstanding balance is: *${formatKSh(balanceDue, { showDecimals: true })}*.\n` +
+      `Total Lifetime Purchases: ${formatKSh(totalSpent)}.\n\n` +
       `You may settle via:\n• *M-Pesa Buy Goods Till:* 789012\n• *Paybill:* 247247 (Acc: 0180293)\n\n` +
       `Thank you for being our valued customer!`
     );
@@ -106,7 +107,7 @@ export const CustomerDetailsModal: React.FC<CustomerDetailsModalProps> = ({
                 </span>
                 {balanceDue > 0 ? (
                   <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/30 flex items-center gap-1">
-                    <AlertTriangle className="w-3 h-3" /> Credit Due: KSh {balanceDue.toLocaleString()}
+                    <AlertTriangle className="w-3 h-3" /> Credit Due: {formatKSh(balanceDue)}
                   </span>
                 ) : (
                   <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center gap-1">
@@ -188,7 +189,7 @@ export const CustomerDetailsModal: React.FC<CustomerDetailsModalProps> = ({
               Total Purchases
             </span>
             <div className="text-base font-extrabold text-slate-100 font-mono mt-1">
-              KSh {totalSpent.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+              {formatKSh(totalSpent, { showDecimals: true })}
             </div>
             <span className="text-[10px] text-slate-500 mt-0.5 block">{customerTxs.length} recorded sales</span>
           </div>
@@ -198,7 +199,7 @@ export const CustomerDetailsModal: React.FC<CustomerDetailsModalProps> = ({
               Balance Due (Debt)
             </span>
             <div className={`text-base font-extrabold font-mono mt-1 ${balanceDue > 0 ? 'text-rose-400' : 'text-emerald-400'}`}>
-              KSh {balanceDue.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+              {formatKSh(balanceDue, { showDecimals: true })}
             </div>
             <span className="text-[10px] text-slate-500 mt-0.5 block">
               {balanceDue > 0 ? 'Payment pending' : 'Zero outstanding'}
@@ -211,7 +212,7 @@ export const CustomerDetailsModal: React.FC<CustomerDetailsModalProps> = ({
             </span>
             <div className="text-base font-bold text-slate-200 font-mono mt-1 flex items-center justify-between">
               <span>{creditUtilization}%</span>
-              <span className="text-[10px] text-slate-400 font-normal">Cap: KSh {creditLimit.toLocaleString()}</span>
+              <span className="text-[10px] text-slate-400 font-normal">Cap: {formatKSh(creditLimit)}</span>
             </div>
             <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden mt-1.5">
               <div
@@ -228,7 +229,7 @@ export const CustomerDetailsModal: React.FC<CustomerDetailsModalProps> = ({
               Average Order Value
             </span>
             <div className="text-base font-bold text-sky-400 font-mono mt-1">
-              KSh {customerTxs.length > 0 ? Math.round(totalSpent / customerTxs.length).toLocaleString() : totalSpent.toLocaleString()}
+              {formatKSh(customerTxs.length > 0 ? Math.round(totalSpent / customerTxs.length) : totalSpent)}
             </div>
             <span className="text-[10px] text-slate-500 mt-0.5 block">Per transaction</span>
           </div>
@@ -298,13 +299,13 @@ export const CustomerDetailsModal: React.FC<CustomerDetailsModalProps> = ({
                             {tx.items.map((i) => `${i.product.name} (x${i.quantity})`).join(', ')}
                           </td>
                           <td className="p-3 text-right font-bold text-slate-100">
-                            KSh {tx.grandTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                            {formatKSh(tx.grandTotal, { showDecimals: true })}
                           </td>
                           <td className="p-3 text-right text-emerald-400">
-                            KSh {tx.amountPaid.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                            {formatKSh(tx.amountPaid, { showDecimals: true })}
                           </td>
                           <td className={`p-3 text-right font-bold ${tx.balanceDue > 0 ? 'text-rose-400' : 'text-slate-500'}`}>
-                            KSh {tx.balanceDue.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                            {formatKSh(tx.balanceDue, { showDecimals: true })}
                           </td>
                           <td className="p-3 text-center">
                             <span

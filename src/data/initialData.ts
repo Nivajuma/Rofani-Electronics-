@@ -927,7 +927,7 @@ export const INITIAL_CASH_TRANSACTIONS: CashTransaction[] = [
 export const INITIAL_STORES: StoreLocation[] = [
   {
     id: 'store-main',
-    name: 'Main Flagship Branch',
+    name: 'Rofani Electronics',
     code: 'HQ-CBD',
     city: 'Nairobi',
     address: 'Kenyatta Avenue, City Center, Nairobi',
@@ -935,39 +935,6 @@ export const INITIAL_STORES: StoreLocation[] = [
     isMainBranch: true,
     active: true,
     managerName: 'Sarah Miller'
-  },
-  {
-    id: 'store-westlands',
-    name: 'Westlands Mall Branch',
-    code: 'WST-02',
-    city: 'Nairobi',
-    address: 'Sarit Centre, 2nd Floor, Westlands',
-    phone: '+254 722 333 444',
-    isMainBranch: false,
-    active: true,
-    managerName: 'John Doe'
-  },
-  {
-    id: 'store-mombasa',
-    name: 'Mombasa Coastal Outlet',
-    code: 'MBA-03',
-    city: 'Mombasa',
-    address: 'Nyerere Avenue, Mombasa Island',
-    phone: '+254 733 555 666',
-    isMainBranch: false,
-    active: true,
-    managerName: 'David Smith'
-  },
-  {
-    id: 'store-online',
-    name: 'Online E-Store Portal',
-    code: 'WEB-ECOM',
-    city: 'Nationwide Express',
-    address: 'https://rofani-store.co.ke',
-    phone: '+254 711 000 999',
-    isOnlineStorefront: true,
-    active: true,
-    managerName: 'E-Commerce Logistics Team'
   }
 ];
 
@@ -1027,7 +994,7 @@ export const INITIAL_ONLINE_ORDERS: OnlineOrder[] = [
     id: 'ord-1001',
     orderNumber: 'ORD-1001',
     storeId: 'store-main',
-    storeName: 'Main Flagship Branch',
+    storeName: 'Rofani Electronics',
     customerName: 'Robert Chen',
     customerPhone: '+254 720 123456',
     customerEmail: 'robert.chen@gmail.com',
@@ -1126,9 +1093,9 @@ export const INITIAL_STOCK_TRANSFERS: StockTransferRecord[] = [
     id: 'trf-101',
     transferNumber: 'TRF-2026-001',
     sourceStoreId: 'store-main',
-    sourceStoreName: 'Main Flagship Branch',
-    targetStoreId: 'store-westlands',
-    targetStoreName: 'Westlands Mall Branch',
+    sourceStoreName: 'Rofani Electronics',
+    targetStoreId: 'store-warehouse',
+    targetStoreName: 'Central Storage Hub',
     productId: 'prod-1',
     productName: 'Wireless Bluetooth Headphones',
     sku: 'ELEC-SND-001',
@@ -1136,15 +1103,15 @@ export const INITIAL_STOCK_TRANSFERS: StockTransferRecord[] = [
     status: 'Completed',
     createdAt: new Date(Date.now() - 86400000 * 2).toISOString(),
     transferredBy: 'Sarah Miller (Manager)',
-    notes: 'Transfer requested for weekend sales surge at Westlands Mall.'
+    notes: 'Restock batch received at Rofani Electronics.'
   },
   {
     id: 'trf-102',
     transferNumber: 'TRF-2026-002',
-    sourceStoreId: 'store-main',
-    sourceStoreName: 'Main Flagship Branch',
-    targetStoreId: 'store-mombasa',
-    targetStoreName: 'Mombasa Coastal Outlet',
+    sourceStoreId: 'store-warehouse',
+    sourceStoreName: 'Central Storage Hub',
+    targetStoreId: 'store-main',
+    targetStoreName: 'Rofani Electronics',
     productId: 'prod-3',
     productName: 'Designer Silk Evening Dress',
     sku: 'FASH-DRS-008',

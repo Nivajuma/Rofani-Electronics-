@@ -25,7 +25,8 @@ import {
   Star,
   Zap,
   Gem,
-  ShieldAlert
+  ShieldAlert,
+  QrCode
 } from 'lucide-react';
 import { Product, Supplier, Transaction } from '../../types';
 import { generateAutoBarcode, printBarcodeLabels, printBatchBarcodes } from '../../utils/barcode';

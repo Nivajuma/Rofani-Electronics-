@@ -45,7 +45,9 @@ import {
   DollarSign,
   Award,
   ShieldAlert,
-  Save
+  Save,
+  Flame,
+  Activity
 } from 'lucide-react';
 import { Product, Supplier, BarcodeScanLog, User, Transaction } from '../../types';
 import { generateAutoBarcode, printBarcodeLabels, printBatchBarcodes } from '../../utils/barcode';
@@ -53,6 +55,7 @@ import { calculateProfitMargin } from '../../utils/margin';
 import { canDeleteInventory, canEditInventory, hasWorkerPermission } from '../../utils/permissions';
 import { SpreadsheetImportModal } from './SpreadsheetImportModal';
 import { ExcelSpreadsheetView } from './ExcelSpreadsheetView';
+import { StockDensityHeatmap } from './StockDensityHeatmap';
 import { ImageGeneratorModal } from './ImageGeneratorModal';
 import { detectDuplicateProducts, deduplicateProducts } from '../../utils/deduplicate';
 import { optimizeImageFile, optimizeImageDataUrl } from '../../utils/imageOptimizer';
@@ -113,7 +116,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   scanLogs = [],
   onRecordScanLog = () => {},
   onClearScanLogs = () => {},
-  storeName = 'Main Store',
+  storeName = 'Rofani Electronics',
   onOpenAiAssistantWithPrompt,
 }) => {
   const [searchTerm, setSearchTerm] = useState(() =>
@@ -195,12 +198,12 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     }
   }, [initialShowLowStockOnly]);
 
-  // View Mode: 'standard' (table) vs 'excel' (grid) vs 'grouped' (hierarchy) vs 'scan_history' (barcode scan log)
-  const [inventoryViewMode, setInventoryViewMode] = useState<'standard' | 'excel' | 'grouped' | 'scan_history'>(() =>
-    safeGetJSON<'standard' | 'excel' | 'grouped' | 'scan_history'>(
+  // View Mode: 'standard' (table) vs 'excel' (grid) vs 'grouped' (hierarchy) vs 'scan_history' (barcode scan log) vs 'heatmap' (d3 stock density)
+  const [inventoryViewMode, setInventoryViewMode] = useState<'standard' | 'excel' | 'grouped' | 'scan_history' | 'heatmap'>(() =>
+    safeGetJSON<'standard' | 'excel' | 'grouped' | 'scan_history' | 'heatmap'>(
       'retail_pos_inventory_view_mode',
       'standard',
-      (val) => ['standard', 'excel', 'grouped', 'scan_history'].includes(val)
+      (val) => ['standard', 'excel', 'grouped', 'scan_history', 'heatmap'].includes(val)
     )
   );
   useEffect(() => {
@@ -1349,6 +1352,20 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                 </span>
               )}
             </button>
+
+            <button
+              id="btn-inventory-tab-heatmap"
+              onClick={() => setInventoryViewMode('heatmap')}
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition ${
+                inventoryViewMode === 'heatmap'
+                  ? 'bg-gradient-to-r from-amber-600 via-rose-600 to-indigo-600 text-white shadow-md'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+              title="Interactive D3 Category Stock Density & Inventory Imbalance Heatmap"
+            >
+              <Flame className="w-4 h-4 text-amber-400" />
+              <span>Density Heatmap</span>
+            </button>
           </div>
 
           {/* AI Predictive Restock Button */}
@@ -1682,6 +1699,25 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
             handleOpenEditModal(prod);
           }}
         />
+      ) : inventoryViewMode === 'heatmap' ? (
+        <StockDensityHeatmap
+          products={products}
+          categories={consolidatedCategories}
+          transactions={transactions}
+          selectedCategory={selectedCategory}
+          onCategoryChange={(cat) => setSelectedCategory(cat)}
+          onSelectProduct={(prod) => {
+            handleOpenEditModal(prod);
+          }}
+          onFilterCatalogCategory={(cat) => {
+            setSelectedCategory(cat);
+            setInventoryViewMode('standard');
+          }}
+          onSwitchToStandard={(cat) => {
+            if (cat) setSelectedCategory(cat);
+            setInventoryViewMode('standard');
+          }}
+        />
       ) : (
         <>
           {/* Sales Performance & Profit Velocity KPI Matrix Strip */}
@@ -1990,6 +2026,17 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                   <X className="w-3 h-3" /> Clear Filter
                 </button>
               )}
+
+              <button
+                type="button"
+                id="btn-inventory-quick-heatmap"
+                onClick={() => setInventoryViewMode('heatmap')}
+                className="px-2.5 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1.5 bg-gradient-to-r from-amber-600/30 to-rose-600/30 hover:from-amber-600/50 hover:to-rose-600/50 text-amber-200 border border-amber-500/40 ml-auto"
+                title="Open interactive D3 Category Stock Density & Imbalance Heatmap"
+              >
+                <Flame className="w-3.5 h-3.5 text-amber-400" />
+                <span>Density Heatmap</span>
+              </button>
             </div>
           </div>
 

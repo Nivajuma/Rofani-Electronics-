@@ -2795,7 +2795,7 @@ export const POSView: React.FC<POSViewProps> = ({
         <BarcodeScannerModal
           onScan={handleBarcodeScan}
           onClose={() => setShowScanner(false)}
-          sampleBarcodes={products.map((p) => ({ name: `${p.name} ($${p.sellingPrice})`, barcode: p.barcode }))}
+          sampleBarcodes={products.map((p) => ({ name: `${p.name} (KSh ${p.sellingPrice.toLocaleString()})`, barcode: p.barcode }))}
           products={products}
           onSwitchToAiScanner={() => setShowAiReceiptScanner(true)}
         />

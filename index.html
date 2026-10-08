@@ -46,6 +46,25 @@
                 }
               } catch(e) {}
             }
+            // Auto-migrate stores to single store: Rofani Electronics
+            var storesJson = localStorage.getItem('retail_pos_stores');
+            if (storesJson && (storesJson.indexOf('Flagship') !== -1 || storesJson.indexOf('store-westlands') !== -1)) {
+              try {
+                var singleStore = [{
+                  id: 'store-main',
+                  name: 'Rofani Electronics',
+                  code: 'HQ-CBD',
+                  city: 'Nairobi',
+                  address: 'Kenyatta Avenue, City Center, Nairobi',
+                  phone: '+254 700 111 222',
+                  isMainBranch: true,
+                  active: true,
+                  managerName: 'Sarah Miller'
+                }];
+                localStorage.setItem('retail_pos_stores', JSON.stringify(singleStore));
+                localStorage.setItem('retail_pos_active_store_id', 'store-main');
+              } catch(e) {}
+            }
           }
         } catch(e) {}
       })();

@@ -23,10 +23,23 @@ import {
   ArrowUpDown,
   FileText,
   Sparkles,
-  Smartphone
+  Smartphone,
+  MessageSquare,
+  CheckSquare,
+  Square,
+  MinusSquare,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
+  X,
+  Send,
+  Check,
+  Share2
 } from 'lucide-react';
 import { Customer, Supplier, Transaction, Product, User, PaymentMethod } from '../../types';
 import { exportCustomerReportPDF, exportSupplierReportPDF } from '../../utils/pdfGenerator';
+import { formatKSh } from '../../utils/currency';
 import { CustomerEditModal } from './CustomerEditModal';
 import { CustomerDebtPaymentModal } from './CustomerDebtPaymentModal';
 import { CustomerDetailsModal } from './CustomerDetailsModal';
@@ -37,7 +50,9 @@ import { SupplierDetailsModal } from './SupplierDetailsModal';
 import { ContactsImportExportModal } from './ContactsImportExportModal';
 import { PhonebookImportModal } from './PhonebookImportModal';
 import { CustomerPromotionGeneratorModal } from '../Marketing/CustomerPromotionGeneratorModal';
+import { WhatsAppMarketingSection } from './WhatsAppMarketingSection';
 import { safeGetJSON, safeSetJSON } from '../../utils/safeStorage';
+import { OfferDeal } from '../../types';
 
 interface CustomersSuppliersViewProps {
   customers: Customer[];
@@ -45,6 +60,7 @@ interface CustomersSuppliersViewProps {
   transactions: Transaction[];
   products: Product[];
   currentUser: User;
+  offers?: OfferDeal[];
   onSaveCustomer: (customer: Customer) => void;
   onDeleteCustomer: (id: string) => void;
   onSaveSupplier: (supplier: Supplier) => void;
@@ -74,6 +90,7 @@ export const CustomersSuppliersView: React.FC<CustomersSuppliersViewProps> = ({
   transactions,
   products,
   currentUser,
+  offers,
   onSaveCustomer,
   onDeleteCustomer,
   onSaveSupplier,
@@ -84,10 +101,10 @@ export const CustomersSuppliersView: React.FC<CustomersSuppliersViewProps> = ({
   onImportSuppliers,
   onNavigateToRestock,
 }) => {
-  // Main Tab: 'customers' or 'suppliers'
-  const [activeTab, setActiveTab] = useState<'customers' | 'suppliers'>(() =>
-    safeGetJSON<'customers' | 'suppliers'>('retail_pos_contacts_active_tab', 'customers', (val) =>
-      val === 'customers' || val === 'suppliers'
+  // Main Tab: 'customers', 'suppliers', or 'whatsapp'
+  const [activeTab, setActiveTab] = useState<'customers' | 'suppliers' | 'whatsapp'>(() =>
+    safeGetJSON<'customers' | 'suppliers' | 'whatsapp'>('retail_pos_contacts_active_tab', 'customers', (val) =>
+      val === 'customers' || val === 'suppliers' || val === 'whatsapp'
     )
   );
   useEffect(() => {
@@ -124,6 +141,29 @@ export const CustomersSuppliersView: React.FC<CustomersSuppliersViewProps> = ({
   useEffect(() => {
     safeSetJSON('retail_pos_contacts_sort_by', sortBy);
   }, [sortBy]);
+
+  // Alphabetical A-Z Quick-Jump Filter
+  const [activeLetter, setActiveLetter] = useState<string>(() =>
+    safeGetJSON<string>('retail_pos_contacts_letter_filter', 'ALL')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_contacts_letter_filter', activeLetter);
+  }, [activeLetter]);
+
+  // High-Performance Pagination (20, 50, 100, 200 per page)
+  const [pageSize, setPageSize] = useState<number>(() =>
+    safeGetJSON<number>('retail_pos_contacts_page_size', 50, (val) => [20, 50, 100, 200].includes(val))
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_contacts_page_size', pageSize);
+  }, [pageSize]);
+
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [jumpPageInput, setJumpPageInput] = useState<string>('');
+
+  // Bulk Selection Control
+  const [selectedCustomerIds, setSelectedCustomerIds] = useState<Set<string>>(() => new Set());
+  const [preselectedMarketingIds, setPreselectedMarketingIds] = useState<string[] | undefined>(undefined);
 
   // Modal States
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(() =>
@@ -241,12 +281,34 @@ export const CustomersSuppliersView: React.FC<CustomersSuppliersViewProps> = ({
     return { totalCount, payablesCount: payables.length, totalPayable, totalSupplied };
   }, [suppliers]);
 
-  // 3. Filtered Customers
+  // Alphabet letters list & live distribution counts
+  const alphabetLetters = useMemo(() => [
+    'ALL', '#', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M',
+    'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z'
+  ], []);
+
+  const letterCounts = useMemo(() => {
+    const counts: Record<string, number> = { ALL: customers.length, '#': 0 };
+    for (let i = 65; i <= 90; i++) {
+      counts[String.fromCharCode(i)] = 0;
+    }
+    customers.forEach((c) => {
+      const firstChar = (c.name || '').trim().charAt(0).toUpperCase();
+      if (firstChar >= 'A' && firstChar <= 'Z') {
+        counts[firstChar] = (counts[firstChar] || 0) + 1;
+      } else if (firstChar) {
+        counts['#'] = (counts['#'] || 0) + 1;
+      }
+    });
+    return counts;
+  }, [customers]);
+
+  // 3. Filtered Customers with Instant Search & A-Z Jump
   const filteredCustomers = useMemo(() => {
     let result = [...customers];
 
     if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
+      const q = searchQuery.toLowerCase().trim();
       result = result.filter(
         (c) =>
           c.name.toLowerCase().includes(q) ||
@@ -269,6 +331,18 @@ export const CustomersSuppliersView: React.FC<CustomersSuppliersViewProps> = ({
       result = result.filter((c) => c.customerType === 'Corporate');
     }
 
+    // A-Z Alphabetical Quick-Jump Filter
+    if (activeLetter !== 'ALL') {
+      if (activeLetter === '#') {
+        result = result.filter((c) => {
+          const firstChar = (c.name || '').trim().charAt(0).toUpperCase();
+          return !(firstChar >= 'A' && firstChar <= 'Z');
+        });
+      } else {
+        result = result.filter((c) => (c.name || '').trim().toUpperCase().startsWith(activeLetter));
+      }
+    }
+
     // Sort
     result.sort((a, b) => {
       if (sortBy === 'name') return a.name.localeCompare(b.name);
@@ -278,7 +352,113 @@ export const CustomersSuppliersView: React.FC<CustomersSuppliersViewProps> = ({
     });
 
     return result;
-  }, [customers, searchQuery, customerFilter, sortBy]);
+  }, [customers, searchQuery, customerFilter, activeLetter, sortBy]);
+
+  // Reset pagination to page 1 whenever search, category filter, letter, or sort changes
+  useEffect(() => {
+    setCurrentPage(1);
+    setJumpPageInput('');
+  }, [searchQuery, customerFilter, activeLetter, sortBy, pageSize]);
+
+  // Pagination Window Slice (Crucial for 1,600+ contacts performance)
+  const totalFilteredCustomers = filteredCustomers.length;
+  const totalPages = Math.max(1, Math.ceil(totalFilteredCustomers / pageSize));
+  const safeCurrentPage = Math.min(Math.max(1, currentPage), totalPages);
+  const startIndex = (safeCurrentPage - 1) * pageSize;
+  const endIndex = Math.min(startIndex + pageSize, totalFilteredCustomers);
+
+  const paginatedCustomers = useMemo(() => {
+    return filteredCustomers.slice(startIndex, endIndex);
+  }, [filteredCustomers, startIndex, endIndex]);
+
+  // Bulk Selection States & Helpers
+  const isPageSelected = useMemo(() => {
+    if (paginatedCustomers.length === 0) return false;
+    return paginatedCustomers.every((c) => selectedCustomerIds.has(c.id));
+  }, [paginatedCustomers, selectedCustomerIds]);
+
+  const isPageIndeterminate = useMemo(() => {
+    if (paginatedCustomers.length === 0) return false;
+    const someSelected = paginatedCustomers.some((c) => selectedCustomerIds.has(c.id));
+    return someSelected && !isPageSelected;
+  }, [paginatedCustomers, selectedCustomerIds, isPageSelected]);
+
+  const isAllFilteredSelected = useMemo(() => {
+    if (filteredCustomers.length === 0) return false;
+    return filteredCustomers.length === selectedCustomerIds.size && filteredCustomers.every((c) => selectedCustomerIds.has(c.id));
+  }, [filteredCustomers, selectedCustomerIds]);
+
+  const handleToggleSelectPage = () => {
+    setSelectedCustomerIds((prev) => {
+      const next = new Set(prev);
+      if (isPageSelected) {
+        paginatedCustomers.forEach((c) => next.delete(c.id));
+      } else {
+        paginatedCustomers.forEach((c) => next.add(c.id));
+      }
+      return next;
+    });
+  };
+
+  const handleSelectAllFiltered = () => {
+    setSelectedCustomerIds((prev) => {
+      const next = new Set(prev);
+      filteredCustomers.forEach((c) => next.add(c.id));
+      return next;
+    });
+  };
+
+  const handleClearSelection = () => {
+    setSelectedCustomerIds(new Set());
+  };
+
+  const handleToggleCustomer = (id: string) => {
+    setSelectedCustomerIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const handleLaunchWhatsAppBlast = () => {
+    if (selectedCustomerIds.size === 0) return;
+    setPreselectedMarketingIds(Array.from(selectedCustomerIds));
+    setActiveTab('whatsapp');
+  };
+
+  const handleExportSelectedCSV = () => {
+    const selectedList = customers.filter((c) => selectedCustomerIds.has(c.id));
+    if (selectedList.length === 0) return;
+    const headers = ['Name', 'Phone', 'Email', 'Customer Type', 'Address', 'KRA PIN', 'Lifetime Purchases (KSh)', 'Current Balance Due (KSh)'];
+    const rows = selectedList.map((c) => [
+      `"${(c.name || '').replace(/"/g, '""')}"`,
+      `"${(c.phone || '').replace(/"/g, '""')}"`,
+      `"${(c.email || '').replace(/"/g, '""')}"`,
+      `"${(c.customerType || 'Individual').replace(/"/g, '""')}"`,
+      `"${(c.address || '').replace(/"/g, '""')}"`,
+      `"${(c.kraPin || '').replace(/"/g, '""')}"`,
+      (c.totalPurchases || 0).toString(),
+      (c.currentBalanceDue || 0).toString(),
+    ]);
+    const csvContent = [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `Selected_Customers_${new Date().toISOString().split('T')[0]}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleExportSelectedPDF = () => {
+    const selectedList = customers.filter((c) => selectedCustomerIds.has(c.id));
+    if (selectedList.length === 0) return;
+    exportCustomerReportPDF(selectedList);
+  };
 
   // 4. Filtered Suppliers
   const filteredSuppliers = useMemo(() => {
@@ -417,11 +597,42 @@ export const CustomersSuppliersView: React.FC<CustomersSuppliersViewProps> = ({
               </span>
             )}
           </button>
+
+          <button
+            id="tab-whatsapp-marketing"
+            onClick={() => {
+              setActiveTab('whatsapp');
+              setSearchQuery('');
+            }}
+            className={`px-4 py-2.5 rounded-xl font-bold text-xs transition flex items-center gap-2 ${
+              activeTab === 'whatsapp'
+                ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/20'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <MessageSquare className="w-4 h-4 text-emerald-400" />
+            <span>WhatsApp Marketing</span>
+            <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-emerald-500/20 text-emerald-300 font-mono font-bold border border-emerald-500/30">
+              Bulk Deals
+            </span>
+          </button>
         </div>
       </div>
 
-      {/* KPI Metrics Strip */}
-      {activeTab === 'customers' ? (
+      {/* Tab Content Display */}
+      {activeTab === 'whatsapp' ? (
+        <WhatsAppMarketingSection
+          customers={customers}
+          transactions={transactions}
+          products={products}
+          offers={offers}
+          currentUser={currentUser}
+          initialSelectedCustomerIds={preselectedMarketingIds}
+        />
+      ) : (
+        <>
+          {/* KPI Metrics Strip */}
+          {activeTab === 'customers' ? (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl shadow-sm">
             <div className="flex items-center justify-between text-slate-400 text-xs font-semibold">
@@ -429,7 +640,7 @@ export const CustomersSuppliersView: React.FC<CustomersSuppliersViewProps> = ({
               <Users className="w-4 h-4 text-sky-400" />
             </div>
             <div className="text-2xl font-black text-slate-100 font-mono mt-1">
-              {customerMetrics.totalCount}
+              {customerMetrics.totalCount.toLocaleString()}
             </div>
             <span className="text-[10px] text-slate-500 block mt-0.5">Active directory accounts</span>
           </div>
@@ -440,7 +651,7 @@ export const CustomersSuppliersView: React.FC<CustomersSuppliersViewProps> = ({
               <AlertTriangle className="w-4 h-4 text-rose-400" />
             </div>
             <div className="text-2xl font-black text-rose-400 font-mono mt-1">
-              KSh {customerMetrics.totalDebt.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+              {formatKSh(customerMetrics.totalDebt, { showDecimals: true })}
             </div>
             <span className="text-[10px] text-rose-400/80 block mt-0.5">
               {customerMetrics.debtorsCount} customer{customerMetrics.debtorsCount !== 1 ? 's' : ''} owe credit
@@ -453,7 +664,7 @@ export const CustomersSuppliersView: React.FC<CustomersSuppliersViewProps> = ({
               <DollarSign className="w-4 h-4 text-emerald-400" />
             </div>
             <div className="text-2xl font-black text-emerald-400 font-mono mt-1">
-              KSh {customerMetrics.totalLifetimeSales.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+              {formatKSh(customerMetrics.totalLifetimeSales, { showDecimals: true })}
             </div>
             <span className="text-[10px] text-slate-500 block mt-0.5">Gross customer sales</span>
           </div>
@@ -464,7 +675,7 @@ export const CustomersSuppliersView: React.FC<CustomersSuppliersViewProps> = ({
               <Sparkles className="w-4 h-4 text-amber-400" />
             </div>
             <div className="text-2xl font-black text-slate-100 font-mono mt-1">
-              KSh {customerMetrics.avgSpend.toLocaleString()}
+              {formatKSh(customerMetrics.avgSpend)}
             </div>
             <span className="text-[10px] text-slate-500 block mt-0.5">Lifetime value per customer</span>
           </div>
@@ -488,7 +699,7 @@ export const CustomersSuppliersView: React.FC<CustomersSuppliersViewProps> = ({
               <AlertTriangle className="w-4 h-4 text-rose-400" />
             </div>
             <div className="text-2xl font-black text-rose-400 font-mono mt-1">
-              KSh {supplierMetrics.totalPayable.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+              {formatKSh(supplierMetrics.totalPayable, { showDecimals: true })}
             </div>
             <span className="text-[10px] text-rose-400/80 block mt-0.5">
               {supplierMetrics.payablesCount} vendor credit balances
@@ -501,7 +712,7 @@ export const CustomersSuppliersView: React.FC<CustomersSuppliersViewProps> = ({
               <Package className="w-4 h-4 text-emerald-400" />
             </div>
             <div className="text-2xl font-black text-emerald-400 font-mono mt-1">
-              KSh {supplierMetrics.totalSupplied.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+              {formatKSh(supplierMetrics.totalSupplied, { showDecimals: true })}
             </div>
             <span className="text-[10px] text-slate-500 block mt-0.5">Total inventory supply value</span>
           </div>
@@ -522,7 +733,7 @@ export const CustomersSuppliersView: React.FC<CustomersSuppliersViewProps> = ({
       {/* Control Bar: Search, Filters, Sort & Action Buttons */}
       <div className="bg-slate-900 border border-slate-800 p-4 rounded-3xl space-y-4">
         <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
-          {/* Search Box */}
+          {/* Instant Search Input Bar */}
           <div className="relative flex-1">
             <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
             <input
@@ -531,11 +742,28 @@ export const CustomersSuppliersView: React.FC<CustomersSuppliersViewProps> = ({
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder={
                 activeTab === 'customers'
-                  ? 'Search customers by name, phone, email, KRA PIN, location...'
+                  ? 'Search customers by name (e.g. John), phone (e.g. 0712...), email, KRA PIN, address...'
                   : 'Search suppliers by company, contact person, phone, category...'
               }
-              className="w-full bg-slate-950 border border-slate-800 focus:border-sky-500 rounded-2xl pl-10 pr-4 py-2.5 text-xs text-slate-100 placeholder-slate-500 outline-none transition"
+              className="w-full bg-slate-950 border border-slate-800 focus:border-sky-500 rounded-2xl pl-10 pr-28 py-2.5 text-xs text-slate-100 placeholder-slate-500 outline-none transition"
             />
+            <div className="absolute right-2.5 top-2 flex items-center gap-1.5">
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  className="p-1 hover:bg-slate-800 text-slate-400 hover:text-slate-200 rounded-lg transition cursor-pointer"
+                  title="Clear search query"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+              <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-slate-900 border border-slate-800 text-slate-400">
+                {activeTab === 'customers'
+                  ? `${totalFilteredCustomers.toLocaleString()} found`
+                  : `${filteredSuppliers.length.toLocaleString()} found`}
+              </span>
+            </div>
           </div>
 
           {/* Action Buttons */}
@@ -573,18 +801,30 @@ export const CustomersSuppliersView: React.FC<CustomersSuppliersViewProps> = ({
             </button>
 
             {activeTab === 'customers' && (
-              <button
-                id="btn-ai-customer-promotions"
-                onClick={() => {
-                  setSelectedPromoCustomer(null);
-                  setIsPromoGeneratorOpen(true);
-                }}
-                className="px-4 py-2.5 bg-gradient-to-r from-purple-600 via-indigo-600 to-sky-600 hover:from-purple-500 hover:to-sky-500 text-white rounded-2xl text-xs font-extrabold transition flex items-center gap-1.5 shadow-lg shadow-indigo-600/30 border border-indigo-400/40 cursor-pointer"
-                title="AI Customer Promotion Generator: Create targeted SMS, WhatsApp, and discount campaigns"
-              >
-                <Sparkles className="w-4 h-4 text-amber-300 animate-pulse" />
-                <span>AI Promo Generator</span>
-              </button>
+              <>
+                <button
+                  id="btn-whatsapp-marketing-shortcut"
+                  onClick={() => setActiveTab('whatsapp')}
+                  className="px-3.5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-2xl text-xs font-bold transition flex items-center gap-1.5 shadow-md shadow-emerald-600/20 active:scale-95 cursor-pointer"
+                  title="Filter customers & broadcast WhatsApp Offer Deals"
+                >
+                  <MessageSquare className="w-4 h-4 text-white" />
+                  <span>💬 WhatsApp Deals</span>
+                </button>
+
+                <button
+                  id="btn-ai-customer-promotions"
+                  onClick={() => {
+                    setSelectedPromoCustomer(null);
+                    setIsPromoGeneratorOpen(true);
+                  }}
+                  className="px-4 py-2.5 bg-gradient-to-r from-purple-600 via-indigo-600 to-sky-600 hover:from-purple-500 hover:to-sky-500 text-white rounded-2xl text-xs font-extrabold transition flex items-center gap-1.5 shadow-lg shadow-indigo-600/30 border border-indigo-400/40 cursor-pointer"
+                  title="AI Customer Promotion Generator: Create targeted SMS, WhatsApp, and discount campaigns"
+                >
+                  <Sparkles className="w-4 h-4 text-amber-300 animate-pulse" />
+                  <span>AI Promo Generator</span>
+                </button>
+              </>
             )}
 
             {activeTab === 'customers' ? (
@@ -722,7 +962,7 @@ export const CustomersSuppliersView: React.FC<CustomersSuppliersViewProps> = ({
             <select
               value={sortBy}
               onChange={(e) => setSortBy(e.target.value as any)}
-              className="bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-1 text-slate-200 text-xs outline-none transition font-semibold"
+              className="bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-1 text-slate-200 text-xs outline-none transition font-semibold cursor-pointer"
             >
               <option value="debt">Highest Debt / Payable</option>
               <option value="volume">Highest Sales / Volume</option>
@@ -730,7 +970,156 @@ export const CustomersSuppliersView: React.FC<CustomersSuppliersViewProps> = ({
             </select>
           </div>
         </div>
+
+        {/* Alphabetical A-Z Quick-Jump Navigation Bar */}
+        {activeTab === 'customers' && (
+          <div className="pt-3 border-t border-slate-800/80">
+            <div className="flex items-center justify-between gap-2 mb-2">
+              <div className="flex items-center gap-2 text-[11px] text-slate-400 font-bold uppercase tracking-wider">
+                <span>A-Z Index Jump:</span>
+                {activeLetter !== 'ALL' && (
+                  <span className="text-sky-400 font-mono font-bold normal-case">
+                    (Filtering names starting with "{activeLetter}")
+                  </span>
+                )}
+              </div>
+              {activeLetter !== 'ALL' && (
+                <button
+                  type="button"
+                  onClick={() => setActiveLetter('ALL')}
+                  className="text-[11px] text-rose-400 hover:text-rose-300 font-semibold cursor-pointer transition flex items-center gap-1"
+                >
+                  <X className="w-3 h-3" /> Reset to All Letters
+                </button>
+              )}
+            </div>
+            <div className="flex items-center gap-1 overflow-x-auto pb-1 scrollbar-thin scrollbar-thumb-slate-700">
+              {alphabetLetters.map((letter) => {
+                const count = letterCounts[letter] || 0;
+                const isSelected = activeLetter === letter;
+                const isDisabled = letter !== 'ALL' && count === 0;
+
+                return (
+                  <button
+                    key={letter}
+                    type="button"
+                    disabled={isDisabled}
+                    onClick={() => setActiveLetter(letter)}
+                    title={isDisabled ? `No contacts starting with ${letter}` : `${count} contact${count !== 1 ? 's' : ''} starting with ${letter}`}
+                    className={`px-2.5 py-1 rounded-xl text-xs font-mono font-bold transition flex items-center justify-center shrink-0 cursor-pointer ${
+                      isSelected
+                        ? 'bg-sky-600 text-white shadow-md shadow-sky-600/30 ring-1 ring-sky-400'
+                        : isDisabled
+                        ? 'bg-slate-950/40 text-slate-700 border border-slate-900 cursor-not-allowed opacity-40'
+                        : 'bg-slate-950 hover:bg-slate-800 text-slate-300 border border-slate-800 hover:border-slate-700'
+                    }`}
+                  >
+                    <span>{letter}</span>
+                    {letter !== 'ALL' && count > 0 && (
+                      <span className={`ml-1 text-[9px] px-1 py-0.2 rounded-full font-mono ${
+                        isSelected ? 'bg-sky-700 text-sky-100' : 'bg-slate-900 text-slate-400'
+                      }`}>
+                        {count}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
+
+      {/* Bulk Selection Control Toolbar */}
+      {activeTab === 'customers' && selectedCustomerIds.size > 0 && (
+        <div className="bg-gradient-to-r from-sky-950/90 via-slate-900 to-indigo-950/90 border border-sky-500/40 p-3.5 rounded-2xl flex flex-wrap items-center justify-between gap-3 shadow-xl shadow-sky-950/50">
+          <div className="flex items-center gap-3">
+            <div className="px-3 py-1 rounded-xl bg-sky-500/20 border border-sky-500/30 text-sky-300 text-xs font-mono font-extrabold flex items-center gap-1.5">
+              <CheckSquare className="w-4 h-4 text-sky-400" />
+              <span>{selectedCustomerIds.size.toLocaleString()} Selected</span>
+            </div>
+            <span className="text-xs text-slate-400 hidden sm:inline">
+              of {totalFilteredCustomers.toLocaleString()} matching customers
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2 flex-wrap">
+            {!isAllFilteredSelected && (
+              <button
+                type="button"
+                onClick={handleSelectAllFiltered}
+                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+              >
+                <span>Select All Filtered ({totalFilteredCustomers.toLocaleString()})</span>
+              </button>
+            )}
+
+            <button
+              type="button"
+              onClick={handleLaunchWhatsAppBlast}
+              className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-extrabold transition flex items-center gap-1.5 shadow-md shadow-emerald-600/30 active:scale-95 cursor-pointer"
+              title="Open WhatsApp Marketing with this cohort pre-selected"
+            >
+              <MessageSquare className="w-4 h-4 text-white" />
+              <span>💬 Send WhatsApp Blast ({selectedCustomerIds.size.toLocaleString()})</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleExportSelectedCSV}
+              className="px-3 py-1.5 bg-slate-950 hover:bg-slate-800 text-slate-300 border border-slate-800 rounded-xl text-xs font-semibold transition flex items-center gap-1 cursor-pointer"
+            >
+              <FileSpreadsheet className="w-3.5 h-3.5 text-sky-400" />
+              <span>Export CSV</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleExportSelectedPDF}
+              className="px-3 py-1.5 bg-slate-950 hover:bg-slate-800 text-slate-300 border border-slate-800 rounded-xl text-xs font-semibold transition flex items-center gap-1 cursor-pointer"
+            >
+              <Download className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Export PDF</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleClearSelection}
+              className="px-2.5 py-1.5 bg-slate-950 hover:bg-rose-950/60 text-slate-400 hover:text-rose-300 border border-slate-800 rounded-xl text-xs font-semibold transition flex items-center gap-1 cursor-pointer"
+            >
+              <X className="w-3.5 h-3.5" />
+              <span>Deselect All</span>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Select All Filtered Helper Banner */}
+      {activeTab === 'customers' && isPageSelected && totalFilteredCustomers > paginatedCustomers.length && (
+        <div className="bg-sky-950/40 border border-sky-800/60 px-4 py-2.5 rounded-2xl flex items-center justify-between text-xs text-sky-200">
+          <div className="flex items-center gap-2">
+            <span>All <strong>{paginatedCustomers.length}</strong> customers on page {safeCurrentPage} are selected.</span>
+            {!isAllFilteredSelected ? (
+              <button
+                type="button"
+                onClick={handleSelectAllFiltered}
+                className="text-sky-400 hover:text-sky-300 underline font-bold cursor-pointer ml-1"
+              >
+                Select all {totalFilteredCustomers.toLocaleString()} customers matching this filter
+              </button>
+            ) : (
+              <span className="text-emerald-400 font-bold ml-1">✓ All {totalFilteredCustomers.toLocaleString()} customers selected!</span>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={handleClearSelection}
+            className="text-slate-400 hover:text-slate-200 text-xs font-semibold cursor-pointer"
+          >
+            Clear
+          </button>
+        </div>
+      )}
 
       {/* Main Data Table */}
       {activeTab === 'customers' ? (
@@ -749,6 +1138,22 @@ export const CustomersSuppliersView: React.FC<CustomersSuppliersViewProps> = ({
                 <table className="w-full text-left text-xs text-slate-300">
                   <thead className="bg-slate-950 text-slate-400 text-[10px] uppercase font-bold tracking-wider border-b border-slate-800">
                     <tr>
+                      <th className="p-4 w-12 text-center">
+                        <button
+                          type="button"
+                          onClick={handleToggleSelectPage}
+                          title={isPageSelected ? "Deselect Page" : "Select Entire Page"}
+                          className="p-1 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-white transition cursor-pointer"
+                        >
+                          {isPageSelected ? (
+                            <CheckSquare className="w-4 h-4 text-sky-400" />
+                          ) : isPageIndeterminate ? (
+                            <MinusSquare className="w-4 h-4 text-sky-400" />
+                          ) : (
+                            <Square className="w-4 h-4 text-slate-500" />
+                          )}
+                        </button>
+                      </th>
                       <th className="p-4">Customer Name & Category</th>
                       <th className="p-4">Contact Info</th>
                       <th className="p-4">Location / KRA PIN</th>
@@ -759,10 +1164,35 @@ export const CustomersSuppliersView: React.FC<CustomersSuppliersViewProps> = ({
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-800/70">
-                    {filteredCustomers.map((c) => {
+                    {paginatedCustomers.map((c) => {
                       const debt = c.currentBalanceDue || 0;
+                      const isSelected = selectedCustomerIds.has(c.id);
+
                       return (
-                        <tr key={c.id} className="hover:bg-slate-800/40 transition">
+                        <tr
+                          key={c.id}
+                          className={`transition ${
+                            isSelected
+                              ? 'bg-sky-950/40 ring-1 ring-inset ring-sky-500/30'
+                              : 'hover:bg-slate-800/40'
+                          }`}
+                        >
+                          {/* Row Checkbox */}
+                          <td className="p-4 w-12 text-center" onClick={(e) => e.stopPropagation()}>
+                            <button
+                              type="button"
+                              onClick={() => handleToggleCustomer(c.id)}
+                              className="p-1 hover:bg-slate-800 rounded-lg transition cursor-pointer"
+                              title={isSelected ? "Deselect Customer" : "Select Customer"}
+                            >
+                              {isSelected ? (
+                                <CheckSquare className="w-4 h-4 text-sky-400" />
+                              ) : (
+                                <Square className="w-4 h-4 text-slate-600 hover:text-slate-400" />
+                              )}
+                            </button>
+                          </td>
+
                           {/* Name & Initials */}
                           <td className="p-4">
                             <div className="flex items-center gap-3">
@@ -835,14 +1265,14 @@ export const CustomersSuppliersView: React.FC<CustomersSuppliersViewProps> = ({
 
                           {/* Lifetime Purchases */}
                           <td className="p-4 text-right font-mono font-bold text-slate-100 text-sm">
-                            KSh {(c.totalPurchases || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                            {formatKSh(c.totalPurchases || 0, { showDecimals: true })}
                           </td>
 
                           {/* Balance Due */}
                           <td className="p-4 text-right font-mono font-black text-sm">
                             {debt > 0 ? (
                               <span className="text-rose-400">
-                                KSh {debt.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                                {formatKSh(debt, { showDecimals: true })}
                               </span>
                             ) : (
                               <span className="text-slate-500 font-normal">KSh 0.00</span>
@@ -872,7 +1302,7 @@ export const CustomersSuppliersView: React.FC<CustomersSuppliersViewProps> = ({
                                     setIsCustomerPayOpen(true);
                                   }}
                                   title="Record Debt Repayment"
-                                  className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-[11px] font-bold transition flex items-center gap-1 shadow-sm"
+                                  className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-[11px] font-bold transition flex items-center gap-1 shadow-sm cursor-pointer"
                                 >
                                   <DollarSign className="w-3.5 h-3.5" /> Pay
                                 </button>
@@ -884,7 +1314,7 @@ export const CustomersSuppliersView: React.FC<CustomersSuppliersViewProps> = ({
                                   setIsCustomerDetailsOpen(true);
                                 }}
                                 title="View Customer Profile & Invoices"
-                                className="p-1.5 bg-slate-800 hover:bg-slate-700 text-sky-400 rounded-xl transition"
+                                className="p-1.5 bg-slate-800 hover:bg-slate-700 text-sky-400 rounded-xl transition cursor-pointer"
                               >
                                 <Eye className="w-4 h-4" />
                               </button>
@@ -917,7 +1347,7 @@ export const CustomersSuppliersView: React.FC<CustomersSuppliersViewProps> = ({
                                   setIsCustomerEditOpen(true);
                                 }}
                                 title="Edit Customer Details"
-                                className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl transition"
+                                className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl transition cursor-pointer"
                               >
                                 <Edit2 className="w-4 h-4" />
                               </button>
@@ -926,7 +1356,7 @@ export const CustomersSuppliersView: React.FC<CustomersSuppliersViewProps> = ({
                                 <button
                                   onClick={() => handleDeleteCustomerPrompt(c)}
                                   title="Delete Customer Profile"
-                                  className="p-1.5 bg-slate-800 hover:bg-rose-900/60 text-slate-400 hover:text-rose-300 rounded-xl transition"
+                                  className="p-1.5 bg-slate-800 hover:bg-rose-900/60 text-slate-400 hover:text-rose-300 rounded-xl transition cursor-pointer"
                                 >
                                   <Trash2 className="w-4 h-4" />
                                 </button>
@@ -938,6 +1368,160 @@ export const CustomersSuppliersView: React.FC<CustomersSuppliersViewProps> = ({
                     })}
                   </tbody>
                 </table>
+              </div>
+
+              {/* High-Performance Pagination Bar */}
+              <div className="p-4 bg-slate-950 border-t border-slate-800 flex flex-col md:flex-row items-center justify-between gap-4 text-xs">
+                {/* Summary & Page Size selector */}
+                <div className="flex items-center gap-4 flex-wrap">
+                  <span className="text-slate-400">
+                    Showing <strong className="text-white font-mono">{totalFilteredCustomers === 0 ? 0 : startIndex + 1}</strong> –{' '}
+                    <strong className="text-white font-mono">{endIndex}</strong> of{' '}
+                    <strong className="text-sky-400 font-mono">{totalFilteredCustomers.toLocaleString()}</strong> customers
+                  </span>
+
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] text-slate-500 font-semibold">Per Page:</span>
+                    <select
+                      value={pageSize}
+                      onChange={(e) => setPageSize(Number(e.target.value))}
+                      className="bg-slate-900 border border-slate-800 rounded-xl px-2.5 py-1 text-slate-200 text-xs font-mono font-bold outline-none cursor-pointer hover:border-slate-700"
+                    >
+                      <option value={20}>20</option>
+                      <option value={50}>50</option>
+                      <option value={100}>100</option>
+                      <option value={200}>200</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* Page Navigation Controls */}
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {/* First Page */}
+                  <button
+                    type="button"
+                    disabled={safeCurrentPage <= 1}
+                    onClick={() => setCurrentPage(1)}
+                    className="p-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 disabled:opacity-30 disabled:cursor-not-allowed transition cursor-pointer"
+                    title="First Page"
+                  >
+                    <ChevronsLeft className="w-4 h-4" />
+                  </button>
+
+                  {/* Previous Page */}
+                  <button
+                    type="button"
+                    disabled={safeCurrentPage <= 1}
+                    onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                    className="px-2.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 disabled:opacity-30 disabled:cursor-not-allowed transition flex items-center gap-1 cursor-pointer"
+                    title="Previous Page"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                    <span className="hidden sm:inline">Prev</span>
+                  </button>
+
+                  {/* Numbered Page Buttons with Ellipses */}
+                  {(() => {
+                    const pages: (number | string)[] = [];
+                    const maxButtons = 7;
+                    if (totalPages <= maxButtons) {
+                      for (let i = 1; i <= totalPages; i++) pages.push(i);
+                    } else {
+                      pages.push(1);
+                      if (safeCurrentPage > 3) {
+                        pages.push('...');
+                      }
+                      const start = Math.max(2, safeCurrentPage - 1);
+                      const end = Math.min(totalPages - 1, safeCurrentPage + 1);
+                      for (let i = start; i <= end; i++) {
+                        if (!pages.includes(i)) pages.push(i);
+                      }
+                      if (safeCurrentPage < totalPages - 2) {
+                        pages.push('...');
+                      }
+                      if (!pages.includes(totalPages)) pages.push(totalPages);
+                    }
+                    return pages.map((p, idx) => {
+                      if (p === '...') {
+                        return (
+                          <span key={`ellipsis-${idx}`} className="px-2 py-1 text-slate-600 font-mono">
+                            ...
+                          </span>
+                        );
+                      }
+                      const isCurrent = p === safeCurrentPage;
+                      return (
+                        <button
+                          key={`page-${p}`}
+                          type="button"
+                          onClick={() => setCurrentPage(Number(p))}
+                          className={`min-w-8 h-8 rounded-xl font-mono text-xs font-bold transition flex items-center justify-center cursor-pointer ${
+                            isCurrent
+                              ? 'bg-sky-600 text-white shadow-md shadow-sky-600/30 ring-1 ring-sky-400'
+                              : 'bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800'
+                          }`}
+                        >
+                          {p}
+                        </button>
+                      );
+                    });
+                  })()}
+
+                  {/* Next Page */}
+                  <button
+                    type="button"
+                    disabled={safeCurrentPage >= totalPages}
+                    onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                    className="px-2.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 disabled:opacity-30 disabled:cursor-not-allowed transition flex items-center gap-1 cursor-pointer"
+                    title="Next Page"
+                  >
+                    <span className="hidden sm:inline">Next</span>
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+
+                  {/* Last Page */}
+                  <button
+                    type="button"
+                    disabled={safeCurrentPage >= totalPages}
+                    onClick={() => setCurrentPage(totalPages)}
+                    className="p-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 disabled:opacity-30 disabled:cursor-not-allowed transition cursor-pointer"
+                    title="Last Page"
+                  >
+                    <ChevronsRight className="w-4 h-4" />
+                  </button>
+                </div>
+
+                {/* Direct Jump-to-Page Input */}
+                {totalPages > 3 && (
+                  <form
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      const num = parseInt(jumpPageInput, 10);
+                      if (!isNaN(num) && num >= 1 && num <= totalPages) {
+                        setCurrentPage(num);
+                        setJumpPageInput('');
+                      }
+                    }}
+                    className="flex items-center gap-1.5"
+                  >
+                    <span className="text-[11px] text-slate-500">Jump to:</span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={totalPages}
+                      value={jumpPageInput}
+                      onChange={(e) => setJumpPageInput(e.target.value)}
+                      placeholder={safeCurrentPage.toString()}
+                      className="w-14 bg-slate-900 border border-slate-800 rounded-xl px-2 py-1 text-slate-200 text-xs font-mono text-center outline-none focus:border-sky-500"
+                    />
+                    <button
+                      type="submit"
+                      className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-sky-400 rounded-xl text-xs font-bold transition cursor-pointer"
+                    >
+                      Go
+                    </button>
+                  </form>
+                )}
               </div>
             </div>
           )}
@@ -1026,14 +1610,14 @@ export const CustomersSuppliersView: React.FC<CustomersSuppliersViewProps> = ({
 
                           {/* Total Supplied Value */}
                           <td className="p-4 text-right font-mono font-bold text-slate-100 text-sm">
-                            KSh {(s.totalSuppliedValue || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                            {formatKSh(s.totalSuppliedValue || 0, { showDecimals: true })}
                           </td>
 
                           {/* Accounts Payable Owed */}
                           <td className="p-4 text-right font-mono font-black text-sm">
                             {debt > 0 ? (
                               <span className="text-rose-400">
-                                KSh {debt.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                                {formatKSh(debt, { showDecimals: true })}
                               </span>
                             ) : (
                               <span className="text-slate-500 font-normal">KSh 0.00</span>
@@ -1044,7 +1628,7 @@ export const CustomersSuppliersView: React.FC<CustomersSuppliersViewProps> = ({
                           <td className="p-4 text-center">
                             {debt > 0 ? (
                               <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/30 inline-flex items-center gap-1">
-                                <AlertTriangle className="w-3 h-3" /> Due: KSh {debt.toLocaleString()}
+                                <AlertTriangle className="w-3 h-3" /> Due: {formatKSh(debt)}
                               </span>
                             ) : (
                               <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 inline-flex items-center gap-1">
@@ -1110,6 +1694,8 @@ export const CustomersSuppliersView: React.FC<CustomersSuppliersViewProps> = ({
           )}
         </div>
       )}
+    </>
+  )}
 
       {/* Sub-Modals */}
       <CustomerEditModal
@@ -1212,7 +1798,7 @@ export const CustomersSuppliersView: React.FC<CustomersSuppliersViewProps> = ({
       <ContactsImportExportModal
         isOpen={isImportExportOpen}
         onClose={() => setIsImportExportOpen(false)}
-        targetType={activeTab}
+        targetType={activeTab === 'suppliers' ? 'suppliers' : 'customers'}
         customers={customers}
         suppliers={suppliers}
         onImportCustomers={onImportCustomers}
@@ -1224,7 +1810,7 @@ export const CustomersSuppliersView: React.FC<CustomersSuppliersViewProps> = ({
       <PhonebookImportModal
         isOpen={isPhonebookModalOpen}
         onClose={() => setIsPhonebookModalOpen(false)}
-        defaultTarget={activeTab}
+        defaultTarget={activeTab === 'suppliers' ? 'suppliers' : 'customers'}
         onImportCustomers={onImportCustomers}
         onImportSuppliers={onImportSuppliers}
       />

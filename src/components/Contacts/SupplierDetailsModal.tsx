@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { Supplier, Product } from '../../types';
 import { exportSupplierAccountStatementPDF } from '../../utils/pdfGenerator';
+import { formatKSh } from '../../utils/currency';
 
 interface SupplierDetailsModalProps {
   isOpen: boolean;
@@ -110,7 +111,7 @@ export const SupplierDetailsModal: React.FC<SupplierDetailsModalProps> = ({
                 )}
                 {currentDebt > 0 ? (
                   <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/30 flex items-center gap-1">
-                    <AlertTriangle className="w-3 h-3" /> Payable Owed: KSh {currentDebt.toLocaleString()}
+                    <AlertTriangle className="w-3 h-3" /> Payable Owed: {formatKSh(currentDebt)}
                   </span>
                 ) : (
                   <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center gap-1">
@@ -188,7 +189,7 @@ export const SupplierDetailsModal: React.FC<SupplierDetailsModalProps> = ({
               Total Goods Supplied
             </span>
             <div className="text-base font-extrabold text-slate-100 font-mono mt-1">
-              KSh {totalSupplied.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+              {formatKSh(totalSupplied, { showDecimals: true })}
             </div>
             <span className="text-[10px] text-slate-500 mt-0.5 block">Lifetime procurement</span>
           </div>
@@ -198,7 +199,7 @@ export const SupplierDetailsModal: React.FC<SupplierDetailsModalProps> = ({
               Accounts Payable (Debt)
             </span>
             <div className={`text-base font-extrabold font-mono mt-1 ${currentDebt > 0 ? 'text-rose-400' : 'text-emerald-400'}`}>
-              KSh {currentDebt.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+              {formatKSh(currentDebt, { showDecimals: true })}
             </div>
             <span className="text-[10px] text-slate-500 mt-0.5 block">
               {currentDebt > 0 ? 'Pending payment' : 'Zero balance owed'}
@@ -289,10 +290,10 @@ export const SupplierDetailsModal: React.FC<SupplierDetailsModalProps> = ({
                             <td className="p-3 font-sans text-xs text-slate-100 font-semibold">{p.name}</td>
                             <td className="p-3 font-sans text-slate-400">{p.category}</td>
                             <td className="p-3 text-right text-slate-200">
-                              KSh {p.costPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                              {formatKSh(p.costPrice, { showDecimals: true })}
                             </td>
                             <td className="p-3 text-right font-bold text-emerald-400">
-                              KSh {p.sellingPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                              {formatKSh(p.sellingPrice, { showDecimals: true })}
                             </td>
                             <td className="p-3 text-center font-bold text-slate-100">
                               {p.stockQuantity} {p.unit}

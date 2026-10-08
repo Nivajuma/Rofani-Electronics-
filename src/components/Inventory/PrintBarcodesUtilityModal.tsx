@@ -1049,7 +1049,7 @@ export const PrintBarcodesUtilityModal: React.FC<PrintBarcodesUtilityModalProps>
                       </div>
                       <p className="text-[11px] text-slate-300 leading-relaxed">
                         • <strong>Wi-Fi:</strong> If HP printer has Wi-Fi / Wireless Direct, connect phone and use <em>Mopria Print Service</em> (Android) or <em>AirPrint</em> (iPhone).<br />
-                        • <strong>USB Cable:</strong> Use a $2 USB-OTG adapter from phone to HP printer USB cable with the <em>NokoPrint</em> app.
+                        • <strong>USB Cable:</strong> Use a KSh 250 USB-OTG adapter from phone to HP printer USB cable with the <em>NokoPrint</em> app.
                       </p>
                     </div>
 

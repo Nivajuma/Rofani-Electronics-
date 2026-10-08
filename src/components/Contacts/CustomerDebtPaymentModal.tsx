@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { X, CreditCard, DollarSign, CheckCircle2, AlertCircle, Phone, FileText, Smartphone } from 'lucide-react';
 import { Customer, PaymentMethod, User } from '../../types';
 import { MpesaPromptModal } from '../POS/MpesaPromptModal';
+import { formatKSh } from '../../utils/currency';
 
 interface CustomerDebtPaymentModalProps {
   isOpen: boolean;
@@ -50,7 +51,7 @@ export const CustomerDebtPaymentModal: React.FC<CustomerDebtPaymentModalProps> =
 
     if (parsedAmount > currentDebt && currentDebt > 0) {
       // allow partial or full settlement
-      if (!window.confirm(`The amount (KSh ${parsedAmount.toLocaleString()}) exceeds the balance due (KSh ${currentDebt.toLocaleString()}). Do you wish to continue and record advance credit?`)) {
+      if (!window.confirm(`The amount (${formatKSh(parsedAmount)}) exceeds the balance due (${formatKSh(currentDebt)}). Do you wish to continue and record advance credit?`)) {
         return;
       }
     }
@@ -102,7 +103,7 @@ export const CustomerDebtPaymentModal: React.FC<CustomerDebtPaymentModalProps> =
               Outstanding Debt Balance
             </span>
             <div className="text-2xl font-black text-rose-400 font-mono">
-              KSh {currentDebt.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+              {formatKSh(currentDebt, { showDecimals: true })}
             </div>
           </div>
           <div className="text-right">
@@ -110,7 +111,7 @@ export const CustomerDebtPaymentModal: React.FC<CustomerDebtPaymentModalProps> =
               Lifetime Purchases
             </span>
             <div className="text-sm font-bold text-slate-200 font-mono">
-              KSh {customer.totalPurchases.toLocaleString()}
+              {formatKSh(customer.totalPurchases)}
             </div>
           </div>
         </div>
@@ -123,21 +124,21 @@ export const CustomerDebtPaymentModal: React.FC<CustomerDebtPaymentModalProps> =
               <button
                 type="button"
                 onClick={() => handleQuickAmount(currentDebt)}
-                className="py-2 px-3 bg-slate-800 hover:bg-slate-700 text-emerald-400 border border-slate-700 rounded-xl font-bold transition flex items-center justify-center gap-1"
+                className="py-2 px-3 bg-slate-800 hover:bg-slate-700 text-emerald-400 border border-slate-700 rounded-xl font-bold transition flex items-center justify-center gap-1 cursor-pointer"
               >
                 <CheckCircle2 className="w-3.5 h-3.5" /> Full (100%)
               </button>
               <button
                 type="button"
                 onClick={() => handleQuickAmount(Math.round(currentDebt / 2))}
-                className="py-2 px-3 bg-slate-800 hover:bg-slate-700 text-sky-400 border border-slate-700 rounded-xl font-semibold transition"
+                className="py-2 px-3 bg-slate-800 hover:bg-slate-700 text-sky-400 border border-slate-700 rounded-xl font-semibold transition cursor-pointer"
               >
-                50% (KSh {Math.round(currentDebt / 2).toLocaleString()})
+                50% ({formatKSh(Math.round(currentDebt / 2))})
               </button>
               <button
                 type="button"
                 onClick={() => handleQuickAmount(1000)}
-                className="py-2 px-3 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded-xl font-semibold transition"
+                className="py-2 px-3 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded-xl font-semibold transition cursor-pointer"
               >
                 KSh 1,000
               </button>

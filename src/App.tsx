@@ -113,6 +113,7 @@ import { AIAssistantWidget } from './components/AI/AIAssistantWidget';
 import { CloudSyncModal } from './components/CloudSync/CloudSyncModal';
 import { PrintBarcodesUtilityModal } from './components/Inventory/PrintBarcodesUtilityModal';
 import { CameraStartupPrompt } from './components/Common/CameraStartupPrompt';
+import { formatKSh } from './utils/currency';
 import {
   TabKey,
   hasTabPermission,
@@ -510,13 +511,41 @@ export default function App() {
     safeSetJSON('retail_pos_financing_facilities', financingFacilities);
   }, [financingFacilities]);
 
-  // Multi-Store Outlets & Online Sales State
-  const [stores, setStores] = useState<StoreLocation[]>(() => safeGetJSON('retail_pos_stores', INITIAL_STORES));
+  // Single Store Location: Rofani Electronics
+  const [stores, setStores] = useState<StoreLocation[]>(() => {
+    const saved = safeGetJSON<StoreLocation[] | null>('retail_pos_stores', null);
+    if (!saved || !Array.isArray(saved) || saved.length === 0) {
+      return INITIAL_STORES;
+    }
+    // Check if user has legacy demo branches or flagship name
+    const hasLegacyBranches = saved.some(
+      (s) => s.id === 'store-westlands' || s.id === 'store-mombasa' || s.name.toLowerCase().includes('flagship')
+    );
+    if (hasLegacyBranches) {
+      const main = saved.find((s) => s.id === 'store-main') || INITIAL_STORES[0];
+      const singleStore: StoreLocation = {
+        ...main,
+        id: 'store-main',
+        name: 'Rofani Electronics',
+        isMainBranch: true,
+        active: true
+      };
+      safeSetJSON('retail_pos_stores', [singleStore]);
+      return [singleStore];
+    }
+    // Cleanly rename any "flagship" or "Main Store" to "Rofani Electronics"
+    return saved.map((s) => {
+      if (s.name.toLowerCase().includes('flagship') || s.name === 'Main Store') {
+        return { ...s, name: 'Rofani Electronics' };
+      }
+      return s;
+    });
+  });
 
   const [activeStoreId, setActiveStoreId] = useState<string>(() => {
     try {
       const saved = localStorage.getItem('retail_pos_active_store_id');
-      return saved || 'store-main';
+      return saved && saved !== 'all' ? saved : 'store-main';
     } catch {
       return 'store-main';
     }
@@ -2320,7 +2349,7 @@ export default function App() {
           scanLogs={scanLogs}
           onRecordScanLog={handleRecordScanLog}
           onClearScanLogs={handleClearScanLogs}
-          storeName={stores.find((s) => s.id === activeStoreId)?.name || 'ROFANI Flagship Store'}
+          storeName={stores.find((s) => s.id === activeStoreId)?.name || 'Rofani Electronics'}
           onOpenAiAssistantWithPrompt={(_prompt) => {
             setShowAiAssistantModal(true);
           }}
@@ -2341,6 +2370,7 @@ export default function App() {
           transactions={transactions}
           products={products}
           currentUser={currentUser}
+          offers={offers}
           onSaveCustomer={handleSaveCustomer}
           onDeleteCustomer={handleDeleteCustomer}
           onSaveSupplier={handleSaveSupplier}
@@ -3134,7 +3164,7 @@ export default function App() {
               <div className="min-w-0">
                 <span className="font-black text-xs tracking-wider block leading-none truncate">ROFANI POS</span>
                 <span className="text-[9px] text-slate-400 font-mono block truncate">
-                  {stores.find((s) => s.id === activeStoreId)?.name || 'Main Store'}
+                  {stores.find((s) => s.id === activeStoreId)?.name || 'Rofani Electronics'}
                 </span>
               </div>
             </div>
@@ -3194,7 +3224,7 @@ export default function App() {
                 Today's Sales
               </span>
               <span className="text-lg xl:text-xl font-extrabold text-slate-900 font-mono">
-                KSh {(todaySales > 0 ? todaySales : totalGrossSales).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                {formatKSh(todaySales > 0 ? todaySales : totalGrossSales, { showDecimals: true })}
               </span>
             </div>
 
@@ -3204,7 +3234,7 @@ export default function App() {
                   Gross Profit Margin
                 </span>
                 <span className="text-xl font-extrabold text-emerald-600 font-mono">
-                  +{profitMarginPercent.toFixed(1)}% (KSh {grossProfitAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })})
+                  +{profitMarginPercent.toFixed(1)}% ({formatKSh(grossProfitAmount, { showDecimals: true })})
                 </span>
               </div>
             )}
@@ -3293,7 +3323,7 @@ export default function App() {
             >
               <Building2 className="w-4 h-4 text-indigo-600 shrink-0" />
               <span className="hidden xl:inline max-w-[120px] truncate">
-                {stores.find((s) => s.id === activeStoreId)?.name || 'All Stores'}
+                {stores.find((s) => s.id === activeStoreId)?.name || 'Rofani Electronics'}
               </span>
             </button>
 
@@ -3535,7 +3565,7 @@ export default function App() {
         onClose={() => setShowPrintBarcodesModal(false)}
         scanLogs={scanLogs}
         products={products}
-        storeName={stores.find((s) => s.id === activeStoreId)?.name || 'ROFANI Retail'}
+        storeName={stores.find((s) => s.id === activeStoreId)?.name || 'Rofani Electronics'}
       />
 
       {/* Floating AI Worker Assistant Widget Trigger */}
@@ -3545,7 +3575,7 @@ export default function App() {
       <AIAssistantModal
         isOpen={showAiAssistantModal}
         onClose={() => setShowAiAssistantModal(false)}
-        activeStoreName={stores.find((s) => s.id === activeStoreId)?.name || 'Main Store'}
+        activeStoreName={stores.find((s) => s.id === activeStoreId)?.name || 'Rofani Electronics'}
         workerRole={currentUser.role}
         activeTab={activeTab}
         lowStockCount={lowStockCount}

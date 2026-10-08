@@ -454,7 +454,7 @@ export const FloatingToolWidget: React.FC<FloatingToolWidgetProps> = ({ onNaviga
                     <div className="flex gap-2">
                       <input
                         type="number"
-                        placeholder="Cash tendered ($)"
+                        placeholder="Cash tendered (KSh)"
                         value={calcTotalPaid}
                         onChange={(e) => setCalcTotalPaid(e.target.value)}
                         className="bg-slate-950 border border-slate-800 text-slate-200 px-3 py-1.5 rounded-lg w-full text-xs focus:outline-none focus:border-sky-500"
@@ -468,7 +468,7 @@ export const FloatingToolWidget: React.FC<FloatingToolWidgetProps> = ({ onNaviga
                     </div>
                     {calcChangeDue !== null && (
                       <div className={`p-2 rounded-lg text-center font-semibold text-xs ${calcChangeDue >= 0 ? 'bg-emerald-950/60 border border-emerald-800/80 text-emerald-400' : 'bg-red-950/60 border border-red-800/80 text-red-400'}`}>
-                        {calcChangeDue >= 0 ? `Change to return: $${calcChangeDue.toFixed(2)}` : `Shortfall amount: $${Math.abs(calcChangeDue).toFixed(2)}`}
+                        {calcChangeDue >= 0 ? `Change to return: KSh ${calcChangeDue.toLocaleString(undefined, { minimumFractionDigits: 2 })}` : `Shortfall amount: KSh ${Math.abs(calcChangeDue).toLocaleString(undefined, { minimumFractionDigits: 2 })}`}
                       </div>
                     )}
                   </div>

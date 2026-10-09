@@ -36,7 +36,10 @@ import {
   Gem,
   AlertTriangle,
   TrendingUp,
-  ArrowLeft
+  ArrowLeft,
+  ChevronDown,
+  ChevronUp,
+  Flame
 } from 'lucide-react';
 import { Product, CartItem, Customer, PaymentMethod, PaymentBreakdown, Transaction, User as Employee, BarcodeScanLog } from '../../types';
 import { BarcodeScannerModal } from './BarcodeScannerModal';
@@ -143,6 +146,45 @@ export const POSView: React.FC<POSViewProps> = ({
 
     return { highSalesHighProfit, lowSales, highVolume, highMargin };
   }, [performanceMap]);
+
+  // Favorites Grid Visibility State - Persisted to LocalStorage
+  const [showFavoritesGrid, setShowFavoritesGrid] = useState<boolean>(() =>
+    safeGetJSON<boolean>('retail_pos_pos_show_favorites', true, (val) => typeof val === 'boolean')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_pos_show_favorites', showFavoritesGrid);
+  }, [showFavoritesGrid]);
+
+  // Aggregate item frequency and units sold from transactions
+  const salesCountMap = React.useMemo(() => {
+    const map: Record<string, number> = {};
+    (transactions || []).forEach((tx) => {
+      (tx.items || []).forEach((item) => {
+        const pId = item.product?.id;
+        if (pId) {
+          map[pId] = (map[pId] || 0) + (Number(item.quantity) || 1);
+        }
+      });
+    });
+    return map;
+  }, [transactions]);
+
+  // Top 10 Most Frequently Sold Items ("Favorites") for one-click selection
+  const favoriteProducts = React.useMemo(() => {
+    const sorted = [...products].sort((a, b) => {
+      const soldA = salesCountMap[a.id] ?? (performanceMap[a.id]?.unitsSold ?? 0);
+      const soldB = salesCountMap[b.id] ?? (performanceMap[b.id]?.unitsSold ?? 0);
+      if (soldB !== soldA) return soldB - soldA;
+      // In-stock items prioritized
+      return (b.stockQuantity || 0) - (a.stockQuantity || 0);
+    });
+
+    return sorted.slice(0, 10);
+  }, [products, salesCountMap, performanceMap]);
+
+  const favoriteProductIds = React.useMemo(() => {
+    return new Set(favoriteProducts.map((p) => p.id));
+  }, [favoriteProducts]);
 
   // Cart State - Persisted to LocalStorage so active order is never lost on refresh
   const [cart, setCart] = useState<CartItem[]>(() =>
@@ -547,7 +589,12 @@ export const POSView: React.FC<POSViewProps> = ({
       p.sku.toLowerCase().includes(searchTerm.toLowerCase()) ||
       p.barcode.toLowerCase().includes(searchTerm.toLowerCase()) ||
       p.category.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesCat = selectedCategory === 'All' || p.category === selectedCategory;
+    const matchesCat =
+      selectedCategory === 'All'
+        ? true
+        : selectedCategory === 'Favorites'
+        ? favoriteProductIds.has(p.id)
+        : p.category === selectedCategory;
 
     let matchesPerf = true;
     const perf = performanceMap[p.id];
@@ -1398,6 +1445,7 @@ export const POSView: React.FC<POSViewProps> = ({
           {/* Category Filter Pills */}
           <div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar text-xs">
             <button
+              id="btn-pos-category-all"
               onClick={() => setSelectedCategory('All')}
               className={`px-3 py-1.5 rounded-xl whitespace-nowrap font-medium transition ${
                 selectedCategory === 'All'
@@ -1407,6 +1455,24 @@ export const POSView: React.FC<POSViewProps> = ({
             >
               All Items ({products.length})
             </button>
+
+            {/* Favorites Category Filter Pill */}
+            {favoriteProducts.length > 0 && (
+              <button
+                id="btn-pos-category-favorites"
+                onClick={() => setSelectedCategory('Favorites')}
+                className={`px-3 py-1.5 rounded-xl whitespace-nowrap font-bold transition flex items-center gap-1.5 ${
+                  selectedCategory === 'Favorites'
+                    ? 'bg-amber-500 text-slate-950 font-black ring-2 ring-amber-400 shadow-md'
+                    : 'bg-amber-950/80 border border-amber-600/60 text-amber-300 hover:bg-amber-900/80'
+                }`}
+                title="Filter catalog to top 10 most frequently sold items"
+              >
+                <Star className="w-3.5 h-3.5 fill-current" />
+                <span>⭐ Favorites ({favoriteProducts.length})</span>
+              </button>
+            )}
+
             {allCategoryNames.map((catName) => (
               <button
                 key={catName}
@@ -1421,6 +1487,140 @@ export const POSView: React.FC<POSViewProps> = ({
               </button>
             ))}
           </div>
+
+          {/* FAVORITES GRID: Top 10 Most Frequently Sold Items with One-Click Selection */}
+          {favoriteProducts.length > 0 && (
+            <div
+              id="pos-favorites-grid-container"
+              className="bg-slate-900 border border-slate-800 rounded-2xl p-3 sm:p-3.5 shadow-md space-y-2.5"
+            >
+              {/* Header with Title, Badge, and Collapse/Expand Toggle */}
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-7 h-7 rounded-lg bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0">
+                    <Star className="w-4 h-4 fill-amber-400 text-amber-400" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <h4 className="text-xs sm:text-sm font-extrabold text-white flex items-center gap-1.5">
+                        Favorites
+                      </h4>
+                      <span className="text-[10px] font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded-full flex items-center gap-1">
+                        <Flame className="w-3 h-3 text-amber-400" />
+                        Top 10 Fast-Selling Items
+                      </span>
+                    </div>
+                    <p className="text-[10px] text-slate-400 hidden sm:block">
+                      One-click instant selection: tap any item below to add it directly to cart
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] text-slate-400 font-mono hidden md:inline">
+                    One-click add +1
+                  </span>
+                  <button
+                    type="button"
+                    id="btn-toggle-favorites-grid"
+                    onClick={() => setShowFavoritesGrid(!showFavoritesGrid)}
+                    className="p-1.5 px-2 rounded-xl bg-slate-950 hover:bg-slate-800 border border-slate-800 text-slate-300 hover:text-white transition flex items-center gap-1 text-[11px] font-bold cursor-pointer"
+                    title={showFavoritesGrid ? 'Collapse Favorites Grid' : 'Expand Favorites Grid (Top 10)'}
+                  >
+                    <span>{showFavoritesGrid ? 'Hide' : 'Show (10)'}</span>
+                    {showFavoritesGrid ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                  </button>
+                </div>
+              </div>
+
+              {/* 10 Items Cards Grid: Responsive columns (2 on mobile, 3 on small tablet, 5 on desktop) */}
+              {showFavoritesGrid && (
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2 pt-1 animate-in fade-in duration-200">
+                  {favoriteProducts.map((p, index) => {
+                    const isOutOfStock = p.stockQuantity <= 0;
+                    const isLowStock = p.stockQuantity <= p.minStockAlert;
+                    const unitsSold = salesCountMap[p.id] ?? (performanceMap[p.id]?.unitsSold ?? 0);
+                    const cartItem = cart.find((item) => item.product.id === p.id);
+                    const inCartQty = cartItem ? cartItem.quantity : 0;
+
+                    return (
+                      <button
+                        key={`fav-card-${p.id}`}
+                        type="button"
+                        onClick={() => handleAddToCart(p)}
+                        className={`text-left p-2.5 rounded-xl border transition flex flex-col justify-between group relative overflow-hidden active:scale-95 cursor-pointer shadow-sm select-none ${
+                          isOutOfStock
+                            ? 'bg-slate-950/60 border-slate-800 opacity-60'
+                            : inCartQty > 0
+                            ? 'bg-slate-950 border-amber-500/70 hover:border-amber-400 shadow-amber-500/5 ring-1 ring-amber-500/40'
+                            : 'bg-slate-950 border-slate-800 hover:border-slate-700 hover:bg-slate-800/60'
+                        }`}
+                        title={`Click to add 1x ${p.name} (${unitsSold} sold)`}
+                      >
+                        {/* Top Ribbon: Rank Badge (#1 - #10) & In-Cart Status */}
+                        <div className="flex items-center justify-between gap-1 w-full mb-1">
+                          <span className="text-[9px] font-mono font-black px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center gap-0.5">
+                            <span>#{index + 1}</span>
+                            {unitsSold > 0 && <span className="opacity-80 font-normal truncate max-w-[55px]">• {unitsSold} sold</span>}
+                          </span>
+
+                          {inCartQty > 0 ? (
+                            <span className="text-[9px] font-mono font-black px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 shrink-0">
+                              ✓ {inCartQty}
+                            </span>
+                          ) : isOutOfStock ? (
+                            <span className="text-[8px] font-bold px-1 py-0.5 rounded bg-rose-950 text-rose-400 border border-rose-800 shrink-0">
+                              Out
+                            </span>
+                          ) : isLowStock ? (
+                            <span className="text-[8px] font-bold px-1 py-0.5 rounded bg-amber-950 text-amber-400 border border-amber-800 shrink-0">
+                              Low
+                            </span>
+                          ) : null}
+                        </div>
+
+                        {/* Middle: Thumbnail & Product Name */}
+                        <div className="flex items-center gap-2 my-1">
+                          {p.imageUrl ? (
+                            <img
+                              src={p.imageUrl}
+                              alt={p.name}
+                              referrerPolicy="no-referrer"
+                              className="w-8 h-8 rounded-lg object-cover border border-slate-700/80 shrink-0"
+                              onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                            />
+                          ) : (
+                            <div className="w-8 h-8 rounded-lg bg-slate-900 border border-slate-800 flex items-center justify-center text-slate-500 shrink-0">
+                              <Package className="w-4 h-4 text-slate-500" />
+                            </div>
+                          )}
+                          <div className="min-w-0 flex-1">
+                            <p className="font-bold text-white text-[11px] truncate leading-tight group-hover:text-amber-300 transition">
+                              {p.name}
+                            </p>
+                            <p className="text-[9px] text-slate-400 font-mono truncate">
+                              {p.category}
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Bottom: Price in KSh & One-Click Add Indicator */}
+                        <div className="flex items-center justify-between gap-1 mt-1 pt-1.5 border-t border-slate-800/80 w-full">
+                          <span className="font-mono font-extrabold text-emerald-400 text-xs">
+                            KSh {p.sellingPrice.toLocaleString()}
+                          </span>
+
+                          <span className="text-[9px] font-bold text-slate-400 group-hover:text-white flex items-center gap-0.5 bg-slate-900 group-hover:bg-amber-500 group-hover:text-slate-950 px-1.5 py-0.5 rounded transition shadow-sm">
+                            <Plus className="w-2.5 h-2.5" /> Add
+                          </span>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Product Items Display (List Form vs Grid) */}
           {viewMode === 'list' ? (

@@ -22,11 +22,13 @@ import {
   Building2,
   ShieldCheck,
   Eye,
-  X
+  X,
+  DollarSign
 } from 'lucide-react';
 import { Product, RestockRecord, Transaction, User } from '../../types';
 import { formatKSh } from '../../utils/currency';
 import { calculateProfitMargin } from '../../utils/margin';
+import { ProductQrCodeModal } from './ProductQrCodeModal';
 import QRCode from 'qrcode';
 
 interface ItemAuditMiniPageProps {
@@ -363,7 +365,7 @@ export const ItemAuditMiniPage: React.FC<ItemAuditMiniPageProps> = ({
               </div>
               <div className="mt-2 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-sky-500/10 text-sky-300 border border-sky-500/20">
                 <TrendingUp className="w-3 h-3" />
-                <span>{marginInfo.marginPercent.toFixed(1)}% Margin ({formatKSh(marginInfo.profitPerUnit)} profit)</span>
+                <span>{marginInfo.marginPercent.toFixed(1)}% Margin ({formatKSh(marginInfo.profitAmount)} profit)</span>
               </div>
             </div>
           </div>
@@ -1010,57 +1012,15 @@ export const ItemAuditMiniPage: React.FC<ItemAuditMiniPageProps> = ({
         </div>
       )}
 
-      {/* MODAL: QR CODE DISPLAY */}
+      {/* MODAL: QR CODE DISPLAY & HIGH-RES PNG EXPORT */}
       {showQrModal && (
-        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-sm w-full p-6 shadow-2xl text-center space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-              <span className="text-xs font-mono font-bold text-slate-400">Manager QR Shelf Code</span>
-              <button
-                onClick={() => setShowQrModal(false)}
-                className="p-1 text-slate-400 hover:text-white rounded-lg transition"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="space-y-1">
-              <h3 className="font-extrabold text-base text-white">{product.name}</h3>
-              <p className="text-xs text-slate-400 font-mono">SKU: {product.sku}</p>
-            </div>
-
-            <div className="bg-white p-3 rounded-2xl inline-block shadow-lg mx-auto">
-              {qrDataUrl ? (
-                <img src={qrDataUrl} alt="Product QR" className="w-52 h-52 object-contain" />
-              ) : (
-                <div className="w-52 h-52 flex items-center justify-center text-slate-400">Generating...</div>
-              )}
-            </div>
-
-            <p className="text-[11px] text-slate-400 leading-relaxed">
-              Scan with any mobile camera to view stock level, recent restock batches, and history.
-            </p>
-
-            <div className="flex items-center justify-center gap-2 pt-2">
-              <button
-                type="button"
-                onClick={handlePrintTag}
-                className="px-3 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow"
-              >
-                <Printer className="w-3.5 h-3.5" />
-                <span>Print Tag</span>
-              </button>
-              <button
-                type="button"
-                onClick={handleCopyLink}
-                className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
-              >
-                {copiedLink ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                <span>{copiedLink ? 'Copied!' : 'Copy Link'}</span>
-              </button>
-            </div>
-          </div>
-        </div>
+        <ProductQrCodeModal
+          isOpen={showQrModal}
+          onClose={() => setShowQrModal(false)}
+          product={product}
+          storeName={storeName}
+          onOpenMiniPage={() => setShowQrModal(false)}
+        />
       )}
     </div>
   );

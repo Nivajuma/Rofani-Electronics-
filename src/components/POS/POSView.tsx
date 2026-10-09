@@ -608,19 +608,28 @@ export const POSView: React.FC<POSViewProps> = ({
     });
   };
 
-  // Barcode Scanned Handler with smart normalization (trim, leading zeros, UPC/EAN)
+  // Barcode Scanned Handler with smart normalization (trim, leading zeros, UPC/EAN, and QR audit links)
   const handleBarcodeScan = (barcodeRaw: string) => {
-    const barcode = (barcodeRaw || '').trim();
+    let barcode = (barcodeRaw || '').trim();
     if (!barcode) return;
+
+    if (barcode.includes('itemAudit=')) {
+      try {
+        const urlObj = new URL(barcode, window.location.origin);
+        const auditParam = urlObj.searchParams.get('itemAudit');
+        if (auditParam) barcode = auditParam;
+      } catch (_) {}
+    }
 
     const norm = (s?: string) => (s || '').trim().toLowerCase();
     const strip0 = (s?: string) => norm(s).replace(/^0+/, '');
 
     const found = products.find((p) => {
+      const pId = norm(p.id);
       const pCode = norm(p.barcode);
       const pSku = norm(p.sku);
       const bCode = norm(barcode);
-      if (pCode === bCode || pSku === bCode) return true;
+      if (pId === bCode || pCode === bCode || pSku === bCode) return true;
       if (strip0(pCode) && strip0(pCode) === strip0(bCode)) return true;
       if (pCode.length === 12 && '0' + pCode === bCode) return true;
       if (bCode.length === 12 && '0' + bCode === pCode) return true;

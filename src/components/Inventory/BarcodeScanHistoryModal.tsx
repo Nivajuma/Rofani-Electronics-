@@ -28,7 +28,11 @@ import {
   Layers,
   Sparkles,
   ArrowUpDown,
-  Laptop
+  Laptop,
+  Check,
+  Volume2,
+  VolumeX,
+  Vibrate
 } from 'lucide-react';
 import { BarcodeScanLog, Product, User } from '../../types';
 import { printBarcodeLabels } from '../../utils/barcode';

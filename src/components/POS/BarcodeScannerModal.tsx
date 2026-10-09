@@ -13,6 +13,9 @@ import {
   FlashlightOff,
   Image as ImageIcon,
   Volume2,
+  VolumeX,
+  Vibrate,
+  Crosshair,
   Info,
   Check,
   ShoppingBag,
@@ -27,6 +30,10 @@ interface BarcodeScannerModalProps {
   sampleBarcodes: { name: string; barcode: string }[];
   products?: Product[];
   onSwitchToAiScanner?: () => void;
+  title?: string;
+  subtitle?: string;
+  mode?: 'pos' | 'stocktake' | 'audit';
+  defaultContinuous?: boolean;
 }
 
 export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
@@ -35,6 +42,10 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
   sampleBarcodes,
   products = [],
   onSwitchToAiScanner,
+  title,
+  subtitle,
+  mode = 'pos',
+  defaultContinuous = false,
 }) => {
   const [manualBarcode, setManualBarcode] = useState('');
   const [isScanning, setIsScanning] = useState(false);
@@ -49,8 +60,11 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
   const [isTorchOn, setIsTorchOn] = useState(false);
   const [isProcessingPhoto, setIsProcessingPhoto] = useState(false);
   const [photoError, setPhotoError] = useState<string | null>(null);
-  const [autoCloseOnScan, setAutoCloseOnScan] = useState(true);
+  const [autoCloseOnScan, setAutoCloseOnScan] = useState(!defaultContinuous);
   const [scanCount, setScanCount] = useState(0);
+  const [scanSuccessFlash, setScanSuccessFlash] = useState(false);
+  const [soundEnabled, setSoundEnabled] = useState(true);
+  const [hapticEnabled, setHapticEnabled] = useState(true);
 
   const html5QrcodeRef = useRef<Html5Qrcode | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -72,33 +86,60 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
 
   // Synthesized audio & haptic vibration feedback for successful scans
   const triggerFeedback = () => {
-    // 1. Audio Beep (Web Audio API)
-    try {
-      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-      if (AudioCtx) {
-        const ctx = new AudioCtx();
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.type = 'triangle';
-        osc.frequency.setValueAtTime(920, ctx.currentTime); // 920Hz clean POS beep
-        gain.gain.setValueAtTime(0.25, ctx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.14);
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-        osc.start();
-        osc.stop(ctx.currentTime + 0.14);
-      }
-    } catch (_) {}
+    // 1. Visual Focus Overlay Green Flash Confirmation
+    setScanSuccessFlash(true);
+    setTimeout(() => {
+      setScanSuccessFlash(false);
+    }, 650);
 
-    // 2. Mobile Haptic Vibration
-    if ('vibrate' in navigator) {
+    // 2. High-Confidence Dual-Tone POS Audio Chime (Web Audio API)
+    if (soundEnabled) {
       try {
-        navigator.vibrate([80, 40, 80]);
+        const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+        if (AudioCtx) {
+          const ctx = new AudioCtx();
+          if (ctx.state === 'suspended') {
+            ctx.resume().catch(() => {});
+          }
+          const now = ctx.currentTime;
+
+          // First fundamental tone (1046.5Hz - C6)
+          const osc1 = ctx.createOscillator();
+          const gain1 = ctx.createGain();
+          osc1.type = 'sine';
+          osc1.frequency.setValueAtTime(1046.5, now);
+          gain1.gain.setValueAtTime(0.32, now);
+          gain1.gain.exponentialRampToValueAtTime(0.01, now + 0.08);
+          osc1.connect(gain1);
+          gain1.connect(ctx.destination);
+          osc1.start(now);
+          osc1.stop(now + 0.08);
+
+          // Second harmonious overtone (1318.5Hz - E6)
+          const osc2 = ctx.createOscillator();
+          const gain2 = ctx.createGain();
+          osc2.type = 'triangle';
+          osc2.frequency.setValueAtTime(1318.5, now + 0.05);
+          gain2.gain.setValueAtTime(0.001, now);
+          gain2.gain.setValueAtTime(0.28, now + 0.05);
+          gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
+          osc2.connect(gain2);
+          gain2.connect(ctx.destination);
+          osc2.start(now + 0.05);
+          osc2.stop(now + 0.18);
+        }
+      } catch (_) {}
+    }
+
+    // 3. Tactile Mobile Haptic Vibration Pattern
+    if (hapticEnabled && 'vibrate' in navigator) {
+      try {
+        navigator.vibrate([70, 35, 110]);
       } catch (_) {}
     }
   };
 
-  // Find product with barcode normalization (handles leading zeros, EAN vs UPC)
+  // Find product with barcode normalization (handles leading zeros, EAN vs UPC, and QR audit links)
   const lookupProduct = (codeRaw: string): Product | null => {
     if (!products || products.length === 0) return null;
     const norm = (s?: string) => (s || '').trim().toLowerCase();
@@ -106,14 +147,24 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
     const code = norm(codeRaw);
     if (!code) return null;
 
+    let targetCode = code;
+    try {
+      if (codeRaw.includes('itemAudit=')) {
+        const urlObj = new URL(codeRaw, window.location.origin);
+        const auditParam = urlObj.searchParams.get('itemAudit');
+        if (auditParam) targetCode = norm(auditParam);
+      }
+    } catch (_) {}
+
     return (
       products.find((p) => {
+        const pId = norm(p.id);
         const pCode = norm(p.barcode);
         const pSku = norm(p.sku);
-        if (pCode === code || pSku === code) return true;
-        if (strip0(pCode) && strip0(pCode) === strip0(code)) return true;
-        if (pCode.length === 12 && '0' + pCode === code) return true;
-        if (code.length === 12 && '0' + code === pCode) return true;
+        if (pId === targetCode || pCode === targetCode || pSku === targetCode) return true;
+        if (strip0(pCode) && strip0(pCode) === strip0(targetCode)) return true;
+        if (pCode.length === 12 && '0' + pCode === targetCode) return true;
+        if (targetCode.length === 12 && '0' + targetCode === pCode) return true;
         return false;
       }) || null
     );
@@ -132,8 +183,18 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
     setScannedProduct(match);
     setUnmatchedCode(match ? null : code);
 
-    // Trigger parent POS callback
-    onScan(code);
+    // If QR code contained itemAudit URL, pass either product's barcode or ID
+    let passCode = code;
+    if (code.includes('itemAudit=')) {
+      try {
+        const urlObj = new URL(code, window.location.origin);
+        const auditParam = urlObj.searchParams.get('itemAudit');
+        if (auditParam) passCode = auditParam;
+      } catch (_) {}
+    }
+
+    // Trigger parent callback
+    onScan(passCode);
 
     if (autoCloseOnScan) {
       setTimeout(() => {
@@ -179,13 +240,13 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
         });
         html5QrcodeRef.current = scanner;
 
-        // Configuration optimized for portrait mobile screens
+        // Configuration with square aspect ratio matching the green square focus overlay
         const config = {
-          fps: 20,
+          fps: 24,
           qrbox: (viewfinderWidth: number, viewfinderHeight: number) => {
-            const width = Math.min(Math.floor(viewfinderWidth * 0.92), 360);
-            const height = Math.min(Math.floor(viewfinderHeight * 0.52), 220);
-            return { width, height };
+            const minEdge = Math.min(viewfinderWidth, viewfinderHeight);
+            const edge = Math.min(Math.floor(minEdge * 0.8), 280);
+            return { width: edge, height: edge };
           },
           disableFlip: false,
         };
@@ -344,14 +405,18 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
             </div>
             <div>
               <div className="flex items-center gap-1.5">
-                <h3 className="font-bold text-slate-100 text-sm">Mobile Barcode Scanner</h3>
+                <h3 className="font-bold text-slate-100 text-sm">
+                  {title || 'Camera Barcode & QR Scanner'}
+                </h3>
                 {scanCount > 0 && (
                   <span className="bg-emerald-950 text-emerald-400 text-[10px] font-mono font-bold px-1.5 py-0.2 rounded border border-emerald-800">
                     {scanCount} scanned
                   </span>
                 )}
               </div>
-              <p className="text-[10px] text-slate-400">Point phone camera or snap high-res photo</p>
+              <p className="text-[10px] text-slate-400">
+                {subtitle || 'Visual focus green square • Sound & haptic active'}
+              </p>
             </div>
           </div>
 
@@ -371,6 +436,34 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
                 <span className="hidden sm:inline">AI Visual</span>
               </button>
             )}
+
+            {/* Sound Feedback Toggle */}
+            <button
+              type="button"
+              onClick={() => setSoundEnabled((prev) => !prev)}
+              title={soundEnabled ? 'Sound Effects Enabled (Click to Mute)' : 'Sound Effects Muted (Click to Unmute)'}
+              className={`p-2 rounded-xl transition ${
+                soundEnabled
+                  ? 'text-emerald-400 hover:bg-slate-800'
+                  : 'text-slate-500 hover:bg-slate-800 hover:text-slate-300'
+              }`}
+            >
+              {soundEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
+            </button>
+
+            {/* Haptic Vibration Toggle */}
+            <button
+              type="button"
+              onClick={() => setHapticEnabled((prev) => !prev)}
+              title={hapticEnabled ? 'Haptic Vibration Enabled' : 'Haptic Vibration Muted'}
+              className={`p-2 rounded-xl transition ${
+                hapticEnabled
+                  ? 'text-sky-400 hover:bg-slate-800'
+                  : 'text-slate-500 hover:bg-slate-800 hover:text-slate-300'
+              }`}
+            >
+              <Vibrate className="w-4 h-4" />
+            </button>
 
             {/* Torch toggle button */}
             {hasTorch && (
@@ -419,9 +512,9 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
               <div className="absolute inset-0 pointer-events-none flex flex-col justify-between p-3">
                 {/* Top status */}
                 <div className="flex items-center justify-between">
-                  <span className="text-[10px] font-semibold text-sky-300 bg-slate-950/85 px-2.5 py-1 rounded-full border border-sky-500/40 shadow-sm flex items-center gap-1">
+                  <span className="text-[10px] font-semibold text-emerald-300 bg-slate-950/85 px-2.5 py-1 rounded-full border border-emerald-500/40 shadow-sm flex items-center gap-1.5">
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping inline-block" />
-                    Align barcode in frame
+                    Green Square Scanner Active
                   </span>
 
                   <span className="text-[10px] text-slate-400 bg-slate-950/85 px-2 py-0.5 rounded border border-slate-800 font-mono">
@@ -429,22 +522,70 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
                   </span>
                 </div>
 
-                {/* Viewfinder Target Reticle with Animated Laser */}
-                <div className="relative w-[86%] max-w-[340px] h-32 mx-auto border border-dashed border-sky-500/60 rounded-xl bg-sky-950/10 flex items-center justify-center">
-                  {/* Corner Reticles */}
-                  <div className="absolute -top-1 -left-1 w-4 h-4 border-t-2 border-l-2 border-sky-400 rounded-tl" />
-                  <div className="absolute -top-1 -right-1 w-4 h-4 border-t-2 border-r-2 border-sky-400 rounded-tr" />
-                  <div className="absolute -bottom-1 -left-1 w-4 h-4 border-b-2 border-l-2 border-sky-400 rounded-bl" />
-                  <div className="absolute -bottom-1 -right-1 w-4 h-4 border-b-2 border-r-2 border-sky-400 rounded-br" />
+                {/* Visual Focus Overlay: High-Confidence Emerald Green Square Frame */}
+                <div className="relative z-10 flex flex-col items-center justify-center my-auto w-full">
+                  {/* The Green Square Focus Frame */}
+                  <div
+                    className={`relative w-52 h-52 sm:w-60 sm:h-60 aspect-square rounded-2xl flex items-center justify-center transition-all duration-200 ${
+                      scanSuccessFlash
+                        ? 'border-4 border-emerald-300 ring-8 ring-emerald-400/60 bg-emerald-500/25 scale-105 shadow-[0_0_35px_rgba(16,185,129,0.85)]'
+                        : 'border-2 border-emerald-400 bg-emerald-950/15 shadow-[0_0_20px_rgba(16,185,129,0.4)]'
+                    }`}
+                  >
+                    {/* 4 Prominent High-Visibility Green Corner Brackets */}
+                    <div className="absolute -top-1.5 -left-1.5 w-7 h-7 border-t-4 border-l-4 border-emerald-400 rounded-tl-xl shadow-md" />
+                    <div className="absolute -top-1.5 -right-1.5 w-7 h-7 border-t-4 border-r-4 border-emerald-400 rounded-tr-xl shadow-md" />
+                    <div className="absolute -bottom-1.5 -left-1.5 w-7 h-7 border-b-4 border-l-4 border-emerald-400 rounded-bl-xl shadow-md" />
+                    <div className="absolute -bottom-1.5 -right-1.5 w-7 h-7 border-b-4 border-r-4 border-emerald-400 rounded-br-xl shadow-md" />
 
-                  {/* Pulsing red scan laser line */}
-                  <div className="w-full h-0.5 bg-red-500 shadow-[0_0_10px_rgba(239,68,68,0.9)] animate-pulse" />
+                    {/* Central Subtle Crosshair Target Guides */}
+                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-40">
+                      <div className="w-6 h-0.5 bg-emerald-400" />
+                      <div className="h-6 w-0.5 bg-emerald-400 absolute" />
+                    </div>
+
+                    {/* Animated Emerald Scanning Laser Line */}
+                    {!scanSuccessFlash && (
+                      <div className="absolute inset-x-2 top-0 bottom-0 pointer-events-none overflow-hidden rounded-xl">
+                        <div className="w-full h-1 bg-gradient-to-r from-transparent via-emerald-400 to-transparent shadow-[0_0_12px_rgba(52,211,153,1)] animate-bounce duration-1000 my-auto" />
+                      </div>
+                    )}
+
+                    {/* Instant Visual Success Confirmation Burst */}
+                    {scanSuccessFlash && (
+                      <div className="absolute inset-0 flex flex-col items-center justify-center animate-in zoom-in-75 duration-200">
+                        <div className="w-16 h-16 rounded-full bg-emerald-500 text-slate-950 flex items-center justify-center shadow-2xl shadow-emerald-500/70 ring-4 ring-emerald-300">
+                          <Check className="w-9 h-9 stroke-[3.5]" />
+                        </div>
+                        <span className="mt-2 text-xs font-black tracking-widest text-emerald-100 bg-slate-950/90 px-3 py-0.5 rounded-full border border-emerald-400/60 font-mono shadow-xl">
+                          SCANNED ✓
+                        </span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Dynamic Status / Feedback Capsule */}
+                  <div className="mt-2.5 text-center">
+                    <span
+                      className={`text-[11px] font-bold px-3 py-1 rounded-full border shadow-sm transition ${
+                        scanSuccessFlash
+                          ? 'bg-emerald-500 text-slate-950 border-emerald-300 ring-2 ring-emerald-400/40'
+                          : 'bg-slate-950/90 text-emerald-300 border-emerald-500/50'
+                      }`}
+                    >
+                      {scanSuccessFlash ? (
+                        <span>✓ Scanned: {lastScanned}</span>
+                      ) : (
+                        <span>🎯 Align barcode or QR inside Green Square</span>
+                      )}
+                    </span>
+                  </div>
                 </div>
 
                 {/* Bottom Tip */}
                 <div className="text-center">
                   <span className="text-[10px] text-slate-300 bg-slate-950/85 px-2.5 py-1 rounded-lg border border-slate-800">
-                    💡 Hold phone ~15cm (6 inches) away for clear focus
+                    💡 Hold phone ~15cm (6 inches) away • Audio & Haptic confirm active
                   </span>
                 </div>
               </div>
@@ -560,7 +701,13 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
                     scannedProduct ? 'bg-emerald-500/20 text-emerald-300' : 'bg-amber-500/20 text-amber-300'
                   }`}
                 >
-                  {scannedProduct ? 'Added to Cart' : 'Not in Catalog'}
+                  {scannedProduct
+                    ? mode === 'stocktake'
+                      ? 'Item Counted (+1)'
+                      : mode === 'audit'
+                      ? 'Item Verified'
+                      : 'Added to Cart'
+                    : 'Not in Catalog'}
                 </span>
               </div>
 

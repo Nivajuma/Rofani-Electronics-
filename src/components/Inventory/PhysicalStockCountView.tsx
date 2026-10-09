@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { ClipboardList, CheckCircle2, AlertTriangle, RefreshCw, Scan, Save, Search, X, Filter, Package } from 'lucide-react';
+import { ClipboardList, CheckCircle2, AlertTriangle, RefreshCw, Scan, Save, Search, X, Filter, Package, Volume2 } from 'lucide-react';
 import { Product, StockCountItem, StockCountAudit } from '../../types';
 import { safeGetJSON, safeSetJSON } from '../../utils/safeStorage';
+import { BarcodeScannerModal } from '../POS/BarcodeScannerModal';
 
 interface PhysicalStockCountViewProps {
   products: Product[];
@@ -12,6 +13,20 @@ export const PhysicalStockCountView: React.FC<PhysicalStockCountViewProps> = ({
   products,
   onApplyStockAdjustment,
 }) => {
+  const [showScannerModal, setShowScannerModal] = useState(false);
+  const [scanNotification, setScanNotification] = useState<{
+    productName: string;
+    sku: string;
+    count: number;
+  } | null>(null);
+
+  // Auto-dismiss scan notification
+  useEffect(() => {
+    if (!scanNotification) return;
+    const timer = setTimeout(() => setScanNotification(null), 4000);
+    return () => clearTimeout(timer);
+  }, [scanNotification]);
+
   const [counts, setCounts] = useState<Record<string, number | null>>(() => {
     const saved = safeGetJSON<Record<string, number | null> | null>(
       'retail_pos_stocktake_counts',
@@ -99,6 +114,51 @@ export const PhysicalStockCountView: React.FC<PhysicalStockCountViewProps> = ({
       prefilled[p.id] = p.stockQuantity;
     });
     setCounts(prefilled);
+  };
+
+  // High-Confidence Scanner Count Handler for busy inventory counts
+  const handleScanItem = (scannedCode: string) => {
+    let code = (scannedCode || '').trim();
+    if (!code) return;
+
+    if (code.includes('itemAudit=')) {
+      try {
+        const parsed = new URL(code, window.location.origin);
+        const param = parsed.searchParams.get('itemAudit');
+        if (param) code = param;
+      } catch (_) {}
+    }
+
+    const norm = (s?: string) => (s || '').trim().toLowerCase();
+    const match = products.find(
+      (p) =>
+        p.id === code ||
+        norm(p.barcode) === norm(code) ||
+        norm(p.sku) === norm(code) ||
+        norm(p.id) === norm(code)
+    );
+
+    if (match) {
+      setCounts((prev) => {
+        const current = prev[match.id];
+        const next = current === null || current === undefined ? 1 : current + 1;
+        setScanNotification({
+          productName: match.name,
+          sku: match.sku,
+          count: next,
+        });
+        return {
+          ...prev,
+          [match.id]: next,
+        };
+      });
+    } else {
+      setScanNotification({
+        productName: `Unrecognized Code (${code})`,
+        sku: 'N/A',
+        count: 0,
+      });
+    }
   };
 
   const filteredProducts = products.filter((p) => {
@@ -199,6 +259,28 @@ export const PhysicalStockCountView: React.FC<PhysicalStockCountViewProps> = ({
         </button>
       </div>
 
+      {/* Real-time Scanner Feedback Banner */}
+      {scanNotification && (
+        <div className="bg-emerald-950/90 border border-emerald-500/50 p-3.5 rounded-2xl flex items-center justify-between gap-3 text-emerald-200 text-xs shadow-lg animate-in fade-in duration-200">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-7 h-7 rounded-lg bg-emerald-500/20 flex items-center justify-center text-emerald-300 shrink-0">
+              <CheckCircle2 className="w-4 h-4" />
+            </div>
+            <div className="truncate">
+              <span className="font-bold text-white">{scanNotification.productName}</span>{' '}
+              <span className="font-mono text-emerald-300">({scanNotification.sku})</span> — Physical Count incremented to{' '}
+              <strong className="text-white font-mono text-sm underline">{scanNotification.count}</strong> units
+            </div>
+          </div>
+          <button
+            onClick={() => setScanNotification(null)}
+            className="p-1 hover:bg-emerald-900 rounded-lg text-emerald-300"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
       {/* Variance Summary Bar */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl">
@@ -248,6 +330,17 @@ export const PhysicalStockCountView: React.FC<PhysicalStockCountViewProps> = ({
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
+            <button
+              type="button"
+              id="btn-stocktake-camera-scan"
+              onClick={() => setShowScannerModal(true)}
+              className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-md shadow-emerald-600/30 transition cursor-pointer active:scale-95"
+              title="Open camera barcode & QR scanner with green square focus overlay and sound/haptic feedback to scan items quickly"
+            >
+              <Scan className="w-4 h-4 text-emerald-200" />
+              <span>📷 Scan Barcode / QR (+1)</span>
+            </button>
+
             <button
               type="button"
               onClick={handleClearAllToBlank}
@@ -454,6 +547,20 @@ export const PhysicalStockCountView: React.FC<PhysicalStockCountViewProps> = ({
           </table>
         </div>
       </div>
+
+      {/* Camera Barcode / QR Scanner Modal with Green Square Focus Overlay & Feedback */}
+      {showScannerModal && (
+        <BarcodeScannerModal
+          title="Stocktaking Barcode / QR Scanner"
+          subtitle="Align barcode or QR inside Green Square • Sound & haptic confirmation active"
+          mode="stocktake"
+          defaultContinuous={true}
+          products={products}
+          sampleBarcodes={products.slice(0, 8).map((p) => ({ name: p.name, barcode: p.barcode }))}
+          onScan={handleScanItem}
+          onClose={() => setShowScannerModal(false)}
+        />
+      )}
     </div>
   );
 };

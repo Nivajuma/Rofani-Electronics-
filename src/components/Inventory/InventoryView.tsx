@@ -47,9 +47,10 @@ import {
   ShieldAlert,
   Save,
   Flame,
-  Activity
+  Activity,
+  QrCode
 } from 'lucide-react';
-import { Product, Supplier, BarcodeScanLog, User, Transaction } from '../../types';
+import { Product, Supplier, BarcodeScanLog, User, Transaction, RestockRecord } from '../../types';
 import { generateAutoBarcode, printBarcodeLabels, printBatchBarcodes } from '../../utils/barcode';
 import { calculateProfitMargin } from '../../utils/margin';
 import { canDeleteInventory, canEditInventory, hasWorkerPermission } from '../../utils/permissions';
@@ -57,6 +58,8 @@ import { SpreadsheetImportModal } from './SpreadsheetImportModal';
 import { ExcelSpreadsheetView } from './ExcelSpreadsheetView';
 import { StockDensityHeatmap } from './StockDensityHeatmap';
 import { ImageGeneratorModal } from './ImageGeneratorModal';
+import { ProductQrCodeModal } from './ProductQrCodeModal';
+import { ItemAuditMiniPage } from './ItemAuditMiniPage';
 import { detectDuplicateProducts, deduplicateProducts } from '../../utils/deduplicate';
 import { optimizeImageFile, optimizeImageDataUrl } from '../../utils/imageOptimizer';
 import { BarcodeScanHistoryModal, BarcodeScanHistoryView } from './BarcodeScanHistoryModal';
@@ -91,6 +94,17 @@ interface InventoryViewProps {
   onClearScanLogs?: () => void;
   storeName?: string;
   onOpenAiAssistantWithPrompt?: (prompt: string) => void;
+  restockRecords?: RestockRecord[];
+  onAddRestock?: (
+    productId: string,
+    quantityAdded: number,
+    unitCost: number,
+    supplierName: string,
+    batchNo: string,
+    notes: string
+  ) => void;
+  onAdjustStockQuantity?: (productId: string, newQuantity: number, reason: string) => void;
+  onOpenItemAuditMiniPage?: (product: Product) => void;
 }
 
 export const InventoryView: React.FC<InventoryViewProps> = ({
@@ -118,6 +132,10 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   onClearScanLogs = () => {},
   storeName = 'Rofani Electronics',
   onOpenAiAssistantWithPrompt,
+  restockRecords = [],
+  onAddRestock,
+  onAdjustStockQuantity,
+  onOpenItemAuditMiniPage,
 }) => {
   const [searchTerm, setSearchTerm] = useState(() =>
     safeGetJSON<string>('retail_pos_inv_search', '', (val) => typeof val === 'string')
@@ -198,17 +216,23 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     }
   }, [initialShowLowStockOnly]);
 
-  // View Mode: 'standard' (table) vs 'excel' (grid) vs 'grouped' (hierarchy) vs 'scan_history' (barcode scan log) vs 'heatmap' (d3 stock density)
-  const [inventoryViewMode, setInventoryViewMode] = useState<'standard' | 'excel' | 'grouped' | 'scan_history' | 'heatmap'>(() =>
-    safeGetJSON<'standard' | 'excel' | 'grouped' | 'scan_history' | 'heatmap'>(
+  // View Mode: 'standard' (table) vs 'cards' (card grid) vs 'excel' (grid) vs 'grouped' (hierarchy) vs 'scan_history' (barcode scan log) vs 'heatmap' (d3 stock density)
+  const [inventoryViewMode, setInventoryViewMode] = useState<'standard' | 'cards' | 'excel' | 'grouped' | 'scan_history' | 'heatmap'>(() =>
+    safeGetJSON<'standard' | 'cards' | 'excel' | 'grouped' | 'scan_history' | 'heatmap'>(
       'retail_pos_inventory_view_mode',
       'standard',
-      (val) => ['standard', 'excel', 'grouped', 'scan_history', 'heatmap'].includes(val)
+      (val) => ['standard', 'cards', 'excel', 'grouped', 'scan_history', 'heatmap'].includes(val)
     )
   );
   useEffect(() => {
     safeSetJSON('retail_pos_inventory_view_mode', inventoryViewMode);
   }, [inventoryViewMode]);
+
+  // Product QR Code Generation Modal state for Store Manager Audits
+  const [qrModalProduct, setQrModalProduct] = useState<Product | null>(null);
+
+  // Local Item Audit Mini-Page state
+  const [localAuditProduct, setLocalAuditProduct] = useState<Product | null>(null);
 
   const [showScanHistoryModal, setShowScanHistoryModal] = useState<boolean>(() =>
     safeGetJSON<boolean>('retail_pos_inv_show_scan_history_modal', false, (val) => typeof val === 'boolean')
@@ -1310,6 +1334,20 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
             </button>
 
             <button
+              id="btn-inventory-tab-cards"
+              onClick={() => setInventoryViewMode('cards')}
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition ${
+                inventoryViewMode === 'cards'
+                  ? 'bg-sky-600 text-white shadow-md'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+              title="Visual Product Cards Grid with QR Code generators for store managers"
+            >
+              <LayoutGrid className="w-4 h-4" />
+              <span>Product Cards</span>
+            </button>
+
+            <button
               onClick={() => setInventoryViewMode('excel')}
               className={`px-3.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition ${
                 inventoryViewMode === 'excel'
@@ -2313,6 +2351,13 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                                         </td>
                                         <td className="p-2.5 text-right">
                                           <div className="flex items-center justify-end gap-1">
+                                            <button
+                                              onClick={() => setQrModalProduct(p)}
+                                              title="Generate Manager Audit QR Code (History, Stock & Batches)"
+                                              className="p-1 hover:bg-slate-800 text-sky-400 hover:text-sky-300 rounded transition cursor-pointer"
+                                            >
+                                              <QrCode className="w-3.5 h-3.5" />
+                                            </button>
                                             {onViewProductHistory && (
                                               <button
                                                 onClick={() => onViewProductHistory(p)}
@@ -2353,6 +2398,251 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
               );
             })
           )}
+        </div>
+      ) : inventoryViewMode === 'cards' ? (
+        /* Visual Product Cards Grid View */
+        <div className="space-y-6">
+          {paginatedProducts.length === 0 ? (
+            <div className="bg-slate-900 border border-slate-800 rounded-3xl p-12 text-center text-slate-500 space-y-2">
+              <Package className="w-12 h-12 mx-auto text-slate-600 mb-2" />
+              <p className="font-bold text-slate-300 text-sm">No items found matching current filters</p>
+              <p className="text-xs">Try clearing search terms or selecting another category.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+              {paginatedProducts.map((p) => {
+                const isLow = p.stockQuantity <= p.minStockAlert;
+                const isOut = p.stockQuantity <= 0;
+                const perf = performanceMap[p.id];
+                const margin = calculateProfitMargin(p.costPrice, p.sellingPrice);
+
+                return (
+                  <div
+                    key={p.id}
+                    className={`bg-slate-900 border border-slate-800 hover:border-slate-700/80 rounded-2xl overflow-hidden shadow-lg hover:shadow-xl transition flex flex-col justify-between group ${
+                      perf ? perf.accentBorderLeft : ''
+                    }`}
+                  >
+                    {/* Card Top: Image & Status Badges */}
+                    <div className="relative aspect-video sm:aspect-square bg-slate-950 flex items-center justify-center overflow-hidden border-b border-slate-800/80">
+                      {p.imageUrl ? (
+                        <>
+                          <img
+                            src={p.imageUrl}
+                            alt={p.name}
+                            referrerPolicy="no-referrer"
+                            className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
+                            onError={(e) => {
+                              e.currentTarget.style.display = 'none';
+                            }}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setPreviewImage({ url: p.imageUrl!, title: p.name })}
+                            className="absolute top-2.5 right-2.5 p-1.5 rounded-lg bg-slate-950/70 hover:bg-slate-900 text-white backdrop-blur-sm opacity-0 group-hover:opacity-100 transition shadow cursor-pointer"
+                            title="Preview Full Image"
+                          >
+                            <Eye className="w-4 h-4" />
+                          </button>
+                        </>
+                      ) : (
+                        <div className="flex flex-col items-center justify-center text-slate-600 group-hover:text-slate-400 transition">
+                          <Package className="w-12 h-12 stroke-[1.5]" />
+                          <button
+                            type="button"
+                            onClick={() => handleOpenEditModal(p)}
+                            className="mt-2 text-[10px] font-bold text-sky-400 hover:underline cursor-pointer"
+                          >
+                            + Add Photo
+                          </button>
+                        </div>
+                      )}
+
+                      {/* Stock Level Badge Overlay */}
+                      <div className="absolute top-2.5 left-2.5 flex flex-col gap-1 items-start">
+                        {isOut ? (
+                          <span className="bg-rose-950/90 text-rose-300 border border-rose-700 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider backdrop-blur-sm shadow">
+                            Out of Stock
+                          </span>
+                        ) : isLow ? (
+                          <span className="bg-amber-950/90 text-amber-300 border border-amber-700 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider backdrop-blur-sm shadow flex items-center gap-1">
+                            <AlertTriangle className="w-3 h-3 text-amber-400" />
+                            Low Stock ({p.stockQuantity} {p.unit})
+                          </span>
+                        ) : (
+                          <span className="bg-emerald-950/90 text-emerald-300 border border-emerald-700 px-2.5 py-0.5 rounded-full text-[10px] font-bold backdrop-blur-sm shadow">
+                            {p.stockQuantity} {p.unit} in stock
+                          </span>
+                        )}
+
+                        {perf && perf.tier !== 'unranked_no_sales' && (
+                          <span
+                            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-extrabold border shadow-sm ${perf.badgeBg} ${perf.badgeText} ${perf.badgeBorder}`}
+                            title={perf.description}
+                          >
+                            {perf.tier === 'high_sales_high_profit' && <Star className="w-3 h-3 fill-emerald-400 text-emerald-400" />}
+                            {perf.tier === 'low_sales_low_profit' && <AlertTriangle className="w-3 h-3 text-amber-400" />}
+                            {perf.tier === 'high_sales_low_profit' && <Zap className="w-3 h-3 text-sky-400" />}
+                            {perf.tier === 'low_sales_high_profit' && <Gem className="w-3 h-3 text-purple-400" />}
+                            <span>{perf.tierShortLabel}</span>
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Card Content */}
+                    <div className="p-4 flex-1 flex flex-col justify-between space-y-3">
+                      <div>
+                        {/* Category & Variant */}
+                        <div className="flex items-center justify-between text-[11px] text-slate-400 mb-1">
+                          <span className="text-sky-400 font-semibold truncate max-w-[140px]">
+                            {p.category} {p.subcategory ? `› ${p.subcategory}` : ''}
+                          </span>
+                          {p.sizeCapacity && (
+                            <span className="bg-slate-950 border border-slate-800 px-1.5 py-0.5 rounded text-[10px] font-mono text-slate-300">
+                              {p.sizeCapacity}
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Title */}
+                        <h3 className="font-bold text-white text-sm leading-snug line-clamp-2" title={p.name}>
+                          {p.name}
+                        </h3>
+
+                        {/* SKU & Barcode */}
+                        <div className="flex items-center gap-2 text-[10px] font-mono text-slate-400 mt-1">
+                          <span className="truncate">SKU: <strong className="text-slate-300">{p.sku}</strong></span>
+                          <span>•</span>
+                          <span className="truncate">Code: <strong className="text-sky-300">{p.barcode}</strong></span>
+                        </div>
+                      </div>
+
+                      {/* Pricing & Stock Details */}
+                      <div className="bg-slate-950/70 border border-slate-800/80 rounded-xl p-2.5 space-y-1.5">
+                        <div className="flex items-baseline justify-between">
+                          <span className="text-[10px] text-slate-400 uppercase font-mono">Retail Price</span>
+                          <span className="text-base font-black text-emerald-400 font-mono">
+                            KSh {p.sellingPrice.toLocaleString()}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between text-[11px] text-slate-400 font-mono">
+                          <span>Cost: KSh {p.costPrice.toLocaleString()}</span>
+                          <span className="text-sky-300 font-bold">{margin.marginPercent.toFixed(0)}% Margin</span>
+                        </div>
+                        <div className="flex items-center justify-between text-[10px] text-slate-500 font-mono pt-1 border-t border-slate-800/60">
+                          <span>Stock: <strong className="text-slate-300">{p.stockQuantity} {p.unit}</strong></span>
+                          <span>Min Alert: {p.minStockAlert}</span>
+                        </div>
+                      </div>
+
+                      {/* Store Manager QR Code Generator Button & Actions */}
+                      <div className="space-y-2 pt-1">
+                        <button
+                          type="button"
+                          onClick={() => setQrModalProduct(p)}
+                          className="w-full py-2.5 px-3 rounded-xl bg-sky-500/10 hover:bg-sky-500/20 text-sky-300 hover:text-white border border-sky-500/30 hover:border-sky-400 text-xs font-extrabold flex items-center justify-center gap-2 transition shadow-sm cursor-pointer active:scale-95 group/btn"
+                          title="Generate Store Manager QR Code: Scan to view item history, stock level & recent restock batches"
+                        >
+                          <QrCode className="w-4 h-4 text-sky-400 group-hover/btn:scale-110 transition" />
+                          <span>Generate QR Code</span>
+                        </button>
+
+                        <div className="flex items-center justify-between pt-1">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (onOpenItemAuditMiniPage) onOpenItemAuditMiniPage(p);
+                              else setLocalAuditProduct(p);
+                            }}
+                            className="text-[11px] font-semibold text-slate-400 hover:text-emerald-400 flex items-center gap-1 transition cursor-pointer"
+                            title="Open Manager Stock & Batches Mini-Page"
+                          >
+                            <Eye className="w-3.5 h-3.5" />
+                            <span>Audit Mini-Page</span>
+                          </button>
+
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => printBarcodeLabels(p.name, p.sellingPrice, p.barcode, 12)}
+                              className="p-1.5 hover:bg-slate-800 text-slate-400 hover:text-sky-400 rounded-lg transition cursor-pointer"
+                              title="Print Barcode Labels"
+                            >
+                              <Printer className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleOpenEditModal(p)}
+                              className="p-1.5 hover:bg-slate-800 text-slate-400 hover:text-amber-400 rounded-lg transition cursor-pointer"
+                              title="Edit Details"
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteProductWithRoleCheck(p.id, p.name)}
+                              className="p-1.5 hover:bg-slate-800 text-slate-500 hover:text-rose-400 rounded-lg transition cursor-pointer"
+                              title="Delete Item"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Cards Grid Footer with Pagination Controls */}
+          <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-400">
+            <div className="flex items-center gap-2">
+              <span>Show:</span>
+              <select
+                value={itemsPerPage}
+                onChange={(e) => {
+                  setItemsPerPage(Number(e.target.value));
+                  setCurrentPage(1);
+                }}
+                className="bg-slate-950 border border-slate-800 text-slate-200 text-xs px-2 py-1 rounded-lg focus:outline-none focus:border-sky-500"
+              >
+                <option value={24}>24 cards per page</option>
+                <option value={48}>48 cards per page</option>
+                <option value={96}>96 cards per page</option>
+                <option value={0}>All ({filteredProducts.length})</option>
+              </select>
+              <span className="text-slate-500 hidden sm:inline">
+                Showing {filteredProducts.length === 0 ? 0 : startIndex + 1} to{' '}
+                {itemsPerPage > 0 ? Math.min(startIndex + itemsPerPage, filteredProducts.length) : filteredProducts.length}{' '}
+                of {filteredProducts.length} items
+              </span>
+            </div>
+
+            {itemsPerPage > 0 && totalPages > 1 && (
+              <div className="flex items-center gap-1">
+                <button
+                  disabled={currentPage <= 1}
+                  onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                  className="p-1.5 rounded-lg border border-slate-800 hover:bg-slate-800 text-slate-300 disabled:opacity-40 transition cursor-pointer"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+                <span className="px-3 font-mono font-bold text-slate-200">
+                  Page {currentPage} of {totalPages}
+                </span>
+                <button
+                  disabled={currentPage >= totalPages}
+                  onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                  className="p-1.5 rounded-lg border border-slate-800 hover:bg-slate-800 text-slate-300 disabled:opacity-40 transition cursor-pointer"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       ) : (
         /* Inventory Catalog Table (Standard View) */
@@ -2535,14 +2825,33 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                       <td className="p-3.5 text-right">
                         <div className="flex items-center justify-end gap-1">
                           <button
+                            onClick={() => setQrModalProduct(p)}
+                            title="Generate Product Audit QR Code (Scan for History, Stock & Batches)"
+                            className="p-1.5 hover:bg-slate-800 text-sky-400 hover:text-sky-300 rounded-lg transition cursor-pointer"
+                          >
+                            <QrCode className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => {
+                              if (onOpenItemAuditMiniPage) onOpenItemAuditMiniPage(p);
+                              else setLocalAuditProduct(p);
+                            }}
+                            title="Open Manager Stock & Batches Mini-Page"
+                            className="p-1.5 hover:bg-slate-800 text-slate-400 hover:text-emerald-400 rounded-lg transition cursor-pointer"
+                          >
+                            <Eye className="w-4 h-4" />
+                          </button>
+                          <button
                             onClick={() => handleOpenEditModal(p)}
-                            className="p-1.5 hover:bg-slate-800 text-slate-300 hover:text-sky-400 rounded-lg transition"
+                            title="Edit Item Details"
+                            className="p-1.5 hover:bg-slate-800 text-slate-300 hover:text-sky-400 rounded-lg transition cursor-pointer"
                           >
                             <Edit2 className="w-4 h-4" />
                           </button>
                           <button
                             onClick={() => handleDeleteProductWithRoleCheck(p.id, p.name)}
-                            className="p-1.5 hover:bg-slate-800 text-slate-500 hover:text-rose-400 rounded-lg transition"
+                            title="Delete Item"
+                            className="p-1.5 hover:bg-slate-800 text-slate-500 hover:text-rose-400 rounded-lg transition cursor-pointer"
                           >
                             <Trash2 className="w-4 h-4" />
                           </button>
@@ -4292,6 +4601,38 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           }}
           onClose={() => setShowReceiptScanModal(false)}
         />
+      )}
+
+      {/* Product QR Code Generator Modal for Store Managers */}
+      <ProductQrCodeModal
+        isOpen={Boolean(qrModalProduct)}
+        onClose={() => setQrModalProduct(null)}
+        product={qrModalProduct}
+        storeName={storeName}
+        onOpenMiniPage={(p) => {
+          setQrModalProduct(null);
+          if (onOpenItemAuditMiniPage) {
+            onOpenItemAuditMiniPage(p);
+          } else {
+            setLocalAuditProduct(p);
+          }
+        }}
+      />
+
+      {/* Item Audit Mini-Page Terminal (showing history, current stock level, and recent restock batches) */}
+      {localAuditProduct && (
+        <div className="fixed inset-0 z-50 bg-slate-950 overflow-y-auto animate-in fade-in duration-200">
+          <ItemAuditMiniPage
+            product={localAuditProduct}
+            restockRecords={restockRecords || []}
+            transactions={transactions}
+            storeName={storeName}
+            currentUser={currentUser}
+            onBack={() => setLocalAuditProduct(null)}
+            onAddRestock={onAddRestock}
+            onAdjustStockQuantity={onAdjustStockQuantity}
+          />
+        </div>
       )}
 
       {/* Permanently Mounted Hidden File Inputs for Device Camera & File Picker */}

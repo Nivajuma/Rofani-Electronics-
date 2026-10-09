@@ -112,6 +112,7 @@ import { AIAssistantModal } from './components/AI/AIAssistantModal';
 import { AIAssistantWidget } from './components/AI/AIAssistantWidget';
 import { CloudSyncModal } from './components/CloudSync/CloudSyncModal';
 import { PrintBarcodesUtilityModal } from './components/Inventory/PrintBarcodesUtilityModal';
+import { ItemAuditMiniPage } from './components/Inventory/ItemAuditMiniPage';
 import { CameraStartupPrompt } from './components/Common/CameraStartupPrompt';
 import { formatKSh } from './utils/currency';
 import {
@@ -599,6 +600,37 @@ export default function App() {
   useEffect(() => {
     safeSetJSON('retail_pos_show_history_modal', showHistoryModal);
   }, [showHistoryModal]);
+
+  // Store Manager Dedicated Item Audit Mini-Page state (from QR code scan or direct audit trigger)
+  const [auditUrlProduct, setAuditUrlProduct] = useState<Product | null>(null);
+
+  // Listen for ?itemAudit=<productId> in URL (e.g., when scanned by the store manager)
+  useEffect(() => {
+    const handleUrlAudit = () => {
+      try {
+        if (typeof window === 'undefined') return;
+        const searchParams = new URLSearchParams(window.location.search);
+        const auditId = searchParams.get('itemAudit');
+        if (auditId && products.length > 0) {
+          const match = products.find(
+            (p) =>
+              p.id === auditId ||
+              p.sku.toLowerCase() === auditId.toLowerCase() ||
+              p.barcode === auditId
+          );
+          if (match) {
+            setAuditUrlProduct(match);
+          }
+        }
+      } catch (err) {
+        console.warn('Error reading itemAudit URL param:', err);
+      }
+    };
+
+    handleUrlAudit();
+    window.addEventListener('popstate', handleUrlAudit);
+    return () => window.removeEventListener('popstate', handleUrlAudit);
+  }, [products]);
 
   // Save changes to LocalStorage
   useEffect(() => {
@@ -1757,6 +1789,34 @@ export default function App() {
     }
   };
 
+  const handleSingleProductStockAdjust = (productId: string, newQuantity: number, reason: string) => {
+    const targetProduct = products.find((p) => p.id === productId);
+    if (!targetProduct) return;
+    const variance = newQuantity - targetProduct.stockQuantity;
+    const updatedProduct = { ...targetProduct, stockQuantity: newQuantity };
+    const updatedProducts = products.map((p) => (p.id === productId ? updatedProduct : p));
+    setProducts(updatedProducts);
+    saveProductToCloud(updatedProduct).catch(() => {});
+
+    if (auditUrlProduct && auditUrlProduct.id === productId) {
+      setAuditUrlProduct(updatedProduct);
+    }
+
+    const log = buildSensitiveActionLog({
+      actionType: 'ADJUST_STOCK',
+      actionTitle: `Single Item Audit Adjust: ${targetProduct.name}`,
+      user: currentUser,
+      authorizingRole: currentUser.role,
+      details: {
+        summary: `Store manager physical count adjustment for ${targetProduct.name} from ${targetProduct.stockQuantity} to ${newQuantity} ${targetProduct.unit} (Variance: ${variance > 0 ? `+${variance}` : variance})`,
+        metadata: { productId, previousQuantity: targetProduct.stockQuantity, newQuantity, variance },
+      },
+      reason,
+      severity: 'medium',
+    });
+    handleRecordAuditLog(log);
+  };
+
   const handleAddExpense = (exp: Expense) => {
     setExpenses((prev) => [exp, ...prev]);
     if (!getIsOnline()) {
@@ -2352,6 +2412,17 @@ export default function App() {
           storeName={stores.find((s) => s.id === activeStoreId)?.name || 'Rofani Electronics'}
           onOpenAiAssistantWithPrompt={(_prompt) => {
             setShowAiAssistantModal(true);
+          }}
+          restockRecords={restockRecords}
+          onAddRestock={handleAddRestockRecord}
+          onAdjustStockQuantity={handleSingleProductStockAdjust}
+          onOpenItemAuditMiniPage={(prod) => {
+            setAuditUrlProduct(prod);
+            try {
+              const url = new URL(window.location.href);
+              url.searchParams.set('itemAudit', prod.id);
+              window.history.pushState({}, '', url.toString());
+            } catch {}
           }}
         />
       )}
@@ -3567,6 +3638,29 @@ export default function App() {
         products={products}
         storeName={stores.find((s) => s.id === activeStoreId)?.name || 'Rofani Electronics'}
       />
+
+      {/* Store Manager Dedicated Item Audit Mini-Page Terminal (Scanned via QR Code or Opened Directly) */}
+      {auditUrlProduct && (
+        <div className="fixed inset-0 z-[3000] bg-slate-950 overflow-y-auto animate-in fade-in duration-200">
+          <ItemAuditMiniPage
+            product={auditUrlProduct}
+            restockRecords={restockRecords}
+            transactions={transactions}
+            storeName={stores.find((s) => s.id === activeStoreId)?.name || 'Rofani Electronics'}
+            currentUser={currentUser}
+            onBack={() => {
+              setAuditUrlProduct(null);
+              try {
+                const url = new URL(window.location.href);
+                url.searchParams.delete('itemAudit');
+                window.history.replaceState({}, '', url.toString());
+              } catch {}
+            }}
+            onAddRestock={handleAddRestockRecord}
+            onAdjustStockQuantity={handleSingleProductStockAdjust}
+          />
+        </div>
+      )}
 
       {/* Floating AI Worker Assistant Widget Trigger */}
       <AIAssistantWidget onOpen={() => setShowAiAssistantModal(true)} />

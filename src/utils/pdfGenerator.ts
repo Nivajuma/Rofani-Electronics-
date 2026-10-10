@@ -1,6 +1,6 @@
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { Transaction, Product, Customer, Supplier, Expense, StaffCommissionPayout, User } from '../types';
+import { Transaction, Product, Customer, Supplier, Expense, StaffCommissionPayout, User, RestockRecord } from '../types';
 
 /**
  * Common Header styling for reports
@@ -690,5 +690,222 @@ export const exportCommissionPayoutSlipPDF = (payout: StaffCommissionPayout) => 
   doc.text('Approving Manager Signature: ________________________', 110, finalY + 28);
 
   doc.save(`Commission_Voucher_${payout.employeeName.replace(/\s+/g, '_')}_${payout.id}.pdf`);
+};
+
+/**
+ * 15. Export Product Audit Report PDF
+ * Generates a comprehensive PDF summary of an item's current stock, valuation,
+ * restock batch procurement history, and customer sales movement.
+ */
+export const exportItemAuditReportPDF = (params: {
+  product: Product;
+  restockRecords: RestockRecord[];
+  transactions: Transaction[];
+  storeName?: string;
+  auditorName?: string;
+  qrDataUrl?: string;
+}) => {
+  const {
+    product,
+    restockRecords,
+    transactions,
+    storeName = 'ROFANI ELECTRONICS AND BOUTIQUE',
+    auditorName = 'Store Manager',
+    qrDataUrl,
+  } = params;
+
+  const doc = new jsPDF();
+  addReportHeader(
+    doc,
+    'ITEM AUDIT & STOCK SUMMARY REPORT',
+    `SKU: ${product.sku || 'N/A'} | Barcode: ${product.barcode || 'N/A'}`
+  );
+
+  // Filter restock batches for this product
+  const batches = restockRecords
+    .filter((r) => r.productId === product.id)
+    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+  // Filter sales for this product
+  const sales = transactions
+    .flatMap((tx) =>
+      tx.items
+        .filter((it) => it.product.id === product.id)
+        .map((it) => ({
+          receiptNumber: tx.receiptNumber,
+          date: tx.date,
+          customerName: tx.customerName || 'Walk-in Customer',
+          cashierName: tx.cashierName,
+          quantity: it.quantity,
+          unitPrice: it.unitPrice,
+          total: it.total,
+          profit: it.total - (it.product.costPrice || product.costPrice) * it.quantity,
+        }))
+    )
+    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+  const totalUnitsSold = sales.reduce((sum, s) => sum + s.quantity, 0);
+  const totalRevenue = sales.reduce((sum, s) => sum + s.total, 0);
+  const totalProfit = sales.reduce((sum, s) => sum + s.profit, 0);
+  const totalRestockedUnits = batches.reduce((sum, b) => sum + b.quantityAdded, 0);
+  const totalRestockedCost = batches.reduce((sum, b) => sum + b.totalCost, 0);
+
+  const profitPerUnit = Math.max(0, product.sellingPrice - product.costPrice);
+  const marginPct = product.sellingPrice > 0 ? (profitPerUnit / product.sellingPrice) * 100 : 0;
+  const stockValuationCost = product.stockQuantity * product.costPrice;
+  const stockValuationRetail = product.stockQuantity * product.sellingPrice;
+
+  const isOutOfStock = product.stockQuantity <= 0;
+  const isLowStock = product.stockQuantity <= product.minStockAlert && !isOutOfStock;
+  const stockStatusStr = isOutOfStock
+    ? 'OUT OF STOCK'
+    : isLowStock
+    ? 'LOW STOCK ALERT'
+    : 'IN STOCK & HEALTHY';
+
+  // Section 1: Product Master Summary Card
+  doc.setFillColor(248, 250, 252);
+  doc.roundedRect(14, 34, 182, 46, 3, 3, 'F');
+  doc.setDrawColor(226, 232, 240);
+  doc.roundedRect(14, 34, 182, 46, 3, 3, 'S');
+
+  doc.setFontSize(13);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(15, 23, 42);
+  doc.text(product.name, 20, 42);
+
+  doc.setFontSize(9);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(71, 85, 105);
+  doc.text(`Category: ${product.category}${product.subcategory ? ` • ${product.subcategory}` : ''}`, 20, 48);
+  doc.text(`SKU: ${product.sku} | Barcode: ${product.barcode}`, 20, 54);
+  doc.text(`Supplier: ${product.supplierName || 'General Supplier'}`, 20, 60);
+
+  // Status & Stock highlight
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(10);
+  if (isOutOfStock) {
+    doc.setTextColor(220, 38, 38);
+  } else if (isLowStock) {
+    doc.setTextColor(217, 119, 6);
+  } else {
+    doc.setTextColor(22, 163, 74);
+  }
+  doc.text(`Current Stock: ${product.stockQuantity} ${product.unit} (${stockStatusStr})`, 20, 68);
+  doc.setFontSize(8.5);
+  doc.setTextColor(100, 116, 139);
+  doc.setFont('helvetica', 'normal');
+  doc.text(`Min Threshold Alert: ${product.minStockAlert} ${product.unit}`, 20, 74);
+
+  // Financial Pricing Box on Right
+  doc.setFontSize(9);
+  doc.setTextColor(15, 23, 42);
+  doc.setFont('helvetica', 'bold');
+  doc.text(`Selling Price: KSh ${product.sellingPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}`, 108, 42);
+  doc.setFont('helvetica', 'normal');
+  doc.text(`Unit Cost: KSh ${product.costPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}`, 108, 48);
+  doc.text(`Margin: ${marginPct.toFixed(1)}% (Profit: KSh ${profitPerUnit.toLocaleString()}/unit)`, 108, 54);
+  doc.text(`Shelf Value (at Cost): KSh ${stockValuationCost.toLocaleString(undefined, { minimumFractionDigits: 2 })}`, 108, 60);
+  doc.text(`Shelf Value (at Retail): KSh ${stockValuationRetail.toLocaleString(undefined, { minimumFractionDigits: 2 })}`, 108, 66);
+  doc.text(`Lifetime Units Sold: ${totalUnitsSold} ${product.unit} | Revenue: KSh ${totalRevenue.toLocaleString()}`, 108, 72);
+
+  // If QR code is provided, render it on the right side
+  if (qrDataUrl) {
+    try {
+      doc.addImage(qrDataUrl, 'PNG', 166, 36, 26, 26);
+    } catch (_) {}
+  }
+
+  // Section 2: Recent Restock Batches Table
+  doc.setFontSize(11);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(15, 23, 42);
+  doc.text('RECENT RESTOCK BATCHES', 14, 88);
+
+  const batchRows = batches.slice(0, 15).map((b) => [
+    b.batchNo || 'BATCH-STD',
+    new Date(b.date).toLocaleDateString(),
+    b.supplierName || 'Supplier',
+    `+${b.quantityAdded} ${product.unit}`,
+    `KSh ${b.unitCost.toLocaleString(undefined, { minimumFractionDigits: 2 })}`,
+    `KSh ${b.totalCost.toLocaleString(undefined, { minimumFractionDigits: 2 })}`,
+    b.receivedBy || 'Staff',
+    b.notes || '—',
+  ]);
+
+  autoTable(doc, {
+    startY: 92,
+    head: [['Batch #', 'Date', 'Supplier', 'Qty Added', 'Unit Cost', 'Total Cost', 'Received By', 'Notes']],
+    body:
+      batchRows.length > 0
+        ? batchRows
+        : [['No Restock Batches Recorded Yet', '', '', '', '', '', '', '']],
+    theme: 'striped',
+    headStyles: { fillColor: [5, 150, 105], textColor: [255, 255, 255], fontStyle: 'bold' },
+    styles: { fontSize: 8, cellPadding: 2.5 },
+  });
+
+  const nextY = (doc as any).lastAutoTable?.finalY || 130;
+
+  // Section 3: Item Movement & Sales History Table
+  doc.setFontSize(11);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(15, 23, 42);
+  doc.text('RECENT SALES & TRANSACTION HISTORY', 14, nextY + 10);
+
+  const salesRows = sales.slice(0, 20).map((s) => [
+    new Date(s.date).toLocaleDateString(),
+    s.receiptNumber,
+    s.customerName,
+    s.cashierName,
+    `${s.quantity} ${product.unit}`,
+    `KSh ${s.unitPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}`,
+    `KSh ${s.total.toLocaleString(undefined, { minimumFractionDigits: 2 })}`,
+    `KSh ${s.profit.toLocaleString(undefined, { minimumFractionDigits: 2 })}`,
+  ]);
+
+  autoTable(doc, {
+    startY: nextY + 14,
+    head: [['Date', 'Receipt #', 'Customer', 'Cashier', 'Qty Sold', 'Unit Price', 'Total Revenue', 'Gross Profit']],
+    body:
+      salesRows.length > 0
+        ? salesRows
+        : [['No Customer Sales Recorded Yet', '', '', '', '', '', '', '']],
+    theme: 'striped',
+    headStyles: { fillColor: [30, 41, 59], textColor: [255, 255, 255], fontStyle: 'bold' },
+    styles: { fontSize: 8, cellPadding: 2.5 },
+  });
+
+  const finalTableY = (doc as any).lastAutoTable?.finalY || 200;
+
+  // If there's enough room on the current page, add sign-off; otherwise add page
+  let certY = finalTableY + 8;
+  if (certY > 255) {
+    doc.addPage();
+    certY = 25;
+  }
+
+  // Audit Certification Box
+  doc.setFillColor(241, 245, 249);
+  doc.roundedRect(14, certY, 182, 28, 3, 3, 'F');
+  doc.setFontSize(8.5);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(71, 85, 105);
+  doc.text(
+    `AUDIT CERTIFICATION: Verified stock count of ${product.stockQuantity} ${product.unit} on shelf for SKU ${product.sku}. Total Batches: ${batches.length} (+${totalRestockedUnits} units received). Total Lifetime Sales: ${totalUnitsSold} units (KSh ${totalRevenue.toLocaleString()} revenue).`,
+    20,
+    certY + 7,
+    { maxWidth: 170 }
+  );
+
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(15, 23, 42);
+  doc.text(`Audited By: ${auditorName}`, 20, certY + 22);
+  doc.text('Manager Signature: _______________________', 105, certY + 22);
+
+  const cleanSku = (product.sku || 'ITEM').replace(/[^a-zA-Z0-9_-]/g, '_');
+  const filename = `Audit_Report_${cleanSku}_${new Date().toISOString().slice(0, 10)}.pdf`;
+  doc.save(filename);
+  return filename;
 };
 

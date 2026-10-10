@@ -23,12 +23,16 @@ import {
   ShieldCheck,
   Eye,
   X,
-  DollarSign
+  DollarSign,
+  FileText,
+  Download,
+  Loader2
 } from 'lucide-react';
 import { Product, RestockRecord, Transaction, User } from '../../types';
 import { formatKSh } from '../../utils/currency';
 import { calculateProfitMargin } from '../../utils/margin';
 import { ProductQrCodeModal } from './ProductQrCodeModal';
+import { exportItemAuditReportPDF } from '../../utils/pdfGenerator';
 import QRCode from 'qrcode';
 
 interface ItemAuditMiniPageProps {
@@ -135,6 +139,34 @@ export const ItemAuditMiniPage: React.FC<ItemAuditMiniPageProps> = ({
       .then((url) => setQrDataUrl(url))
       .catch((err) => console.warn('QR code gen error:', err));
   }, [auditUrl]);
+
+  const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
+  const [auditReportToast, setAuditReportToast] = useState<string | null>(null);
+
+  /**
+   * Generates a PDF summary of the item's history, current stock, and recent restock batches.
+   */
+  const handlePrintAuditReport = () => {
+    setIsGeneratingPdf(true);
+    try {
+      const filename = exportItemAuditReportPDF({
+        product,
+        restockRecords,
+        transactions,
+        storeName,
+        auditorName: currentUser?.name || 'Store Manager',
+        qrDataUrl,
+      });
+      setAuditReportToast(`Audit report PDF generated and downloaded as ${filename}!`);
+      setTimeout(() => setAuditReportToast(null), 4500);
+    } catch (err) {
+      console.error('Failed to generate audit report PDF:', err);
+      setAuditReportToast('Failed to generate PDF audit report. Please try again.');
+      setTimeout(() => setAuditReportToast(null), 4500);
+    } finally {
+      setIsGeneratingPdf(false);
+    }
+  };
 
   const handleCopyLink = () => {
     navigator.clipboard.writeText(auditUrl).then(() => {
@@ -258,6 +290,21 @@ export const ItemAuditMiniPage: React.FC<ItemAuditMiniPageProps> = ({
 
         <div className="flex items-center gap-2 shrink-0">
           <button
+            type="button"
+            onClick={handlePrintAuditReport}
+            disabled={isGeneratingPdf}
+            id="btn-print-audit-report-header"
+            className="px-3 py-1.5 sm:px-3.5 sm:py-2 bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 disabled:text-slate-500 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-md shadow-indigo-600/30 cursor-pointer active:scale-95 group"
+            title="Generate and download PDF summary of item history, current stock, and recent restock batches"
+          >
+            {isGeneratingPdf ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin text-white" />
+            ) : (
+              <FileText className="w-3.5 h-3.5 text-white group-hover:scale-110 transition-transform" />
+            )}
+            <span>Print Audit Report</span>
+          </button>
+          <button
             onClick={() => setShowQrModal(true)}
             className="p-2 bg-slate-800 hover:bg-slate-700 text-sky-400 rounded-xl transition cursor-pointer"
             title="View Shelf QR Tag"
@@ -283,6 +330,22 @@ export const ItemAuditMiniPage: React.FC<ItemAuditMiniPageProps> = ({
 
       {/* Main Container */}
       <main className="flex-1 max-w-4xl w-full mx-auto p-4 sm:p-6 space-y-5">
+        {/* PDF Audit Report Toast Alert */}
+        {auditReportToast && (
+          <div className="p-3.5 bg-indigo-950/90 border border-indigo-500/50 text-indigo-100 rounded-2xl flex items-center justify-between gap-3 text-xs font-bold shadow-lg shadow-indigo-900/30 animate-in fade-in">
+            <div className="flex items-center gap-2.5">
+              <CheckCircle2 className="w-5 h-5 text-indigo-400 shrink-0" />
+              <span>{auditReportToast}</span>
+            </div>
+            <button
+              onClick={() => setAuditReportToast(null)}
+              className="p-1 text-indigo-300 hover:text-white rounded-lg transition"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+
         {/* Success Alert Banner */}
         {restockSuccessMsg && (
           <div className="p-3.5 bg-emerald-950/80 border border-emerald-500/40 text-emerald-200 rounded-2xl flex items-center gap-3 text-xs font-bold shadow-lg animate-in fade-in">
@@ -424,8 +487,24 @@ export const ItemAuditMiniPage: React.FC<ItemAuditMiniPageProps> = ({
               </div>
             </div>
 
-            {/* Quick Manager Stock Adjust Button */}
-            <div className="flex flex-col sm:flex-row gap-2 shrink-0">
+            {/* Quick Manager Stock Adjust & Report Buttons */}
+            <div className="flex flex-col sm:flex-row gap-2 shrink-0 flex-wrap">
+              <button
+                type="button"
+                id="btn-print-audit-report-hero"
+                onClick={handlePrintAuditReport}
+                disabled={isGeneratingPdf}
+                className="px-3.5 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 disabled:text-slate-500 text-white rounded-2xl text-xs font-black transition flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/30 cursor-pointer active:scale-95 group"
+                title="Print Audit Report (PDF Summary of stock, batches, and sales history)"
+              >
+                {isGeneratingPdf ? (
+                  <Loader2 className="w-4 h-4 animate-spin text-white" />
+                ) : (
+                  <FileText className="w-4 h-4 text-white group-hover:scale-110 transition-transform" />
+                )}
+                <span>Print Audit Report</span>
+              </button>
+
               <button
                 type="button"
                 onClick={() => {
@@ -643,23 +722,35 @@ export const ItemAuditMiniPage: React.FC<ItemAuditMiniPageProps> = ({
         {/* TAB 2: RECENT RESTOCK BATCHES (Specifically Requested) */}
         {activeTab === 'batches' && (
           <div className="space-y-4">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between flex-wrap gap-2">
               <div>
                 <h3 className="font-black text-base text-white">Recent Restock Batches</h3>
                 <p className="text-xs text-slate-400">
                   Audit trail of all supplier shipments, incoming quantities, and costs for {product.name}
                 </p>
               </div>
-              {onAddRestock && (
+              <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => setShowQuickRestockForm(true)}
-                  className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow cursor-pointer"
+                  onClick={handlePrintAuditReport}
+                  disabled={isGeneratingPdf}
+                  className="px-3 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 disabled:text-slate-500 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow cursor-pointer active:scale-95"
+                  title="Generate PDF summary of batches and audit history"
                 >
-                  <PlusCircle className="w-3.5 h-3.5" />
-                  <span>+ Receive Batch</span>
+                  {isGeneratingPdf ? <Loader2 className="w-3.5 h-3.5 animate-spin text-white" /> : <FileText className="w-3.5 h-3.5 text-white" />}
+                  <span>Print Audit Report</span>
                 </button>
-              )}
+                {onAddRestock && (
+                  <button
+                    type="button"
+                    onClick={() => setShowQuickRestockForm(true)}
+                    className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow cursor-pointer"
+                  >
+                    <PlusCircle className="w-3.5 h-3.5" />
+                    <span>+ Receive Batch</span>
+                  </button>
+                )}
+              </div>
             </div>
 
             {productBatches.length === 0 ? (
@@ -741,11 +832,23 @@ export const ItemAuditMiniPage: React.FC<ItemAuditMiniPageProps> = ({
         {/* TAB 3: MOVEMENT & SALES HISTORY (Specifically Requested) */}
         {activeTab === 'history' && (
           <div className="space-y-4">
-            <div>
-              <h3 className="font-black text-base text-white">Item Sales & Movement History</h3>
-              <p className="text-xs text-slate-400">
-                Customer purchases and sales velocity transactions for {product.name}
-              </p>
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div>
+                <h3 className="font-black text-base text-white">Item Sales & Movement History</h3>
+                <p className="text-xs text-slate-400">
+                  Customer purchases and sales velocity transactions for {product.name}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handlePrintAuditReport}
+                disabled={isGeneratingPdf}
+                className="px-3 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 disabled:text-slate-500 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow cursor-pointer active:scale-95"
+                title="Generate PDF summary of item sales and movement history"
+              >
+                {isGeneratingPdf ? <Loader2 className="w-3.5 h-3.5 animate-spin text-white" /> : <FileText className="w-3.5 h-3.5 text-white" />}
+                <span>Print Audit Report</span>
+              </button>
             </div>
 
             {productSales.length === 0 ? (

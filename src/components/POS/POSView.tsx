@@ -39,7 +39,8 @@ import {
   ArrowLeft,
   ChevronDown,
   ChevronUp,
-  Flame
+  Flame,
+  Clock
 } from 'lucide-react';
 import { Product, CartItem, Customer, PaymentMethod, PaymentBreakdown, Transaction, User as Employee, BarcodeScanLog } from '../../types';
 import { BarcodeScannerModal } from './BarcodeScannerModal';
@@ -185,6 +186,40 @@ export const POSView: React.FC<POSViewProps> = ({
   const favoriteProductIds = React.useMemo(() => {
     return new Set(favoriteProducts.map((p) => p.id));
   }, [favoriteProducts]);
+
+  // 5 Most Recently Created Products for faster access to new inventory
+  const recentlyAddedProducts = React.useMemo(() => {
+    const sorted = [...products].sort((a, b) => {
+      // Prioritize createdAt timestamp
+      const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+      if (!isNaN(timeA) && !isNaN(timeB) && timeB !== timeA) {
+        return timeB - timeA;
+      }
+      // If timestamps are equal or missing, check updatedAt
+      const updatedA = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
+      const updatedB = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
+      if (!isNaN(updatedA) && !isNaN(updatedB) && updatedB !== updatedA) {
+        return updatedB - updatedA;
+      }
+      return b.id.localeCompare(a.id);
+    });
+    return sorted.slice(0, 5);
+  }, [products]);
+
+  const recentlyAddedProductIds = React.useMemo(() => {
+    return new Set(recentlyAddedProducts.map((p) => p.id));
+  }, [recentlyAddedProducts]);
+
+  // Favorites Grid Section Selector: 'all' (Both Top 10 & Recently Added) vs 'top_selling' vs 'recently_added'
+  const [favoritesSectionView, setFavoritesSectionView] = useState<'all' | 'top_selling' | 'recently_added'>(() =>
+    safeGetJSON<'all' | 'top_selling' | 'recently_added'>('retail_pos_pos_fav_view', 'all', (val) =>
+      ['all', 'top_selling', 'recently_added'].includes(val)
+    )
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_pos_fav_view', favoritesSectionView);
+  }, [favoritesSectionView]);
 
   // Cart State - Persisted to LocalStorage so active order is never lost on refresh
   const [cart, setCart] = useState<CartItem[]>(() =>
@@ -594,6 +629,8 @@ export const POSView: React.FC<POSViewProps> = ({
         ? true
         : selectedCategory === 'Favorites'
         ? favoriteProductIds.has(p.id)
+        : selectedCategory === 'Recently Added'
+        ? recentlyAddedProductIds.has(p.id)
         : p.category === selectedCategory;
 
     let matchesPerf = true;
@@ -1473,6 +1510,23 @@ export const POSView: React.FC<POSViewProps> = ({
               </button>
             )}
 
+            {/* Recently Added Category Filter Pill */}
+            {recentlyAddedProducts.length > 0 && (
+              <button
+                id="btn-pos-category-recently-added"
+                onClick={() => setSelectedCategory('Recently Added')}
+                className={`px-3 py-1.5 rounded-xl whitespace-nowrap font-bold transition flex items-center gap-1.5 ${
+                  selectedCategory === 'Recently Added'
+                    ? 'bg-sky-500 text-slate-950 font-black ring-2 ring-sky-400 shadow-md'
+                    : 'bg-sky-950/80 border border-sky-600/60 text-sky-300 hover:bg-sky-900/80'
+                }`}
+                title="Filter catalog to 5 most recently created products"
+              >
+                <Clock className="w-3.5 h-3.5" />
+                <span>✨ Recently Added ({recentlyAddedProducts.length})</span>
+              </button>
+            )}
+
             {allCategoryNames.map((catName) => (
               <button
                 key={catName}
@@ -1488,35 +1542,71 @@ export const POSView: React.FC<POSViewProps> = ({
             ))}
           </div>
 
-          {/* FAVORITES GRID: Top 10 Most Frequently Sold Items with One-Click Selection */}
-          {favoriteProducts.length > 0 && (
+          {/* FAVORITES & QUICK-ACCESS GRID: Top 10 Most Frequently Sold Items & 5 Most Recently Created Products */}
+          {(favoriteProducts.length > 0 || recentlyAddedProducts.length > 0) && (
             <div
               id="pos-favorites-grid-container"
-              className="bg-slate-900 border border-slate-800 rounded-2xl p-3 sm:p-3.5 shadow-md space-y-2.5"
+              className="bg-slate-900 border border-slate-800 rounded-2xl p-3 sm:p-3.5 shadow-md space-y-3"
             >
-              {/* Header with Title, Badge, and Collapse/Expand Toggle */}
-              <div className="flex items-center justify-between gap-2">
+              {/* Header with Title, Section Switcher, and Collapse/Expand Toggle */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-2 border-b border-slate-800/80">
                 <div className="flex items-center gap-2.5">
-                  <div className="w-7 h-7 rounded-lg bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0">
+                  <div className="w-8 h-8 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0">
                     <Star className="w-4 h-4 fill-amber-400 text-amber-400" />
                   </div>
                   <div>
-                    <div className="flex items-center gap-1.5 flex-wrap">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <h4 className="text-xs sm:text-sm font-extrabold text-white flex items-center gap-1.5">
-                        Favorites
+                        Favorites & Quick Access
                       </h4>
-                      <span className="text-[10px] font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded-full flex items-center gap-1">
-                        <Flame className="w-3 h-3 text-amber-400" />
-                        Top 10 Fast-Selling Items
-                      </span>
+                      <div className="flex items-center gap-1 bg-slate-950 p-0.5 rounded-lg border border-slate-800 text-[10px]">
+                        <button
+                          type="button"
+                          id="btn-fav-view-all"
+                          onClick={() => setFavoritesSectionView('all')}
+                          className={`px-2 py-0.5 rounded-md font-bold transition cursor-pointer ${
+                            favoritesSectionView === 'all'
+                              ? 'bg-slate-800 text-white shadow-xs'
+                              : 'text-slate-400 hover:text-slate-200'
+                          }`}
+                        >
+                          Show Both
+                        </button>
+                        <button
+                          type="button"
+                          id="btn-fav-view-top"
+                          onClick={() => setFavoritesSectionView('top_selling')}
+                          className={`px-2 py-0.5 rounded-md font-bold transition flex items-center gap-1 cursor-pointer ${
+                            favoritesSectionView === 'top_selling'
+                              ? 'bg-amber-500 text-slate-950 font-black shadow-xs'
+                              : 'text-amber-300 hover:text-white'
+                          }`}
+                        >
+                          <Flame className="w-2.5 h-2.5" />
+                          Top 10 Sellers
+                        </button>
+                        <button
+                          type="button"
+                          id="btn-fav-view-recent"
+                          onClick={() => setFavoritesSectionView('recently_added')}
+                          className={`px-2 py-0.5 rounded-md font-bold transition flex items-center gap-1 cursor-pointer ${
+                            favoritesSectionView === 'recently_added'
+                              ? 'bg-sky-500 text-slate-950 font-black shadow-xs'
+                              : 'text-sky-300 hover:text-white'
+                          }`}
+                        >
+                          <Clock className="w-2.5 h-2.5" />
+                          Recently Added (5)
+                        </button>
+                      </div>
                     </div>
-                    <p className="text-[10px] text-slate-400 hidden sm:block">
+                    <p className="text-[10px] text-slate-400">
                       One-click instant selection: tap any item below to add it directly to cart
                     </p>
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 self-end sm:self-auto">
                   <span className="text-[10px] text-slate-400 font-mono hidden md:inline">
                     One-click add +1
                   </span>
@@ -1524,99 +1614,239 @@ export const POSView: React.FC<POSViewProps> = ({
                     type="button"
                     id="btn-toggle-favorites-grid"
                     onClick={() => setShowFavoritesGrid(!showFavoritesGrid)}
-                    className="p-1.5 px-2 rounded-xl bg-slate-950 hover:bg-slate-800 border border-slate-800 text-slate-300 hover:text-white transition flex items-center gap-1 text-[11px] font-bold cursor-pointer"
-                    title={showFavoritesGrid ? 'Collapse Favorites Grid' : 'Expand Favorites Grid (Top 10)'}
+                    className="p-1.5 px-2.5 rounded-xl bg-slate-950 hover:bg-slate-800 border border-slate-800 text-slate-300 hover:text-white transition flex items-center gap-1 text-[11px] font-bold cursor-pointer"
+                    title={showFavoritesGrid ? 'Collapse Favorites Grid' : 'Expand Favorites Grid'}
                   >
-                    <span>{showFavoritesGrid ? 'Hide' : 'Show (10)'}</span>
+                    <span>{showFavoritesGrid ? 'Hide' : 'Show Grid'}</span>
                     {showFavoritesGrid ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
                   </button>
                 </div>
               </div>
 
-              {/* 10 Items Cards Grid: Responsive columns (2 on mobile, 3 on small tablet, 5 on desktop) */}
+              {/* Collapsible Content */}
               {showFavoritesGrid && (
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2 pt-1 animate-in fade-in duration-200">
-                  {favoriteProducts.map((p, index) => {
-                    const isOutOfStock = p.stockQuantity <= 0;
-                    const isLowStock = p.stockQuantity <= p.minStockAlert;
-                    const unitsSold = salesCountMap[p.id] ?? (performanceMap[p.id]?.unitsSold ?? 0);
-                    const cartItem = cart.find((item) => item.product.id === p.id);
-                    const inCartQty = cartItem ? cartItem.quantity : 0;
-
-                    return (
-                      <button
-                        key={`fav-card-${p.id}`}
-                        type="button"
-                        onClick={() => handleAddToCart(p)}
-                        className={`text-left p-2.5 rounded-xl border transition flex flex-col justify-between group relative overflow-hidden active:scale-95 cursor-pointer shadow-sm select-none ${
-                          isOutOfStock
-                            ? 'bg-slate-950/60 border-slate-800 opacity-60'
-                            : inCartQty > 0
-                            ? 'bg-slate-950 border-amber-500/70 hover:border-amber-400 shadow-amber-500/5 ring-1 ring-amber-500/40'
-                            : 'bg-slate-950 border-slate-800 hover:border-slate-700 hover:bg-slate-800/60'
-                        }`}
-                        title={`Click to add 1x ${p.name} (${unitsSold} sold)`}
-                      >
-                        {/* Top Ribbon: Rank Badge (#1 - #10) & In-Cart Status */}
-                        <div className="flex items-center justify-between gap-1 w-full mb-1">
-                          <span className="text-[9px] font-mono font-black px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center gap-0.5">
-                            <span>#{index + 1}</span>
-                            {unitsSold > 0 && <span className="opacity-80 font-normal truncate max-w-[55px]">• {unitsSold} sold</span>}
+                <div className="space-y-4">
+                  {/* SECTION 1: TOP 10 FREQUENTLY SOLD ITEMS */}
+                  {(favoritesSectionView === 'all' || favoritesSectionView === 'top_selling') && favoriteProducts.length > 0 && (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-1.5">
+                          <Flame className="w-3.5 h-3.5 text-amber-400" />
+                          <span className="text-xs font-bold text-slate-200">
+                            Top 10 Fast-Selling Items
                           </span>
-
-                          {inCartQty > 0 ? (
-                            <span className="text-[9px] font-mono font-black px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 shrink-0">
-                              ✓ {inCartQty}
-                            </span>
-                          ) : isOutOfStock ? (
-                            <span className="text-[8px] font-bold px-1 py-0.5 rounded bg-rose-950 text-rose-400 border border-rose-800 shrink-0">
-                              Out
-                            </span>
-                          ) : isLowStock ? (
-                            <span className="text-[8px] font-bold px-1 py-0.5 rounded bg-amber-950 text-amber-400 border border-amber-800 shrink-0">
-                              Low
-                            </span>
-                          ) : null}
+                          <span className="text-[10px] text-slate-400 font-mono">
+                            (Ranked by Sales Frequency)
+                          </span>
                         </div>
+                        {favoritesSectionView === 'all' && recentlyAddedProducts.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setFavoritesSectionView('recently_added')}
+                            className="text-[10px] text-sky-400 hover:text-sky-300 font-semibold flex items-center gap-0.5 cursor-pointer"
+                          >
+                            <span>Jump to Recently Added (5)</span>
+                            <Clock className="w-3 h-3" />
+                          </button>
+                        )}
+                      </div>
 
-                        {/* Middle: Thumbnail & Product Name */}
-                        <div className="flex items-center gap-2 my-1">
-                          {p.imageUrl ? (
-                            <img
-                              src={p.imageUrl}
-                              alt={p.name}
-                              referrerPolicy="no-referrer"
-                              className="w-8 h-8 rounded-lg object-cover border border-slate-700/80 shrink-0"
-                              onError={(e) => { e.currentTarget.style.display = 'none'; }}
-                            />
-                          ) : (
-                            <div className="w-8 h-8 rounded-lg bg-slate-900 border border-slate-800 flex items-center justify-center text-slate-500 shrink-0">
-                              <Package className="w-4 h-4 text-slate-500" />
-                            </div>
-                          )}
-                          <div className="min-w-0 flex-1">
-                            <p className="font-bold text-white text-[11px] truncate leading-tight group-hover:text-amber-300 transition">
-                              {p.name}
-                            </p>
-                            <p className="text-[9px] text-slate-400 font-mono truncate">
-                              {p.category}
-                            </p>
+                      {/* 10 Items Cards Grid */}
+                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2">
+                        {favoriteProducts.map((p, index) => {
+                          const isOutOfStock = p.stockQuantity <= 0;
+                          const isLowStock = p.stockQuantity <= p.minStockAlert;
+                          const unitsSold = salesCountMap[p.id] ?? (performanceMap[p.id]?.unitsSold ?? 0);
+                          const cartItem = cart.find((item) => item.product.id === p.id);
+                          const inCartQty = cartItem ? cartItem.quantity : 0;
+
+                          return (
+                            <button
+                              key={`fav-card-${p.id}`}
+                              type="button"
+                              onClick={() => handleAddToCart(p)}
+                              className={`text-left p-2.5 rounded-xl border transition flex flex-col justify-between group relative overflow-hidden active:scale-95 cursor-pointer shadow-sm select-none ${
+                                isOutOfStock
+                                  ? 'bg-slate-950/60 border-slate-800 opacity-60'
+                                  : inCartQty > 0
+                                  ? 'bg-slate-950 border-amber-500/70 hover:border-amber-400 shadow-amber-500/5 ring-1 ring-amber-500/40'
+                                  : 'bg-slate-950 border-slate-800 hover:border-slate-700 hover:bg-slate-800/60'
+                              }`}
+                              title={`Click to add 1x ${p.name} (${unitsSold} sold)`}
+                            >
+                              {/* Top Ribbon: Rank Badge (#1 - #10) & In-Cart Status */}
+                              <div className="flex items-center justify-between gap-1 w-full mb-1">
+                                <span className="text-[9px] font-mono font-black px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center gap-0.5">
+                                  <span>#{index + 1}</span>
+                                  {unitsSold > 0 && <span className="opacity-80 font-normal truncate max-w-[55px]">• {unitsSold} sold</span>}
+                                </span>
+
+                                {inCartQty > 0 ? (
+                                  <span className="text-[9px] font-mono font-black px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 shrink-0">
+                                    ✓ {inCartQty}
+                                  </span>
+                                ) : isOutOfStock ? (
+                                  <span className="text-[8px] font-bold px-1 py-0.5 rounded bg-rose-950 text-rose-400 border border-rose-800 shrink-0">
+                                    Out
+                                  </span>
+                                ) : isLowStock ? (
+                                  <span className="text-[8px] font-bold px-1 py-0.5 rounded bg-amber-950 text-amber-400 border border-amber-800 shrink-0">
+                                    Low
+                                  </span>
+                                ) : null}
+                              </div>
+
+                              {/* Middle: Thumbnail & Product Name */}
+                              <div className="flex items-center gap-2 my-1">
+                                {p.imageUrl ? (
+                                  <img
+                                    src={p.imageUrl}
+                                    alt={p.name}
+                                    referrerPolicy="no-referrer"
+                                    className="w-8 h-8 rounded-lg object-cover border border-slate-700/80 shrink-0"
+                                    onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                                  />
+                                ) : (
+                                  <div className="w-8 h-8 rounded-lg bg-slate-900 border border-slate-800 flex items-center justify-center text-slate-500 shrink-0">
+                                    <Package className="w-4 h-4 text-slate-500" />
+                                  </div>
+                                )}
+                                <div className="min-w-0 flex-1">
+                                  <p className="font-bold text-white text-[11px] truncate leading-tight group-hover:text-amber-300 transition">
+                                    {p.name}
+                                  </p>
+                                  <p className="text-[9px] text-slate-400 font-mono truncate">
+                                    {p.category}
+                                  </p>
+                                </div>
+                              </div>
+
+                              {/* Bottom: Price in KSh & One-Click Add Indicator */}
+                              <div className="flex items-center justify-between gap-1 mt-1 pt-1.5 border-t border-slate-800/80 w-full">
+                                <span className="font-mono font-extrabold text-emerald-400 text-xs">
+                                  KSh {p.sellingPrice.toLocaleString()}
+                                </span>
+
+                                <span className="text-[9px] font-bold text-slate-400 group-hover:text-white flex items-center gap-0.5 bg-slate-900 group-hover:bg-amber-500 group-hover:text-slate-950 px-1.5 py-0.5 rounded transition shadow-sm">
+                                  <Plus className="w-2.5 h-2.5" /> Add
+                                </span>
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* SECTION 2: RECENTLY ADDED (5 Most Recently Created Products for Fast Access to New Inventory) */}
+                  {(favoritesSectionView === 'all' || favoritesSectionView === 'recently_added') && recentlyAddedProducts.length > 0 && (
+                    <div
+                      id="pos-favorites-recently-added-section"
+                      className="space-y-2 pt-2 border-t border-slate-800/80"
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <div className="w-5 h-5 rounded-md bg-sky-500/20 text-sky-400 flex items-center justify-center">
+                            <Clock className="w-3.5 h-3.5" />
+                          </div>
+                          <div>
+                            <span className="text-xs font-extrabold text-white">
+                              Recently Added
+                            </span>
+                            <span className="ml-2 text-[10px] font-mono font-bold bg-sky-500/20 text-sky-300 border border-sky-500/30 px-1.5 py-0.2 rounded-full">
+                              5 Newest Products
+                            </span>
                           </div>
                         </div>
+                        <span className="text-[10px] text-slate-400 font-mono hidden sm:inline">
+                          Fast one-click access to new inventory
+                        </span>
+                      </div>
 
-                        {/* Bottom: Price in KSh & One-Click Add Indicator */}
-                        <div className="flex items-center justify-between gap-1 mt-1 pt-1.5 border-t border-slate-800/80 w-full">
-                          <span className="font-mono font-extrabold text-emerald-400 text-xs">
-                            KSh {p.sellingPrice.toLocaleString()}
-                          </span>
+                      {/* 5 Recently Added Cards Grid: Responsive 2 on mobile, 3 on tablet, 5 on desktop */}
+                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2">
+                        {recentlyAddedProducts.map((p, index) => {
+                          const isOutOfStock = p.stockQuantity <= 0;
+                          const isLowStock = p.stockQuantity <= p.minStockAlert;
+                          const cartItem = cart.find((item) => item.product.id === p.id);
+                          const inCartQty = cartItem ? cartItem.quantity : 0;
+                          const formattedDate = p.createdAt ? p.createdAt.slice(0, 10) : 'New Stock';
 
-                          <span className="text-[9px] font-bold text-slate-400 group-hover:text-white flex items-center gap-0.5 bg-slate-900 group-hover:bg-amber-500 group-hover:text-slate-950 px-1.5 py-0.5 rounded transition shadow-sm">
-                            <Plus className="w-2.5 h-2.5" /> Add
-                          </span>
-                        </div>
-                      </button>
-                    );
-                  })}
+                          return (
+                            <button
+                              key={`recent-card-${p.id}`}
+                              type="button"
+                              onClick={() => handleAddToCart(p)}
+                              className={`text-left p-2.5 rounded-xl border transition flex flex-col justify-between group relative overflow-hidden active:scale-95 cursor-pointer shadow-sm select-none ${
+                                isOutOfStock
+                                  ? 'bg-slate-950/60 border-slate-800 opacity-60'
+                                  : inCartQty > 0
+                                  ? 'bg-slate-950 border-sky-500/70 hover:border-sky-400 shadow-sky-500/5 ring-1 ring-sky-500/40'
+                                  : 'bg-slate-950 border-slate-800 hover:border-sky-500/50 hover:bg-slate-800/60'
+                              }`}
+                              title={`Click to add recently added item: ${p.name}`}
+                            >
+                              {/* Top Ribbon: NEW Badge with Date & In-Cart Status */}
+                              <div className="flex items-center justify-between gap-1 w-full mb-1">
+                                <span className="text-[9px] font-mono font-black px-1.5 py-0.5 rounded bg-sky-500/20 text-sky-300 border border-sky-500/30 flex items-center gap-1">
+                                  <Sparkles className="w-2.5 h-2.5 text-sky-400 animate-pulse" />
+                                  <span>NEW #{index + 1}</span>
+                                </span>
+
+                                {inCartQty > 0 ? (
+                                  <span className="text-[9px] font-mono font-black px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 shrink-0">
+                                    ✓ {inCartQty}
+                                  </span>
+                                ) : (
+                                  <span className="text-[9px] font-mono text-slate-500 truncate max-w-[65px]">
+                                    {formattedDate}
+                                  </span>
+                                )}
+                              </div>
+
+                              {/* Middle: Thumbnail & Product Name */}
+                              <div className="flex items-center gap-2 my-1">
+                                {p.imageUrl ? (
+                                  <img
+                                    src={p.imageUrl}
+                                    alt={p.name}
+                                    referrerPolicy="no-referrer"
+                                    className="w-8 h-8 rounded-lg object-cover border border-slate-700/80 shrink-0"
+                                    onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                                  />
+                                ) : (
+                                  <div className="w-8 h-8 rounded-lg bg-slate-900 border border-slate-800 flex items-center justify-center text-slate-500 shrink-0">
+                                    <Package className="w-4 h-4 text-slate-500" />
+                                  </div>
+                                )}
+                                <div className="min-w-0 flex-1">
+                                  <p className="font-bold text-white text-[11px] truncate leading-tight group-hover:text-sky-300 transition">
+                                    {p.name}
+                                  </p>
+                                  <div className="flex items-center gap-1 text-[9px] text-slate-400 font-mono truncate">
+                                    <span className="truncate">{p.category}</span>
+                                    <span>•</span>
+                                    <span className="text-slate-300">{p.stockQuantity} {p.unit}</span>
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Bottom: Price in KSh & One-Click Add Indicator */}
+                              <div className="flex items-center justify-between gap-1 mt-1 pt-1.5 border-t border-slate-800/80 w-full">
+                                <span className="font-mono font-extrabold text-emerald-400 text-xs">
+                                  KSh {p.sellingPrice.toLocaleString()}
+                                </span>
+
+                                <span className="text-[9px] font-bold text-slate-400 group-hover:text-white flex items-center gap-0.5 bg-slate-900 group-hover:bg-sky-500 group-hover:text-slate-950 px-1.5 py-0.5 rounded transition shadow-sm">
+                                  <Plus className="w-2.5 h-2.5" /> Add
+                                </span>
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>

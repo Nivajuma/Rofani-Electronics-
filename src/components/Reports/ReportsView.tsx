@@ -12,9 +12,13 @@ import {
   Clock,
   Sparkles,
   ChevronRight,
+  ChevronDown,
   Landmark,
   ShieldAlert,
-  BarChart3
+  BarChart3,
+  Package,
+  Archive,
+  X
 } from 'lucide-react';
 import { Transaction, Product, Customer, Supplier, Expense, SensitiveActionLog } from '../../types';
 import {
@@ -25,6 +29,12 @@ import {
   exportSupplierReportPDF,
   exportKRATaxReportPDF
 } from '../../utils/pdfGenerator';
+import {
+  exportSalesToCSV,
+  exportInventoryToCSV,
+  exportExpensesToCSV,
+  exportConsolidatedArchiveToCSV
+} from '../../utils/csvArchiveExport';
 import { AuditLogsView } from './AuditLogsView';
 import { DailySalesPerformanceCard, DateRangePreset } from './DailySalesPerformanceCard';
 import { TopSellingProductsCard } from './TopSellingProductsCard';
@@ -156,8 +166,84 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
 
   itemVelocityList.sort((a, b) => b.qtySold - a.qtySold);
 
+  // CSV Archival States
+  const [showCsvMenu, setShowCsvMenu] = useState(false);
+  const [csvToast, setCsvToast] = useState<{ text: string; filename: string } | null>(null);
+
+  // Map of product ID to units sold for inventory velocity
+  const productVelocityMap = useMemo(() => {
+    const map: Record<string, number> = {};
+    filteredTransactions.forEach((tx) => {
+      tx.items.forEach((it) => {
+        map[it.product.id] = (map[it.product.id] || 0) + it.quantity;
+      });
+    });
+    return map;
+  }, [filteredTransactions]);
+
+  const handleDownloadSalesCsv = () => {
+    const filename = exportSalesToCSV(filteredTransactions, dateFilter);
+    setCsvToast({
+      text: `Exported ${filteredTransactions.length} sales records to CSV successfully!`,
+      filename,
+    });
+    setShowCsvMenu(false);
+    setTimeout(() => setCsvToast(null), 4000);
+  };
+
+  const handleDownloadInventoryCsv = () => {
+    const filename = exportInventoryToCSV(products, productVelocityMap);
+    setCsvToast({
+      text: `Exported ${products.length} inventory products to CSV successfully!`,
+      filename,
+    });
+    setShowCsvMenu(false);
+    setTimeout(() => setCsvToast(null), 4000);
+  };
+
+  const handleDownloadExpensesCsv = () => {
+    const filename = exportExpensesToCSV(expenses);
+    setCsvToast({
+      text: `Exported ${expenses.length} operating expenses to CSV successfully!`,
+      filename,
+    });
+    setShowCsvMenu(false);
+    setTimeout(() => setCsvToast(null), 4000);
+  };
+
+  const handleDownloadConsolidatedCsv = () => {
+    const filename = exportConsolidatedArchiveToCSV(filteredTransactions, products, expenses);
+    setCsvToast({
+      text: `Exported master consolidated archive (Sales, Inventory & Expenses) to CSV!`,
+      filename,
+    });
+    setShowCsvMenu(false);
+    setTimeout(() => setCsvToast(null), 4000);
+  };
+
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+      {/* CSV Archival Download Toast Alert */}
+      {csvToast && (
+        <div className="bg-emerald-950/90 border border-emerald-500/50 text-emerald-100 p-3.5 rounded-2xl flex items-center justify-between gap-3 text-xs font-bold shadow-lg shadow-emerald-900/30 animate-in fade-in">
+          <div className="flex items-center gap-2.5">
+            <CheckCircle className="w-5 h-5 text-emerald-400 shrink-0" />
+            <div>
+              <p>{csvToast.text}</p>
+              <p className="text-[10px] font-mono text-emerald-300/80 font-normal mt-0.5">
+                Archival File: {csvToast.filename}
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => setCsvToast(null)}
+            className="p-1 text-emerald-300 hover:text-white rounded-lg transition cursor-pointer"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
       {/* Header Banner */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-900 border border-slate-800 p-4 rounded-2xl shadow-lg">
         <div className="flex items-center gap-3">
@@ -172,21 +258,130 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
           </div>
         </div>
 
-        {/* Date Filter Buttons */}
-        <div className="flex gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs">
-          {(['all', 'today', 'week', 'month'] as const).map((period) => (
+        {/* Controls: Date Filter & CSV Download Action */}
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Date Filter Buttons */}
+          <div className="flex gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs">
+            {(['all', 'today', 'week', 'month'] as const).map((period) => (
+              <button
+                key={period}
+                onClick={() => setDateFilter(period)}
+                className={`px-3 py-1.5 capitalize rounded-lg font-medium transition cursor-pointer ${
+                  dateFilter === period
+                    ? 'bg-sky-600 text-white font-bold'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                {period}
+              </button>
+            ))}
+          </div>
+
+          {/* Download CSV Archival Action */}
+          <div className="relative">
             <button
-              key={period}
-              onClick={() => setDateFilter(period)}
-              className={`px-3 py-1.5 capitalize rounded-lg font-medium transition ${
-                dateFilter === period
-                  ? 'bg-sky-600 text-white font-bold'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
+              type="button"
+              id="btn-download-reports-csv"
+              onClick={() => setShowCsvMenu((prev) => !prev)}
+              className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-md shadow-emerald-600/25 cursor-pointer active:scale-95 group"
+              title="Download CSV of current sales, inventory, or expenses for local archival"
             >
-              {period}
+              <Download className="w-4 h-4 group-hover:translate-y-0.5 transition-transform" />
+              <span>Download CSV</span>
+              <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showCsvMenu ? 'rotate-180' : ''}`} />
             </button>
-          ))}
+
+            {/* Dropdown Menu */}
+            {showCsvMenu && (
+              <>
+                <div
+                  className="fixed inset-0 z-40"
+                  onClick={() => setShowCsvMenu(false)}
+                />
+                <div className="absolute right-0 mt-2 w-72 bg-slate-900 border border-slate-700/80 rounded-2xl shadow-2xl p-2 z-50 text-xs space-y-1 animate-in fade-in zoom-in-95 duration-150">
+                  <div className="px-3 py-2 text-[11px] font-bold text-slate-400 uppercase tracking-wider border-b border-slate-800 flex items-center justify-between">
+                    <span>Local Archival CSV Exports</span>
+                    <span className="text-[10px] text-emerald-400 font-mono">RFC 4180</span>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleDownloadSalesCsv}
+                    className="w-full text-left px-3 py-2.5 rounded-xl hover:bg-slate-800 text-slate-200 hover:text-white transition flex items-start gap-2.5 cursor-pointer group"
+                  >
+                    <TrendingUp className="w-4 h-4 text-sky-400 mt-0.5 shrink-0 group-hover:scale-110 transition-transform" />
+                    <div className="flex-1 min-w-0">
+                      <div className="font-bold text-slate-100 flex items-center justify-between">
+                        <span>Current Sales CSV</span>
+                        <span className="text-[10px] font-mono text-sky-400 bg-sky-950/60 px-1.5 py-0.5 rounded border border-sky-800/60">
+                          {filteredTransactions.length} receipts
+                        </span>
+                      </div>
+                      <p className="text-[10px] text-slate-400 mt-0.5">
+                        Receipts, items, totals, payment modes ({dateFilter.toUpperCase()})
+                      </p>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleDownloadInventoryCsv}
+                    className="w-full text-left px-3 py-2.5 rounded-xl hover:bg-slate-800 text-slate-200 hover:text-white transition flex items-start gap-2.5 cursor-pointer group"
+                  >
+                    <Package className="w-4 h-4 text-emerald-400 mt-0.5 shrink-0 group-hover:scale-110 transition-transform" />
+                    <div className="flex-1 min-w-0">
+                      <div className="font-bold text-slate-100 flex items-center justify-between">
+                        <span>Current Inventory CSV</span>
+                        <span className="text-[10px] font-mono text-emerald-400 bg-emerald-950/60 px-1.5 py-0.5 rounded border border-emerald-800/60">
+                          {products.length} items
+                        </span>
+                      </div>
+                      <p className="text-[10px] text-slate-400 mt-0.5">
+                        Stock counts, cost prices, retail values, profit margins
+                      </p>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleDownloadExpensesCsv}
+                    className="w-full text-left px-3 py-2.5 rounded-xl hover:bg-slate-800 text-slate-200 hover:text-white transition flex items-start gap-2.5 cursor-pointer group"
+                  >
+                    <DollarSign className="w-4 h-4 text-rose-400 mt-0.5 shrink-0 group-hover:scale-110 transition-transform" />
+                    <div className="flex-1 min-w-0">
+                      <div className="font-bold text-slate-100 flex items-center justify-between">
+                        <span>Operating Expenses CSV</span>
+                        <span className="text-[10px] font-mono text-rose-400 bg-rose-950/60 px-1.5 py-0.5 rounded border border-rose-800/60">
+                          {expenses.length} logs
+                        </span>
+                      </div>
+                      <p className="text-[10px] text-slate-400 mt-0.5">
+                        Expense categories, amounts, descriptions, payment status
+                      </p>
+                    </div>
+                  </button>
+
+                  <div className="border-t border-slate-800 pt-1">
+                    <button
+                      type="button"
+                      onClick={handleDownloadConsolidatedCsv}
+                      className="w-full text-left px-3 py-2.5 rounded-xl bg-slate-950 hover:bg-slate-850 text-slate-200 hover:text-white transition flex items-start gap-2.5 cursor-pointer group border border-slate-800"
+                    >
+                      <Archive className="w-4 h-4 text-purple-400 mt-0.5 shrink-0 group-hover:scale-110 transition-transform" />
+                      <div>
+                        <div className="font-bold text-purple-300">
+                          Master Consolidated Archive
+                        </div>
+                        <p className="text-[10px] text-slate-400 mt-0.5">
+                          Complete package: Sales + Inventory + Expenses in one file
+                        </p>
+                      </div>
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
         </div>
       </div>
 
@@ -378,12 +573,23 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                 <h3 className="font-bold text-base text-slate-100">Sales Transactions & Payment Modes</h3>
                 <p className="text-xs text-slate-400">Detailed transactions history and payment channels</p>
               </div>
-              <button
-                onClick={() => exportSalesReportPDF(filteredTransactions, `Filter: ${dateFilter.toUpperCase()}`)}
-                className="bg-sky-600 hover:bg-sky-500 text-white font-bold px-4 py-2 rounded-xl text-xs transition flex items-center gap-2 shadow-md shadow-sky-600/20 cursor-pointer"
-              >
-                <Download className="w-4 h-4" /> Export Sales Report PDF
-              </button>
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  type="button"
+                  id="btn-download-sales-tab-csv"
+                  onClick={handleDownloadSalesCsv}
+                  className="bg-slate-800 hover:bg-slate-700 text-sky-300 border border-slate-700 font-bold px-3.5 py-2 rounded-xl text-xs transition flex items-center gap-1.5 shadow-sm cursor-pointer active:scale-95"
+                  title="Download Current Sales Transactions as CSV"
+                >
+                  <Download className="w-4 h-4 text-sky-400" /> Download Sales CSV
+                </button>
+                <button
+                  onClick={() => exportSalesReportPDF(filteredTransactions, `Filter: ${dateFilter.toUpperCase()}`)}
+                  className="bg-sky-600 hover:bg-sky-500 text-white font-bold px-4 py-2 rounded-xl text-xs transition flex items-center gap-2 shadow-md shadow-sky-600/20 cursor-pointer active:scale-95"
+                >
+                  <Download className="w-4 h-4" /> Export Sales Report PDF
+                </button>
+              </div>
             </div>
 
           <div className="overflow-x-auto">
@@ -428,12 +634,23 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
               <h3 className="font-bold text-base text-slate-100">Store Profit & Loss Statement</h3>
               <p className="text-xs text-slate-400">Financial summary comparing revenue, COGS, KRA tax, and operating expenses</p>
             </div>
-            <button
-              onClick={() => exportProfitReportPDF(filteredTransactions, expenses, `Period: ${dateFilter.toUpperCase()}`)}
-              className="bg-sky-600 hover:bg-sky-500 text-white font-bold px-4 py-2 rounded-xl text-xs transition flex items-center gap-2 shadow-md shadow-sky-600/20"
-            >
-              <Download className="w-4 h-4" /> Export P&L Report PDF
-            </button>
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                type="button"
+                id="btn-download-expenses-tab-csv"
+                onClick={handleDownloadExpensesCsv}
+                className="bg-slate-800 hover:bg-slate-700 text-rose-300 border border-slate-700 font-bold px-3.5 py-2 rounded-xl text-xs transition flex items-center gap-1.5 shadow-sm cursor-pointer active:scale-95"
+                title="Download Store Operating Expenses as CSV"
+              >
+                <Download className="w-4 h-4 text-rose-400" /> Download Expenses CSV
+              </button>
+              <button
+                onClick={() => exportProfitReportPDF(filteredTransactions, expenses, `Period: ${dateFilter.toUpperCase()}`)}
+                className="bg-sky-600 hover:bg-sky-500 text-white font-bold px-4 py-2 rounded-xl text-xs transition flex items-center gap-2 shadow-md shadow-sky-600/20 cursor-pointer active:scale-95"
+              >
+                <Download className="w-4 h-4" /> Export P&L Report PDF
+              </button>
+            </div>
           </div>
 
           <div className="space-y-3 font-mono text-sm max-w-xl mx-auto bg-slate-950 p-6 rounded-2xl border border-slate-800">
@@ -542,12 +759,23 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
               <h3 className="font-bold text-base text-slate-100">Item Comparison & Sales Velocity</h3>
               <p className="text-xs text-slate-400">Identify fast-moving top sellers vs low/slow-moving inventory</p>
             </div>
-            <button
-              onClick={() => exportItemMovementPDF(products, filteredTransactions)}
-              className="bg-sky-600 hover:bg-sky-500 text-white font-bold px-4 py-2 rounded-xl text-xs transition flex items-center gap-2 shadow-md shadow-sky-600/20"
-            >
-              <Download className="w-4 h-4" /> Export Item Velocity PDF
-            </button>
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                type="button"
+                id="btn-download-inventory-tab-csv"
+                onClick={handleDownloadInventoryCsv}
+                className="bg-slate-800 hover:bg-slate-700 text-emerald-300 border border-slate-700 font-bold px-3.5 py-2 rounded-xl text-xs transition flex items-center gap-1.5 shadow-sm cursor-pointer active:scale-95"
+                title="Download Current Inventory Stock & Valuation as CSV"
+              >
+                <Download className="w-4 h-4 text-emerald-400" /> Download Inventory CSV
+              </button>
+              <button
+                onClick={() => exportItemMovementPDF(products, filteredTransactions)}
+                className="bg-sky-600 hover:bg-sky-500 text-white font-bold px-4 py-2 rounded-xl text-xs transition flex items-center gap-2 shadow-md shadow-sky-600/20 cursor-pointer active:scale-95"
+              >
+                <Download className="w-4 h-4" /> Export Item Velocity PDF
+              </button>
+            </div>
           </div>
 
           <div className="overflow-x-auto">

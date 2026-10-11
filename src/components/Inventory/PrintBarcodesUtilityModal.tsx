@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import {
   Printer,
   Barcode,
+  QrCode,
   Search,
   CheckSquare,
   Square,
@@ -566,19 +567,19 @@ export const PrintBarcodesUtilityModal: React.FC<PrintBarcodesUtilityModalProps>
         <div className="px-3 py-2 sm:p-4 border-b border-slate-800 flex items-center justify-between bg-slate-900/95 shrink-0">
           <div className="flex items-center gap-2 sm:gap-3 min-w-0">
             <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-tr from-sky-600 to-blue-500 flex items-center justify-center text-white shadow-md shadow-sky-600/30 shrink-0">
-              <Printer className="w-4 h-4 sm:w-5 sm:h-5" />
+              <QrCode className="w-4 h-4 sm:w-5 sm:h-5" />
             </div>
             <div className="min-w-0">
               <div className="flex items-center gap-2">
                 <h2 className="text-sm sm:text-lg font-black tracking-tight text-white truncate">
-                  Batch Barcode Label Printer
+                  Batch QR Code Label Printer
                 </h2>
                 <span className="hidden sm:inline-block text-[10px] bg-sky-500/20 text-sky-300 border border-sky-400/40 px-2 py-0.5 rounded-full font-mono font-bold">
-                  Print Utility
+                  QR Utility
                 </span>
               </div>
               <p className="hidden sm:block text-xs text-slate-400 mt-0.5 truncate">
-                Generate and print sticky barcode sheets from recent barcode scan history or catalog products
+                Generate and print sticky QR code sheets from scan history or catalog products (QR + Price or QR Only)
               </p>
             </div>
           </div>
@@ -751,15 +752,15 @@ export const PrintBarcodesUtilityModal: React.FC<PrintBarcodesUtilityModalProps>
                 <button
                   type="button"
                   onClick={() => setIncludePrice(!includePrice)}
-                  className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-bold transition cursor-pointer border ${
+                  className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold transition cursor-pointer border ${
                     includePrice
                       ? 'bg-emerald-950 text-emerald-300 border-emerald-600 shadow-sm'
-                      : 'bg-slate-900 text-slate-400 border-slate-700/80 hover:text-slate-200'
+                      : 'bg-slate-900 text-slate-300 border-slate-700/80 hover:text-white'
                   }`}
-                  title="Toggle Price Labelling on barcode stickers (Kenya Shillings, zero decimals)"
+                  title="Toggle between printing QR Code + Price (KSh) or QR Code Only on stickers"
                 >
                   <Tag className="w-3 h-3 text-emerald-400" />
-                  <span>Price Labelling (KSh)</span>
+                  <span>{includePrice ? 'QR Code + Price (KSh)' : 'QR Code Only'}</span>
                   {includePrice && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>}
                 </button>
 
@@ -1467,8 +1468,8 @@ export const PrintBarcodesUtilityModal: React.FC<PrintBarcodesUtilityModalProps>
                       </label>
 
                       {/* Sticker Content info */}
-                      <span className="text-[10px] font-bold text-amber-300 bg-amber-950/60 border border-amber-800/80 px-2 py-0.5 rounded-lg font-mono">
-                        {includePrice ? 'Name + Barcode + Price' : 'Only Name + Barcode'}
+                      <span className="text-[10px] font-bold text-sky-300 bg-sky-950/60 border border-sky-800/80 px-2 py-0.5 rounded-lg font-mono">
+                        {includePrice ? 'QR Code + Price (KSh)' : 'QR Code Only'}
                       </span>
                     </div>
                   </div>
@@ -2163,7 +2164,7 @@ export const PrintBarcodesUtilityModal: React.FC<PrintBarcodesUtilityModalProps>
               </span>
               <span className="text-slate-500">•</span>
               <span className="text-[11px] text-emerald-300 bg-emerald-950/80 border border-emerald-800/80 px-2 py-0.5 rounded-full font-sans font-semibold">
-                {includePrice ? 'Name + Price (KSh)' : 'Only Item Name'}
+                {includePrice ? 'QR Code + Price (KSh)' : 'QR Code Only'}
               </span>
             </span>
           </div>

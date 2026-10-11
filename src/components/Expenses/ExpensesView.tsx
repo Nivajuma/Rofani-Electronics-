@@ -4,6 +4,7 @@ import { Expense, PaymentMethod, User, RecurringFrequency } from '../../types';
 import { detectDuplicateExpenses, deduplicateExpenses, processDueRecurringExpenses, computeNextDueDate } from '../../utils/deduplicate';
 import { hasWorkerPermission } from '../../utils/permissions';
 import { safeGetJSON, safeSetJSON } from '../../utils/safeStorage';
+import { MonthlyExpenseCategoryChart, CATEGORY_PALETTE } from './MonthlyExpenseCategoryChart';
 
 interface ExpensesViewProps {
   expenses: Expense[];
@@ -402,12 +403,42 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
         </div>
       </div>
 
+      {/* Monthly Expense Breakdown Chart (Recharts Library) */}
+      <MonthlyExpenseCategoryChart
+        expenses={expenses}
+        activeCategoryFilter={filterCategory}
+        onCategoryFilterChange={setFilterCategory}
+      />
+
       {/* Expense Logs Table */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
+      <div id="expense-audit-records-table" className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl scroll-mt-6">
         <div className="p-4 border-b border-slate-800 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 bg-slate-950/40">
           <div>
-            <h3 className="font-bold text-sm text-slate-200">Expense Audit Records</h3>
-            <p className="text-[11px] text-slate-400">Track standard operating costs & recurring scheduled expenses</p>
+            <div className="flex items-center gap-2.5 flex-wrap">
+              <h3 className="font-bold text-sm text-slate-200">Expense Audit Records</h3>
+              {filterCategory !== 'All' && (
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold bg-sky-950/90 border border-sky-500/60 text-sky-300 animate-fadeIn">
+                  <span
+                    className="w-2 h-2 rounded-full"
+                    style={{ backgroundColor: CATEGORY_PALETTE[filterCategory]?.fill || '#38bdf8' }}
+                  />
+                  <span>Category: {filterCategory}</span>
+                  <button
+                    type="button"
+                    onClick={() => setFilterCategory('All')}
+                    className="text-sky-400 hover:text-white p-0.5 rounded hover:bg-sky-900/60 transition cursor-pointer"
+                    title="Clear category filter"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </span>
+              )}
+            </div>
+            <p className="text-[11px] text-slate-400 mt-0.5">
+              {filterCategory !== 'All'
+                ? `Showing ${filteredExpenses.length} ${filteredExpenses.length === 1 ? 'item' : 'items'} in "${filterCategory}" (Total: KSh ${totalExpenseAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })})`
+                : 'Track standard operating costs & recurring scheduled expenses'}
+            </p>
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
@@ -441,7 +472,7 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
             <select
               value={filterCategory}
               onChange={(e) => setFilterCategory(e.target.value)}
-              className="bg-slate-950 border border-slate-800 text-slate-200 text-xs px-3 py-1.5 rounded-xl focus:outline-none"
+              className="bg-slate-950 border border-slate-800 text-slate-200 text-xs px-3 py-1.5 rounded-xl focus:outline-none cursor-pointer"
             >
               <option value="All">All Categories</option>
               <option value="Rent">Rent</option>
@@ -473,7 +504,20 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
               {filteredExpenses.length === 0 ? (
                 <tr>
                   <td colSpan={8} className="p-8 text-center text-slate-500">
-                    No expense records found.
+                    <div className="space-y-2">
+                      <p>
+                        No expense records found{filterCategory !== 'All' ? ` for category "${filterCategory}"` : ''}.
+                      </p>
+                      {filterCategory !== 'All' && (
+                        <button
+                          type="button"
+                          onClick={() => setFilterCategory('All')}
+                          className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-sky-400 hover:text-sky-300 rounded-xl text-xs font-bold transition cursor-pointer"
+                        >
+                          Show All Categories
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ) : (

@@ -394,23 +394,23 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
 
                 const labelTitle =
                   selectedRowIds.size > 0
-                    ? `Selected Items Barcodes Sheet (${selectedRowIds.size} items)`
-                    : `All Filtered Items Barcodes Sheet (${filteredProducts.length} items)`;
+                    ? `Selected Items QR Codes Catalog (${selectedRowIds.size} items)`
+                    : `All Filtered Items QR Codes Catalog (${filteredProducts.length} items)`;
 
-                printBatchBarcodes(batchData, labelTitle);
+                printBatchBarcodes(batchData, labelTitle, true);
               }}
-              className="bg-sky-950 border border-sky-800 text-sky-200 hover:bg-sky-900 font-bold px-3 py-1.5 rounded-xl text-xs transition flex items-center gap-1.5 shadow-md"
+              className="bg-sky-950 border border-sky-800 text-sky-200 hover:bg-sky-900 font-bold px-3 py-1.5 rounded-xl text-xs transition flex items-center gap-1.5 shadow-md cursor-pointer"
               title={
                 selectedRowIds.size > 0
-                  ? `Print barcodes for ${selectedRowIds.size} selected rows`
-                  : `Print barcodes for all ${filteredProducts.length} items`
+                  ? `Print QR codes for ${selectedRowIds.size} selected rows`
+                  : `Print QR codes for all ${filteredProducts.length} items`
               }
             >
-              <Barcode className="w-4 h-4 text-sky-400" />
+              <QrCode className="w-4 h-4 text-sky-400" />
               <span>
                 {selectedRowIds.size > 0
-                  ? `Print Selected Barcodes (${selectedRowIds.size})`
-                  : `Print All Barcodes`}
+                  ? `Print Selected QR Codes (${selectedRowIds.size})`
+                  : `Print All QR Codes`}
               </span>
             </button>
 

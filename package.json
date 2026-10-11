@@ -20,7 +20,6 @@
     "express": "^4.21.2",
     "firebase": "^12.19.0",
     "html5-qrcode": "^2.3.8",
-    "jsbarcode": "^3.12.3",
     "jspdf": "^4.2.1",
     "jspdf-autotable": "^5.0.8",
     "lucide-react": "^0.546.0",

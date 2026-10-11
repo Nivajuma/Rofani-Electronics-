@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import {
   Search,
   Scan,
+  QrCode,
   Plus,
   Minus,
   Trash2,
@@ -1307,10 +1308,10 @@ export const POSView: React.FC<POSViewProps> = ({
                 <button
                   type="button"
                   onClick={() => setShowScanner(true)}
-                  className="sm:hidden p-1.5 rounded-lg bg-sky-600/30 hover:bg-sky-600/50 text-sky-400 hover:text-sky-200 border border-sky-500/30 transition flex items-center gap-1"
-                  title="Scan Barcode"
+                  className="sm:hidden p-1.5 rounded-lg bg-sky-600/30 hover:bg-sky-600/50 text-sky-400 hover:text-sky-200 border border-sky-500/30 transition flex items-center gap-1 cursor-pointer"
+                  title="Scan QR Code"
                 >
-                  <Scan className="w-3.5 h-3.5" />
+                  <QrCode className="w-3.5 h-3.5" />
                 </button>
               </div>
             </div>
@@ -1361,14 +1362,15 @@ export const POSView: React.FC<POSViewProps> = ({
                   <span>AI Scan to Receipt</span>
                 </button>
 
-                {/* Scan Barcode (Tablet/Desktop) */}
+                {/* Scan QR Code (Tablet/Desktop) */}
                 <button
                   id="btn-pos-scan-barcode"
                   onClick={() => setShowScanner(true)}
-                  className="hidden sm:flex bg-sky-600 hover:bg-sky-500 text-white font-semibold px-3 py-1.5 rounded-xl text-xs transition items-center gap-1.5 shadow-md shadow-sky-600/20 shrink-0"
+                  className="hidden sm:flex bg-sky-600 hover:bg-sky-500 text-white font-semibold px-3 py-1.5 rounded-xl text-xs transition items-center gap-1.5 shadow-md shadow-sky-600/20 shrink-0 cursor-pointer"
+                  title="Scan QR Code"
                 >
-                  <Scan className="w-3.5 h-3.5" />
-                  <span>Scan</span>
+                  <QrCode className="w-3.5 h-3.5" />
+                  <span>Scan QR</span>
                 </button>
 
                 {/* Transaction SMS Logs Button */}

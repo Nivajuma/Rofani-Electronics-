@@ -1,4 +1,4 @@
-import JsBarcode from 'jsbarcode';
+import QRCode from 'qrcode';
 
 export interface LabelSheetPreset {
   id: string;
@@ -25,8 +25,8 @@ export const LABEL_SHEET_PRESETS: LabelSheetPreset[] = [
     heightMm: 16.9,
     columns: 4,
     rows: 16,
-    description: '4 cols × 16 rows. Most economical format for Name + Barcode with HP & office printers.',
-    recommendedFor: 'Item Name + Barcode (No Price) on HP/Deskjet printers',
+    description: '4 cols × 16 rows. Compact stickers for Item Name + QR Code sticker labels.',
+    recommendedFor: 'Item Name + QR Code (No Price) on office/laser printers',
   },
   {
     id: 'a4_40',
@@ -38,8 +38,8 @@ export const LABEL_SHEET_PRESETS: LabelSheetPreset[] = [
     heightMm: 25.4,
     columns: 4,
     rows: 10,
-    description: '4 cols × 10 rows. Standard retail die-cut sheet. Extra vertical height makes it very easy to align.',
-    recommendedFor: 'Easy alignment & general boutique/retail items',
+    description: '4 cols × 10 rows. Standard retail die-cut sheet. Ideal square aspect for QR codes + Price.',
+    recommendedFor: 'Easy alignment, QR Code + KSh Price for retail items',
   },
   {
     id: 'a4_65',
@@ -51,7 +51,7 @@ export const LABEL_SHEET_PRESETS: LabelSheetPreset[] = [
     heightMm: 21.2,
     columns: 5,
     rows: 13,
-    description: '5 cols × 13 rows. Compact stickers for small items, cables, earphones, and accessories.',
+    description: '5 cols × 13 rows. Compact QR stickers for accessories, cables, and small items.',
     recommendedFor: 'Small accessories & compact items',
   },
   {
@@ -64,8 +64,8 @@ export const LABEL_SHEET_PRESETS: LabelSheetPreset[] = [
     heightMm: 30,
     columns: 1,
     rows: 1,
-    description: 'Standard single-roll sticker for Xprinter, Rongta, Zebra thermal barcode printers.',
-    recommendedFor: 'Dedicated thermal POS barcode printers',
+    description: 'Standard single-roll sticker for Xprinter, Rongta, Zebra thermal label printers.',
+    recommendedFor: 'Dedicated thermal POS label printers',
   },
   {
     id: 'thermal_50x25',
@@ -77,13 +77,13 @@ export const LABEL_SHEET_PRESETS: LabelSheetPreset[] = [
     heightMm: 25,
     columns: 1,
     rows: 1,
-    description: 'Wide thermal label for longer product names.',
-    recommendedFor: 'Longer product names on thermal printers',
+    description: 'Wide thermal label for product names + QR codes.',
+    recommendedFor: 'Thermal roll stickers with price and QR',
   },
 ];
 
 /**
- * Generate a random 13-digit EAN-13 / Code128 style barcode string
+ * Generate a random 13-digit EAN-13 / SKU numeric code string
  */
 export const generateAutoBarcode = (): string => {
   const prefix = '890';
@@ -100,134 +100,81 @@ export const generateAutoBarcode = (): string => {
   return raw + checkDigit.toString();
 };
 
+export const generateAutoQrCode = generateAutoBarcode;
+
 /**
- * Render a barcode onto an HTML SVG (crisp vector) or Canvas element and return Data URL.
- * Produces 100% sharp vector SVG with #000000 on #FFFFFF, quiet zones (>=10px),
- * and optimized bar proportions for camera and hardware laser scanners.
+ * Render a QR code onto an HTML SVG (crisp vector) Data URL synchronously.
+ * Produces 100% sharp vector SVG with infinite DPI, zero blurring on any printer,
+ * and high scanning reliability.
  */
-export const generateBarcodeDataUrl = (
-  barcodeValue: string,
-  text?: string,
+export const generateQrCodeDataUrl = (
+  codeValue: string,
+  _text?: string,
   options?: {
     height?: number;
     quietZone?: number;
     fontSize?: number;
+    margin?: number;
+    darkColor?: string;
+    lightColor?: string;
   }
 ): string => {
-  if (!barcodeValue) return '';
+  if (!codeValue) return '';
 
-  const quietZone = Math.max(10, options?.quietZone ?? 12); // At least 10px quiet zone on both sides
-  const height = options?.height ?? 58; // Increased bar height relative to sticker height
-  const fontSize = options?.fontSize ?? 8.5; // Compact font size to maximize vertical bar visibility
-  const displayText = text !== undefined ? text : barcodeValue;
+  const margin = options?.margin ?? 2;
+  const darkColor = options?.darkColor ?? '#000000';
+  const lightColor = options?.lightColor ?? '#ffffff';
 
-  // 1. Try vector SVG first: infinite DPI, mathematically crisp edges, zero blurring on any printer
-  if (typeof document !== 'undefined' && typeof XMLSerializer !== 'undefined') {
-    try {
-      const svgNode = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-      JsBarcode(svgNode, barcodeValue, {
-        format: 'CODE128',
-        lineColor: '#000000',
-        background: '#FFFFFF',
-        width: 2,
-        height,
-        displayValue: true,
-        text: displayText,
-        fontSize,
-        font: 'monospace',
-        fontOptions: 'bold',
-        textMargin: 1,
-        margin: 0,
-        marginLeft: quietZone,
-        marginRight: quietZone,
-        marginTop: 2,
-        marginBottom: 2,
-      });
-
-      svgNode.setAttribute('preserveAspectRatio', 'none');
-      svgNode.setAttribute('shape-rendering', 'crispEdges');
-      // Ensure all child rects inside the SVG also have crispEdges
-      const rects = svgNode.querySelectorAll('rect');
-      rects.forEach((r) => r.setAttribute('shape-rendering', 'crispEdges'));
-
-      const serializer = new XMLSerializer();
-      const svgString = serializer.serializeToString(svgNode);
-      if (svgString && svgString.includes('<svg')) {
-        return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgString);
+  try {
+    const qr = QRCode.create(codeValue, { errorCorrectionLevel: 'M' });
+    const size = qr.modules.size;
+    let path = '';
+    for (let r = 0; r < size; r++) {
+      for (let c = 0; c < size; c++) {
+        if (qr.modules.get(r, c)) {
+          path += `M${c + margin},${r + margin}h1v1h-1z`;
+        }
       }
-    } catch {
-      // Fallback to high-DPI canvas
     }
+    const totalSize = size + margin * 2;
+    const svgString = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${totalSize} ${totalSize}" shape-rendering="crispEdges"><rect width="100%" height="100%" fill="${lightColor}"/><path d="${path}" fill="${darkColor}"/></svg>`;
+    return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgString);
+  } catch (err) {
+    console.error('Failed to generate vector QR code SVG:', err);
+    return '';
   }
-
-  // 2. High-DPI Canvas fallback with smoothing disabled for razor sharp bars
-  if (typeof document !== 'undefined') {
-    try {
-      const canvas = document.createElement('canvas');
-      const ctx = canvas.getContext('2d');
-      if (ctx) {
-        ctx.imageSmoothingEnabled = false;
-        (ctx as any).webkitImageSmoothingEnabled = false;
-        (ctx as any).mozImageSmoothingEnabled = false;
-        (ctx as any).msImageSmoothingEnabled = false;
-      }
-      JsBarcode(canvas, barcodeValue, {
-        format: 'CODE128',
-        lineColor: '#000000',
-        background: '#FFFFFF',
-        width: 2,
-        height,
-        displayValue: true,
-        text: displayText,
-        fontSize,
-        font: 'monospace',
-        fontOptions: 'bold',
-        textMargin: 1,
-        margin: 0,
-        marginLeft: quietZone,
-        marginRight: quietZone,
-        marginTop: 2,
-        marginBottom: 2,
-      });
-      return canvas.toDataURL('image/png');
-    } catch (canvasErr) {
-      console.error('Failed to generate barcode canvas:', canvasErr);
-    }
-  }
-
-  return '';
 };
 
+// Backwards-compatible alias for existing components
+export const generateBarcodeDataUrl = generateQrCodeDataUrl;
+
 /**
- * Print barcode label sheet for an item (defaults to only item name and barcode on stickers)
+ * Print QR code label sheet for an item with toggle for "QR Code + Price (KSh)" or "QR Code Only"
  */
 export const printBarcodeLabels = (
   productName: string,
   price: number | string,
-  barcode: string,
+  code: string,
   count: number = 8,
   includePrice: boolean = false
 ) => {
   const numPrice = typeof price === 'number' ? price : (parseFloat(String(price)) || 0);
-  const dataUrl = generateBarcodeDataUrl(barcode, barcode, { height: 56, quietZone: 12, fontSize: 8.5 });
+  const dataUrl = generateQrCodeDataUrl(code);
   const printWindow = window.open('', '_blank');
   if (!printWindow) return;
+
+  const modeTitle = includePrice ? 'QR Code + Price (KSh)' : 'QR Code Only';
 
   let labelsHtml = '';
   for (let i = 0; i < count; i++) {
     labelsHtml += `
-      <div style="border: 1px dashed #cbd5e1; padding: 4px 6px; border-radius: 4px; text-align: center; width: 180px; box-sizing: border-box; background: #ffffff; page-break-inside: avoid; display: flex; flex-direction: column; justify-content: space-between; align-items: center; min-height: 80px;">
-        <div style="font-size: clamp(8px, 2.2vw, 11px); font-weight: 800; font-family: sans-serif; white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; color: #000000; line-height: 1.1; word-break: break-word; text-align: center; width: 100%; margin-bottom: 2px;">
-          ${productName}
+      <div class="label-item">
+        <div class="product-title">${productName}</div>
+        ${includePrice ? `<div class="product-price">KSh ${Math.round(numPrice).toLocaleString()}</div>` : ''}
+        <div class="qr-container">
+          <img src="${dataUrl}" class="qr-code-img" alt="QR ${code}" />
         </div>
-        ${includePrice ? `
-        <div style="font-size: 11px; font-weight: 800; color: #0284c7; font-family: sans-serif; margin: 1px 0; line-height: 1;">
-          KSh ${Math.round(numPrice).toLocaleString()}
-        </div>
-        ` : ''}
-        <div style="width: 100%; flex: 1 1 auto; display: flex; align-items: center; justify-content: center; overflow: hidden; min-height: 0;">
-          <img src="${dataUrl}" style="max-width: 100%; width: 100%; height: auto; max-height: 48px; display: block; margin: 0 auto; object-fit: contain; image-rendering: -webkit-optimize-contrast; image-rendering: crisp-edges; image-rendering: pixelated;" alt="${barcode}" />
-        </div>
+        <div class="code-caption">${code}</div>
       </div>
     `;
   }
@@ -236,24 +183,118 @@ export const printBarcodeLabels = (
     <!DOCTYPE html>
     <html>
       <head>
-        <title>Print Barcode Labels - ${productName}</title>
+        <title>Print QR Code Labels - ${productName}</title>
+        <meta charset="utf-8" />
         <style>
           * { box-sizing: border-box; margin: 0; padding: 0; }
-          body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; margin: 20px; background: #fff; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-          .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; }
+          body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+            margin: 20px;
+            background: #fff;
+            color: #000;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+          }
+          .no-print {
+            margin-bottom: 20px;
+            padding: 16px;
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 12px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 16px;
+          }
+          .no-print h2 { font-size: 18px; color: #0f172a; margin-bottom: 4px; }
+          .no-print p { font-size: 12px; color: #64748b; }
+          .btn-group { display: flex; gap: 8px; }
+          .btn {
+            padding: 9px 18px;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 700;
+            cursor: pointer;
+            border: none;
+            transition: opacity 0.2s;
+          }
+          .btn-primary { background: #0284c7; color: white; }
+          .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+            gap: 12px;
+          }
+          .label-item {
+            border: 1px dashed #cbd5e1;
+            padding: 8px;
+            border-radius: 6px;
+            text-align: center;
+            width: 100%;
+            background: #ffffff;
+            page-break-inside: avoid;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            align-items: center;
+            min-height: 100px;
+          }
+          .product-title {
+            font-size: 11px;
+            font-weight: 800;
+            line-height: 1.15;
+            color: #0f172a;
+            max-height: 28px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            margin-bottom: 2px;
+          }
+          .product-price {
+            font-size: 13px;
+            font-weight: 900;
+            color: #0284c7;
+            margin: 2px 0;
+            line-height: 1;
+          }
+          .qr-container {
+            width: 72px;
+            height: 72px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 4px auto;
+          }
+          .qr-code-img {
+            width: 100%;
+            height: 100%;
+            display: block;
+            object-fit: contain;
+            image-rendering: pixelated;
+          }
+          .code-caption {
+            font-size: 9px;
+            font-family: monospace;
+            color: #475569;
+            font-weight: 700;
+          }
           @media print {
             body { margin: 0; background: transparent; }
             .no-print { display: none !important; }
+            .label-item { border: 1px dashed #94a3b8; }
           }
         </style>
       </head>
       <body>
-        <div class="no-print" style="margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center;">
+        <div class="no-print">
           <div>
-            <h2 style="margin: 0; font-size: 18px; color: #000000;">Barcode Label Sheet (${count} labels)</h2>
-            <p style="margin: 4px 0 0 0; color: #64748b; font-size: 12px;">Format: <strong>${includePrice ? `Item Name + Price (KSh ${Math.round(numPrice).toLocaleString()}) + Barcode` : 'Only Item Name + Barcode'}</strong></p>
+            <h2>QR Code Sticker Labels (${count} stickers)</h2>
+            <p>Layout Mode: <strong>${modeTitle}</strong> • SKU / Code: <strong>${code}</strong></p>
           </div>
-          <button onclick="window.print()" style="padding: 10px 20px; background: #0284c7; color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer;">Print Labels</button>
+          <div class="btn-group">
+            <button class="btn btn-primary" onclick="window.print()">Print Labels Now</button>
+          </div>
         </div>
         <div class="grid">
           ${labelsHtml}
@@ -264,12 +305,14 @@ export const printBarcodeLabels = (
   printWindow.document.close();
 };
 
+export const printQrCodeLabels = printBarcodeLabels;
+
 /**
- * Print batch barcode labels for multiple products or entire catalog with tailored sheet formats
+ * Print batch QR code labels for multiple products or catalog with tailored sheet formats
  */
 export const printBatchBarcodes = (
-  items: { name: string; price?: number; barcode: string; count?: number }[],
-  title: string = 'All Inventory Items Barcode Catalog',
+  items: { name: string; price?: number; barcode: string; sku?: string; count?: number }[],
+  title: string = 'All Inventory Items QR Code Catalog',
   includePrice: boolean = false,
   formatId: string = 'a4_64',
   fontSize: 'small' | 'medium' | 'large' = 'medium',
@@ -292,16 +335,11 @@ export const printBatchBarcodes = (
       ? 'clamp(9px, 2.5vw, 12.5px)'
       : 'clamp(8px, 2.2vw, 11px)';
 
-  const barHeight = preset.heightMm <= 18 ? 44 : preset.heightMm <= 26 ? 56 : 64;
-
   items.forEach((item) => {
-    if (!item.barcode) return;
+    const code = item.barcode || item.sku;
+    if (!code) return;
     const count = item.count && item.count > 0 ? item.count : 1;
-    const dataUrl = generateBarcodeDataUrl(item.barcode, item.barcode, {
-      height: barHeight,
-      quietZone: 12,
-      fontSize: 8.5,
-    });
+    const dataUrl = generateQrCodeDataUrl(code);
 
     for (let i = 0; i < count; i++) {
       totalLabels++;
@@ -316,9 +354,10 @@ export const printBatchBarcodes = (
               ? `<div class="product-price">KSh ${Math.round(Number(item.price)).toLocaleString()}</div>`
               : ''
           }
-          <div class="barcode-wrapper">
-            <img src="${dataUrl}" class="barcode-img" alt="${item.barcode}" />
+          <div class="qr-wrapper">
+            <img src="${dataUrl}" class="qr-img" alt="${code}" />
           </div>
+          <div class="sku-tag">${code}</div>
         </div>
       `;
     }
@@ -456,7 +495,7 @@ export const printBatchBarcodes = (
             flex-shrink: 0;
           }
 
-          .barcode-wrapper {
+          .qr-wrapper {
             width: 100%;
             flex: 1 1 auto;
             display: flex;
@@ -464,19 +503,24 @@ export const printBatchBarcodes = (
             align-items: center;
             overflow: hidden;
             min-height: 0;
-            margin-top: 1px;
+            margin: 1px 0;
           }
 
-          .barcode-img {
-            width: 100%;
+          .qr-img {
             max-width: 100%;
             height: 100%;
             max-height: ${preset.heightMm <= 18 ? '26px' : preset.heightMm <= 26 ? '38px' : '48px'};
             display: block;
             object-fit: contain;
-            image-rendering: -webkit-optimize-contrast;
-            image-rendering: crisp-edges;
             image-rendering: pixelated;
+          }
+
+          .sku-tag {
+            font-size: 7px;
+            font-family: monospace;
+            font-weight: 700;
+            color: #475569;
+            line-height: 1;
           }
 
           @media print {
@@ -496,13 +540,13 @@ export const printBatchBarcodes = (
           <div>
             <h2>${title}</h2>
             <p>
-              Format: <strong>${preset.name}</strong> • Total Labels: <strong>${totalLabels}</strong> (${items.length} products)
+              Format: <strong>${preset.name}</strong> • Mode: <strong>${includePrice ? 'QR Code + Price (KSh)' : 'QR Code Only'}</strong> • Total Labels: <strong>${totalLabels}</strong> (${items.length} products)
             </p>
             <div class="instructions-box">
-              💡 <strong>HP Printer Advice:</strong> In your print dialog, select <strong>Actual Size (Scale: 100%)</strong> rather than "Fit to Page" for exact alignment with pre-cut sticker lines.
+              💡 <strong>Printer Advice:</strong> Select <strong>Actual Size (Scale: 100%)</strong> rather than "Fit to Page" for exact alignment with pre-cut sticker lines.
             </div>
           </div>
-          <button class="print-btn" onclick="window.print()">Print Labels Now</button>
+          <button class="print-btn" onclick="window.print()">Print QR Labels Now</button>
         </div>
 
         <div class="sheet-container">
@@ -515,3 +559,5 @@ export const printBatchBarcodes = (
   `);
   printWindow.document.close();
 };
+
+export const printBatchQrCodes = printBatchBarcodes;

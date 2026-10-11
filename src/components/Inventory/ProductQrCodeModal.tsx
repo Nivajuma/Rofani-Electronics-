@@ -244,10 +244,10 @@ export const ProductQrCodeModal: React.FC<ProductQrCodeModalProps> = ({
         ctx.font = '600 13px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
         ctx.fillText(catVariantText || 'Retail Inventory', canvas.width / 2, nextY + 6);
 
-        // 4. SKU & Barcode Row
+        // 4. SKU & QR Code Row
         ctx.fillStyle = '#334155';
         ctx.font = '700 13px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace';
-        const skuLine = `SKU: ${product.sku}   |   BARCODE: ${product.barcode}`;
+        const skuLine = product.sku ? `SKU: ${product.sku}` : `QR CODE: ${product.barcode}`;
         ctx.fillText(skuLine, canvas.width / 2, nextY + 28);
 
         // 5. Price & Stock Pill Badge Container
@@ -551,7 +551,7 @@ export const ProductQrCodeModal: React.FC<ProductQrCodeModalProps> = ({
               <div className="flex items-center gap-2 text-[10px] font-mono text-slate-400 mt-0.5">
                 <span>SKU: <strong className="text-slate-200">{product.sku}</strong></span>
                 <span>•</span>
-                <span>Barcode: <strong className="text-sky-300">{product.barcode}</strong></span>
+                <span>QR Code: <strong className="text-sky-300">{product.barcode}</strong></span>
               </div>
               <div className="flex items-center gap-3 text-xs mt-1">
                 <span className="font-mono font-bold text-emerald-400 text-xs">
@@ -580,7 +580,7 @@ export const ProductQrCodeModal: React.FC<ProductQrCodeModalProps> = ({
                 title="Includes Item Name, SKU, and Price in KSh on the shelf tag"
               >
                 <Tag className="w-3.5 h-3.5" />
-                <span>Show QR + Price</span>
+                <span>QR Code + Price (KSh)</span>
               </button>
 
               <button

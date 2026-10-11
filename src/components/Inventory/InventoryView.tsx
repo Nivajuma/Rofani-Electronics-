@@ -1458,15 +1458,15 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                 const batchData = filteredProducts.map((p) => ({
                   name: p.name,
                   price: p.sellingPrice,
-                  barcode: p.barcode,
+                  barcode: p.sku || p.barcode,
                   count: 1
                 }));
-                printBatchBarcodes(batchData, `Inventory Barcodes Sheet (${filteredProducts.length} items)`);
+                printBatchBarcodes(batchData, `Inventory QR Codes Catalog (${filteredProducts.length} items)`, true);
               }}
-              className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold px-3.5 py-2 rounded-xl text-xs transition flex items-center gap-1.5 shadow-lg"
-              title="Print 1 barcode label for every item in current inventory view"
+              className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold px-3.5 py-2 rounded-xl text-xs transition flex items-center gap-1.5 shadow-lg cursor-pointer"
+              title="Print 1 QR code label for every item in current inventory view"
             >
-              <Barcode className="w-4 h-4 text-sky-400" /> Print All Barcodes
+              <QrCode className="w-4 h-4 text-sky-400" /> Print All QR Codes
             </button>
           )}
 
@@ -2565,11 +2565,11 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                           <div className="flex items-center gap-1">
                             <button
                               type="button"
-                              onClick={() => printBarcodeLabels(p.name, p.sellingPrice, p.barcode, 12)}
-                              className="p-1.5 hover:bg-slate-800 text-slate-400 hover:text-sky-400 rounded-lg transition cursor-pointer"
-                              title="Print Barcode Labels"
+                              onClick={() => setQrModalProduct(p)}
+                              className="p-1.5 hover:bg-slate-800 text-sky-400 hover:text-sky-300 rounded-lg transition cursor-pointer"
+                              title="Generate & Print QR Code Shelf Tag (QR + Price or QR Only)"
                             >
-                              <Printer className="w-3.5 h-3.5" />
+                              <QrCode className="w-3.5 h-3.5" />
                             </button>
                             <button
                               type="button"
@@ -2753,18 +2753,18 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                         )}
                       </td>
 
-                      {/* Barcode & Print Button */}
+                      {/* SKU / QR Code & Print Shelf Tag Button */}
                       <td className="p-3.5 font-mono">
                         <div className="flex items-center gap-1.5">
                           <span className="bg-slate-950 border border-slate-800 px-2 py-1 rounded text-slate-200 text-[11px]">
-                            {p.barcode}
+                            {p.sku || p.barcode}
                           </span>
                           <button
-                            onClick={() => printBarcodeLabels(p.name, p.sellingPrice, p.barcode, 12)}
-                            title="Print Barcode Labels Sheet"
-                            className="p-1 hover:bg-slate-800 text-slate-400 hover:text-sky-400 rounded transition"
+                            onClick={() => setQrModalProduct(p)}
+                            title="Generate & Print QR Code Shelf Tag"
+                            className="p-1 hover:bg-slate-800 text-sky-400 hover:text-sky-300 rounded transition cursor-pointer"
                           >
-                            <Printer className="w-3.5 h-3.5" />
+                            <QrCode className="w-3.5 h-3.5" />
                           </button>
                         </div>
                       </td>
@@ -3153,17 +3153,20 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                   />
                 </div>
 
-                {/* Barcode & Auto Generator */}
+                {/* Item QR Code Identifier & QR Sheet Printer */}
                 <div className="sm:col-span-2">
                   <div className="flex justify-between items-center mb-1">
-                    <label className="text-slate-300 font-semibold">Barcode Number</label>
+                    <label className="text-slate-300 font-semibold flex items-center gap-1.5">
+                      <QrCode className="w-3.5 h-3.5 text-sky-400" />
+                      <span>Item QR Code Identifier (SKU / Code)</span>
+                    </label>
                     {hasWorkerPermission(currentUser, 'canGenerateBarcode') && (
                       <button
                         type="button"
                         onClick={handleGenerateBarcodeInForm}
-                        className="text-sky-400 hover:underline flex items-center gap-1 font-semibold text-[11px]"
+                        className="text-sky-400 hover:underline flex items-center gap-1 font-semibold text-[11px] cursor-pointer"
                       >
-                        <Sparkles className="w-3.5 h-3.5" /> Auto-Generate Barcode
+                        <Sparkles className="w-3.5 h-3.5" /> Auto-Generate QR Code
                       </button>
                     )}
                   </div>
@@ -3171,6 +3174,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                     <input
                       type="text"
                       required
+                      placeholder="e.g. SKU-88912 or 8901234567891"
                       value={editingProduct.barcode || ''}
                       onChange={(e) =>
                         setEditingProduct((prev) => (prev ? { ...prev, barcode: e.target.value } : prev))
@@ -3181,15 +3185,17 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                       type="button"
                       onClick={() =>
                         printBarcodeLabels(
-                          editingProduct.name || 'Sample',
+                          editingProduct.name || 'Sample Product',
                           editingProduct.sellingPrice || 0,
-                          editingProduct.barcode || '0000',
-                          8
+                          editingProduct.barcode || editingProduct.sku || 'ITEM-001',
+                          8,
+                          true
                         )
                       }
-                      className="bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold px-3 py-2 rounded-xl text-xs flex items-center gap-1.5 whitespace-nowrap"
+                      className="bg-sky-600 hover:bg-sky-500 text-white font-bold px-3 py-2 rounded-xl text-xs flex items-center gap-1.5 whitespace-nowrap shadow-sm cursor-pointer"
+                      title="Print QR Code Stickers with Price"
                     >
-                      <Printer className="w-4 h-4" /> Print Sheet
+                      <QrCode className="w-4 h-4" /> Print QR Sheet
                     </button>
                   </div>
                 </div>

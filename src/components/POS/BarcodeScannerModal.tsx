@@ -70,18 +70,9 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const scannerContainerId = 'html5-qr-code-scanner-viewport';
 
-  // Standard retail formats supported by modern scanners
+  // Optimized solely for QR Code detection to maximize scanning speed, reliability, and battery life
   const formatsToSupport = [
-    Html5QrcodeSupportedFormats.EAN_13,
-    Html5QrcodeSupportedFormats.EAN_8,
-    Html5QrcodeSupportedFormats.CODE_128,
-    Html5QrcodeSupportedFormats.UPC_A,
-    Html5QrcodeSupportedFormats.UPC_E,
-    Html5QrcodeSupportedFormats.CODE_39,
-    Html5QrcodeSupportedFormats.ITF,
-    Html5QrcodeSupportedFormats.CODABAR,
     Html5QrcodeSupportedFormats.QR_CODE,
-    Html5QrcodeSupportedFormats.DATA_MATRIX,
   ];
 
   // Synthesized audio & haptic vibration feedback for successful scans
@@ -377,7 +368,7 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
     } catch (err: any) {
       console.warn('File barcode scan error:', err);
       setPhotoError(
-        'Could not read barcode in photo. Please ensure barcode is in clear focus and well-lit, then try again.'
+        'Could not read QR code in photo. Please ensure QR code is in clear focus and well-lit, then try again.'
       );
     } finally {
       setIsProcessingPhoto(false);
@@ -406,7 +397,7 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
             <div>
               <div className="flex items-center gap-1.5">
                 <h3 className="font-bold text-slate-100 text-sm">
-                  {title || 'Camera Barcode & QR Scanner'}
+                  {title || 'High-Speed Camera QR Code Scanner'}
                 </h3>
                 {scanCount > 0 && (
                   <span className="bg-emerald-950 text-emerald-400 text-[10px] font-mono font-bold px-1.5 py-0.2 rounded border border-emerald-800">
@@ -415,7 +406,7 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
                 )}
               </div>
               <p className="text-[10px] text-slate-400">
-                {subtitle || 'Visual focus green square • Sound & haptic active'}
+                {subtitle || 'Visual focus green square • Optimized for QR detection'}
               </p>
             </div>
           </div>
@@ -576,7 +567,7 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
                       {scanSuccessFlash ? (
                         <span>✓ Scanned: {lastScanned}</span>
                       ) : (
-                        <span>🎯 Align barcode or QR inside Green Square</span>
+                        <span>🎯 Align QR Code inside Green Square</span>
                       )}
                     </span>
                   </div>
@@ -585,7 +576,7 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
                 {/* Bottom Tip */}
                 <div className="text-center">
                   <span className="text-[10px] text-slate-300 bg-slate-950/85 px-2.5 py-1 rounded-lg border border-slate-800">
-                    💡 Hold phone ~15cm (6 inches) away • Audio & Haptic confirm active
+                    💡 Hold camera steady • Optimized for instant QR Code recognition
                   </span>
                 </div>
               </div>
@@ -668,7 +659,7 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
             >
               <Camera className="w-4 h-4 text-sky-400" />
               <span>
-                {isProcessingPhoto ? 'Analyzing Barcode Photo...' : '📸 Snap High-Res Photo to Scan'}
+                {isProcessingPhoto ? 'Analyzing QR Code Photo...' : '📸 Snap High-Res Photo to Scan QR'}
               </span>
             </button>
             {photoError && (
@@ -694,7 +685,7 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
                   ) : (
                     <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
                   )}
-                  <span className="font-mono text-xs font-bold">Code: {lastScanned}</span>
+                  <span className="font-mono text-xs font-bold">QR / SKU: {lastScanned}</span>
                 </div>
                 <span
                   className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
@@ -727,7 +718,7 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
                 </div>
               ) : (
                 <p className="text-[10px] text-amber-300/90 leading-tight">
-                  Barcode read successfully, but no product in your inventory matches this code yet.
+                  QR code read successfully, but no product in your inventory matches this code yet.
                 </p>
               )}
             </div>
@@ -749,15 +740,15 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
             </button>
           </div>
 
-          {/* Manual Barcode Gun / Keyboard Input */}
+          {/* Manual QR Code / SKU Input */}
           <form onSubmit={handleSubmit} className="space-y-1.5 pt-1 border-t border-slate-800">
             <label className="text-xs font-semibold text-slate-300 block">
-              Or Type / Scan with Handheld Barcode Gun:
+              Or Type / Enter Product QR Code or SKU:
             </label>
             <div className="flex gap-2">
               <input
                 type="text"
-                placeholder="Enter barcode e.g. 8901234567891"
+                placeholder="Enter QR payload or SKU e.g. SKU-10023"
                 value={manualBarcode}
                 onChange={(e) => setManualBarcode(e.target.value)}
                 className="w-full bg-slate-950 border border-slate-700/80 rounded-xl px-3 py-2 text-xs text-white font-mono focus:outline-none focus:border-sky-500"
@@ -766,7 +757,7 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
                 type="submit"
                 className="bg-sky-600 hover:bg-sky-500 text-white font-bold px-3.5 py-2 rounded-xl text-xs transition flex items-center gap-1 shrink-0 shadow-md shadow-sky-600/20"
               >
-                <Zap className="w-3.5 h-3.5" /> Add
+                <Zap className="w-3.5 h-3.5" /> Lookup
               </button>
             </div>
           </form>
@@ -775,7 +766,7 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
           {sampleBarcodes && sampleBarcodes.length > 0 && (
             <div className="pt-2 border-t border-slate-800">
               <div className="text-[11px] text-slate-400 mb-1.5 font-semibold">
-                Quick Sample Barcodes (Tap to Test):
+                Quick Sample QR Codes (Tap to Test):
               </div>
               <div className="grid grid-cols-2 gap-1.5 max-h-24 overflow-y-auto">
                 {sampleBarcodes.slice(0, 6).map((item) => (

@@ -40,7 +40,8 @@ import {
   Menu,
   X,
   Printer,
-  Barcode
+  Barcode,
+  QrCode
 } from 'lucide-react';
 import {
   Product,
@@ -2762,10 +2763,10 @@ export default function App() {
               <button
                 id="btn-sidebar-print-barcodes"
                 onClick={() => setShowPrintBarcodesModal(true)}
-                title="Print Barcodes Utility - Batch print labels from scan history & catalog"
+                title="Print QR Codes Utility - Batch print QR labels from scan history & catalog"
                 className="w-full bg-slate-800/90 hover:bg-slate-700 active:scale-95 text-sky-400 hover:text-white font-bold rounded-xl border border-slate-700/80 hover:border-sky-500/50 shadow-sm transition flex items-center justify-center p-2.5 cursor-pointer"
               >
-                <Printer className="w-4 h-4 shrink-0" />
+                <QrCode className="w-4 h-4 shrink-0" />
               </button>
             </div>
           ) : (
@@ -2782,11 +2783,11 @@ export default function App() {
               <button
                 id="btn-sidebar-print-barcodes"
                 onClick={() => setShowPrintBarcodesModal(true)}
-                title="Print Barcodes Utility - Batch print labels from scan history & catalog"
+                title="Print QR Codes Utility - Batch print QR labels from scan history & catalog"
                 className="bg-slate-800/90 hover:bg-slate-700 active:scale-95 text-sky-300 hover:text-white font-bold rounded-xl border border-slate-700/80 hover:border-sky-500/60 shadow-sm transition flex items-center gap-1.5 py-2.5 px-2.5 text-xs shrink-0 cursor-pointer"
               >
-                <Printer className="w-3.5 h-3.5 shrink-0 text-sky-400" />
-                <span className="font-semibold">Print Barcodes</span>
+                <QrCode className="w-3.5 h-3.5 shrink-0 text-sky-400" />
+                <span className="font-semibold">Print QR Labels</span>
               </button>
             </div>
           )}

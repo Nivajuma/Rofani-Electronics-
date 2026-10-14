@@ -2410,21 +2410,31 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
             </div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-              {paginatedProducts.map((p) => {
+              {paginatedProducts.map((p, index) => {
                 const isLow = p.stockQuantity <= p.minStockAlert;
                 const isOut = p.stockQuantity <= 0;
                 const perf = performanceMap[p.id];
                 const margin = calculateProfitMargin(p.costPrice, p.sellingPrice);
+                const isNewest = currentPage === 1 && index === 0 && searchTerm === '' && selectedCategory === 'All' && selectedSubcategory === 'All' && !showLowStockOnly;
 
                 return (
                   <div
                     key={p.id}
-                    className={`bg-slate-900 border border-slate-800 hover:border-slate-700/80 rounded-2xl overflow-hidden shadow-lg hover:shadow-xl transition flex flex-col justify-between group ${
-                      perf ? perf.accentBorderLeft : ''
-                    }`}
+                    className={`bg-slate-900 border rounded-2xl overflow-hidden shadow-lg hover:shadow-xl transition flex flex-col justify-between group ${
+                      isNewest
+                        ? 'border-sky-500/80 ring-2 ring-sky-500/30 shadow-[0_0_25px_rgba(14,165,233,0.25)]'
+                        : 'border-slate-800 hover:border-slate-700/80'
+                    } ${perf ? perf.accentBorderLeft : ''}`}
                   >
                     {/* Card Top: Image & Status Badges */}
                     <div className="relative aspect-video sm:aspect-square bg-slate-950 flex items-center justify-center overflow-hidden border-b border-slate-800/80">
+                      {isNewest && (
+                        <div className="absolute top-2.5 right-2.5 z-20">
+                          <span className="bg-sky-500 text-slate-950 font-black text-[10px] uppercase tracking-wider px-2.5 py-1 rounded-full shadow-lg border border-sky-300 flex items-center gap-1">
+                            <Sparkles className="w-3 h-3 fill-slate-950" /> New Arrival
+                          </span>
+                        </div>
+                      )}
                       {p.imageUrl ? (
                         <>
                           <img
@@ -2670,13 +2680,14 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                   </td>
                 </tr>
               ) : (
-                paginatedProducts.map((p) => {
+                paginatedProducts.map((p, index) => {
                   const isLow = p.stockQuantity <= p.minStockAlert;
                   const isOut = p.stockQuantity <= 0;
                   const perf = performanceMap[p.id];
+                  const isNewest = currentPage === 1 && index === 0 && searchTerm === '' && selectedCategory === 'All' && selectedSubcategory === 'All' && !showLowStockOnly;
 
                   return (
-                    <tr key={p.id} className={`hover:bg-slate-800/50 transition ${perf ? perf.accentBorderLeft : ''} ${perf ? perf.tableRowHighlight : ''}`}>
+                    <tr key={p.id} className={`hover:bg-slate-800/50 transition ${isNewest ? 'bg-sky-950/20' : ''} ${perf ? perf.accentBorderLeft : ''} ${perf ? perf.tableRowHighlight : ''}`}>
                       {/* Photo Thumbnail */}
                       <td className="p-3.5 text-center">
                         {p.imageUrl ? (
@@ -2689,7 +2700,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                               className={`w-11 h-11 rounded-xl object-cover shadow-sm cursor-pointer group-hover/thumb:border-sky-400 group-hover/thumb:scale-105 transition duration-200 ${
                                 repeatedProductIds.has(p.id)
                                   ? 'border-2 border-amber-500 ring-2 ring-amber-500/30'
-                                  : 'border border-slate-700'
+                                  : isNewest ? 'border-2 border-sky-400 ring-2 ring-sky-400/40' : 'border border-slate-700'
                               }`}
                             />
                             {repeatedProductIds.has(p.id) && (
@@ -2724,7 +2735,14 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
 
                       {/* Name & SKU */}
                       <td className="p-3.5">
-                        <div className="font-bold text-slate-100 text-xs">{p.name}</div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-slate-100 text-xs">{p.name}</span>
+                          {isNewest && (
+                            <span className="bg-sky-500 text-slate-950 font-black text-[9px] uppercase tracking-wider px-2 py-0.5 rounded-full shadow border border-sky-300 flex items-center gap-1 shrink-0">
+                              <Sparkles className="w-2.5 h-2.5 fill-slate-950" /> New Arrival
+                            </span>
+                          )}
+                        </div>
                         <div className="text-[10px] text-slate-400 font-mono">
                           SKU: {p.sku} {p.supplierName ? `• ${p.supplierName}` : ''}
                         </div>

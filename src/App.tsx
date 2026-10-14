@@ -114,6 +114,7 @@ import { AIAssistantWidget } from './components/AI/AIAssistantWidget';
 import { CloudSyncModal } from './components/CloudSync/CloudSyncModal';
 import { PrintBarcodesUtilityModal } from './components/Inventory/PrintBarcodesUtilityModal';
 import { ItemAuditMiniPage } from './components/Inventory/ItemAuditMiniPage';
+import { StockAlertNotificationModal } from './components/Inventory/StockAlertNotificationModal';
 import { CameraStartupPrompt } from './components/Common/CameraStartupPrompt';
 import { formatKSh } from './utils/currency';
 import {
@@ -565,6 +566,8 @@ export default function App() {
   useEffect(() => {
     safeSetJSON('retail_pos_show_store_modal', showStoreManagerModal);
   }, [showStoreManagerModal]);
+
+  const [showStockAlertModal, setShowStockAlertModal] = useState<boolean>(false);
 
   const [showAiAssistantModal, setShowAiAssistantModal] = useState<boolean>(() =>
     safeGetJSON<boolean>('retail_pos_show_ai_modal', false, (val) => typeof val === 'boolean')
@@ -3335,6 +3338,25 @@ export default function App() {
             {/* Real-Time Network & Offline Status Indicator */}
             <NetworkStatusBadge onClick={() => setShowCloudSyncModal(true)} />
 
+            {/* Stock Alert & Daily Digest Bell Button */}
+            <button
+              onClick={() => setShowStockAlertModal(true)}
+              title="Stock Alert & Daily Email Digest Center"
+              className={`relative px-3 py-2 rounded-xl border transition flex items-center gap-1.5 text-xs font-bold shadow-sm shrink-0 cursor-pointer ${
+                lowStockCount > 0
+                  ? 'bg-amber-50 hover:bg-amber-100 text-amber-950 border-amber-300 animate-pulse'
+                  : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200'
+              }`}
+            >
+              <Bell className={`w-4 h-4 ${lowStockCount > 0 ? 'text-amber-600' : 'text-slate-500'}`} />
+              <span>Stock Alerts</span>
+              {lowStockCount > 0 && (
+                <span className="bg-red-600 text-white text-[10px] font-extrabold px-1.5 py-0.2 rounded-full shadow-sm">
+                  {lowStockCount}
+                </span>
+              )}
+            </button>
+
             {/* Direct "+ New Sale" Button in Top Header */}
             <button
               id="btn-top-new-sale"
@@ -3680,6 +3702,24 @@ export default function App() {
         transactions={transactions}
         onOpenPredictiveRestock={() => {
           setActiveTab('inventory');
+        }}
+      />
+      {/* Stock Alert & Daily Digest Email Notification Center Modal */}
+      <StockAlertNotificationModal
+        isOpen={showStockAlertModal}
+        onClose={() => setShowStockAlertModal(false)}
+        products={products}
+        onRestockClick={(p) => {
+          setShowStockAlertModal(false);
+          setActiveTab('inventory');
+          // Select product or trigger restock modal
+          setSelectedHistoryProduct(p);
+          setShowHistoryModal(true);
+        }}
+        onViewInventoryProduct={(p) => {
+          setShowStockAlertModal(false);
+          setActiveTab('inventory');
+          setInventoryLowStockOnly(true);
         }}
       />
       {/* Role Authorization Modal for Sensitive Operations (Modifying Inventory, Deleting Expenses, Stock Count Adjustment) */}

@@ -24,7 +24,8 @@ import {
   WifiOff,
   Smartphone,
   Download,
-  Building2
+  Building2,
+  Bell
 } from 'lucide-react';
 import { User, Role, StoreLocation } from '../types';
 
@@ -44,6 +45,7 @@ interface HeaderProps {
   stores?: StoreLocation[];
   activeStoreId?: string;
   onOpenStoreManager?: () => void;
+  onOpenStockAlerts?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -62,6 +64,7 @@ export const Header: React.FC<HeaderProps> = ({
   stores = [],
   activeStoreId,
   onOpenStoreManager,
+  onOpenStockAlerts,
 }) => {
   const [showRoleMenu, setShowRoleMenu] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -267,6 +270,27 @@ export const Header: React.FC<HeaderProps> = ({
               >
                 <Smartphone className="w-3.5 h-3.5" />
                 <span className="hidden md:inline">Install App</span>
+              </button>
+            )}
+
+            {/* Stock Alert Notification Center Bell */}
+            {onOpenStockAlerts && (
+              <button
+                onClick={onOpenStockAlerts}
+                title="Stock Alert & Daily Email Digest Center"
+                className={`relative p-2 rounded-xl border transition flex items-center gap-1.5 ${
+                  lowStockCount > 0
+                    ? 'bg-amber-500/15 border-amber-500/40 text-amber-300 hover:bg-amber-500/25 animate-pulse'
+                    : 'bg-slate-800 border-slate-700 text-slate-300 hover:text-white hover:bg-slate-750'
+                }`}
+              >
+                <Bell className="w-4 h-4" />
+                {lowStockCount > 0 && (
+                  <span className="absolute -top-1.5 -right-1.5 bg-red-500 text-white text-[10px] font-extrabold w-5 h-5 rounded-full flex items-center justify-center shadow-md border border-slate-900">
+                    {lowStockCount}
+                  </span>
+                )}
+                <span className="hidden xl:inline text-xs font-bold">Alerts</span>
               </button>
             )}
 

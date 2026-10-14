@@ -221,6 +221,38 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
     setTimeout(() => setCsvToast(null), 4000);
   };
 
+  // Today's immediate business insights calculations
+  const todayTransactionsList = useMemo(() => {
+    const now = new Date();
+    return transactions.filter((tx) => {
+      const d = new Date(tx.date);
+      return d.toDateString() === now.toDateString();
+    });
+  }, [transactions]);
+
+  const todayTotalTransactions = todayTransactionsList.length;
+  const todayTotalRevenue = todayTransactionsList.reduce((sum, tx) => sum + tx.grandTotal, 0);
+
+  const todayTopSellingCategory = useMemo(() => {
+    const catRevenueMap: Record<string, number> = {};
+    todayTransactionsList.forEach((tx) => {
+      tx.items.forEach((it) => {
+        const cat = it.product.category || 'General';
+        catRevenueMap[cat] = (catRevenueMap[cat] || 0) + it.total;
+      });
+    });
+
+    let topCat = 'None Yet';
+    let maxRev = -1;
+    Object.entries(catRevenueMap).forEach(([cat, rev]) => {
+      if (rev > maxRev) {
+        maxRev = rev;
+        topCat = cat;
+      }
+    });
+    return topCat;
+  }, [todayTransactionsList]);
+
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
       {/* CSV Archival Download Toast Alert */}
@@ -381,6 +413,49 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                 </div>
               </>
             )}
+          </div>
+        </div>
+      </div>
+
+      {/* TODAY'S BUSINESS INSIGHTS SUMMARY CARD */}
+      <div className="bg-gradient-to-r from-sky-950/80 via-slate-900 to-emerald-950/70 border border-sky-500/30 rounded-3xl p-5 shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <div className="p-3 bg-sky-500/20 border border-sky-500/40 text-sky-400 rounded-2xl">
+            <Sparkles className="w-6 h-6 animate-pulse text-sky-400" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <h3 className="font-extrabold text-sm sm:text-base text-white">Today's Business Insights</h3>
+              <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-[10px] font-mono font-bold px-2 py-0.5 rounded-full">
+                LIVE SUMMARY
+              </span>
+            </div>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Real-time snapshot for {new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' })}
+            </p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-3 gap-3 sm:gap-6 shrink-0">
+          <div className="bg-slate-950/80 border border-slate-800/80 px-4 py-2.5 rounded-2xl text-center">
+            <span className="text-[10px] uppercase font-mono text-slate-400 block mb-0.5">Total Transactions</span>
+            <span className="text-lg sm:text-xl font-black text-sky-400 font-mono">
+              {todayTotalTransactions}
+            </span>
+          </div>
+
+          <div className="bg-slate-950/80 border border-slate-800/80 px-4 py-2.5 rounded-2xl text-center">
+            <span className="text-[10px] uppercase font-mono text-slate-400 block mb-0.5">Total Revenue</span>
+            <span className="text-lg sm:text-xl font-black text-emerald-400 font-mono">
+              KSh {todayTotalRevenue.toLocaleString()}
+            </span>
+          </div>
+
+          <div className="bg-slate-950/80 border border-slate-800/80 px-4 py-2.5 rounded-2xl text-center">
+            <span className="text-[10px] uppercase font-mono text-slate-400 block mb-0.5">Top Selling Category</span>
+            <span className="text-xs sm:text-sm font-black text-amber-300 font-sans truncate max-w-[130px] block mx-auto">
+              {todayTopSellingCategory}
+            </span>
           </div>
         </div>
       </div>

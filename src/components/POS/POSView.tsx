@@ -41,7 +41,9 @@ import {
   ChevronDown,
   ChevronUp,
   Flame,
-  Clock
+  Clock,
+  SlidersHorizontal,
+  Truck
 } from 'lucide-react';
 import { Product, CartItem, Customer, PaymentMethod, PaymentBreakdown, Transaction, User as Employee, BarcodeScanLog } from '../../types';
 import { BarcodeScannerModal } from './BarcodeScannerModal';
@@ -126,6 +128,44 @@ export const POSView: React.FC<POSViewProps> = ({
   useEffect(() => {
     safeSetJSON('retail_pos_pos_mobile_tab', mobileTab);
   }, [mobileTab]);
+
+  const [selectedSupplier, setSelectedSupplier] = useState<string>(() =>
+    safeGetJSON<string>('retail_pos_pos_supplier', 'All', (val) => typeof val === 'string')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_pos_supplier', selectedSupplier);
+  }, [selectedSupplier]);
+
+  const [priceRange, setPriceRange] = useState<string>(() =>
+    safeGetJSON<string>('retail_pos_pos_price_range', 'all', (val) => typeof val === 'string')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_pos_price_range', priceRange);
+  }, [priceRange]);
+
+  const [productAge, setProductAge] = useState<string>(() =>
+    safeGetJSON<string>('retail_pos_pos_product_age', 'all', (val) => typeof val === 'string')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_pos_product_age', productAge);
+  }, [productAge]);
+
+  const [showAdvancedFilters, setShowAdvancedFilters] = useState<boolean>(false);
+
+  const allSuppliers = React.useMemo(() => {
+    const set = new Set<string>();
+    (products || []).forEach((p) => {
+      if (p.supplierName && p.supplierName.trim()) {
+        set.add(p.supplierName.trim());
+      }
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [products]);
+
+  const activeAdvancedCount =
+    (selectedSupplier !== 'All' ? 1 : 0) +
+    (priceRange !== 'all' ? 1 : 0) +
+    (productAge !== 'all' ? 1 : 0);
 
   // Sales Velocity and Margin Performance Map
   const performanceMap = React.useMemo(() => {
@@ -624,7 +664,9 @@ export const POSView: React.FC<POSViewProps> = ({
       p.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       p.sku.toLowerCase().includes(searchTerm.toLowerCase()) ||
       p.barcode.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      p.category.toLowerCase().includes(searchTerm.toLowerCase());
+      p.category.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (p.supplierName && p.supplierName.toLowerCase().includes(searchTerm.toLowerCase()));
+
     const matchesCat =
       selectedCategory === 'All'
         ? true
@@ -633,6 +675,27 @@ export const POSView: React.FC<POSViewProps> = ({
         : selectedCategory === 'Recently Added'
         ? recentlyAddedProductIds.has(p.id)
         : p.category === selectedCategory;
+
+    const matchesSupplier =
+      selectedSupplier === 'All' || (p.supplierName && p.supplierName.trim() === selectedSupplier.trim());
+
+    let matchesPrice = true;
+    if (priceRange === 'under_500') matchesPrice = p.sellingPrice < 500;
+    else if (priceRange === '500_2000') matchesPrice = p.sellingPrice >= 500 && p.sellingPrice <= 2000;
+    else if (priceRange === '2000_10000') matchesPrice = p.sellingPrice > 2000 && p.sellingPrice <= 10000;
+    else if (priceRange === 'over_10000') matchesPrice = p.sellingPrice > 10000;
+
+    let matchesAge = true;
+    if (productAge !== 'all' && p.createdAt) {
+      const createdTime = new Date(p.createdAt).getTime();
+      const diffMs = Date.now() - createdTime;
+      const diffDays = diffMs / (1000 * 60 * 60 * 24);
+      if (productAge === 'today') matchesAge = diffDays <= 1;
+      else if (productAge === '7_days') matchesAge = diffDays <= 7;
+      else if (productAge === '30_days') matchesAge = diffDays <= 30;
+      else if (productAge === '90_days') matchesAge = diffDays <= 90;
+      else if (productAge === 'older_90') matchesAge = diffDays > 90;
+    }
 
     let matchesPerf = true;
     const perf = performanceMap[p.id];
@@ -646,7 +709,7 @@ export const POSView: React.FC<POSViewProps> = ({
       matchesPerf = perf?.tier === 'low_sales_high_profit';
     }
 
-    return matchesSearch && matchesCat && matchesPerf;
+    return matchesSearch && matchesCat && matchesSupplier && matchesPrice && matchesAge && matchesPerf;
   });
 
   // Add Item to Cart
@@ -1335,6 +1398,103 @@ export const POSView: React.FC<POSViewProps> = ({
                 </button>
               </div>
             )}
+
+            {/* Advanced Filters Toggle & Collapsible Panel */}
+            <div className="pt-1">
+              <div className="flex items-center justify-between">
+                <button
+                  type="button"
+                  onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition border ${
+                    activeAdvancedCount > 0
+                      ? 'bg-sky-950 text-sky-300 border-sky-700/80 shadow-sm'
+                      : 'bg-slate-950 text-slate-400 hover:text-slate-200 border-slate-800'
+                  }`}
+                >
+                  <SlidersHorizontal className="w-3.5 h-3.5 text-sky-400" />
+                  <span>Advanced Filters</span>
+                  {activeAdvancedCount > 0 && (
+                    <span className="bg-sky-500 text-slate-950 px-1.5 py-0.2 rounded-full text-[10px] font-extrabold">
+                      {activeAdvancedCount}
+                    </span>
+                  )}
+                </button>
+
+                {activeAdvancedCount > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedSupplier('All');
+                      setPriceRange('all');
+                      setProductAge('all');
+                    }}
+                    className="text-[11px] text-slate-400 hover:text-white underline transition"
+                  >
+                    Reset Advanced
+                  </button>
+                )}
+              </div>
+
+              {showAdvancedFilters && (
+                <div className="mt-2.5 p-3 bg-slate-950 border border-slate-800 rounded-xl grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-400 mb-1 flex items-center gap-1">
+                      <Truck className="w-3 h-3 text-sky-400" />
+                      <span>Supplier Name</span>
+                    </label>
+                    <select
+                      value={selectedSupplier}
+                      onChange={(e) => setSelectedSupplier(e.target.value)}
+                      className="w-full bg-slate-900 border border-slate-700 text-white text-xs px-2.5 py-1.5 rounded-lg focus:outline-none focus:border-sky-500"
+                    >
+                      <option value="All">All Suppliers ({allSuppliers.length})</option>
+                      {allSuppliers.map((sup) => (
+                        <option key={sup} value={sup}>
+                          {sup}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-400 mb-1 flex items-center gap-1">
+                      <DollarSign className="w-3 h-3 text-emerald-400" />
+                      <span>Price Range (KSh)</span>
+                    </label>
+                    <select
+                      value={priceRange}
+                      onChange={(e) => setPriceRange(e.target.value)}
+                      className="w-full bg-slate-900 border border-slate-700 text-white text-xs px-2.5 py-1.5 rounded-lg focus:outline-none focus:border-sky-500"
+                    >
+                      <option value="all">All Prices</option>
+                      <option value="under_500">Under KSh 500</option>
+                      <option value="500_2000">KSh 500 - 2,000</option>
+                      <option value="2000_10000">KSh 2,000 - 10,000</option>
+                      <option value="over_10000">Over KSh 10,000</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-400 mb-1 flex items-center gap-1">
+                      <Calendar className="w-3 h-3 text-amber-400" />
+                      <span>Product Age</span>
+                    </label>
+                    <select
+                      value={productAge}
+                      onChange={(e) => setProductAge(e.target.value)}
+                      className="w-full bg-slate-900 border border-slate-700 text-white text-xs px-2.5 py-1.5 rounded-lg focus:outline-none focus:border-sky-500"
+                    >
+                      <option value="all">All Time</option>
+                      <option value="today">Added Today (24h)</option>
+                      <option value="7_days">Last 7 Days</option>
+                      <option value="30_days">Last 30 Days</option>
+                      <option value="90_days">Last 90 Days</option>
+                      <option value="older_90">Older than 90 Days</option>
+                    </select>
+                  </div>
+                </div>
+              )}
+            </div>
 
             {/* Quick action tools row */}
             <div className="flex items-center justify-between gap-2 flex-wrap sm:flex-nowrap">

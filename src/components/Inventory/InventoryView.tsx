@@ -3903,6 +3903,61 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 focus:outline-none focus:border-sky-500"
                   />
                 </div>
+
+                {/* Bulk Barcode Image Generator & PDF Label Download Integration */}
+                <div className="sm:col-span-2 bg-slate-950/90 border border-sky-900/60 rounded-2xl p-4 space-y-3 shadow-lg">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className="p-2 bg-sky-950/80 text-sky-400 rounded-xl border border-sky-800/80">
+                        <QrCode className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <h4 className="font-bold text-slate-200 text-xs">Barcode & PDF Label Generator</h4>
+                        <p className="text-[11px] text-slate-400">Instantly generate barcodes and download printable PDF sheets for this product or newly added stock</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const code = editingProduct.sku || editingProduct.barcode || generateAutoBarcode();
+                          if (!editingProduct.sku && !editingProduct.barcode) {
+                            setEditingProduct(prev => prev ? { ...prev, sku: code, barcode: code } : prev);
+                          }
+                          printBatchBarcodes(
+                            [{ name: editingProduct.name || 'New Product', price: editingProduct.sellingPrice || 0, barcode: code, count: 1 }],
+                            `${editingProduct.name || 'Product'} Barcode Label`,
+                            true
+                          );
+                        }}
+                        className="bg-sky-600 hover:bg-sky-500 text-white font-bold px-3 py-1.5 rounded-xl text-xs flex items-center gap-1.5 transition shadow-sm cursor-pointer"
+                        title="Download printable PDF label for this item"
+                      >
+                        <Download className="w-3.5 h-3.5" /> Download PDF Label
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const batchData = products.slice(0, 20).map(p => ({
+                            name: p.name,
+                            price: p.sellingPrice,
+                            barcode: p.sku || p.barcode,
+                            count: 1
+                          }));
+                          printBatchBarcodes(batchData, `Inventory Bulk Barcode Labels (${products.length} Items)`, true);
+                        }}
+                        className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold px-3 py-1.5 rounded-xl text-xs flex items-center gap-1.5 transition shadow-sm cursor-pointer"
+                        title="Download bulk PDF sheets for all recent inventory products"
+                      >
+                        <Layers className="w-3.5 h-3.5 text-sky-400" /> Bulk PDF Sheet
+                      </button>
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between text-[11px] text-slate-400 bg-slate-900/80 px-3 py-2 rounded-xl border border-slate-800 font-mono">
+                    <span>SKU / Barcode: <strong className="text-sky-300">{editingProduct.sku || editingProduct.barcode || 'Will auto-generate on save'}</strong></span>
+                    <span>Retail Price: <strong className="text-emerald-400">KSh {editingProduct.sellingPrice || 0}</strong></span>
+                  </div>
+                </div>
               </div>
             </div>
 

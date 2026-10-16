@@ -1774,6 +1774,43 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
         </div>
       )}
 
+      {/* Low Stock Alert Notifications Banner */}
+      {products.filter(p => p.stockQuantity <= (p.minStockAlert ?? 5)).length > 0 && (
+        <div className="bg-gradient-to-r from-amber-950/90 via-slate-900 to-red-950/90 border border-amber-500/80 p-4 rounded-2xl shadow-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-amber-200">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 bg-amber-500/20 text-amber-400 rounded-xl border border-amber-500/40 shrink-0">
+              <AlertTriangle className="w-5 h-5 animate-pulse text-amber-400" />
+            </div>
+            <div>
+              <h4 className="font-bold text-sm text-amber-100 flex items-center gap-2">
+                <span>Low Stock Alert Notifications</span>
+                <span className="bg-amber-500 text-slate-950 text-[10px] font-extrabold px-2 py-0.5 rounded-full">
+                  {products.filter(p => p.stockQuantity <= (p.minStockAlert ?? 5)).length} items require reordering
+                </span>
+              </h4>
+              <p className="text-xs text-amber-300/80 mt-0.5">
+                Inventory stock levels have fallen to or below alert thresholds. Use 1-Click Quick Restock to immediately replenish inventory.
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={() => setShowPredictiveRestockModal(true)}
+              className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold px-4 py-2.5 rounded-xl text-xs transition flex items-center gap-1.5 shadow-lg shadow-amber-500/20 cursor-pointer"
+            >
+              <Package className="w-4 h-4 text-slate-950" />
+              <span>Predictive Restock Center ({products.filter(p => p.stockQuantity <= (p.minStockAlert ?? 5)).length})</span>
+            </button>
+            <button
+              onClick={() => setShowLowStockOnly(true)}
+              className="bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold px-3 py-2.5 rounded-xl text-xs transition border border-slate-700 cursor-pointer"
+            >
+              View Low Stock Only
+            </button>
+          </div>
+        </div>
+      )}
+
       {inventoryViewMode === 'excel' ? (
         <ExcelSpreadsheetView
           products={products}
@@ -2708,10 +2745,21 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
 
                       {/* Store Manager QR Code Generator Button & Actions */}
                       <div className="space-y-2 pt-1">
+                        {p.stockQuantity <= p.minStockAlert && (
+                          <button
+                            type="button"
+                            onClick={() => handleQuickRestockProduct(p.id, 10, 'Quick restock from card alert')}
+                            className="w-full py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center justify-center gap-1.5 transition shadow-sm cursor-pointer"
+                            title="Quick Restock (+10 units)"
+                          >
+                            <Package className="w-4 h-4" />
+                            <span>Quick Restock (+10)</span>
+                          </button>
+                        )}
                         <button
                           type="button"
                           onClick={() => setQrModalProduct(p)}
-                          className="w-full py-2.5 px-3 rounded-xl bg-sky-500/10 hover:bg-sky-500/20 text-sky-300 hover:text-white border border-sky-500/30 hover:border-sky-400 text-xs font-extrabold flex items-center justify-center gap-2 transition shadow-sm cursor-pointer active:scale-95 group/btn"
+                          className="w-full py-2 px-3 rounded-xl bg-sky-500/10 hover:bg-sky-500/20 text-sky-300 hover:text-white border border-sky-500/30 hover:border-sky-400 text-xs font-extrabold flex items-center justify-center gap-2 transition shadow-sm cursor-pointer active:scale-95 group/btn"
                           title="Generate Store Manager QR Code: Scan to view item history, stock level & recent restock batches"
                         >
                           <QrCode className="w-4 h-4 text-sky-400 group-hover/btn:scale-110 transition" />

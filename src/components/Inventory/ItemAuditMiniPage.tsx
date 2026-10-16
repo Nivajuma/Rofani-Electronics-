@@ -34,6 +34,15 @@ import { calculateProfitMargin } from '../../utils/margin';
 import { ProductQrCodeModal } from './ProductQrCodeModal';
 import { exportItemAuditReportPDF } from '../../utils/pdfGenerator';
 import QRCode from 'qrcode';
+import {
+  ResponsiveContainer,
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+} from 'recharts';
 
 interface ItemAuditMiniPageProps {
   product: Product;
@@ -119,6 +128,63 @@ export const ItemAuditMiniPage: React.FC<ItemAuditMiniPageProps> = ({
   const marginInfo = calculateProfitMargin(product.costPrice, product.sellingPrice);
   const isOutOfStock = product.stockQuantity <= 0;
   const isLowStock = product.stockQuantity <= product.minStockAlert && !isOutOfStock;
+
+  // 30-Day Stock Level Trend calculation
+  const stockTrendData = useMemo(() => {
+    const today = new Date();
+    const salesByDate = new Map<string, number>();
+    productSales.forEach(sale => {
+      const d = sale.date.slice(0, 10);
+      salesByDate.set(d, (salesByDate.get(d) || 0) + sale.quantitySold);
+    });
+
+    const restocksByDate = new Map<string, number>();
+    productBatches.forEach(batch => {
+      const d = batch.date.slice(0, 10);
+      restocksByDate.set(d, (restocksByDate.get(d) || 0) + batch.quantityAdded);
+    });
+
+    const stockMap = new Map<string, number>();
+    let current = product.stockQuantity;
+    const todayStr = today.toISOString().slice(0, 10);
+    stockMap.set(todayStr, current);
+
+    for (let i = 0; i < 30; i++) {
+      const currDate = new Date(today);
+      currDate.setDate(today.getDate() - i);
+      const currStr = currDate.toISOString().slice(0, 10);
+      
+      const prevDate = new Date(currDate);
+      prevDate.setDate(currDate.getDate() - 1);
+      const prevStr = prevDate.toISOString().slice(0, 10);
+
+      const soldOnCurr = salesByDate.get(currStr) || 0;
+      const restockOnCurr = restocksByDate.get(currStr) || 0;
+
+      const stockOnCurr = stockMap.get(currStr) !== undefined ? stockMap.get(currStr)! : current;
+      const stockOnPrev = Math.max(0, stockOnCurr + soldOnCurr - restockOnCurr);
+      stockMap.set(prevStr, stockOnPrev);
+      current = stockOnPrev;
+    }
+
+    const result = [];
+    for (let i = 29; i >= 0; i--) {
+      const d = new Date(today);
+      d.setDate(today.getDate() - i);
+      const dateStr = d.toISOString().slice(0, 10);
+      const displayDate = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      
+      result.push({
+        date: displayDate,
+        dateStr,
+        stock: stockMap.get(dateStr) ?? product.stockQuantity,
+        sold: salesByDate.get(dateStr) || 0,
+        restocked: restocksByDate.get(dateStr) || 0,
+      });
+    }
+
+    return result;
+  }, [product.stockQuantity, productSales, productBatches]);
 
   // Direct audit URL
   const auditUrl = useMemo(() => {
@@ -617,6 +683,82 @@ export const ItemAuditMiniPage: React.FC<ItemAuditMiniPageProps> = ({
                   {totalRestockedUnits} {product.unit}
                 </div>
                 <span className="text-[10px] text-slate-500 block mt-0.5">{productBatches.length} supply shipments</span>
+              </div>
+            </div>
+
+            {/* 30-Day Stock Level Trend Line Chart */}
+            <div className="bg-slate-900 border border-slate-800 p-5 rounded-3xl space-y-4 shadow-xl">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+                <div>
+                  <h3 className="text-sm font-black uppercase tracking-wider text-white flex items-center gap-2">
+                    <TrendingUp className="w-4 h-4 text-sky-400" />
+                    <span>30-Day Stock Level Trend & Consumption Patterns</span>
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Daily inventory balance and stock movement over the past 30 days
+                  </p>
+                </div>
+                <div className="flex items-center gap-3 text-xs font-mono">
+                  <span className="flex items-center gap-1.5 text-sky-300">
+                    <span className="w-3 h-1 bg-sky-400 rounded-full inline-block"></span> Stock Level ({product.unit})
+                  </span>
+                </div>
+              </div>
+
+              <div className="h-64 w-full pt-2">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={stockTrendData} margin={{ top: 10, right: 10, left: -15, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
+                    <XAxis 
+                      dataKey="date" 
+                      stroke="#64748b" 
+                      fontSize={11} 
+                      tickLine={false} 
+                      axisLine={{ stroke: '#334155' }}
+                    />
+                    <YAxis 
+                      stroke="#64748b" 
+                      fontSize={11} 
+                      tickLine={false} 
+                      axisLine={{ stroke: '#334155' }}
+                      allowDecimals={false}
+                    />
+                    <Tooltip 
+                      content={({ active, payload, label }) => {
+                        if (active && payload && payload.length) {
+                          const data = payload[0].payload;
+                          return (
+                            <div className="bg-slate-900 border border-slate-700 p-3 rounded-xl shadow-xl text-xs space-y-1">
+                              <p className="font-bold text-white font-mono">{label}</p>
+                              <p className="text-sky-400 font-mono">
+                                Stock Level: <strong>{data.stock} {product.unit}</strong>
+                              </p>
+                              {data.sold > 0 && (
+                                <p className="text-rose-400 font-mono">
+                                  Units Sold: <strong>-{data.sold}</strong>
+                                </p>
+                              )}
+                              {data.restocked > 0 && (
+                                <p className="text-emerald-400 font-mono">
+                                  Restocked: <strong>+{data.restocked}</strong>
+                                </p>
+                              )}
+                            </div>
+                          );
+                        }
+                        return null;
+                      }}
+                    />
+                    <Line 
+                      type="monotone" 
+                      dataKey="stock" 
+                      stroke="#38bdf8" 
+                      strokeWidth={3} 
+                      dot={{ r: 3, fill: '#38bdf8' }} 
+                      activeDot={{ r: 6, fill: '#0284c7', stroke: '#bae6fd', strokeWidth: 2 }} 
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
               </div>
             </div>
 

@@ -125,6 +125,7 @@ export interface Product {
   costPrice: number;
   buyingPrice?: number;
   sellingPrice: number;
+  profitMargin?: number;
   stockQuantity: number;
   stock?: number;
   minStockAlert: number;

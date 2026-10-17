@@ -33,6 +33,7 @@ import {
   ChevronDown,
   ChevronUp,
   Tag,
+  Percent,
   Eye,
   ZoomIn,
   Check,
@@ -251,21 +252,14 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
 
     // Also record restock / adjustment in restock records if prop available
     if (onAddRestock) {
-      const restockItem: RestockRecord = {
-        id: `restock-${Date.now()}`,
-        productId: existing.id,
-        productName: existing.name,
-        quantityAdded: addedQuantity,
-        unitCost: existing.costPrice || existing.buyingPrice || 0,
-        totalCost: addedQuantity * (existing.costPrice || existing.buyingPrice || 0),
-        supplierName: existing.supplierName || 'General Stock Adjustment',
-        supplierId: existing.supplierId,
-        date: new Date().toISOString(),
-        receivedBy: currentUser ? `${currentUser.name} (${currentUser.role})` : 'Store Manager',
-        batchNo: `BATCH-${Date.now().toString().slice(-6)}`,
-        notes: `Reason: ${reason}`
-      };
-      onAddRestock(restockItem);
+      onAddRestock(
+        existing.id,
+        addedQuantity,
+        existing.costPrice || existing.buyingPrice || 0,
+        existing.supplierName || 'General Stock Adjustment',
+        `BATCH-${Date.now().toString().slice(-6)}`,
+        `Reason: ${reason}`
+      );
     }
   };
 
@@ -1274,6 +1268,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
       description: '',
       costPrice: '' as any,
       sellingPrice: '' as any,
+      profitMargin: 30,
       stockQuantity: '' as any,
       minStockAlert: '' as any,
       unit: 'pcs',
@@ -1305,6 +1300,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
       ...p,
       costPrice: (p.costPrice === 0 || (p.costPrice as any) === '0' ? '' : p.costPrice) as any,
       sellingPrice: (p.sellingPrice === 0 || (p.sellingPrice as any) === '0' ? '' : p.sellingPrice) as any,
+      profitMargin: p.profitMargin !== undefined ? p.profitMargin : (p.costPrice && p.costPrice > 0 ? Math.round(((p.sellingPrice - p.costPrice) / p.costPrice) * 100) : 30),
       stockQuantity: (p.stockQuantity === 0 || (p.stockQuantity as any) === '0' ? '' : p.stockQuantity) as any,
       minStockAlert: (p.minStockAlert === 0 || (p.minStockAlert as any) === '0' ? '' : p.minStockAlert) as any,
     });
@@ -1377,6 +1373,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
       supplierName: finalSupplierName,
       costPrice: parseNum(editingProduct.costPrice, 0),
       sellingPrice: parseNum(editingProduct.sellingPrice, 0),
+      profitMargin: parseNum(editingProduct.profitMargin, 30),
       stockQuantity: parseIntNum(editingProduct.stockQuantity, 0),
       minStockAlert: parseIntNum(editingProduct.minStockAlert, 0),
     };
@@ -3482,7 +3479,10 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                         return;
                       }
                       val = val.replace(/^0+(?=\d)/, '');
-                      setEditingProduct((prev) => (prev ? { ...prev, costPrice: val as any } : prev));
+                      const costNum = parseFloat(val) || 0;
+                      const margin = parseFloat(String(editingProduct.profitMargin)) || 30;
+                      const newSelling = costNum > 0 ? Number((costNum * (1 + margin / 100)).toFixed(2)) : editingProduct.sellingPrice;
+                      setEditingProduct((prev) => (prev ? { ...prev, costPrice: val as any, sellingPrice: newSelling } : prev));
                     }}
                     onBlur={(e) => {
                       const val = String(e.target.value).trim();
@@ -3490,13 +3490,81 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                         setEditingProduct((prev) => (prev ? { ...prev, costPrice: '' as any } : prev));
                       } else {
                         const parsed = parseFloat(val);
+                        const validCost = isNaN(parsed) ? 0 : Math.max(0, parsed);
+                        const margin = parseFloat(String(editingProduct.profitMargin)) || 30;
+                        const newSelling = validCost > 0 ? Number((validCost * (1 + margin / 100)).toFixed(2)) : editingProduct.sellingPrice;
                         setEditingProduct((prev) =>
-                          prev ? { ...prev, costPrice: isNaN(parsed) ? ('' as any) : Math.max(0, parsed) } : prev
+                          prev ? { ...prev, costPrice: validCost, sellingPrice: newSelling } : prev
                         );
                       }
                     }}
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 font-mono focus:outline-none focus:border-sky-500"
                   />
+                </div>
+
+                {/* Profit Margin (%) Calculator Widget */}
+                <div className="sm:col-span-2 bg-slate-950/80 border border-slate-800 p-3.5 rounded-2xl space-y-3">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
+                      <Percent className="w-3.5 h-3.5 text-sky-400" />
+                      <span>Automated Profit Margin / Markup (%)</span>
+                    </label>
+                    <div className="flex items-center gap-1 text-[10px] text-slate-400 font-mono flex-wrap">
+                      <span>Quick Markup:</span>
+                      {[20, 30, 40, 50, 100].map((m) => (
+                        <button
+                          key={m}
+                          type="button"
+                          onClick={() => {
+                            const cost = parseFloat(String(editingProduct.costPrice)) || 0;
+                            const newSelling = cost > 0 ? Number((cost * (1 + m / 100)).toFixed(2)) : (editingProduct.sellingPrice || 0);
+                            setEditingProduct((prev) =>
+                              prev ? { ...prev, profitMargin: m, sellingPrice: newSelling } : prev
+                            );
+                          }}
+                          className={`px-2 py-0.5 rounded-lg border text-[10px] font-bold cursor-pointer transition ${
+                            editingProduct.profitMargin === m
+                              ? 'bg-sky-600 text-white border-sky-400'
+                              : 'bg-slate-900 text-slate-300 border-slate-800 hover:border-slate-700'
+                          }`}
+                        >
+                          {m}%
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-[11px] font-semibold text-slate-400 block mb-1">Margin Percentage (%)</label>
+                      <input
+                        type="number"
+                        step="0.1"
+                        placeholder="30"
+                        value={
+                          editingProduct.profitMargin === null || editingProduct.profitMargin === undefined
+                            ? ''
+                            : editingProduct.profitMargin
+                        }
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          const marginNum = val === '' ? 0 : parseFloat(val);
+                          const cost = parseFloat(String(editingProduct.costPrice)) || 0;
+                          const newSelling = cost > 0 ? Number((cost * (1 + (isNaN(marginNum) ? 0 : marginNum) / 100)).toFixed(2)) : (editingProduct.sellingPrice || 0);
+                          setEditingProduct((prev) =>
+                            prev ? { ...prev, profitMargin: val === '' ? ('' as any) : marginNum, sellingPrice: newSelling } : prev
+                          );
+                        }}
+                        className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 font-mono text-sm focus:outline-none focus:border-sky-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[11px] font-semibold text-slate-400 block mb-1">Formula Preview</label>
+                      <div className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-slate-300 font-mono text-xs flex items-center justify-between">
+                        <span>Cost × (1 + Margin%)</span>
+                        <span className="text-emerald-400 font-bold">KSh {(parseFloat(String(editingProduct.costPrice)) || 0).toLocaleString()} + {editingProduct.profitMargin || 30}%</span>
+                      </div>
+                    </div>
+                  </div>
                 </div>
 
                 {/* Selling Price */}
@@ -3518,7 +3586,10 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                         return;
                       }
                       val = val.replace(/^0+(?=\d)/, '');
-                      setEditingProduct((prev) => (prev ? { ...prev, sellingPrice: val as any } : prev));
+                      const sellingNum = parseFloat(val) || 0;
+                      const cost = parseFloat(String(editingProduct.costPrice)) || 0;
+                      const newMargin = cost > 0 ? Number((((sellingNum - cost) / cost) * 100).toFixed(1)) : (editingProduct.profitMargin || 30);
+                      setEditingProduct((prev) => (prev ? { ...prev, sellingPrice: val as any, profitMargin: newMargin } : prev));
                     }}
                     onBlur={(e) => {
                       const val = String(e.target.value).trim();
@@ -3526,8 +3597,11 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                         setEditingProduct((prev) => (prev ? { ...prev, sellingPrice: '' as any } : prev));
                       } else {
                         const parsed = parseFloat(val);
+                        const validSelling = isNaN(parsed) ? 0 : Math.max(0, parsed);
+                        const cost = parseFloat(String(editingProduct.costPrice)) || 0;
+                        const newMargin = cost > 0 ? Number((((validSelling - cost) / cost) * 100).toFixed(1)) : (editingProduct.profitMargin || 30);
                         setEditingProduct((prev) =>
-                          prev ? { ...prev, sellingPrice: isNaN(parsed) ? ('' as any) : Math.max(0, parsed) } : prev
+                          prev ? { ...prev, sellingPrice: validSelling, profitMargin: newMargin } : prev
                         );
                       }
                     }}

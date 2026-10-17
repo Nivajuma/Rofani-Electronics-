@@ -237,7 +237,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     safeSetJSON('retail_pos_inv_show_restock_modal', showPredictiveRestockModal);
   }, [showPredictiveRestockModal]);
 
-  const handleQuickRestockProduct = (productId: string, addedQuantity: number, reason?: string) => {
+  const handleQuickRestockProduct = (productId: string, addedQuantity: number, reason: string = 'Store manager quick restock update') => {
     const existing = products.find((p) => p.id === productId);
     if (!existing) return;
     const currentStock = Number(existing.stockQuantity ?? existing.stock ?? 0);
@@ -248,6 +248,45 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
       updatedAt: new Date().toISOString()
     };
     onSaveProduct(updatedProduct);
+
+    // Also record restock / adjustment in restock records if prop available
+    if (onAddRestock) {
+      const restockItem: RestockRecord = {
+        id: `restock-${Date.now()}`,
+        productId: existing.id,
+        productName: existing.name,
+        quantityAdded: addedQuantity,
+        unitCost: existing.costPrice || existing.buyingPrice || 0,
+        totalCost: addedQuantity * (existing.costPrice || existing.buyingPrice || 0),
+        supplierName: existing.supplierName || 'General Stock Adjustment',
+        supplierId: existing.supplierId,
+        date: new Date().toISOString(),
+        receivedBy: currentUser ? `${currentUser.name} (${currentUser.role})` : 'Store Manager',
+        batchNo: `BATCH-${Date.now().toString().slice(-6)}`,
+        notes: `Reason: ${reason}`
+      };
+      onAddRestock(restockItem);
+    }
+  };
+
+  // Interactive Quick Restock Modal States
+  const [quickRestockModalProduct, setQuickRestockModalProduct] = useState<Product | null>(null);
+  const [quickRestockAddAmount, setQuickRestockAddAmount] = useState<string>('10');
+  const [quickRestockReason, setQuickRestockReason] = useState<string>('Supplier Delivery');
+  const [quickRestockSuccessToast, setQuickRestockSuccessToast] = useState<string | null>(null);
+
+  const handleSaveQuickRestockModal = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!quickRestockModalProduct) return;
+    const addQty = parseInt(quickRestockAddAmount, 10);
+    if (isNaN(addQty) || addQty <= 0) return;
+
+    handleQuickRestockProduct(quickRestockModalProduct.id, addQty, quickRestockReason);
+    setQuickRestockSuccessToast(`Successfully adjusted stock by +${addQty} ${quickRestockModalProduct.unit} for "${quickRestockModalProduct.name}" (Reason: ${quickRestockReason}). Logged to audit trail.`);
+    setTimeout(() => setQuickRestockSuccessToast(null), 5000);
+    setQuickRestockModalProduct(null);
+    setQuickRestockAddAmount('10');
+    setQuickRestockReason('Supplier Delivery');
   };
 
   // Sync state when initialShowLowStockOnly prop changes from parent
@@ -2745,17 +2784,15 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
 
                       {/* Store Manager QR Code Generator Button & Actions */}
                       <div className="space-y-2 pt-1">
-                        {p.stockQuantity <= p.minStockAlert && (
-                          <button
-                            type="button"
-                            onClick={() => handleQuickRestockProduct(p.id, 10, 'Quick restock from card alert')}
-                            className="w-full py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center justify-center gap-1.5 transition shadow-sm cursor-pointer"
-                            title="Quick Restock (+10 units)"
-                          >
-                            <Package className="w-4 h-4" />
-                            <span>Quick Restock (+10)</span>
-                          </button>
-                        )}
+                        <button
+                          type="button"
+                          onClick={() => setQuickRestockModalProduct(p)}
+                          className="w-full py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center justify-center gap-1.5 transition shadow-sm cursor-pointer"
+                          title="Interactive Stock Adjustment / Quick Restock"
+                        >
+                          <Package className="w-4 h-4" />
+                          <span>+ Edit / Add Stock</span>
+                        </button>
                         <button
                           type="button"
                           onClick={() => setQrModalProduct(p)}
@@ -4919,6 +4956,116 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
             onAddRestock={onAddRestock}
             onAdjustStockQuantity={onAdjustStockQuantity}
           />
+        </div>
+      )}
+
+      {/* INTERACTIVE QUICK RESTOCK / STOCK ADJUSTMENT MODAL */}
+      {quickRestockModalProduct && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-md w-full p-6 space-y-5 shadow-2xl relative">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-2xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center justify-center font-bold">
+                  <Package className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-white">Quick Stock Restock & Adjustment</h3>
+                  <p className="text-xs text-slate-400 font-mono">Instant Inventory Balance Update</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setQuickRestockModalProduct(null)}
+                className="p-2 text-slate-400 hover:text-white rounded-xl bg-slate-800 transition cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800 space-y-2">
+              <div className="text-[11px] font-mono text-sky-400 font-bold uppercase">
+                {quickRestockModalProduct.category} {quickRestockModalProduct.subcategory ? `• ${quickRestockModalProduct.subcategory}` : ''}
+              </div>
+              <h4 className="font-bold text-white text-sm">{quickRestockModalProduct.name}</h4>
+              <div className="flex items-center justify-between text-xs font-mono pt-1 border-t border-slate-800/80">
+                <span className="text-slate-400">Current Stock:</span>
+                <span className={quickRestockModalProduct.stockQuantity <= 0 ? 'text-rose-400 font-black' : 'text-emerald-400 font-black'}>
+                  {quickRestockModalProduct.stockQuantity} {quickRestockModalProduct.unit} {quickRestockModalProduct.stockQuantity <= 0 ? '(OUT OF STOCK)' : ''}
+                </span>
+              </div>
+            </div>
+
+            <form onSubmit={handleSaveQuickRestockModal} className="space-y-4">
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-300 block">Select or Enter Quantity to Add</label>
+                <div className="grid grid-cols-4 gap-2">
+                  {['5', '10', '25', '50'].map((val) => (
+                    <button
+                      key={val}
+                      type="button"
+                      onClick={() => setQuickRestockAddAmount(val)}
+                      className={`py-2 rounded-xl text-xs font-mono font-bold transition border cursor-pointer ${
+                        quickRestockAddAmount === val
+                          ? 'bg-emerald-600 border-emerald-500 text-white shadow-md'
+                          : 'bg-slate-950 border-slate-800 text-slate-300 hover:bg-slate-800'
+                      }`}
+                    >
+                      +{val}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-300 block">Custom Quantity Addition</label>
+                <div className="relative">
+                  <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-emerald-400 font-black">+</span>
+                  <input
+                    type="number"
+                    min="1"
+                    value={quickRestockAddAmount}
+                    onChange={(e) => setQuickRestockAddAmount(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-8 pr-3 py-2.5 text-sm text-white font-mono focus:outline-none focus:border-emerald-500"
+                    placeholder="Enter quantity..."
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-300 block">Reason for Adjustment</label>
+                <select
+                  value={quickRestockReason}
+                  onChange={(e) => setQuickRestockReason(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-slate-200 focus:outline-none focus:border-emerald-500 font-medium"
+                >
+                  <option value="Supplier Delivery">Supplier Delivery</option>
+                  <option value="Damaged">Damaged / Write-Off</option>
+                  <option value="Returned">Customer Returned</option>
+                  <option value="Internal Use">Internal Use / Sample</option>
+                  <option value="Physical Count Variance">Physical Count Variance Audit</option>
+                  <option value="Other">Other Adjustment</option>
+                </select>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setQuickRestockModalProduct(null)}
+                  className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-black transition shadow-lg shadow-emerald-600/30 cursor-pointer flex items-center gap-1.5"
+                >
+                  <Package className="w-4 h-4" />
+                  <span>Update Stock Level</span>
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
 

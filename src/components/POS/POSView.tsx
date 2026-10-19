@@ -364,7 +364,7 @@ export const POSView: React.FC<POSViewProps> = ({
       const profitRate = worker.profitShareRate || 15;
       let totalProfit = 0;
       itemsList.forEach((item) => {
-        const itemProfit = ((item.product.sellingPrice || item.unitPrice) - (item.product.costPrice || 0)) * item.quantity;
+        const itemProfit = ((item.unitPrice - item.discount) - (item.product.costPrice || 0)) * item.quantity;
         totalProfit += Math.max(0, itemProfit);
       });
       const amount = Math.round(totalProfit * (profitRate / 100));
@@ -889,6 +889,25 @@ export const POSView: React.FC<POSViewProps> = ({
             ...item,
             discount: safeDiscount,
             total: (item.unitPrice - safeDiscount) * item.quantity,
+          };
+        }
+        return item;
+      })
+    );
+  };
+
+  // Item-level manual custom unit price override (supports higher/negotiated prices or markdowns)
+  const handleUpdateItemUnitPrice = (productId: string, newUnitPrice: number) => {
+    setCart((prev) =>
+      prev.map((item) => {
+        if (item.product.id === productId) {
+          const safePrice = Math.max(0, newUnitPrice);
+          const safeDiscount = Math.min(safePrice, item.discount);
+          return {
+            ...item,
+            unitPrice: safePrice,
+            discount: safeDiscount,
+            total: (safePrice - safeDiscount) * item.quantity,
           };
         }
         return item;
@@ -2406,23 +2425,25 @@ export const POSView: React.FC<POSViewProps> = ({
                       )}
                       <div className="min-w-0 flex-1">
                         <div className="font-semibold text-slate-200 truncate">{item.product.name}</div>
-                        <div className="text-[10px] text-slate-400 font-mono flex items-center gap-1.5 flex-wrap">
-                          {item.discount > 0 ? (
-                            <>
-                              <span className="line-through text-slate-500">
-                                KSh {item.unitPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                              </span>
-                              <span className="text-emerald-400 font-bold">
-                                KSh {(item.unitPrice - item.discount).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                              </span>
-                              <span className="text-[9px] bg-emerald-950/80 text-emerald-300 border border-emerald-800 px-1 rounded font-semibold">
-                                -KSh {item.discount} off
-                              </span>
-                            </>
-                          ) : (
-                            <span>KSh {item.unitPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                        <div className="text-[10px] text-slate-400 font-mono flex items-center gap-2 flex-wrap mt-0.5">
+                          <div className="flex items-center gap-1 bg-slate-900 border border-slate-700/80 px-1.5 py-0.5 rounded-lg">
+                            <span className="text-slate-400 font-bold">KSh</span>
+                            <input
+                              type="number"
+                              min="0"
+                              step="1"
+                              value={item.unitPrice}
+                              onChange={(e) => handleUpdateItemUnitPrice(item.product.id, parseFloat(e.target.value) || 0)}
+                              className="w-20 bg-transparent text-sky-400 font-bold text-xs outline-none font-mono"
+                              title="Custom negotiated selling price (can be higher or lower than baseline retail price)"
+                            />
+                          </div>
+                          {item.discount > 0 && (
+                            <span className="text-emerald-400 font-bold">
+                              Net: KSh {(item.unitPrice - item.discount).toLocaleString(undefined, { minimumFractionDigits: 2 })} (-KSh {item.discount})
+                            </span>
                           )}
-                          <span>/ {item.product.unit} {item.product.sizeCapacity ? `• ${item.product.sizeCapacity}` : ''}</span>
+                          <span className="text-slate-500">/ {item.product.unit} {item.product.sizeCapacity ? `• ${item.product.sizeCapacity}` : ''}</span>
                         </div>
                       </div>
                     </div>
@@ -2929,6 +2950,29 @@ export const POSView: React.FC<POSViewProps> = ({
                 </div>
               </div>
             )}
+
+            {/* Compact Backdate Sale Date Selector */}
+            <div className="bg-slate-900 p-2.5 rounded-xl border border-slate-800 space-y-1">
+              <label className="text-[11px] text-slate-300 font-semibold flex items-center justify-between">
+                <span className="flex items-center gap-1.5">
+                  <Calendar className="w-3.5 h-3.5 text-sky-400" />
+                  <span>Sale Date / Backdate Mode</span>
+                </span>
+                {!hasWorkerPermission(currentUser, 'canBackdateEntries') ? (
+                  <span className="text-[10px] text-amber-400 font-mono">Restricted</span>
+                ) : (
+                  <span className="text-[10px] text-slate-400">Past dates allowed</span>
+                )}
+              </label>
+              <input
+                type="datetime-local"
+                disabled={!hasWorkerPermission(currentUser, 'canBackdateEntries')}
+                value={saleDate}
+                onChange={(e) => setSaleDate(e.target.value)}
+                className="w-full bg-slate-950 border border-slate-800 disabled:opacity-50 text-slate-200 px-2.5 py-1.5 rounded-lg text-xs font-mono outline-none focus:border-sky-500"
+                title="Select date and time for recording past / forgotten sales"
+              />
+            </div>
 
             {/* Quick 1-Tap M-PESA STK Push Prompt Button */}
             <button

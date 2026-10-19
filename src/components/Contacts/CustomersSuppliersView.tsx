@@ -35,9 +35,10 @@ import {
   X,
   Send,
   Check,
-  Share2
+  Share2,
+  Clock
 } from 'lucide-react';
-import { Customer, Supplier, Transaction, Product, User, PaymentMethod } from '../../types';
+import { Customer, Supplier, Transaction, Product, User, PaymentMethod, CashTransaction } from '../../types';
 import { exportCustomerReportPDF, exportSupplierReportPDF } from '../../utils/pdfGenerator';
 import { formatKSh } from '../../utils/currency';
 import { CustomerEditModal } from './CustomerEditModal';
@@ -47,6 +48,7 @@ import { CustomerContactsListModal } from './CustomerContactsListModal';
 import { SupplierEditModal } from './SupplierEditModal';
 import { SupplierPaymentModal } from './SupplierPaymentModal';
 import { SupplierDetailsModal } from './SupplierDetailsModal';
+import { SupplierPaymentHistoryModal } from './SupplierPaymentHistoryModal';
 import { ContactsImportExportModal } from './ContactsImportExportModal';
 import { PhonebookImportModal } from './PhonebookImportModal';
 import { CustomerPromotionGeneratorModal } from '../Marketing/CustomerPromotionGeneratorModal';
@@ -58,6 +60,7 @@ interface CustomersSuppliersViewProps {
   customers: Customer[];
   suppliers: Supplier[];
   transactions: Transaction[];
+  cashTransactions: CashTransaction[];
   products: Product[];
   currentUser: User;
   offers?: OfferDeal[];
@@ -88,6 +91,7 @@ export const CustomersSuppliersView: React.FC<CustomersSuppliersViewProps> = ({
   customers,
   suppliers,
   transactions,
+  cashTransactions,
   products,
   currentUser,
   offers,
@@ -249,6 +253,9 @@ export const CustomersSuppliersView: React.FC<CustomersSuppliersViewProps> = ({
   useEffect(() => {
     safeSetJSON('retail_pos_contacts_view_supp_open', isSupplierDetailsOpen);
   }, [isSupplierDetailsOpen]);
+
+  const [viewingSupplierHistory, setViewingSupplierHistory] = useState<Supplier | null>(null);
+  const [isSupplierHistoryOpen, setIsSupplierHistoryOpen] = useState(false);
 
   const [isImportExportOpen, setIsImportExportOpen] = useState(false);
   const [isPhonebookModalOpen, setIsPhonebookModalOpen] = useState(false);
@@ -1655,6 +1662,17 @@ export const CustomersSuppliersView: React.FC<CustomersSuppliersViewProps> = ({
 
                               <button
                                 onClick={() => {
+                                  setViewingSupplierHistory(s);
+                                  setIsSupplierHistoryOpen(true);
+                                }}
+                                title="View Supplier Payment History"
+                                className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-sky-400 rounded-xl text-[11px] font-bold transition flex items-center gap-1 shadow-sm cursor-pointer"
+                              >
+                                <Clock className="w-3.5 h-3.5" /> History
+                              </button>
+
+                              <button
+                                onClick={() => {
                                   setViewingSupplier(s);
                                   setIsSupplierDetailsOpen(true);
                                 }}
@@ -1793,6 +1811,20 @@ export const CustomersSuppliersView: React.FC<CustomersSuppliersViewProps> = ({
           setIsSupplierPayOpen(true);
         }}
         onNavigateToRestock={onNavigateToRestock}
+      />
+
+      <SupplierPaymentHistoryModal
+        isOpen={isSupplierHistoryOpen}
+        onClose={() => {
+          setIsSupplierHistoryOpen(false);
+          setViewingSupplierHistory(null);
+        }}
+        supplier={viewingSupplierHistory}
+        cashTransactions={cashTransactions}
+        onOpenPayment={(s) => {
+          setPayingSupplier(s);
+          setIsSupplierPayOpen(true);
+        }}
       />
 
       <ContactsImportExportModal

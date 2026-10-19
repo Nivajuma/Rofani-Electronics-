@@ -2443,6 +2443,7 @@ export default function App() {
           customers={customers}
           suppliers={suppliers}
           transactions={transactions}
+          cashTransactions={cashTransactions}
           products={products}
           currentUser={currentUser}
           offers={offers}

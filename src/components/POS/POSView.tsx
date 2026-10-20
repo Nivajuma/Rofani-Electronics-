@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Search,
   Scan,
@@ -303,6 +303,20 @@ export const POSView: React.FC<POSViewProps> = ({
   useEffect(() => {
     safeSetJSON('retail_pos_pos_discount_input', discountInputVal);
   }, [discountInputVal]);
+
+  const [saleMarkupInputVal, setSaleMarkupInputVal] = useState<string>(() =>
+    safeGetJSON<string>('retail_pos_pos_markup_input', '', (val) => typeof val === 'string')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_pos_markup_input', saleMarkupInputVal);
+  }, [saleMarkupInputVal]);
+
+  const [saleMarkupAmount, setSaleMarkupAmount] = useState<number>(() =>
+    safeGetJSON<number>('retail_pos_pos_markup_amount', 0, (val) => typeof val === 'number')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_pos_markup_amount', saleMarkupAmount);
+  }, [saleMarkupAmount]);
 
   const [taxRate, setTaxRate] = useState<number>(() =>
     safeGetJSON<number>('retail_pos_pos_tax_rate', 0, (val) => typeof val === 'number')
@@ -639,12 +653,38 @@ export const POSView: React.FC<POSViewProps> = ({
     safeSetJSON('retail_pos_pos_sale_notes', saleNotes);
   }, [saleNotes]);
 
+  const getLocalDateString = (d: Date = new Date()) => {
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
   const [saleDate, setSaleDate] = useState<string>(() =>
-    safeGetJSON<string>('retail_pos_pos_sale_date', '', (val) => typeof val === 'string')
+    safeGetJSON<string>(
+      'retail_pos_pos_sale_date',
+      getLocalDateString(),
+      (val) => typeof val === 'string' && val.length === 10
+    ) || getLocalDateString()
   );
   useEffect(() => {
     safeSetJSON('retail_pos_pos_sale_date', saleDate);
   }, [saleDate]);
+
+  const mainDateInputRef = useRef<HTMLInputElement>(null);
+  const modalDateInputRef = useRef<HTMLInputElement>(null);
+
+  const handleSetToday = () => {
+    const todayStr = new Date().toISOString().split('T')[0];
+    setSaleDate(todayStr);
+  };
+
+  const handleSetYesterday = () => {
+    const d = new Date();
+    d.setDate(d.getDate() - 1);
+    const yestStr = d.toISOString().split('T')[0];
+    setSaleDate(yestStr);
+  };
 
   // Consolidate categories from categories prop and all unique categories in products
   const allCategoryNames = React.useMemo(() => {
@@ -920,22 +960,32 @@ export const POSView: React.FC<POSViewProps> = ({
   const itemDiscountsTotal = cart.reduce((sum, item) => sum + (item.discount || 0) * item.quantity, 0);
   const itemsSubtotal = cart.reduce((sum, item) => sum + item.total, 0);
 
+  // Compute sale-level markup
+  let numMarkup = 0;
+  const parsedMarkupInput = parseFloat(saleMarkupInputVal);
+  if (!isNaN(parsedMarkupInput) && parsedMarkupInput > 0) {
+    numMarkup = parsedMarkupInput;
+  } else if (saleMarkupAmount > 0 && !saleMarkupInputVal) {
+    numMarkup = saleMarkupAmount;
+  }
+
   // Compute sale-level manual or percentage discount
   let numDiscount = 0;
   const parsedSaleInput = parseFloat(discountInputVal);
   if (!isNaN(parsedSaleInput) && parsedSaleInput > 0) {
     if (discountMode === 'percentage') {
-      numDiscount = Math.round((parsedSaleInput / 100) * itemsSubtotal);
+      numDiscount = Math.round((parsedSaleInput / 100) * (itemsSubtotal + numMarkup));
     } else {
-      numDiscount = Math.min(itemsSubtotal, parsedSaleInput);
+      numDiscount = Math.min(itemsSubtotal + numMarkup, parsedSaleInput);
     }
   } else if (discountAmount > 0 && !discountInputVal) {
-    numDiscount = Math.min(itemsSubtotal, discountAmount);
+    numDiscount = Math.min(itemsSubtotal + numMarkup, discountAmount);
   }
 
   const totalDiscount = itemDiscountsTotal + numDiscount;
-  const subtotal = grossSubtotal; // Gross subtotal before all discounts
-  const afterDiscountAmount = Math.max(0, itemsSubtotal - numDiscount);
+  const subtotal = grossSubtotal; // Gross subtotal before all markups & discounts
+  const afterMarkupAmount = itemsSubtotal + numMarkup;
+  const afterDiscountAmount = Math.max(0, afterMarkupAmount - numDiscount);
   const taxTotal = afterDiscountAmount * (taxRate / 100);
   const grandTotal = Math.max(0, afterDiscountAmount + taxTotal);
 
@@ -1272,6 +1322,153 @@ export const POSView: React.FC<POSViewProps> = ({
     setNewCustName('');
     setNewCustPhone('');
     setNewCustEmail('');
+  };
+
+  const renderMobileDateSelector = () => {
+    const [yearStr, monthStr, dayStr] = (saleDate || getLocalDateString()).split('-');
+    const currentYear = parseInt(yearStr, 10) || new Date().getFullYear();
+    const currentMonth = parseInt(monthStr, 10) || (new Date().getMonth() + 1);
+    const currentDay = parseInt(dayStr, 10) || new Date().getDate();
+
+    const updateDateParts = (y: number, m: number, d: number) => {
+      const maxD = new Date(y, m, 0).getDate();
+      const safeD = Math.min(Math.max(1, d), maxD);
+      const yS = String(y);
+      const mS = String(m).padStart(2, '0');
+      const dS = String(safeD).padStart(2, '0');
+      setSaleDate(`${yS}-${mS}-${dS}`);
+    };
+
+    const handlePreset = (offsetDays: number) => {
+      const d = new Date();
+      d.setDate(d.getDate() - offsetDays);
+      setSaleDate(getLocalDateString(d));
+    };
+
+    const monthNames = [
+      { val: 1, name: 'Jan' },
+      { val: 2, name: 'Feb' },
+      { val: 3, name: 'Mar' },
+      { val: 4, name: 'Apr' },
+      { val: 5, name: 'May' },
+      { val: 6, name: 'Jun' },
+      { val: 7, name: 'Jul' },
+      { val: 8, name: 'Aug' },
+      { val: 9, name: 'Sep' },
+      { val: 10, name: 'Oct' },
+      { val: 11, name: 'Nov' },
+      { val: 12, name: 'Dec' },
+    ];
+
+    const yearsList = [new Date().getFullYear(), new Date().getFullYear() - 1, new Date().getFullYear() - 2];
+
+    const displayFormatted = (() => {
+      try {
+        const [y, m, d] = (saleDate || '').split('-').map(Number);
+        const dt = new Date(y, m - 1, d);
+        if (isNaN(dt.getTime())) return saleDate;
+        return dt.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+      } catch (_) {
+        return saleDate;
+      }
+    })();
+
+    return (
+      <div className="bg-slate-900 p-3 rounded-2xl border border-slate-800 space-y-2.5">
+        <div className="flex items-center justify-between">
+          <label className="text-xs text-slate-300 font-semibold flex items-center gap-1.5">
+            <Calendar className="w-3.5 h-3.5 text-sky-400" />
+            <span>Sale Date / Backdate Mode</span>
+          </label>
+          <span className="text-[10px] text-slate-400 font-mono">Mobile Touch Picker</span>
+        </div>
+
+        {/* 1-Tap Preset Buttons */}
+        <div className="grid grid-cols-3 gap-1.5">
+          <button
+            type="button"
+            onClick={() => handlePreset(0)}
+            className="py-1.5 px-2 bg-emerald-950/80 hover:bg-emerald-900 text-emerald-300 border border-emerald-800/80 rounded-xl text-[11px] font-bold transition flex items-center justify-center gap-1 cursor-pointer"
+          >
+            <span>🟢 Today</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => handlePreset(1)}
+            className="py-1.5 px-2 bg-amber-950/80 hover:bg-amber-900 text-amber-300 border border-amber-800/80 rounded-xl text-[11px] font-bold transition flex items-center justify-center gap-1 cursor-pointer"
+          >
+            <span>🟡 Yesterday</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => handlePreset(2)}
+            className="py-1.5 px-2 bg-orange-950/80 hover:bg-orange-900 text-orange-300 border border-orange-800/80 rounded-xl text-[11px] font-bold transition flex items-center justify-center gap-1 cursor-pointer"
+          >
+            <span>🟠 2 Days Ago</span>
+          </button>
+        </div>
+
+        {/* 3 Native Mobile Dropdowns (Day, Month, Year) */}
+        <div className="grid grid-cols-3 gap-2">
+          {/* Day */}
+          <div>
+            <span className="text-[10px] text-slate-400 block mb-1 font-semibold uppercase">Day</span>
+            <select
+              disabled={!hasWorkerPermission(currentUser, 'canBackdateEntries')}
+              value={currentDay}
+              onChange={(e) => updateDateParts(currentYear, currentMonth, parseInt(e.target.value, 10))}
+              className="w-full bg-slate-950 border border-slate-800 text-slate-200 px-2 py-2 rounded-xl text-xs font-mono font-bold outline-none focus:border-sky-500 cursor-pointer"
+            >
+              {Array.from({ length: 31 }, (_, i) => i + 1).map((d) => (
+                <option key={d} value={d}>
+                  {String(d).padStart(2, '0')}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Month */}
+          <div>
+            <span className="text-[10px] text-slate-400 block mb-1 font-semibold uppercase">Month</span>
+            <select
+              disabled={!hasWorkerPermission(currentUser, 'canBackdateEntries')}
+              value={currentMonth}
+              onChange={(e) => updateDateParts(currentYear, parseInt(e.target.value, 10), currentDay)}
+              className="w-full bg-slate-950 border border-slate-800 text-slate-200 px-2 py-2 rounded-xl text-xs font-semibold outline-none focus:border-sky-500 cursor-pointer"
+            >
+              {monthNames.map((m) => (
+                <option key={m.val} value={m.val}>
+                  {m.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Year */}
+          <div>
+            <span className="text-[10px] text-slate-400 block mb-1 font-semibold uppercase">Year</span>
+            <select
+              disabled={!hasWorkerPermission(currentUser, 'canBackdateEntries')}
+              value={currentYear}
+              onChange={(e) => updateDateParts(parseInt(e.target.value, 10), currentMonth, currentDay)}
+              className="w-full bg-slate-950 border border-slate-800 text-slate-200 px-2 py-2 rounded-xl text-xs font-mono font-bold outline-none focus:border-sky-500 cursor-pointer"
+            >
+              {yearsList.map((y) => (
+                <option key={y} value={y}>
+                  {y}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        {/* Active Date Display Confirmation Badge */}
+        <div className="bg-sky-950/40 border border-sky-800/60 p-2.5 rounded-xl flex items-center justify-between text-xs">
+          <span className="text-slate-400 text-[11px]">Selected Sale Date:</span>
+          <span className="font-bold text-sky-300 font-mono">{displayFormatted}</span>
+        </div>
+      </div>
+    );
   };
 
   return (
@@ -2425,22 +2622,26 @@ export const POSView: React.FC<POSViewProps> = ({
                       )}
                       <div className="min-w-0 flex-1">
                         <div className="font-semibold text-slate-200 truncate">{item.product.name}</div>
-                        <div className="text-[10px] text-slate-400 font-mono flex items-center gap-2 flex-wrap mt-0.5">
-                          <div className="flex items-center gap-1 bg-slate-900 border border-slate-700/80 px-1.5 py-0.5 rounded-lg">
-                            <span className="text-slate-400 font-bold">KSh</span>
+                        <div className="text-[10px] text-slate-400 font-mono flex items-center gap-2 flex-wrap mt-1">
+                          <div className="flex items-center gap-1.5 bg-slate-900 border border-sky-800/80 px-2 py-1 rounded-lg shadow-sm">
+                            <span className="text-slate-400 font-bold text-[10px]">Custom Unit Price: KSh</span>
                             <input
                               type="number"
                               min="0"
                               step="1"
                               value={item.unitPrice}
                               onChange={(e) => handleUpdateItemUnitPrice(item.product.id, parseFloat(e.target.value) || 0)}
-                              className="w-20 bg-transparent text-sky-400 font-bold text-xs outline-none font-mono"
-                              title="Custom negotiated selling price (can be higher or lower than baseline retail price)"
+                              className="w-20 bg-slate-950 border border-sky-700/60 text-sky-300 font-extrabold px-1.5 py-0.5 rounded text-xs outline-none font-mono focus:border-sky-400"
+                              title="Type custom negotiated selling price or markup (higher or lower than baseline retail price)"
                             />
                           </div>
-                          {item.discount > 0 && (
-                            <span className="text-emerald-400 font-bold">
-                              Net: KSh {(item.unitPrice - item.discount).toLocaleString(undefined, { minimumFractionDigits: 2 })} (-KSh {item.discount})
+                          {item.unitPrice !== item.product.sellingPrice && (
+                            <span className={`text-[10px] font-bold font-mono px-1.5 py-0.5 rounded ${
+                              item.unitPrice > item.product.sellingPrice
+                                ? 'bg-emerald-950 text-emerald-300 border border-emerald-800'
+                                : 'bg-amber-950 text-amber-300 border border-amber-800'
+                            }`}>
+                              {item.unitPrice > item.product.sellingPrice ? `▲ Markup (+KSh ${item.unitPrice - item.product.sellingPrice})` : `▼ Markdown (-KSh ${item.product.sellingPrice - item.unitPrice})`}
                             </span>
                           )}
                           <span className="text-slate-500">/ {item.product.unit} {item.product.sizeCapacity ? `• ${item.product.sizeCapacity}` : ''}</span>
@@ -2675,6 +2876,74 @@ export const POSView: React.FC<POSViewProps> = ({
 
           {/* Discount, KRA Tax & Totals summary */}
           <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800 space-y-2.5 text-xs">
+            {/* Custom Item Price / Price Markup Section */}
+            <div className="bg-slate-900 p-2.5 rounded-xl border border-slate-800 space-y-2.5">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <div className="flex items-center gap-1.5">
+                  <TrendingUp className="w-3.5 h-3.5 text-sky-400" />
+                  <span className="font-semibold text-slate-300">
+                    Custom Price / Price Markup (Extra KSh):
+                  </span>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <div className="relative flex-1">
+                    <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500 text-xs font-mono font-bold">
+                      +KSh
+                    </span>
+                    <input
+                      type="number"
+                      min="0"
+                      value={saleMarkupInputVal}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setSaleMarkupInputVal(val);
+                        setSaleMarkupAmount(parseFloat(val) || 0);
+                      }}
+                      placeholder="e.g. 50 (Increase selling price)"
+                      className="w-full bg-slate-950 border border-slate-700 pl-12 pr-2 py-1.5 rounded-lg text-xs font-mono font-bold text-sky-300 focus:outline-none focus:border-sky-400"
+                    />
+                  </div>
+
+                  {(saleMarkupAmount > 0 || saleMarkupInputVal !== '') && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSaleMarkupInputVal('');
+                        setSaleMarkupAmount(0);
+                      }}
+                      className="px-2 py-1.5 bg-rose-950/60 hover:bg-rose-900 border border-rose-800 text-rose-300 rounded-lg text-[11px] font-semibold transition"
+                      title="Clear markup"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+
+                {/* Quick Addition Chips (+KSh 20, +KSh 50, +KSh 100) */}
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="text-[10px] text-slate-500 font-medium">Quick Markup:</span>
+                  {[20, 50, 100, 200, 500].map((amt) => (
+                    <button
+                      key={amt}
+                      type="button"
+                      onClick={() => {
+                        const current = parseFloat(saleMarkupInputVal) || 0;
+                        const updated = current + amt;
+                        setSaleMarkupInputVal(String(updated));
+                        setSaleMarkupAmount(updated);
+                      }}
+                      className="px-2 py-0.5 bg-slate-950 hover:bg-sky-950 border border-slate-800 hover:border-sky-700 text-slate-300 hover:text-sky-300 text-[10px] rounded font-mono transition"
+                    >
+                      +{amt}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
             {/* Sales Discount Controller with Dual Manual & Percentage Support */}
             <div className="bg-slate-900 p-2.5 rounded-xl border border-slate-800 space-y-2.5">
               <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -2951,28 +3220,8 @@ export const POSView: React.FC<POSViewProps> = ({
               </div>
             )}
 
-            {/* Compact Backdate Sale Date Selector */}
-            <div className="bg-slate-900 p-2.5 rounded-xl border border-slate-800 space-y-1">
-              <label className="text-[11px] text-slate-300 font-semibold flex items-center justify-between">
-                <span className="flex items-center gap-1.5">
-                  <Calendar className="w-3.5 h-3.5 text-sky-400" />
-                  <span>Sale Date / Backdate Mode</span>
-                </span>
-                {!hasWorkerPermission(currentUser, 'canBackdateEntries') ? (
-                  <span className="text-[10px] text-amber-400 font-mono">Restricted</span>
-                ) : (
-                  <span className="text-[10px] text-slate-400">Past dates allowed</span>
-                )}
-              </label>
-              <input
-                type="datetime-local"
-                disabled={!hasWorkerPermission(currentUser, 'canBackdateEntries')}
-                value={saleDate}
-                onChange={(e) => setSaleDate(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 disabled:opacity-50 text-slate-200 px-2.5 py-1.5 rounded-lg text-xs font-mono outline-none focus:border-sky-500"
-                title="Select date and time for recording past / forgotten sales"
-              />
-            </div>
+            {/* Custom Mobile-Optimized Date Selector */}
+            {renderMobileDateSelector()}
 
             {/* Quick 1-Tap M-PESA STK Push Prompt Button */}
             <button
@@ -3259,29 +3508,8 @@ export const POSView: React.FC<POSViewProps> = ({
                 );
               })()}
 
-              {/* Sale Date & Backdating Field */}
-              <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 space-y-1">
-                <label className="text-xs text-slate-300 font-semibold flex items-center justify-between">
-                  <span className="flex items-center gap-1.5">
-                    <Calendar className="w-3.5 h-3.5 text-sky-400" />
-                    <span>Sale Date & Time (Back-date Option)</span>
-                  </span>
-                  {!hasWorkerPermission(currentUser, 'canBackdateEntries') ? (
-                    <span className="text-[10px] text-amber-400 font-mono flex items-center gap-1">
-                      <Lock className="w-2.5 h-2.5" /> Backdating restricted
-                    </span>
-                  ) : (
-                    <span className="text-[10px] text-slate-400 font-normal">Select past date for forgotten sales</span>
-                  )}
-                </label>
-                <input
-                  type="datetime-local"
-                  disabled={!hasWorkerPermission(currentUser, 'canBackdateEntries')}
-                  value={saleDate}
-                  onChange={(e) => setSaleDate(e.target.value)}
-                  className="w-full bg-slate-900 border border-slate-800 disabled:opacity-60 text-slate-200 px-3 py-2 rounded-xl text-xs font-mono focus:outline-none focus:border-sky-500"
-                />
-              </div>
+              {/* Custom Mobile-Optimized Date Selector */}
+              {renderMobileDateSelector()}
 
               {/* Notes */}
               <div>

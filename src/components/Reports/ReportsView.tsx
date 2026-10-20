@@ -18,7 +18,8 @@ import {
   BarChart3,
   Package,
   Archive,
-  X
+  X,
+  Calendar
 } from 'lucide-react';
 import { Transaction, Product, Customer, Supplier, Expense, SensitiveActionLog } from '../../types';
 import {
@@ -60,6 +61,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   const VALID_REPORT_TABS = [
     'sales',
     'daily_performance',
+    'itemized_breakdown',
     'profit',
     'kra_tax',
     'item_movement',
@@ -94,6 +96,65 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
     const d = String(now.getDate()).padStart(2, '0');
     return `${y}-${m}-${d}`;
   }, []);
+
+  const getLocalDateString = (d: Date = new Date()) => {
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
+  const [selectedBreakdownDate, setSelectedBreakdownDate] = useState<string>(() =>
+    safeGetJSON<string>('retail_pos_reports_breakdown_date', getLocalDateString(), (val) => typeof val === 'string' && val.length === 10) || getLocalDateString()
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_reports_breakdown_date', selectedBreakdownDate);
+  }, [selectedBreakdownDate]);
+
+  const dayTransactions = useMemo(() => {
+    return (transactions || []).filter((tx) => {
+      const txDateStr = (tx.date || '').slice(0, 10);
+      return txDateStr === selectedBreakdownDate;
+    });
+  }, [transactions, selectedBreakdownDate]);
+
+  const itemSummaryMap = useMemo(() => {
+    const map = new Map<string, { name: string; sku?: string; category?: string; qty: number; revenue: number; unitPrice: number }>();
+    dayTransactions.forEach((tx) => {
+      (tx.items || []).forEach((item) => {
+        const prodId = item.product?.id || item.product?.name || 'unknown';
+        const name = item.product?.name || 'Unknown Product';
+        const sku = item.product?.sku || 'N/A';
+        const category = item.product?.category || 'General';
+        const effectiveUnitPrice = item.unitPrice - (item.discount || 0);
+        const lineTotal = item.total || effectiveUnitPrice * item.quantity;
+
+        if (map.has(prodId)) {
+          const existing = map.get(prodId)!;
+          existing.qty += item.quantity;
+          existing.revenue += lineTotal;
+        } else {
+          map.set(prodId, {
+            name,
+            sku,
+            category,
+            qty: item.quantity,
+            revenue: lineTotal,
+            unitPrice: effectiveUnitPrice,
+          });
+        }
+      });
+    });
+    return Array.from(map.values()).sort((a, b) => b.revenue - a.revenue);
+  }, [dayTransactions]);
+
+  const dayTotalRevenue = useMemo(() => {
+    return dayTransactions.reduce((sum, tx) => sum + (tx.grandTotal || 0), 0);
+  }, [dayTransactions]);
+
+  const dayTotalUnits = useMemo(() => {
+    return itemSummaryMap.reduce((sum, item) => sum + item.qty, 0);
+  }, [itemSummaryMap]);
 
   const [performanceRange, setPerformanceRange] = useState<{
     startDate: string;
@@ -530,6 +591,17 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
         </button>
 
         <button
+          onClick={() => setActiveReportTab('itemized_breakdown')}
+          className={`px-4 py-2 rounded-xl font-bold flex items-center gap-2 transition whitespace-nowrap ${
+            activeReportTab === 'itemized_breakdown'
+              ? 'bg-emerald-600 text-white shadow-md'
+              : 'bg-slate-900 border border-slate-800 text-emerald-400 hover:text-white'
+          }`}
+        >
+          <Package className="w-4 h-4" /> Date Itemized Breakdown
+        </button>
+
+        <button
           onClick={() => setActiveReportTab('profit')}
           className={`px-4 py-2 rounded-xl font-bold flex items-center gap-2 transition whitespace-nowrap ${
             activeReportTab === 'profit'
@@ -602,6 +674,238 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
       </div>
 
       {/* REPORT CONTENT PANEL */}
+
+      {/* 0.5. DATE ITEMIZED BREAKDOWN TAB */}
+      {activeReportTab === 'itemized_breakdown' && (
+        <div className="space-y-6">
+          {/* Interactive Date Selector Widget */}
+          {(() => {
+            const [yearStr, monthStr, dayStr] = selectedBreakdownDate.split('-');
+            const currentYear = parseInt(yearStr, 10) || new Date().getFullYear();
+            const currentMonth = parseInt(monthStr, 10) || (new Date().getMonth() + 1);
+            const currentDay = parseInt(dayStr, 10) || new Date().getDate();
+
+            const updateDateParts = (y: number, m: number, d: number) => {
+              const maxD = new Date(y, m, 0).getDate();
+              const safeD = Math.min(Math.max(1, d), maxD);
+              setSelectedBreakdownDate(`${y}-${String(m).padStart(2, '0')}-${String(safeD).padStart(2, '0')}`);
+            };
+
+            const handlePreset = (offsetDays: number) => {
+              const dt = new Date();
+              dt.setDate(dt.getDate() - offsetDays);
+              setSelectedBreakdownDate(getLocalDateString(dt));
+            };
+
+            const monthNames = [
+              { val: 1, name: 'Jan' }, { val: 2, name: 'Feb' }, { val: 3, name: 'Mar' }, { val: 4, name: 'Apr' },
+              { val: 5, name: 'May' }, { val: 6, name: 'Jun' }, { val: 7, name: 'Jul' }, { val: 8, name: 'Aug' },
+              { val: 9, name: 'Sep' }, { val: 10, name: 'Oct' }, { val: 11, name: 'Nov' }, { val: 12, name: 'Dec' },
+            ];
+            const yearsList = [new Date().getFullYear(), new Date().getFullYear() - 1, new Date().getFullYear() - 2];
+
+            const formattedDisplay = (() => {
+              try {
+                const [y, m, d] = selectedBreakdownDate.split('-').map(Number);
+                const dtObj = new Date(y, m - 1, d);
+                if (isNaN(dtObj.getTime())) return selectedBreakdownDate;
+                return dtObj.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'short', year: 'numeric' });
+              } catch (_) {
+                return selectedBreakdownDate;
+              }
+            })();
+
+            return (
+              <div className="bg-slate-900 p-4 rounded-2xl border border-slate-800 space-y-3">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <div className="flex items-center gap-2">
+                    <Calendar className="w-4 h-4 text-emerald-400" />
+                    <h3 className="font-bold text-slate-100 text-sm">Select Target Date for Itemized Breakdown</h3>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => handlePreset(0)}
+                      className="px-2.5 py-1 bg-emerald-950/80 hover:bg-emerald-900 text-emerald-300 border border-emerald-800/80 rounded-xl text-xs font-bold transition cursor-pointer"
+                    >
+                      🟢 Today
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handlePreset(1)}
+                      className="px-2.5 py-1 bg-amber-950/80 hover:bg-amber-900 text-amber-300 border border-amber-800/80 rounded-xl text-xs font-bold transition cursor-pointer"
+                    >
+                      🟡 Yesterday
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handlePreset(2)}
+                      className="px-2.5 py-1 bg-orange-950/80 hover:bg-orange-900 text-orange-300 border border-orange-800/80 rounded-xl text-xs font-bold transition cursor-pointer"
+                    >
+                      🟠 2 Days Ago
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-3 gap-2">
+                  <div>
+                    <span className="text-[10px] text-slate-400 block mb-1 font-semibold uppercase">Day</span>
+                    <select
+                      value={currentDay}
+                      onChange={(e) => updateDateParts(currentYear, currentMonth, parseInt(e.target.value, 10))}
+                      className="w-full bg-slate-950 border border-slate-800 text-slate-200 px-2 py-2 rounded-xl text-xs font-mono font-bold outline-none focus:border-emerald-500 cursor-pointer"
+                    >
+                      {Array.from({ length: 31 }, (_, i) => i + 1).map((d) => (
+                        <option key={d} value={d}>{String(d).padStart(2, '0')}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-slate-400 block mb-1 font-semibold uppercase">Month</span>
+                    <select
+                      value={currentMonth}
+                      onChange={(e) => updateDateParts(currentYear, parseInt(e.target.value, 10), currentDay)}
+                      className="w-full bg-slate-950 border border-slate-800 text-slate-200 px-2 py-2 rounded-xl text-xs font-semibold outline-none focus:border-emerald-500 cursor-pointer"
+                    >
+                      {monthNames.map((m) => (
+                        <option key={m.val} value={m.val}>{m.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-slate-400 block mb-1 font-semibold uppercase">Year</span>
+                    <select
+                      value={currentYear}
+                      onChange={(e) => updateDateParts(parseInt(e.target.value, 10), currentMonth, currentDay)}
+                      className="w-full bg-slate-950 border border-slate-800 text-slate-200 px-2 py-2 rounded-xl text-xs font-mono font-bold outline-none focus:border-emerald-500 cursor-pointer"
+                    >
+                      {yearsList.map((y) => (
+                        <option key={y} value={y}>{y}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div className="bg-emerald-950/40 border border-emerald-800/60 p-2.5 rounded-xl flex items-center justify-between text-xs">
+                  <span className="text-slate-400 text-[11px]">Selected Target Date:</span>
+                  <span className="font-bold text-emerald-300 font-mono">{formattedDisplay}</span>
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* Daily Totals Banner */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl space-y-1">
+              <div className="text-xs text-slate-400 font-medium">Total Transactions</div>
+              <div className="text-2xl font-extrabold font-mono text-slate-100">{dayTransactions.length}</div>
+              <div className="text-[10px] text-slate-500">Sales recorded on this date</div>
+            </div>
+            <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl space-y-1">
+              <div className="text-xs text-slate-400 font-medium">Total Units Sold</div>
+              <div className="text-2xl font-extrabold font-mono text-emerald-400">{dayTotalUnits} pcs</div>
+              <div className="text-[10px] text-slate-500">Aggregate items quantity</div>
+            </div>
+            <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl space-y-1">
+              <div className="text-xs text-slate-400 font-medium">Total Gross Revenue</div>
+              <div className="text-2xl font-extrabold font-mono text-sky-400">KSh {dayTotalRevenue.toLocaleString(undefined, { minimumFractionDigits: 2 })}</div>
+              <div className="text-[10px] text-slate-500">Total cash & M-Pesa inflow</div>
+            </div>
+          </div>
+
+          {/* Aggregated Daily Item Summary Table */}
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
+            <div className="p-4 border-b border-slate-800 flex items-center justify-between">
+              <h3 className="font-bold text-slate-100 text-sm flex items-center gap-2">
+                <Package className="w-4 h-4 text-emerald-400" />
+                <span>Aggregated Itemized Sales Summary ({itemSummaryMap.length} products)</span>
+              </h3>
+            </div>
+            {itemSummaryMap.length === 0 ? (
+              <div className="text-center py-12 text-slate-500 text-xs">
+                No items sold on {selectedBreakdownDate}. Select another date above.
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse text-xs">
+                  <thead>
+                    <tr className="bg-slate-950/80 text-slate-400 font-mono text-[11px] border-b border-slate-800">
+                      <th className="p-3">Product Name & SKU</th>
+                      <th className="p-3 text-center">Category</th>
+                      <th className="p-3 text-center">Qty Sold</th>
+                      <th className="p-3 text-right">Avg Unit Price</th>
+                      <th className="p-3 text-right">Total Revenue</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/60">
+                    {itemSummaryMap.map((item, idx) => (
+                      <tr key={idx} className="hover:bg-slate-800/40 transition">
+                        <td className="p-3 font-semibold text-slate-200">
+                          <div>{item.name}</div>
+                          <div className="text-[10px] text-slate-500 font-mono">SKU: {item.sku}</div>
+                        </td>
+                        <td className="p-3 text-center text-slate-400">{item.category}</td>
+                        <td className="p-3 text-center font-mono font-bold text-emerald-400">{item.qty} pcs</td>
+                        <td className="p-3 text-right font-mono text-slate-300">KSh {item.unitPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                        <td className="p-3 text-right font-mono font-bold text-sky-400">KSh {item.revenue.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {/* Individual Transaction Breakdown (Receipt Level) */}
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
+            <div className="p-4 border-b border-slate-800">
+              <h3 className="font-bold text-slate-100 text-sm flex items-center gap-2">
+                <FileText className="w-4 h-4 text-sky-400" />
+                <span>Receipts & Transactions Log ({dayTransactions.length})</span>
+              </h3>
+            </div>
+            {dayTransactions.length === 0 ? (
+              <div className="text-center py-10 text-slate-500 text-xs">
+                No transaction receipts recorded for this date.
+              </div>
+            ) : (
+              <div className="divide-y divide-slate-800/60 max-h-96 overflow-y-auto">
+                {dayTransactions.map((tx) => (
+                  <div key={tx.id} className="p-4 flex items-center justify-between gap-4 hover:bg-slate-800/30 transition text-xs">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono font-bold text-sky-400">{tx.receiptNumber}</span>
+                        <span className="text-[10px] px-2 py-0.5 bg-slate-950 text-slate-300 border border-slate-800 rounded-md font-mono">
+                          {new Date(tx.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                        <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${
+                          tx.paymentStatus === 'Paid' ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-amber-500/20 text-amber-300 border border-amber-800'
+                        }`}>
+                          {tx.paymentStatus}
+                        </span>
+                      </div>
+                      <div className="text-[11px] text-slate-300">
+                        Customer: <span className="font-semibold text-slate-100">{tx.customerName || 'Walk-in'}</span> • Cashier: {tx.cashierName}
+                      </div>
+                      <div className="text-[10px] text-slate-500 font-mono">
+                        {(tx.items || []).map((i) => `${i.product.name} (x${i.quantity})`).join(', ')}
+                      </div>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <div className="font-mono font-extrabold text-slate-100 text-sm">
+                        KSh {tx.grandTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                      </div>
+                      <div className="text-[10px] text-slate-400">
+                        {(tx.payments || []).map((p) => p.method).join(', ') || 'Cash'}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* 0. DAILY PERFORMANCE DEDICATED TAB */}
       {activeReportTab === 'daily_performance' && (

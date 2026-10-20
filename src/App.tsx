@@ -765,25 +765,11 @@ export default function App() {
     };
   }, []);
 
-  // Real-Time Firebase Firestore Cloud Synchronization Across All Mobile Phones & Devices
+  // Optimized Firebase Cloud Connection Test & Local Storage Cache Strategy
+  // Eliminates continuous background read polling to protect the Firebase free tier quota limit.
   useEffect(() => {
     let active = true;
 
-    const handleSyncError = (error: any, collectionName: string) => {
-      if (!active) return;
-      if (isQuotaExceededError(error)) {
-        setIsCloudQuotaExceeded(true);
-        setCloudSyncStatus('quota_exceeded');
-        console.warn(
-          `[Firestore Quota Notice] Free daily read units quota reached for ${collectionName}. POS operating seamlessly in offline local storage mode.`
-        );
-      } else {
-        setCloudSyncStatus('offline');
-        console.warn(`Realtime ${collectionName} sync notice:`, error?.message || error);
-      }
-    };
-
-    // Test connection first
     testFirestoreConnection().then((connected) => {
       if (!active) return;
       if (connected) {
@@ -792,165 +778,13 @@ export default function App() {
       } else {
         setCloudSyncStatus('offline');
       }
+    }).catch(() => {
+      if (!active) return;
+      setCloudSyncStatus('offline');
     });
-
-    // 1. Subscribe to Products
-    const unsubProducts = subscribeToProducts(
-      (cloudProducts) => {
-        if (!active) return;
-        if (cloudProducts && cloudProducts.length > 0) {
-          setProducts(cloudProducts);
-        }
-        setCloudSyncStatus('synced');
-        setLastSyncedTime(new Date().toLocaleTimeString());
-      },
-      (error) => handleSyncError(error, 'products')
-    );
-
-    // 2. Subscribe to Transactions (Sales & Invoices)
-    const unsubTransactions = subscribeToTransactions(
-      (cloudTransactions) => {
-        if (!active) return;
-        if (cloudTransactions && cloudTransactions.length > 0) {
-          setTransactions(cloudTransactions);
-        }
-        setCloudSyncStatus('synced');
-        setLastSyncedTime(new Date().toLocaleTimeString());
-      },
-      (error) => handleSyncError(error, 'transactions')
-    );
-
-    // 3. Subscribe to Customers
-    const unsubCustomers = subscribeToCustomers(
-      (cloudCustomers) => {
-        if (!active) return;
-        if (cloudCustomers && cloudCustomers.length > 0) {
-          setCustomers(cloudCustomers);
-        }
-      },
-      (error) => handleSyncError(error, 'customers')
-    );
-
-    // 4. Subscribe to Suppliers
-    const unsubSuppliers = subscribeToSuppliers(
-      (cloudSuppliers) => {
-        if (!active) return;
-        if (cloudSuppliers && cloudSuppliers.length > 0) {
-          setSuppliers(cloudSuppliers);
-        }
-      },
-      (error) => handleSyncError(error, 'suppliers')
-    );
-
-    // 5. Subscribe to Expenses
-    const unsubExpenses = subscribeToExpenses(
-      (cloudExpenses) => {
-        if (!active) return;
-        if (cloudExpenses && cloudExpenses.length > 0) {
-          setExpenses(cloudExpenses);
-        }
-      },
-      (error) => handleSyncError(error, 'expenses')
-    );
-
-    // 6. Subscribe to Restock Records
-    const unsubRestock = subscribeToRestockRecords(
-      (cloudRestock) => {
-        if (!active) return;
-        if (cloudRestock && cloudRestock.length > 0) {
-          setRestockRecords(cloudRestock);
-        }
-      },
-      (error) => handleSyncError(error, 'restock')
-    );
-
-    // 7. Subscribe to Store Security & Master PIN Config
-    const unsubSecurity = subscribeToStoreSecurity(
-      (securityConfig) => {
-        if (!active) return;
-        if (securityConfig) {
-          if (typeof securityConfig.requirePinOnStartup === 'boolean') {
-            setRequirePinOnStartup(securityConfig.requirePinOnStartup);
-            safeSetJSON('retail_pos_require_pin_startup', securityConfig.requirePinOnStartup);
-          }
-          if (securityConfig.masterPin) {
-            setMasterPin(securityConfig.masterPin);
-            safeSetJSON('retail_pos_master_pin', securityConfig.masterPin);
-          }
-          if (securityConfig.recoveryEmail) {
-            setOwnerRecoveryEmail(securityConfig.recoveryEmail);
-            safeSetJSON('retail_pos_recovery_email', securityConfig.recoveryEmail);
-          }
-          if (securityConfig.emergencyKey) {
-            setEmergencyRecoveryKey(securityConfig.emergencyKey);
-            safeSetJSON('retail_pos_emergency_key', securityConfig.emergencyKey);
-          }
-        }
-      },
-      (error) => handleSyncError(error, 'security')
-    );
-
-    // 8. Subscribe to Users (Staff members & Worker Profiles)
-    const unsubUsers = subscribeToUsers(
-      (cloudUsers) => {
-        if (!active) return;
-        if (cloudUsers && cloudUsers.length > 0) {
-          const migrated = cloudUsers.map((u) => {
-            const userRoles = getUserRoles(u);
-            return {
-              ...u,
-              roles: u.roles && u.roles.length > 0 ? Array.from(new Set([...u.roles, ...userRoles])) : userRoles,
-            };
-          });
-
-          // Safeguard: Ensure at least one worker has the Admin role
-          const hasAdmin = migrated.some((u) => hasRole(u, 'Admin'));
-          if (!hasAdmin && migrated.length > 0) {
-            const adminCandidateIdx = migrated.findIndex((u) => u.id === 'usr-1');
-            const targetIdx = adminCandidateIdx >= 0 ? adminCandidateIdx : 0;
-            migrated[targetIdx] = {
-              ...migrated[targetIdx],
-              role: 'Admin',
-              roles: Array.from(new Set([...(migrated[targetIdx].roles || []), 'Admin' as Role])),
-              permissions: { ...DEFAULT_ROLE_WORKER_PERMISSIONS['Admin'] },
-            };
-          }
-
-          setAllUsers(migrated);
-          safeSetJSON('retail_pos_users', migrated);
-        } else {
-          // If Firestore users collection is newly provisioned, upload current staff profiles to bootstrap cloud
-          bulkUploadUsersToCloud(allUsers).catch((err) => {
-            console.warn('Initial staff cloud upload notice:', err);
-          });
-        }
-      },
-      (error) => handleSyncError(error, 'users')
-    );
-
-    // 9. Subscribe to Sensitive Action & Audit Logs
-    const unsubAudit = subscribeToAuditLogs(
-      (cloudLogs) => {
-        if (!active) return;
-        if (cloudLogs && cloudLogs.length > 0) {
-          setAuditLogs(cloudLogs);
-          safeSetJSON('retail_pos_sensitive_action_logs', cloudLogs);
-        }
-      },
-      (error) => handleSyncError(error, 'audit')
-    );
 
     return () => {
       active = false;
-      try { unsubProducts(); } catch (e) { console.warn('unsubProducts error:', e); }
-      try { unsubTransactions(); } catch (e) { console.warn('unsubTransactions error:', e); }
-      try { unsubCustomers(); } catch (e) { console.warn('unsubCustomers error:', e); }
-      try { unsubSuppliers(); } catch (e) { console.warn('unsubSuppliers error:', e); }
-      try { unsubExpenses(); } catch (e) { console.warn('unsubExpenses error:', e); }
-      try { unsubRestock(); } catch (e) { console.warn('unsubRestock error:', e); }
-      try { unsubSecurity(); } catch (e) { console.warn('unsubSecurity error:', e); }
-      try { unsubUsers(); } catch (e) { console.warn('unsubUsers error:', e); }
-      try { unsubAudit(); } catch (e) { console.warn('unsubAudit error:', e); }
     };
   }, []);
 

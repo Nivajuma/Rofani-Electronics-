@@ -37,6 +37,7 @@ import { Product, Customer, Supplier, Transaction, Expense, AttendanceRecord, Us
 import { detectDuplicateProducts, deduplicateProducts } from '../../utils/deduplicate';
 import { DataSnapshotModal } from './DataSnapshotModal';
 import { CameraPermissionsCard } from './CameraPermissionsCard';
+import { SettingsDashboardView } from './SettingsDashboardView';
 import { safeGetJSON, safeSetJSON } from '../../utils/safeStorage';
 
 interface DataManagementViewProps {
@@ -289,7 +290,38 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
   );
 
   return (
-    <div className="p-6 space-y-6 max-w-7xl mx-auto">
+    <div className="space-y-8">
+      {/* Modern List-Style Settings Dashboard Menu */}
+      <SettingsDashboardView
+        products={products}
+        categories={categories}
+        customers={customers}
+        suppliers={suppliers}
+        transactions={transactions}
+        expenses={expenses}
+        attendanceRecords={attendanceRecords}
+        allUsers={allUsers}
+        stores={stores}
+        onOpenStoreManager={onOpenStoreManager}
+        onImportData={onImportData}
+        displayTheme={displayTheme}
+        onChangeDisplayTheme={onChangeDisplayTheme}
+        fontScale={fontScale}
+        onChangeFontScale={onChangeFontScale}
+        isSidebarCollapsed={isSidebarCollapsed}
+        onToggleSidebar={onToggleSidebar}
+        onOpenCloudSync={onOpenCloudSync}
+        deviceFormat={deviceFormat}
+        onChangeDeviceFormat={onChangeDeviceFormat}
+        requirePinOnStartup={requirePinOnStartup}
+        onToggleRequirePinOnStartup={onToggleRequirePinOnStartup}
+        masterPin={masterPin}
+        onUpdateMasterPin={onUpdateMasterPin}
+        onLockNow={onLockNow}
+        onOpenAuditLogs={onOpenAuditLogs}
+      />
+
+      <div className="p-6 space-y-6 max-w-7xl mx-auto border-t border-slate-800 pt-8">
       {/* Top Banner */}
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 text-white flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-xl">
         <div className="flex items-center gap-3">
@@ -1047,5 +1079,6 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
         onRestoreSnapshot={onImportData}
       />
     </div>
-  );
+  </div>
+);
 };

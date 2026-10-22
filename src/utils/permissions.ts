@@ -3,6 +3,7 @@ import { Role, User, WorkerPermissions } from '../types';
 export type TabKey =
   | 'pos'
   | 'inventory'
+  | 'purchasing'
   | 'stocktake'
   | 'contacts'
   | 'cashmanagement'
@@ -388,6 +389,7 @@ export const ROLE_CONFIGURATIONS: Record<string, RoleConfiguration> = {
     allowedTabs: [
       'pos',
       'inventory',
+      'purchasing',
       'stocktake',
       'contacts',
       'cashmanagement',
@@ -413,6 +415,7 @@ export const ROLE_CONFIGURATIONS: Record<string, RoleConfiguration> = {
     allowedTabs: [
       'pos',
       'inventory',
+      'purchasing',
       'stocktake',
       'contacts',
       'cashmanagement',
@@ -446,7 +449,7 @@ export const ROLE_CONFIGURATIONS: Record<string, RoleConfiguration> = {
   'Inventory Staff': {
     label: 'Storekeeper / Inventory Staff',
     description: 'Manages physical warehouse stock, counts, supplier restocking, and item catalog additions.',
-    allowedTabs: ['inventory', 'stocktake', 'contacts'],
+    allowedTabs: ['inventory', 'purchasing', 'stocktake', 'contacts'],
     canManageStaff: false,
     canViewStaffPins: false,
     canViewGrossProfit: false,
@@ -470,7 +473,7 @@ export const ROLE_CONFIGURATIONS: Record<string, RoleConfiguration> = {
   'Stock Ins Role': {
     label: 'Stock Ins Role (Receiving & Supplies)',
     description: 'Can add stock in, manage supplier orders, view/manage supplies, and record bad stock.',
-    allowedTabs: ['inventory', 'stocktake', 'contacts'],
+    allowedTabs: ['inventory', 'purchasing', 'stocktake', 'contacts'],
     canManageStaff: false,
     canViewStaffPins: false,
     canViewGrossProfit: false,
@@ -984,6 +987,8 @@ export function hasTabPermission(roleOrUser: Role | User, tab: TabKey): boolean 
       return perms.canMakeSales;
     case 'inventory':
       return perms.canAddStockIn || perms.canAddNewProducts || perms.canAddBadStock || perms.canViewOutOfStock || perms.canCountUpdateStockBalance;
+    case 'purchasing':
+      return perms.canAddStockIn || perms.canManageSupplierOrders || perms.canViewManageSupplies;
     case 'stocktake':
       return perms.canCountUpdateStockBalance;
     case 'contacts':
@@ -1407,6 +1412,7 @@ export function toggleRoleCategoryOnWorker(
 export const TAB_LABELS: Record<TabKey, string> = {
   pos: 'Point of Sale (POS)',
   inventory: 'Inventory Control',
+  purchasing: 'Purchase Orders & Receiving',
   stocktake: 'Physical Stock Audit',
   contacts: 'Customers & Suppliers',
   cashmanagement: 'Cash Drawer & Finance',

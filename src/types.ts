@@ -192,6 +192,33 @@ export interface Supplier {
   updatedAt?: string;
 }
 
+export interface PurchaseOrderItem {
+  productId: string;
+  productName: string;
+  sku: string;
+  imageUrl?: string;
+  quantityOrdered: number;
+  quantityReceived: number;
+  unitCost: number;
+  totalCost: number;
+}
+
+export interface PurchaseOrder {
+  id: string;
+  poNumber: string; // e.g. "PO-2026-001"
+  supplierId: string;
+  supplierName: string;
+  orderDate: string; // ISO string or YYYY-MM-DD
+  expectedDeliveryDate: string;
+  status: 'Pending' | 'Received' | 'Cancelled';
+  items: PurchaseOrderItem[];
+  totalCost: number;
+  notes?: string;
+  receivedAt?: string;
+  receivedBy?: string;
+  createdAt: string;
+}
+
 export interface Transaction {
   id: string;
   receiptNumber: string;

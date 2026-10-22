@@ -31,14 +31,15 @@ import {
   ShieldAlert
 } from 'lucide-react';
 import { User } from '../types';
+import { TabKey } from '../utils/permissions';
 import { OfflineSyncBanner } from './Network/OfflineSyncBanner';
 import { NetworkStatusBadge } from './Network/NetworkStatusBadge';
 import { useNetworkStatus } from '../utils/offlineSync';
 
 interface PhoneDeviceFrameProps {
   children: React.ReactNode;
-  activeTab: 'pos' | 'inventory' | 'stocktake' | 'contacts' | 'cashmanagement' | 'expenses' | 'attendance' | 'reports' | 'onlinestore' | 'onlineorders' | 'settings' | 'auditlogs';
-  onSelectTab: (tab: 'pos' | 'inventory' | 'stocktake' | 'contacts' | 'cashmanagement' | 'expenses' | 'attendance' | 'reports' | 'onlinestore' | 'onlineorders' | 'settings' | 'auditlogs') => void;
+  activeTab: TabKey;
+  onSelectTab: (tab: TabKey) => void;
   onSelectStockAlertFilter?: () => void;
   phoneOrientation: 'portrait' | 'landscape';
   phoneModel: 'iphone15pro' | 'galaxyS24' | 'pixel8';

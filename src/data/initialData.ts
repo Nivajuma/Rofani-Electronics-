@@ -1,4 +1,64 @@
-import { Product, Customer, Supplier, Expense, AttendanceRecord, Transaction, User, CashTransaction, RestockRecord, StaffCommissionPayout, StoreLocation, OfferDeal, OnlineOrder, StockTransferRecord, WorkerLoan, FinancingFacility, BarcodeScanLog } from '../types';
+import { Product, Customer, Supplier, Expense, AttendanceRecord, Transaction, User, CashTransaction, RestockRecord, StaffCommissionPayout, StoreLocation, OfferDeal, OnlineOrder, StockTransferRecord, WorkerLoan, FinancingFacility, BarcodeScanLog, PurchaseOrder } from '../types';
+
+export const INITIAL_PURCHASE_ORDERS: PurchaseOrder[] = [
+  {
+    id: 'po-101',
+    poNumber: 'PO-2026-001',
+    supplierId: 'sup-1',
+    supplierName: 'Apex Electronics Nairobi',
+    orderDate: '2026-09-01',
+    expectedDeliveryDate: '2026-09-08',
+    status: 'Received',
+    items: [
+      {
+        productId: 'prod-1',
+        productName: 'JBL Charge 5 Waterproof Portable Bluetooth Speaker',
+        sku: 'JBL-CHG5-BLK',
+        quantityOrdered: 10,
+        quantityReceived: 10,
+        unitCost: 14500,
+        totalCost: 145000
+      },
+      {
+        productId: 'prod-2',
+        productName: 'Anker PowerCore 24,000mAh 140W Power Bank',
+        sku: 'ANKER-24K-140W',
+        quantityOrdered: 15,
+        quantityReceived: 15,
+        unitCost: 9200,
+        totalCost: 138000
+      }
+    ],
+    totalCost: 283000,
+    notes: 'Restocked premium speakers and power banks for weekend promo.',
+    receivedAt: '2026-09-07T14:30:00Z',
+    receivedBy: 'David Smith (Stock Staff)',
+    createdAt: '2026-09-01T10:00:00Z'
+  },
+  {
+    id: 'po-102',
+    poNumber: 'PO-2026-002',
+    supplierId: 'sup-2',
+    supplierName: 'East Africa Fashion Wholesalers',
+    orderDate: '2026-09-15',
+    expectedDeliveryDate: '2026-09-22',
+    status: 'Pending',
+    items: [
+      {
+        productId: 'prod-5',
+        productName: 'Men Casual Slim Fit Cotton Chino Trousers',
+        sku: 'CLOTH-CHINO-NVY',
+        quantityOrdered: 30,
+        quantityReceived: 0,
+        unitCost: 1800,
+        totalCost: 54000
+      }
+    ],
+    totalCost: 54000,
+    notes: 'Awaiting delivery for men cotton chinos ahead of month-end rush.',
+    createdAt: '2026-09-15T09:15:00Z'
+  }
+];
 
 export const INITIAL_USERS: User[] = [
   {

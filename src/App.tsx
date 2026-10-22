@@ -41,7 +41,8 @@ import {
   X,
   Printer,
   Barcode,
-  QrCode
+  QrCode,
+  Truck
 } from 'lucide-react';
 import {
   Product,
@@ -67,7 +68,8 @@ import {
   FacilityRepayment,
   BarcodeScanLog,
   SensitiveActionLog,
-  SensitiveActionType
+  SensitiveActionType,
+  PurchaseOrder
 } from './types';
 import {
   INITIAL_USERS,
@@ -87,10 +89,12 @@ import {
   INITIAL_OFFERS,
   INITIAL_ONLINE_ORDERS,
   INITIAL_STOCK_TRANSFERS,
-  INITIAL_BARCODE_SCAN_LOGS
+  INITIAL_BARCODE_SCAN_LOGS,
+  INITIAL_PURCHASE_ORDERS
 } from './data/initialData';
 import { POSView } from './components/POS/POSView';
 import { InventoryView } from './components/Inventory/InventoryView';
+import { PurchasingView } from './components/Inventory/PurchasingView';
 import { PhysicalStockCountView } from './components/Inventory/PhysicalStockCountView';
 import { ExpensesView } from './components/Expenses/ExpensesView';
 import { CashManagementView } from './components/Finance/CashManagementView';
@@ -189,6 +193,7 @@ export default function App() {
   const VALID_TABS = [
     'pos',
     'inventory',
+    'purchasing',
     'stocktake',
     'contacts',
     'cashmanagement',
@@ -499,6 +504,12 @@ export default function App() {
   const [cashTransactions, setCashTransactions] = useState<CashTransaction[]>(() => safeGetJSON('retail_pos_cash_transactions', INITIAL_CASH_TRANSACTIONS));
 
   const [restockRecords, setRestockRecords] = useState<RestockRecord[]>(() => safeGetJSON('retail_pos_restock_records', INITIAL_RESTOCK_RECORDS));
+
+  const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>(() => safeGetJSON('retail_pos_purchase_orders', INITIAL_PURCHASE_ORDERS));
+
+  useEffect(() => {
+    safeSetJSON('retail_pos_purchase_orders', purchaseOrders);
+  }, [purchaseOrders]);
 
   const [commissionPayouts, setCommissionPayouts] = useState<StaffCommissionPayout[]>(() => safeGetJSON('retail_pos_commission_payouts', INITIAL_COMMISSION_PAYOUTS));
 
@@ -2265,6 +2276,18 @@ export default function App() {
         />
       )}
 
+      {activeTab === 'purchasing' && (
+        <PurchasingView
+          purchaseOrders={purchaseOrders}
+          setPurchaseOrders={setPurchaseOrders}
+          suppliers={suppliers}
+          setSuppliers={setSuppliers}
+          products={products}
+          setProducts={setProducts}
+          currentUser={currentUser}
+        />
+      )}
+
       {activeTab === 'stocktake' && (
         <PhysicalStockCountView
           products={products}
@@ -2680,6 +2703,26 @@ export default function App() {
                 title="Click to view only low stock / alerted items"
               >
                 {lowStockCount}
+              </span>
+            )}
+          </button>
+
+          <button
+            onClick={() => setActiveTab('purchasing')}
+            title="Purchase Orders & Supplier Inventory Receiving"
+            className={`w-full flex items-center ${isSidebarCollapsed ? 'justify-center px-2' : 'justify-between px-3'} py-2.5 rounded-lg transition ${
+              activeTab === 'purchasing'
+                ? 'bg-blue-600 text-white shadow-md'
+                : 'hover:bg-slate-800 text-slate-300'
+            }`}
+          >
+            <div className="flex items-center gap-3">
+              <Truck className="w-4 h-4 opacity-90 shrink-0 text-emerald-400" />
+              {!isSidebarCollapsed && <span>Purchasing & POs</span>}
+            </div>
+            {!isSidebarCollapsed && purchaseOrders.filter((p) => p.status === 'Pending').length > 0 && (
+              <span className="text-[10px] bg-amber-500 text-slate-950 font-bold px-1.5 py-0.5 rounded-full font-mono">
+                {purchaseOrders.filter((p) => p.status === 'Pending').length}
               </span>
             )}
           </button>

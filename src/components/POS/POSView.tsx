@@ -33,6 +33,7 @@ import {
   Sparkles,
   Image as ImageIcon,
   Star,
+  MoreVertical,
   Zap,
   Gem,
   AlertTriangle,
@@ -128,6 +129,11 @@ export const POSView: React.FC<POSViewProps> = ({
   useEffect(() => {
     safeSetJSON('retail_pos_pos_mobile_tab', mobileTab);
   }, [mobileTab]);
+
+  const [isKeyboardActive, setIsKeyboardActive] = useState<boolean>(false);
+  const [showSalesInfo, setShowSalesInfo] = useState<boolean>(false);
+  const [showRepModal, setShowRepModal] = useState<boolean>(false);
+  const [showTopRightMenu, setShowTopRightMenu] = useState<boolean>(false);
 
   const [selectedSupplier, setSelectedSupplier] = useState<string>(() =>
     safeGetJSON<string>('retail_pos_pos_supplier', 'All', (val) => typeof val === 'string')
@@ -960,32 +966,22 @@ export const POSView: React.FC<POSViewProps> = ({
   const itemDiscountsTotal = cart.reduce((sum, item) => sum + (item.discount || 0) * item.quantity, 0);
   const itemsSubtotal = cart.reduce((sum, item) => sum + item.total, 0);
 
-  // Compute sale-level markup
-  let numMarkup = 0;
-  const parsedMarkupInput = parseFloat(saleMarkupInputVal);
-  if (!isNaN(parsedMarkupInput) && parsedMarkupInput > 0) {
-    numMarkup = parsedMarkupInput;
-  } else if (saleMarkupAmount > 0 && !saleMarkupInputVal) {
-    numMarkup = saleMarkupAmount;
-  }
-
   // Compute sale-level manual or percentage discount
   let numDiscount = 0;
   const parsedSaleInput = parseFloat(discountInputVal);
   if (!isNaN(parsedSaleInput) && parsedSaleInput > 0) {
     if (discountMode === 'percentage') {
-      numDiscount = Math.round((parsedSaleInput / 100) * (itemsSubtotal + numMarkup));
+      numDiscount = Math.round((parsedSaleInput / 100) * itemsSubtotal);
     } else {
-      numDiscount = Math.min(itemsSubtotal + numMarkup, parsedSaleInput);
+      numDiscount = Math.min(itemsSubtotal, parsedSaleInput);
     }
   } else if (discountAmount > 0 && !discountInputVal) {
-    numDiscount = Math.min(itemsSubtotal + numMarkup, discountAmount);
+    numDiscount = Math.min(itemsSubtotal, discountAmount);
   }
 
   const totalDiscount = itemDiscountsTotal + numDiscount;
-  const subtotal = grossSubtotal; // Gross subtotal before all markups & discounts
-  const afterMarkupAmount = itemsSubtotal + numMarkup;
-  const afterDiscountAmount = Math.max(0, afterMarkupAmount - numDiscount);
+  const subtotal = grossSubtotal; // Gross subtotal
+  const afterDiscountAmount = Math.max(0, itemsSubtotal - numDiscount);
   const taxTotal = afterDiscountAmount * (taxRate / 100);
   const grandTotal = Math.max(0, afterDiscountAmount + taxTotal);
 
@@ -1557,9 +1553,9 @@ export const POSView: React.FC<POSViewProps> = ({
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         {/* LEFT 7 COLS: PRODUCT CATALOG & SEARCH */}
         <div className={`lg:col-span-7 space-y-4 ${mobileTab === 'catalog' ? 'block' : 'hidden lg:block'}`}>
-          {/* Search bar, Barcode Scanner, View Toggle & New Sale Button */}
-          <div className="bg-slate-900 border border-slate-800 p-3 rounded-2xl shadow-md space-y-2.5">
-            {/* Dedicated Full-Width Search Input Bar */}
+          {/* STICKY TOP SEARCH BAR & COMPACT TOP SELLERS CHIPS BAR */}
+          <div className="sticky top-2 z-30 bg-slate-900/95 backdrop-blur-md p-3 rounded-2xl border border-slate-800 shadow-2xl space-y-2.5">
+            {/* Dedicated Full-Width Search Input Bar with Auto-Focus */}
             <div className="relative w-full flex items-center">
               <Search className="w-4 h-4 text-sky-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
               <input
@@ -1572,6 +1568,7 @@ export const POSView: React.FC<POSViewProps> = ({
                 autoComplete="off"
                 autoCorrect="off"
                 spellCheck={false}
+                autoFocus
               />
               <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1.5">
                 {searchTerm && (
@@ -1594,6 +1591,42 @@ export const POSView: React.FC<POSViewProps> = ({
                 </button>
               </div>
             </div>
+
+            {/* Compact Top Sellers Horizontal Scrollable Chips Bar right below search */}
+            {favoriteProducts.length > 0 && (
+              <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 pt-1 no-scrollbar text-xs">
+                <span className="text-[10px] font-extrabold text-amber-400 shrink-0 flex items-center gap-1 bg-amber-950/70 border border-amber-800 px-2 py-1 rounded-xl">
+                  <Flame className="w-3 h-3 text-amber-400" /> Top Sellers:
+                </span>
+                {favoriteProducts.slice(0, 10).map((p, index) => {
+                  const cartItem = cart.find((item) => item.product.id === p.id);
+                  const inCartQty = cartItem ? cartItem.quantity : 0;
+                  return (
+                    <button
+                      key={`top-chip-${p.id}`}
+                      type="button"
+                      onClick={() => handleAddToCart(p)}
+                      className={`px-2 py-1 rounded-xl whitespace-nowrap text-xs font-bold transition flex items-center gap-1 border cursor-pointer select-none shrink-0 ${
+                        inCartQty > 0
+                          ? 'bg-amber-500 text-slate-950 border-amber-400 font-extrabold shadow-sm'
+                          : 'bg-slate-950 hover:bg-slate-800 border-slate-800 text-slate-200 hover:text-white'
+                      }`}
+                      title={`Add 1x ${p.name} (KSh ${p.sellingPrice})`}
+                    >
+                      <span className="text-[9px] font-mono opacity-70">#{index + 1}</span>
+                      <span className="max-w-[100px] truncate">{p.name}</span>
+                      <span className="font-mono text-emerald-400 font-bold">KSh {p.sellingPrice}</span>
+                      {inCartQty > 0 && (
+                        <span className="ml-0.5 px-1 bg-slate-950 text-amber-300 rounded text-[9px] font-mono">
+                          ✓{inCartQty}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
 
             {/* Active search pill for instant mobile visibility */}
             {searchTerm && (
@@ -2506,36 +2539,77 @@ export const POSView: React.FC<POSViewProps> = ({
           </div>
 
           {/* Header & Customer Picker */}
-          <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+          <div className="flex items-center justify-between border-b border-slate-800 pb-3 relative">
             <div className="flex items-center gap-2">
               <ShoppingBag className="w-5 h-5 text-sky-400" />
               <h3 className="font-bold text-sm text-slate-100">Receipt Order Cart</h3>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5 relative">
               {/* AI Quick Add to Receipt */}
               <button
                 id="btn-pos-ai-scan-cart"
                 type="button"
                 onClick={() => setShowAiReceiptScanner(true)}
-                className="bg-purple-950/80 hover:bg-purple-900 border border-purple-700/80 text-purple-300 font-bold px-2.5 py-1 rounded-lg text-xs transition flex items-center gap-1 shadow-sm cursor-pointer"
-                title="Scan items with AI to automatically add onto this receipt"
+                className="bg-purple-950/80 hover:bg-purple-900 border border-purple-700/80 text-purple-300 font-bold px-2 py-1 rounded-lg text-xs transition flex items-center gap-1 shadow-sm cursor-pointer"
+                title="Scan items with AI"
               >
                 <Sparkles className="w-3.5 h-3.5 text-amber-300" />
                 <span className="hidden sm:inline">AI Add</span>
               </button>
 
-              <span className="bg-sky-950 border border-sky-800 text-sky-300 text-xs px-2.5 py-1 rounded-lg font-mono font-bold">
-                {cart.reduce((sum, item) => sum + item.quantity, 0)} items
+              <span className="bg-sky-950 border border-sky-800 text-sky-300 text-xs px-2 py-1 rounded-lg font-mono font-bold">
+                {cart.reduce((sum, item) => sum + item.quantity, 0)}
               </span>
-              <button
-                id="btn-pos-new-sale-cart"
-                onClick={handleTriggerNewSale}
-                className="bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white font-extrabold px-3 py-1 rounded-lg text-xs transition flex items-center gap-1 shadow-md shadow-emerald-600/20"
-                title="Start a fresh new sale (clears cart)"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                <span>New Sale</span>
-              </button>
+
+              {/* Top-Right Utilities Menu Button (•••) */}
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setShowTopRightMenu(!showTopRightMenu)}
+                  className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg transition"
+                  title="Quick Tools & Utilities"
+                >
+                  <MoreVertical className="w-4 h-4" />
+                </button>
+
+                {showTopRightMenu && (
+                  <div className="absolute right-0 top-full mt-2 w-48 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl z-50 p-1.5 space-y-1 text-xs">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowTopRightMenu(false);
+                        handleTriggerNewSale();
+                      }}
+                      className="w-full text-left px-3 py-2 hover:bg-slate-800 rounded-lg text-slate-200 flex items-center gap-2"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5 text-emerald-400" />
+                      <span>New Sale (Reset)</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowTopRightMenu(false);
+                        setShowAiReceiptScanner(true);
+                      }}
+                      className="w-full text-left px-3 py-2 hover:bg-slate-800 rounded-lg text-slate-200 flex items-center gap-2"
+                    >
+                      <Sparkles className="w-3.5 h-3.5 text-purple-400" />
+                      <span>AI Camera Scan</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowTopRightMenu(false);
+                        setShowRepModal(true);
+                      }}
+                      className="w-full text-left px-3 py-2 hover:bg-slate-800 rounded-lg text-slate-200 flex items-center gap-2"
+                    >
+                      <User className="w-3.5 h-3.5 text-sky-400" />
+                      <span>Change Sales Rep</span>
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 
@@ -2571,7 +2645,7 @@ export const POSView: React.FC<POSViewProps> = ({
           </div>
 
           {/* Cart Itemized List */}
-          <div className="space-y-2 max-h-64 sm:max-h-80 overflow-y-auto pr-1">
+          <div className={`space-y-2 max-h-64 sm:max-h-96 overflow-y-auto pr-1 transition-all ${isKeyboardActive ? 'pb-[400px]' : 'pb-96 mb-96'}`}>
             {cart.length === 0 ? (
               <div className="text-center py-10 space-y-3 border-2 border-dashed border-slate-800 rounded-2xl">
                 <ShoppingBag className="w-8 h-8 text-slate-600 mx-auto" />
@@ -2603,80 +2677,72 @@ export const POSView: React.FC<POSViewProps> = ({
               cart.map((item) => (
                 <div
                   key={item.product.id}
-                  className="bg-slate-950 p-2.5 rounded-xl border border-slate-800 space-y-2 text-xs"
+                  className="bg-slate-950 p-2.5 rounded-xl border border-slate-800 space-y-2 text-xs shadow-md"
                 >
-                  <div className="flex items-center justify-between gap-2.5">
-                    <div className="flex items-center gap-2.5 flex-1 min-w-0">
-                      {item.product.imageUrl ? (
-                        <img
-                          src={item.product.imageUrl}
-                          alt={item.product.name}
-                          referrerPolicy="no-referrer"
-                          className="w-10 h-10 rounded-lg object-cover border border-slate-700 shrink-0 shadow-sm"
-                          onError={(e) => { e.currentTarget.style.display = 'none'; }}
-                        />
-                      ) : (
-                        <div className="w-10 h-10 rounded-lg bg-slate-900 border border-slate-800 flex items-center justify-center text-slate-600 shrink-0">
-                          <Package className="w-4 h-4 text-slate-500" />
-                        </div>
-                      )}
-                      <div className="min-w-0 flex-1">
-                        <div className="font-semibold text-slate-200 truncate">{item.product.name}</div>
-                        <div className="text-[10px] text-slate-400 font-mono flex items-center gap-2 flex-wrap mt-1">
-                          <div className="flex items-center gap-1.5 bg-slate-900 border border-sky-800/80 px-2 py-1 rounded-lg shadow-sm">
-                            <span className="text-slate-400 font-bold text-[10px]">Custom Unit Price: KSh</span>
-                            <input
-                              type="number"
-                              min="0"
-                              step="1"
-                              value={item.unitPrice}
-                              onChange={(e) => handleUpdateItemUnitPrice(item.product.id, parseFloat(e.target.value) || 0)}
-                              className="w-20 bg-slate-950 border border-sky-700/60 text-sky-300 font-extrabold px-1.5 py-0.5 rounded text-xs outline-none font-mono focus:border-sky-400"
-                              title="Type custom negotiated selling price or markup (higher or lower than baseline retail price)"
-                            />
-                          </div>
-                          {item.unitPrice !== item.product.sellingPrice && (
-                            <span className={`text-[10px] font-bold font-mono px-1.5 py-0.5 rounded ${
-                              item.unitPrice > item.product.sellingPrice
-                                ? 'bg-emerald-950 text-emerald-300 border border-emerald-800'
-                                : 'bg-amber-950 text-amber-300 border border-amber-800'
-                            }`}>
-                              {item.unitPrice > item.product.sellingPrice ? `▲ Markup (+KSh ${item.unitPrice - item.product.sellingPrice})` : `▼ Markdown (-KSh ${item.product.sellingPrice - item.unitPrice})`}
-                            </span>
-                          )}
-                          <span className="text-slate-500">/ {item.product.unit} {item.product.sizeCapacity ? `• ${item.product.sizeCapacity}` : ''}</span>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Quantity Counter */}
-                    <div className="flex items-center gap-1.5 bg-slate-900 px-2 py-1 rounded-lg border border-slate-800">
-                      <button
-                        onClick={() => updateCartQty(item.product.id, -1)}
-                        className="text-slate-400 hover:text-white p-0.5"
-                      >
-                        <Minus className="w-3.5 h-3.5" />
-                      </button>
-                      <span className="font-bold font-mono text-slate-100 px-1">{item.quantity}</span>
-                      <button
-                        onClick={() => updateCartQty(item.product.id, 1)}
-                        className="text-slate-400 hover:text-white p-0.5"
-                      >
-                        <Plus className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-
-                    <div className="text-right font-bold text-slate-100 min-w-[70px]">
-                      KSh {item.total.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                    </div>
-
+                  {/* Row 1: Full Product Name & Delete Icon */}
+                  <div className="flex items-center justify-between gap-2">
+                    <h4 className="font-bold text-slate-100 text-xs sm:text-sm leading-snug break-words flex-1 min-w-0">
+                      {item.product.name}
+                    </h4>
                     <button
                       onClick={() => removeFromCart(item.product.id)}
-                      className="p-1 hover:bg-slate-800 text-slate-500 hover:text-rose-400 rounded transition"
-                      title="Remove item from cart"
+                      className="p-1 hover:bg-rose-950/50 text-slate-400 hover:text-rose-400 rounded transition shrink-0 border border-slate-800"
+                      title="Remove item"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
+                  </div>
+
+                  {/* Row 2: Price Input x Qty Stepper = Line Subtotal */}
+                  <div className="flex items-center justify-between gap-1.5 pt-1 border-t border-slate-900 flex-wrap">
+                    <div className="flex items-center gap-1.5 bg-slate-900 border border-sky-800/80 px-2 py-1 rounded-lg">
+                      <span className="text-[10px] text-slate-400 font-bold whitespace-nowrap">Price (KSh):</span>
+                      <input
+                        type="number"
+                        min="0"
+                        step="1"
+                        value={item.unitPrice === 0 ? '' : item.unitPrice}
+                        onFocus={(e) => {
+                          e.target.select();
+                          setIsKeyboardActive(true);
+                          setTimeout(() => {
+                            e.currentTarget.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                          }, 300);
+                        }}
+                        onBlur={() => setIsKeyboardActive(false)}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          const num = val === '' ? 0 : parseFloat(val);
+                          handleUpdateItemUnitPrice(item.product.id, isNaN(num) ? 0 : num);
+                        }}
+                        className="w-20 bg-slate-950 border border-sky-700/60 text-sky-300 font-extrabold px-1.5 py-0.5 rounded text-xs outline-none font-mono focus:border-sky-400"
+                        title="Selling Unit Price"
+                      />
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      {/* Quantity Stepper */}
+                      <div className="flex items-center gap-1 bg-slate-900 px-1.5 py-0.5 rounded-lg border border-slate-800">
+                        <button
+                          onClick={() => updateCartQty(item.product.id, -1)}
+                          className="text-slate-400 hover:text-white p-0.5"
+                        >
+                          <Minus className="w-3.5 h-3.5" />
+                        </button>
+                        <span className="font-bold font-mono text-slate-100 px-1 text-xs">{item.quantity}</span>
+                        <button
+                          onClick={() => updateCartQty(item.product.id, 1)}
+                          className="text-slate-400 hover:text-white p-0.5"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+
+                      {/* Line Subtotal */}
+                      <div className="text-right font-extrabold text-emerald-400 font-mono text-xs min-w-[70px]">
+                        KSh {item.total.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                      </div>
+                    </div>
                   </div>
 
                   {/* Item Discount Action Bar */}
@@ -2835,446 +2901,197 @@ export const POSView: React.FC<POSViewProps> = ({
             )}
           </div>
 
-          {/* Sales Representative Selector & Real-time Commission Banner */}
-          <div className="bg-slate-950/80 border border-slate-800 p-2.5 rounded-xl space-y-2 text-xs">
-            <div className="flex items-center justify-between">
-              <label className="text-[11px] font-semibold text-slate-400 flex items-center gap-1">
-                <User className="w-3.5 h-3.5 text-sky-400" /> Attributing Sales Rep:
-              </label>
-              <select
-                value={selectedSalesRepId}
-                onChange={(e) => setSelectedSalesRepId(e.target.value)}
-                className="bg-slate-900 border border-slate-700 text-slate-200 text-xs px-2 py-1 rounded-lg focus:outline-none font-semibold"
-              >
-                {allUsers.map((u) => (
-                  <option key={u.id} value={u.id}>
-                    {u.name} ({u.role})
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* Real-time Sales Commission Display */}
-            <div className="bg-indigo-950/40 border border-indigo-900/60 p-2 rounded-lg flex items-center justify-between">
-              <div className="flex items-center gap-2 text-indigo-300">
-                <Award className="w-4 h-4 text-amber-400 shrink-0" />
-                <div>
-                  <span className="font-bold text-slate-200">{selectedSalesRep.name}</span>
-                  <span className="text-[10px] text-indigo-300 block font-mono">
-                    {currentCartComm.modelDescription}
-                  </span>
-                </div>
+          {/* Compact Sales Rep Chip */}
+          <div className="bg-slate-950 p-2 rounded-xl border border-slate-800 text-xs">
+            <button
+              type="button"
+              onClick={() => setShowRepModal(true)}
+              className="w-full flex items-center justify-between text-slate-300 hover:text-white transition"
+            >
+              <div className="flex items-center gap-1.5">
+                <User className="w-3.5 h-3.5 text-sky-400" />
+                <span>Rep: <strong className="text-white">{selectedSalesRep.name}</strong></span>
               </div>
-              <div className="text-right font-mono">
-                <div className="text-[10px] text-slate-400">Cart Commission</div>
-                <div className="font-bold text-emerald-400 text-xs">
-                  +KSh {currentCartComm.amount.toLocaleString()}
-                </div>
+              <div className="flex items-center gap-1.5 font-mono">
+                <span className="text-emerald-400 font-bold">+KSh {currentCartComm.amount.toLocaleString()}</span>
+                <span className="text-[10px] bg-slate-900 border border-slate-700 px-1.5 py-0.5 rounded text-sky-400">Change ▾</span>
               </div>
-            </div>
+            </button>
           </div>
 
-          {/* Discount, KRA Tax & Totals summary */}
-          <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800 space-y-2.5 text-xs">
-            {/* Custom Item Price / Price Markup Section */}
-            <div className="bg-slate-900 p-2.5 rounded-xl border border-slate-800 space-y-2.5">
-              <div className="flex items-center justify-between gap-2 flex-wrap">
-                <div className="flex items-center gap-1.5">
-                  <TrendingUp className="w-3.5 h-3.5 text-sky-400" />
-                  <span className="font-semibold text-slate-300">
-                    Custom Price / Price Markup (Extra KSh):
-                  </span>
+          {/* Streamlined Discount & Financial Totals Card */}
+          <div className="bg-slate-950/80 p-3 rounded-2xl border border-slate-800 space-y-2.5 text-xs">
+            {/* Sales Discount Controller */}
+            <div className="bg-slate-900 p-2.5 rounded-xl border border-slate-800 space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5 text-slate-300 font-semibold">
+                  <Tag className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Sales Discount ({discountMode === 'fixed' ? 'KSh' : '%'}):</span>
                 </div>
-              </div>
-
-              <div className="space-y-2">
-                <div className="flex items-center gap-2">
-                  <div className="relative flex-1">
-                    <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500 text-xs font-mono font-bold">
-                      +KSh
-                    </span>
-                    <input
-                      type="number"
-                      min="0"
-                      value={saleMarkupInputVal}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        setSaleMarkupInputVal(val);
-                        setSaleMarkupAmount(parseFloat(val) || 0);
-                      }}
-                      placeholder="e.g. 50 (Increase selling price)"
-                      className="w-full bg-slate-950 border border-slate-700 pl-12 pr-2 py-1.5 rounded-lg text-xs font-mono font-bold text-sky-300 focus:outline-none focus:border-sky-400"
-                    />
-                  </div>
-
-                  {(saleMarkupAmount > 0 || saleMarkupInputVal !== '') && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSaleMarkupInputVal('');
-                        setSaleMarkupAmount(0);
-                      }}
-                      className="px-2 py-1.5 bg-rose-950/60 hover:bg-rose-900 border border-rose-800 text-rose-300 rounded-lg text-[11px] font-semibold transition"
-                      title="Clear markup"
-                    >
-                      Clear
-                    </button>
-                  )}
-                </div>
-
-                {/* Quick Addition Chips (+KSh 20, +KSh 50, +KSh 100) */}
-                <div className="flex items-center gap-1.5 flex-wrap">
-                  <span className="text-[10px] text-slate-500 font-medium">Quick Markup:</span>
-                  {[20, 50, 100, 200, 500].map((amt) => (
-                    <button
-                      key={amt}
-                      type="button"
-                      onClick={() => {
-                        const current = parseFloat(saleMarkupInputVal) || 0;
-                        const updated = current + amt;
-                        setSaleMarkupInputVal(String(updated));
-                        setSaleMarkupAmount(updated);
-                      }}
-                      className="px-2 py-0.5 bg-slate-950 hover:bg-sky-950 border border-slate-800 hover:border-sky-700 text-slate-300 hover:text-sky-300 text-[10px] rounded font-mono transition"
-                    >
-                      +{amt}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            {/* Sales Discount Controller with Dual Manual & Percentage Support */}
-            <div className="bg-slate-900 p-2.5 rounded-xl border border-slate-800 space-y-2.5">
-              <div className="flex items-center justify-between gap-2 flex-wrap">
-                <div className="flex items-center gap-1.5">
-                  {discountMode === 'fixed' ? (
-                    <Banknote className="w-3.5 h-3.5 text-amber-400" />
-                  ) : (
-                    <Percent className="w-3.5 h-3.5 text-amber-400" />
-                  )}
-                  <span className="font-semibold text-slate-300">
-                    Sales Discount {discountMode === 'fixed' ? '(Manual KSh)' : '(Percentage %)'}:
-                  </span>
-                </div>
-
-                {/* Mode Toggle: Manual Cash (KSh) vs Percentage (%) */}
                 <div className="flex items-center bg-slate-950 p-0.5 rounded-lg border border-slate-800 text-[10px]">
                   <button
                     type="button"
-                    onClick={() => {
-                      setDiscountMode('fixed');
-                      if (discountMode === 'percentage' && numDiscount > 0) {
-                        setDiscountInputVal(String(numDiscount));
-                        setDiscountAmount(numDiscount);
-                      }
-                    }}
-                    className={`px-2 py-0.5 rounded font-bold transition flex items-center gap-1 ${
-                      discountMode === 'fixed'
-                        ? 'bg-amber-500 text-slate-950 shadow-sm'
-                        : 'text-slate-400 hover:text-white'
-                    }`}
-                    title="Give flat manual discount in Kenyan Shillings"
+                    onClick={() => setDiscountMode('fixed')}
+                    className={`px-2 py-0.5 rounded font-bold transition ${discountMode === 'fixed' ? 'bg-amber-500 text-slate-950' : 'text-slate-400 hover:text-white'}`}
                   >
-                    <Banknote className="w-3 h-3" />
-                    <span>Manual (KSh)</span>
+                    KSh
                   </button>
-
                   <button
                     type="button"
-                    onClick={() => {
-                      setDiscountMode('percentage');
-                      if (discountMode === 'fixed' && numDiscount > 0 && itemsSubtotal > 0) {
-                        const pct = Math.round((numDiscount / itemsSubtotal) * 100);
-                        setDiscountInputVal(pct > 0 ? String(pct) : '');
-                      }
-                    }}
-                    className={`px-2 py-0.5 rounded font-bold transition flex items-center gap-1 ${
-                      discountMode === 'percentage'
-                        ? 'bg-amber-500 text-slate-950 shadow-sm'
-                        : 'text-slate-400 hover:text-white'
-                    }`}
-                    title="Give percentage discount calculated from subtotal"
+                    onClick={() => setDiscountMode('percentage')}
+                    className={`px-2 py-0.5 rounded font-bold transition ${discountMode === 'percentage' ? 'bg-amber-500 text-slate-950' : 'text-slate-400 hover:text-white'}`}
                   >
-                    <Percent className="w-3 h-3" />
-                    <span>Percentage (%)</span>
+                    %
                   </button>
                 </div>
               </div>
 
-              {/* Discount Input & Quick Preset Chips */}
               {hasWorkerPermission(currentUser, 'canGiveDiscounts') || discountAuthorizedBy ? (
-                <div className="space-y-2">
+                <div className="space-y-1.5">
                   <div className="flex items-center gap-2">
-                    <div className="relative flex-1">
-                      <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500 text-xs font-mono font-bold">
-                        {discountMode === 'fixed' ? 'KSh' : '%'}
-                      </span>
-                      <input
-                        type="number"
-                        min="0"
-                        max={discountMode === 'percentage' ? 100 : itemsSubtotal}
-                        value={discountInputVal}
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          setDiscountInputVal(val);
-                          const numVal = parseFloat(val) || 0;
-                          if (discountMode === 'percentage') {
-                            setDiscountAmount(Math.round((numVal / 100) * itemsSubtotal));
-                          } else {
-                            setDiscountAmount(numVal);
-                          }
-                          if (hasWorkerPermission(currentUser, 'canGiveDiscounts') && !discountAuthorizedBy) {
-                            setDiscountAuthorizedBy(`${currentUser.name} (${currentUser.customRoleTitle || currentUser.role})`);
-                          }
-                        }}
-                        placeholder={discountMode === 'fixed' ? 'e.g. 200' : 'e.g. 10'}
-                        className="w-full bg-slate-950 border border-slate-700 pl-10 pr-2 py-1.5 rounded-lg text-xs font-mono font-bold text-amber-300 focus:outline-none focus:border-amber-400"
-                      />
-                    </div>
-
-                    {(numDiscount > 0 || discountInputVal !== '') && (
+                    <input
+                      type="number"
+                      min="0"
+                      value={discountInputVal}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setDiscountInputVal(val);
+                        const numVal = parseFloat(val) || 0;
+                        if (discountMode === 'percentage') {
+                          setDiscountAmount(Math.round((numVal / 100) * itemsSubtotal));
+                        } else {
+                          setDiscountAmount(numVal);
+                        }
+                      }}
+                      placeholder={discountMode === 'fixed' ? 'e.g. 100' : 'e.g. 10'}
+                      className="w-full bg-slate-950 border border-slate-700 px-2.5 py-1 rounded-lg text-xs font-mono font-bold text-amber-300 focus:outline-none focus:border-amber-400"
+                    />
+                    {discountInputVal !== '' && (
                       <button
                         type="button"
                         onClick={() => {
                           setDiscountInputVal('');
                           setDiscountAmount(0);
-                          if (!hasWorkerPermission(currentUser, 'canGiveDiscounts')) {
-                            setDiscountAuthorizedBy(null);
-                          }
                         }}
-                        className="px-2 py-1.5 bg-rose-950/60 hover:bg-rose-900 border border-rose-800 text-rose-300 rounded-lg text-[11px] font-semibold transition"
-                        title="Clear discount"
+                        className="px-2 py-1 bg-rose-950/60 text-rose-300 rounded-lg text-[10px]"
                       >
                         Clear
                       </button>
                     )}
                   </div>
 
-                  {/* 1-Tap Quick Discount Preset Chips */}
-                  <div className="flex items-center gap-1.5 flex-wrap">
-                    <span className="text-[10px] text-slate-500 font-medium">Quick Presets:</span>
+                  {/* Inline preset chips */}
+                  <div className="flex items-center gap-1 flex-wrap">
+                    <span className="text-[10px] text-slate-500">Presets:</span>
                     {discountMode === 'fixed' ? (
-                      [50, 100, 200, 500, 1000].map((amt) => (
+                      [50, 100, 200, 500].map((amt) => (
                         <button
                           key={amt}
                           type="button"
                           onClick={() => {
                             setDiscountInputVal(String(amt));
                             setDiscountAmount(amt);
-                            if (hasWorkerPermission(currentUser, 'canGiveDiscounts') && !discountAuthorizedBy) {
-                              setDiscountAuthorizedBy(`${currentUser.name} (${currentUser.customRoleTitle || currentUser.role})`);
-                            }
                           }}
-                          className={`px-2 py-0.5 rounded text-[10px] font-mono transition border ${
-                            parseFloat(discountInputVal) === amt
-                              ? 'bg-amber-500 text-slate-950 border-amber-400 font-bold'
-                              : 'bg-slate-950 hover:bg-amber-950 border-slate-800 hover:border-amber-700 text-slate-300 hover:text-amber-300'
-                          }`}
+                          className="px-1.5 py-0.5 bg-slate-950 hover:bg-amber-950 border border-slate-800 text-slate-300 text-[10px] rounded font-mono"
                         >
-                          -KSh {amt}
+                          -{amt}
                         </button>
                       ))
                     ) : (
-                      [5, 10, 15, 20, 25].map((pct) => (
+                      [5, 10, 15, 20].map((pct) => (
                         <button
                           key={pct}
                           type="button"
                           onClick={() => {
                             setDiscountInputVal(String(pct));
                             setDiscountAmount(Math.round((pct / 100) * itemsSubtotal));
-                            if (hasWorkerPermission(currentUser, 'canGiveDiscounts') && !discountAuthorizedBy) {
-                              setDiscountAuthorizedBy(`${currentUser.name} (${currentUser.customRoleTitle || currentUser.role})`);
-                            }
                           }}
-                          className={`px-2 py-0.5 rounded text-[10px] font-mono transition border ${
-                            parseFloat(discountInputVal) === pct
-                              ? 'bg-amber-500 text-slate-950 border-amber-400 font-bold'
-                              : 'bg-slate-950 hover:bg-amber-950 border-slate-800 hover:border-amber-700 text-slate-300 hover:text-amber-300'
-                          }`}
+                          className="px-1.5 py-0.5 bg-slate-950 hover:bg-amber-950 border border-slate-800 text-slate-300 text-[10px] rounded font-mono"
                         >
-                          {pct}% off
+                          {pct}%
                         </button>
                       ))
                     )}
                   </div>
-
-                  {/* Dynamic calculation summary note */}
-                  {numDiscount > 0 && (
-                    <div className="text-[10px] text-amber-300/90 font-mono bg-amber-950/20 border border-amber-900/40 px-2 py-1 rounded-md">
-                      {discountMode === 'fixed' ? (
-                        <span>
-                          💵 Deducting manual flat <strong>KSh {numDiscount.toLocaleString()}</strong> from bill{' '}
-                          {itemsSubtotal > 0 && (
-                            <span className="text-slate-400">
-                              (saves {((numDiscount / itemsSubtotal) * 100).toFixed(1)}%)
-                            </span>
-                          )}
-                        </span>
-                      ) : (
-                        <span>
-                          📊 Applying <strong>{discountInputVal}%</strong> discount = Saves{' '}
-                          <strong>KSh {numDiscount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</strong>
-                        </span>
-                      )}
-                    </div>
-                  )}
                 </div>
               ) : (
-                <div className="pt-1">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setTempDiscountVal(100);
-                      setShowAdminDiscountAuthModal(true);
-                    }}
-                    className="w-full px-2.5 py-1.5 bg-amber-950/80 hover:bg-amber-900 border border-amber-800 text-amber-300 rounded-lg text-[11px] font-bold transition flex items-center justify-center gap-1.5"
-                  >
-                    <Lock className="w-3.5 h-3.5 text-amber-400" />
-                    <span>Request Supervisor Discount (Manual KSh or %)</span>
-                  </button>
-                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowAdminDiscountAuthModal(true)}
+                  className="w-full py-1 bg-amber-950/60 text-amber-300 rounded-lg text-[11px] font-bold"
+                >
+                  🔒 Request Supervisor Discount PIN
+                </button>
               )}
+            </div>
+
+            {/* Financial Summary Card */}
+            <div className="space-y-1.5 font-mono pt-1 text-slate-300">
+              <div className="flex justify-between text-slate-400">
+                <span>Items Subtotal:</span>
+                <span>KSh {itemsSubtotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+              </div>
 
               {totalDiscount > 0 && (
-                <div className="flex items-center justify-between text-[10px] text-emerald-400 font-mono bg-emerald-950/40 border border-emerald-900/60 px-2 py-1 rounded-lg">
-                  <span className="flex items-center gap-1">
-                    <ShieldCheck className="w-3 h-3 text-emerald-400" />
-                    <span>Discount Authorization:</span>
-                  </span>
-                  <span className="font-bold">{discountAuthorizedBy || `${currentUser.name} (${currentUser.role})`}</span>
+                <div className="flex justify-between text-emerald-400">
+                  <span>Customer Savings:</span>
+                  <span>-KSh {totalDiscount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
                 </div>
               )}
 
-              {currentUser.role !== 'Admin' && currentUser.role !== 'Manager' && !discountAuthorizedBy && (
-                <p className="text-[10px] text-slate-500 italic">
-                  🔒 Cashiers require Manager or Admin PIN authorization to apply manual cash or percentage discounts.
-                </p>
-              )}
-            </div>
-
-            {/* Subtotal, Item Discounts & Totals Breakdown */}
-            <div className="flex items-center justify-between border-t border-slate-800 pt-2 text-slate-300">
-              <span className="text-slate-400">Items Gross Subtotal:</span>
-              <span className="font-mono font-semibold">KSh {grossSubtotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
-            </div>
-
-            {itemDiscountsTotal > 0 && (
-              <div className="flex items-center justify-between text-emerald-400 font-mono text-[11px]">
-                <span className="flex items-center gap-1">
-                  <Tag className="w-3 h-3" />
-                  <span>Item-Level Discounts:</span>
-                </span>
-                <span>-KSh {itemDiscountsTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
-              </div>
-            )}
-
-            {numDiscount > 0 && (
-              <div className="flex items-center justify-between text-amber-400 font-mono text-[11px]">
-                <span className="flex items-center gap-1">
-                  {discountMode === 'fixed' ? <Banknote className="w-3 h-3" /> : <Percent className="w-3 h-3" />}
-                  <span>Sale Discount {discountMode === 'fixed' ? '(Manual KSh)' : `(${discountInputVal}%)`}:</span>
-                </span>
-                <span>-KSh {numDiscount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
-              </div>
-            )}
-
-            {totalDiscount > 0 && (
-              <div className="flex items-center justify-between text-emerald-300 font-mono text-[11px] bg-emerald-950/30 px-2 py-0.5 rounded border border-emerald-900/40">
-                <span className="font-bold">Total Customer Savings:</span>
-                <span className="font-extrabold">-KSh {totalDiscount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
-              </div>
-            )}
-
-            <div className="flex items-center justify-between text-[11px] text-amber-400/90 font-mono">
-              <span className="flex items-center gap-1">
+              <div className="flex justify-between text-amber-400/90 text-[11px]">
                 <span>KRA Turnover Tax (1.5% TOT):</span>
-              </span>
-              <span>KSh {(grandTotal * 0.015).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
-            </div>
+                <span>KSh {(grandTotal * 0.015).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+              </div>
 
-            <div className="flex items-center justify-between text-base font-extrabold border-t border-slate-800 pt-2 text-white">
-              <span>Grand Total:</span>
-              <span className="text-sky-400 font-mono">KSh {grandTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+              <div className="border-t border-slate-800 pt-2 flex items-center justify-between text-white font-sans">
+                <span className="text-xs font-bold text-slate-400 uppercase tracking-wide">Grand Total:</span>
+                <span className="text-2xl font-black text-sky-400 font-mono">
+                  KSh {grandTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                </span>
+              </div>
             </div>
           </div>
 
-          {/* Checkout & New Sale Action Buttons */}
+          {/* Unified Bottom Dock (Side-by-Side Primary CTAs) */}
           <div className="space-y-2">
-            {/* Offline Cart Indicator */}
             {!isOnline && (
-              <div
-                role="status"
-                aria-live="polite"
-                className="flex items-start gap-2.5 p-2.5 bg-amber-500/15 border-2 border-amber-500/60 text-amber-300 rounded-xl text-xs font-semibold shadow-sm animate-pulse"
-              >
-                <WifiOff className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-                <div>
-                  <span className="font-black text-amber-200 block text-[11px] uppercase tracking-wider">
-                    You are currently offline
-                  </span>
-                  <span className="text-[11px] leading-tight text-amber-300/90 block mt-0.5">
-                    Any actions performed will only sync once a stable connection is re-established.
-                  </span>
-                </div>
+              <div className="flex items-center gap-2 p-2 bg-amber-500/15 border border-amber-500/40 text-amber-300 rounded-xl text-xs">
+                <WifiOff className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                <span>Offline Mode (Syncs upon reconnect)</span>
               </div>
             )}
 
-            {/* Custom Mobile-Optimized Date Selector */}
             {renderMobileDateSelector()}
 
-            {/* Quick 1-Tap M-PESA STK Push Prompt Button */}
-            <button
-              id="btn-pos-mpesa-fast-prompt"
-              type="button"
-              disabled={cart.length === 0 || !hasWorkerPermission(currentUser, 'canMakeSales')}
-              onClick={handleOpenMpesaStkPushDirect}
-              className="w-full bg-gradient-to-r from-emerald-600 via-emerald-500 to-green-600 hover:from-emerald-500 hover:to-green-500 disabled:opacity-40 text-white font-extrabold py-3 px-4 rounded-xl shadow-lg shadow-emerald-950/40 transition flex items-center justify-center gap-2 text-xs sm:text-sm border border-emerald-400/40 group"
-              title="Customer gives mobile number -> SMS/SIM STK prompt sent to customer phone to enter PIN"
-            >
-              <div className="w-5 h-5 rounded-md bg-white/20 flex items-center justify-center font-black text-xs text-white shadow-sm group-hover:scale-105 transition">
-                M
-              </div>
-              <Smartphone className="w-4 h-4 text-emerald-100" />
-              <span>
-                📱 Prompt Customer M-PESA (STK Push) • KSh {grandTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-              </span>
-            </button>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                id="btn-pos-mpesa-fast-prompt"
+                type="button"
+                disabled={cart.length === 0 || !hasWorkerPermission(currentUser, 'canMakeSales')}
+                onClick={handleOpenMpesaStkPushDirect}
+                className="bg-emerald-600 hover:bg-emerald-500 active:scale-95 disabled:opacity-40 text-white font-extrabold py-3 px-3 rounded-xl shadow-md transition flex items-center justify-center gap-1.5 text-xs border border-emerald-400/40"
+              >
+                <div className="w-4 h-4 rounded bg-white/20 flex items-center justify-center font-bold text-[10px]">M</div>
+                <Smartphone className="w-3.5 h-3.5" />
+                <span className="truncate">M-PESA STK</span>
+              </button>
 
-            <div className="flex items-center gap-2">
-              {cart.length > 0 && (
-                <button
-                  id="btn-pos-clear-new-sale"
-                  type="button"
-                  onClick={handleTriggerNewSale}
-                  className="bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 font-bold py-3 px-3 rounded-xl transition flex items-center justify-center gap-1.5 text-xs shrink-0"
-                  title="Discard current items and start a fresh sale"
-                >
-                  <RotateCcw className="w-3.5 h-3.5 text-slate-400" />
-                  <span className="hidden sm:inline">New Sale</span>
-                </button>
-              )}
               <button
                 id="btn-pos-checkout"
                 disabled={cart.length === 0 || !hasWorkerPermission(currentUser, 'canMakeSales')}
                 onClick={handleOpenCheckout}
-                className="flex-1 bg-gradient-to-r from-sky-500 to-indigo-600 hover:from-sky-400 hover:to-indigo-500 disabled:opacity-50 text-white font-bold py-3 px-4 rounded-xl shadow-lg transition flex items-center justify-center gap-2 text-sm"
-                title={!hasWorkerPermission(currentUser, 'canMakeSales') ? 'Worker does not have "Can make sales" permission' : undefined}
+                className="bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-500 hover:to-indigo-500 active:scale-95 disabled:opacity-50 text-white font-extrabold py-3 px-3 rounded-xl shadow-md transition flex items-center justify-center gap-1.5 text-xs"
               >
-                <CreditCard className="w-4 h-4" />
-                <span>
-                  {!hasWorkerPermission(currentUser, 'canMakeSales')
-                    ? 'Sales Permission Restricted'
-                    : `Multi-Pay / Cash / Other (KSh ${grandTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })})`}
-                </span>
+                <CreditCard className="w-3.5 h-3.5" />
+                <span className="truncate">Make Sale</span>
               </button>
             </div>
           </div>
         </div>
-      </div>
 
       {/* MOBILE STICKY BOTTOM QUICK-SALE & CHECKOUT BAR (Zero-scrolling checkout for mobile phones) */}
-      {cart.length > 0 && (
+      {cart.length > 0 && !isKeyboardActive && (
         <div className="lg:hidden sticky bottom-2 left-0 right-0 z-40 bg-slate-900/95 backdrop-blur-md border border-slate-700/80 rounded-2xl p-2.5 shadow-2xl safe-area-bottom mt-4">
           <div className="flex items-center justify-between gap-2 max-w-lg mx-auto">
             {/* Reset / New Sale 1-tap Button */}
@@ -3963,6 +3780,60 @@ export const POSView: React.FC<POSViewProps> = ({
         isOpen={showSmsLogsModal}
         onClose={() => setShowSmsLogsModal(false)}
       />
+
+      {/* SALES REP MODAL */}
+      {showRepModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-fadeIn">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-sm p-5 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <h4 className="font-extrabold text-sm text-slate-100 flex items-center gap-2">
+                <User className="w-4 h-4 text-sky-400" /> Select Attributing Sales Rep
+              </h4>
+              <button
+                type="button"
+                onClick={() => setShowRepModal(false)}
+                className="p-1 hover:bg-slate-800 text-slate-400 hover:text-white rounded-lg transition"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
+              {allUsers.map((u) => (
+                <button
+                  key={u.id}
+                  type="button"
+                  onClick={() => {
+                    setSelectedSalesRepId(u.id);
+                    setShowRepModal(false);
+                  }}
+                  className={`w-full p-3 rounded-xl border text-left flex items-center justify-between transition ${
+                    selectedSalesRepId === u.id
+                      ? 'bg-sky-950/60 border-sky-500 text-white'
+                      : 'bg-slate-950 border-slate-800 text-slate-300 hover:bg-slate-800'
+                  }`}
+                >
+                  <div>
+                    <div className="font-bold text-xs">{u.name}</div>
+                    <div className="text-[10px] text-slate-400 font-mono">{u.role}</div>
+                  </div>
+                  {selectedSalesRepId === u.id && (
+                    <span className="text-xs bg-sky-600 text-white font-bold px-2 py-0.5 rounded-full">Active</span>
+                  )}
+                </button>
+              ))}
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setShowRepModal(false)}
+              className="w-full bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold py-2.5 rounded-xl text-xs transition"
+            >
+              Done
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

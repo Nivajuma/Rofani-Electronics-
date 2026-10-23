@@ -13,7 +13,8 @@ export type TabKey =
   | 'onlinestore'
   | 'onlineorders'
   | 'settings'
-  | 'auditlogs';
+  | 'auditlogs'
+  | 'menu';
 
 export interface PermissionDefinition {
   key: keyof WorkerPermissions;
@@ -1423,4 +1424,5 @@ export const TAB_LABELS: Record<TabKey, string> = {
   onlineorders: 'Online Orders & Delivery',
   settings: 'System & KRA Fiscal Settings',
   auditlogs: 'Worker Role Authorization Audit Trail',
+  menu: 'App Menu',
 };

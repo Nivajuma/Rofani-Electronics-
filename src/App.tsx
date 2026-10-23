@@ -120,6 +120,7 @@ import { PrintBarcodesUtilityModal } from './components/Inventory/PrintBarcodesU
 import { ItemAuditMiniPage } from './components/Inventory/ItemAuditMiniPage';
 import { StockAlertNotificationModal } from './components/Inventory/StockAlertNotificationModal';
 import { CameraStartupPrompt } from './components/Common/CameraStartupPrompt';
+import { AppMenuView } from './components/Common/AppMenuView';
 import { formatKSh } from './utils/currency';
 import {
   TabKey,
@@ -204,6 +205,7 @@ export default function App() {
     'onlineorders',
     'settings',
     'auditlogs',
+    'menu',
   ] as const;
 
   type AppTab = (typeof VALID_TABS)[number];
@@ -2455,6 +2457,18 @@ export default function App() {
           onOpenAuditLogs={() => setActiveTab('auditlogs')}
           stores={stores}
           onOpenStoreManager={() => setShowStoreManagerModal(true)}
+        />
+      )}
+
+      {activeTab === 'menu' && (
+        <AppMenuView
+          onSelectTab={(tab) => setActiveTab(tab as any)}
+          onOpenCloudSync={() => setShowCloudSyncModal(true)}
+          onOpenStoreManager={() => setShowStoreManagerModal(true)}
+          onOpenInstallModal={() => setShowInstallModal(true)}
+          onSwitchToComputer={() => setDeviceFormat('computer')}
+          lowStockCount={lowStockCount}
+          storeName={stores.find((s) => s.id === activeStoreId)?.name || 'ROFANI ELECTRONICS'}
         />
       )}
     </>

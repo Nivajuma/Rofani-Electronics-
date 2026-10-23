@@ -559,7 +559,20 @@ export const PhoneDeviceFrame: React.FC<PhoneDeviceFrameProps> = ({
             }`}
           >
             <ShoppingBag className="w-5 h-5 mb-0.5" />
-            <span className="text-[10px] font-bold">POS</span>
+            <span className="text-[10px] font-bold">Home</span>
+          </button>
+
+          <button
+            onClick={() => {
+              onSelectTab('reports');
+              setShowMobileMoreMenu(false);
+            }}
+            className={`flex flex-col items-center justify-center w-14 py-1 rounded-xl transition ${
+              activeTab === 'reports' ? 'text-blue-400 font-black' : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <FileText className="w-5 h-5 mb-0.5" />
+            <span className="text-[10px] font-bold">Dashboard</span>
           </button>
 
           <button
@@ -572,43 +585,29 @@ export const PhoneDeviceFrame: React.FC<PhoneDeviceFrameProps> = ({
             }`}
           >
             <Package className="w-5 h-5 mb-0.5" />
-            <span className="text-[10px] font-bold">Stock</span>
+            <span className="text-[10px] font-bold">Items</span>
           </button>
 
           <button
             onClick={() => {
-              onSelectTab('stocktake');
+              onSelectTab('menu' as any);
               setShowMobileMoreMenu(false);
             }}
             className={`flex flex-col items-center justify-center w-14 py-1 rounded-xl transition ${
-              activeTab === 'stocktake' ? 'text-blue-400 font-black' : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <ClipboardList className="w-5 h-5 mb-0.5" />
-            <span className="text-[10px] font-bold">Audit</span>
-          </button>
-
-          <button
-            onClick={() => {
-              onSelectTab('cashmanagement');
-              setShowMobileMoreMenu(false);
-            }}
-            className={`flex flex-col items-center justify-center w-14 py-1 rounded-xl transition ${
-              activeTab === 'cashmanagement' ? 'text-blue-400 font-black' : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <Landmark className="w-5 h-5 mb-0.5" />
-            <span className="text-[10px] font-bold">Cash</span>
-          </button>
-
-          <button
-            onClick={() => setShowMobileMoreMenu(!showMobileMoreMenu)}
-            className={`flex flex-col items-center justify-center w-14 py-1 rounded-xl transition ${
-              showMobileMoreMenu ? 'text-blue-400 font-black' : 'text-slate-400 hover:text-slate-200'
+              activeTab === ('menu' as any) ? 'text-blue-400 font-black' : 'text-slate-400 hover:text-slate-200'
             }`}
           >
             <Menu className="w-5 h-5 mb-0.5" />
-            <span className="text-[10px] font-bold">More</span>
+            <span className="text-[10px] font-bold">Menu</span>
+          </button>
+
+          <button
+            onClick={onSwitchToComputer}
+            className="flex flex-col items-center justify-center w-14 py-1 rounded-xl transition text-slate-400 hover:text-slate-200 cursor-pointer"
+            title="Get Desktop Billing Software"
+          >
+            <Monitor className="w-5 h-5 mb-0.5 text-blue-400" />
+            <span className="text-[10px] font-bold">Desktop</span>
           </button>
         </div>
 

@@ -25,7 +25,8 @@ import {
   Smartphone,
   Download,
   Building2,
-  Bell
+  Bell,
+  Settings
 } from 'lucide-react';
 import { User, Role, StoreLocation } from '../types';
 
@@ -216,6 +217,18 @@ export const Header: React.FC<HeaderProps> = ({
             >
               <FileText className="w-4 h-4" />
               <span>Reports & PDF</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('settings')}
+              className={`flex items-center gap-2 px-3 py-2 rounded-lg font-medium transition ${
+                activeTab === 'settings'
+                  ? 'bg-sky-600 text-white shadow-sm font-semibold'
+                  : 'text-slate-300 hover:text-white hover:bg-slate-800'
+              }`}
+            >
+              <Settings className="w-4 h-4 text-amber-400" />
+              <span>Settings</span>
             </button>
           </nav>
 
@@ -474,6 +487,14 @@ export const Header: React.FC<HeaderProps> = ({
             }`}
           >
             <FileText className="w-3.5 h-3.5" /> Reports
+          </button>
+          <button
+            onClick={() => setActiveTab('settings')}
+            className={`px-3 py-1.5 rounded-lg whitespace-nowrap flex items-center gap-1.5 ${
+              activeTab === 'settings' ? 'bg-sky-600 text-white font-bold' : 'bg-slate-800 text-slate-300'
+            }`}
+          >
+            <Settings className="w-3.5 h-3.5 text-amber-400" /> Settings ⚙️
           </button>
         </div>
       </div>

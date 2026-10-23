@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { Product, Customer, Supplier, Transaction, Expense, AttendanceRecord, User, StoreLocation } from '../../types';
 import { safeGetJSON, safeSetJSON } from '../../utils/safeStorage';
+import { ItemSettingsView } from './ItemSettingsView';
 
 interface SettingsDashboardViewProps {
   products: Product[];
@@ -354,8 +355,14 @@ export const SettingsDashboardView: React.FC<SettingsDashboardViewProps> = ({
         )}
       </div>
 
+      {activeSubPanel === 'inventory' && (
+        <div className="fixed inset-0 z-50 bg-[#F1F5F9] overflow-y-auto">
+          <ItemSettingsView onBack={() => setActiveSubPanel(null)} />
+        </div>
+      )}
+
       {/* Sub-Panel Modal Overlay */}
-      {activeSubPanel && (
+      {activeSubPanel && activeSubPanel !== 'inventory' && (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
             {/* Modal Header */}
@@ -366,15 +373,15 @@ export const SettingsDashboardView: React.FC<SettingsDashboardViewProps> = ({
                 </div>
                 <div>
                   <h3 className="font-bold text-base text-slate-100 capitalize">
-                    {activeSubPanel === 'general' && '⚙️ General Shop Settings'}
-                    {activeSubPanel === 'transaction' && '💱 Transaction & POS Settings'}
-                    {activeSubPanel === 'invoice' && '🖨️ Invoice & Receipt Print Settings'}
-                    {activeSubPanel === 'taxes' && '% Taxes & KRA Configuration'}
-                    {activeSubPanel === 'users' && '👥 User Management & Roles'}
-                    {activeSubPanel === 'reminders' && '🔔 Reminders & Low Stock Alerts'}
-                    {activeSubPanel === 'party' && '🤝 Party & Customer Management'}
-                    {activeSubPanel === 'inventory' && '📦 Item & Inventory Defaults'}
-                    {activeSubPanel === 'currency' && '🪙 Multi-Currency & Formatting'}
+                    {(activeSubPanel as string) === 'general' && '⚙️ General Shop Settings'}
+                    {(activeSubPanel as string) === 'transaction' && '💱 Transaction & POS Settings'}
+                    {(activeSubPanel as string) === 'invoice' && '🖨️ Invoice & Receipt Print Settings'}
+                    {(activeSubPanel as string) === 'taxes' && '% Taxes & KRA Configuration'}
+                    {(activeSubPanel as string) === 'users' && '👥 User Management & Roles'}
+                    {(activeSubPanel as string) === 'reminders' && '🔔 Reminders & Low Stock Alerts'}
+                    {(activeSubPanel as string) === 'party' && '🤝 Party & Customer Management'}
+                    {(activeSubPanel as string) === 'inventory' && '📦 Item & Inventory Defaults'}
+                    {(activeSubPanel as string) === 'currency' && '🪙 Multi-Currency & Formatting'}
                   </h3>
                   <p className="text-xs text-slate-400">Configure parameters and save changes instantly</p>
                 </div>
@@ -647,29 +654,7 @@ export const SettingsDashboardView: React.FC<SettingsDashboardViewProps> = ({
                 </div>
               )}
 
-              {activeSubPanel === 'inventory' && (
-                <div className="space-y-4">
-                  <div>
-                    <label className="block font-semibold text-slate-200 mb-1">Default Unit Category</label>
-                    <select
-                      value={defaultUnitCategory}
-                      onChange={(e) => setDefaultUnitCategory(e.target.value)}
-                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2.5 text-slate-100 focus:outline-none focus:ring-2 focus:ring-teal-500 font-medium"
-                    >
-                      <option value="pcs">Pieces (pcs)</option>
-                      <option value="units">Units</option>
-                      <option value="pairs">Pairs</option>
-                      <option value="sets">Sets</option>
-                      <option value="boxes">Boxes</option>
-                    </select>
-                  </div>
-                  <div className="p-3 bg-slate-950/60 border border-slate-800 rounded-xl">
-                    <p className="text-[11px] text-slate-400">
-                      Catalog items automatically inherit this unit category upon creation unless specified.
-                    </p>
-                  </div>
-                </div>
-              )}
+
 
               {activeSubPanel === 'currency' && (
                 <div className="space-y-4">

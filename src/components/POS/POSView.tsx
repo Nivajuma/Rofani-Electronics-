@@ -1196,6 +1196,15 @@ export const POSView: React.FC<POSViewProps> = ({
 
   // Process Final Sale
   const handleFinalizeSale = () => {
+    if (!cart || cart.length === 0) {
+      console.error('Sale finalization failed: Cart is empty.');
+      alert('Cannot complete sale: Receipt cart is empty. Please add items first.');
+      setShowCheckoutModal(false);
+      return;
+    }
+
+    console.log('Finalizing sale with cart items:', cart.length, 'Grand Total:', grandTotal);
+
     const totalPaid = paymentEntries.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
     const balanceDue = Math.max(0, grandTotal - totalPaid);
     let paymentStatus: 'Paid' | 'Partial' | 'Unpaid' = 'Paid';
@@ -1267,7 +1276,14 @@ export const POSView: React.FC<POSViewProps> = ({
       return cust;
     });
 
-    onCompleteSale(newTx, updatedProducts, updatedCustomers);
+    try {
+      onCompleteSale(newTx, updatedProducts, updatedCustomers);
+      console.log('Successfully recorded transaction:', newTx.receiptNumber);
+    } catch (err) {
+      console.error('Error invoking onCompleteSale callback:', err);
+      alert('Error recording sale transaction. Please check console logs.');
+      return;
+    }
 
     // Automated Transaction Summary SMS Notification via Mock Gateway
     if (autoSmsSummary && newTx.customerPhone && newTx.customerPhone !== 'N/A') {
@@ -1319,6 +1335,481 @@ export const POSView: React.FC<POSViewProps> = ({
     setNewCustPhone('');
     setNewCustEmail('');
   };
+
+  const renderCartPanel = () => (
+    <div className="space-y-4">
+      {/* Mobile Back to Catalog Button & Quick Reset */}
+      <div className="lg:hidden flex items-center justify-between pb-2 border-b border-slate-800">
+        <button
+          type="button"
+          onClick={() => setMobileTab('catalog')}
+          className="text-xs font-bold text-sky-400 hover:text-sky-300 flex items-center gap-1.5 py-1 px-2.5 rounded-lg bg-sky-950/60 border border-sky-900/60 cursor-pointer"
+        >
+          <ArrowLeft className="w-3.5 h-3.5" />
+          <span>← Back to Catalog</span>
+        </button>
+        <button
+          type="button"
+          onClick={handleTriggerNewSale}
+          className="text-xs font-bold text-emerald-400 hover:text-emerald-300 flex items-center gap-1 py-1 px-2.5 rounded-lg bg-emerald-950/60 border border-emerald-900/60 cursor-pointer"
+        >
+          <RotateCcw className="w-3.5 h-3.5" />
+          <span>Reset / New Sale</span>
+        </button>
+      </div>
+
+      {/* Header & Customer Picker */}
+      <div className="flex items-center justify-between border-b border-slate-800 pb-3 relative">
+        <div className="flex items-center gap-2">
+          <ShoppingBag className="w-5 h-5 text-sky-400" />
+          <h3 className="font-bold text-sm text-slate-100">Receipt Order Cart</h3>
+        </div>
+        <div className="flex items-center gap-1.5 relative">
+          <button
+            id="btn-pos-ai-scan-cart"
+            type="button"
+            onClick={() => setShowAiReceiptScanner(true)}
+            className="bg-purple-950/80 hover:bg-purple-900 border border-purple-700/80 text-purple-300 font-bold px-2 py-1 rounded-lg text-xs transition flex items-center gap-1 shadow-sm cursor-pointer"
+            title="Scan items with AI"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+            <span className="hidden sm:inline">AI Add</span>
+          </button>
+
+          <span className="bg-sky-950 border border-sky-800 text-sky-300 text-xs px-2 py-1 rounded-lg font-mono font-bold">
+            {cart.reduce((sum, item) => sum + item.quantity, 0)}
+          </span>
+
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setShowTopRightMenu(!showTopRightMenu)}
+              className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg transition cursor-pointer"
+              title="Quick Tools & Utilities"
+            >
+              <MoreVertical className="w-4 h-4" />
+            </button>
+
+            {showTopRightMenu && (
+              <div className="absolute right-0 top-full mt-2 w-48 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl z-50 p-1.5 space-y-1 text-xs">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowTopRightMenu(false);
+                    handleTriggerNewSale();
+                  }}
+                  className="w-full text-left px-3 py-2 hover:bg-slate-800 rounded-lg text-slate-200 flex items-center gap-2 cursor-pointer"
+                >
+                  <RotateCcw className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>New Sale (Reset)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowTopRightMenu(false);
+                    setShowAiReceiptScanner(true);
+                  }}
+                  className="w-full text-left px-3 py-2 hover:bg-slate-800 rounded-lg text-slate-200 flex items-center gap-2 cursor-pointer"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-purple-400" />
+                  <span>AI Camera Scan</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowTopRightMenu(false);
+                    setShowRepModal(true);
+                  }}
+                  className="w-full text-left px-3 py-2 hover:bg-slate-800 rounded-lg text-slate-200 flex items-center gap-2 cursor-pointer"
+                >
+                  <User className="w-3.5 h-3.5 text-sky-400" />
+                  <span>Change Sales Rep</span>
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Customer Selection Row */}
+      <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 flex-1 min-w-0">
+          <User className="w-4 h-4 text-slate-400 shrink-0" />
+          <select
+            value={selectedCustomer.id}
+            onChange={(e) => {
+              const cust = customers.find((c) => c.id === e.target.value);
+              if (cust) setSelectedCustomer(cust);
+            }}
+            className="bg-transparent text-slate-200 text-xs font-semibold focus:outline-none w-full truncate cursor-pointer"
+          >
+            {customers.map((c) => (
+              <option key={c.id} value={c.id} className="bg-slate-900 text-slate-200">
+                {c.name} {c.currentBalanceDue > 0 ? `(Debt: KSh ${c.currentBalanceDue.toLocaleString()})` : ''}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {hasWorkerPermission(currentUser, 'canViewManageCustomers') && (
+          <button
+            onClick={() => setShowAddCustomerModal(true)}
+            title="Add New Customer"
+            className="p-1.5 bg-slate-800 hover:bg-slate-700 text-sky-400 rounded-lg transition cursor-pointer"
+          >
+            <UserPlus className="w-4 h-4" />
+          </button>
+        )}
+      </div>
+
+      {/* Cart Itemized List */}
+      <div className="space-y-2 max-h-64 sm:max-h-96 overflow-y-auto pr-1">
+        {cart.length === 0 ? (
+          <div className="text-center py-10 space-y-3 border-2 border-dashed border-slate-800 rounded-2xl">
+            <ShoppingBag className="w-8 h-8 text-slate-600 mx-auto" />
+            <div>
+              <p className="text-xs text-slate-400 font-medium">Cart is empty</p>
+              <p className="text-[11px] text-slate-500">Scan barcode, tap products, or use AI camera scan to build receipt</p>
+            </div>
+            <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => setShowAiReceiptScanner(true)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white rounded-xl text-xs font-extrabold shadow-md shadow-purple-600/25 transition cursor-pointer"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-amber-300 animate-pulse" />
+                <span>AI Scan & Auto-Add Items</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setMobileTab('catalog')}
+                className="lg:hidden inline-flex items-center gap-1.5 px-3 py-1.5 bg-sky-600 hover:bg-sky-500 text-white rounded-xl text-xs font-bold shadow-md transition cursor-pointer"
+              >
+                <Package className="w-3.5 h-3.5" />
+                <span>Browse Products Catalog</span>
+              </button>
+            </div>
+          </div>
+        ) : (
+          cart.map((item) => (
+            <div
+              key={item.product.id}
+              className="bg-slate-950 p-2.5 rounded-xl border border-slate-800 space-y-2 text-xs shadow-md"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <h4 className="font-bold text-slate-100 text-xs sm:text-sm leading-snug break-words flex-1 min-w-0">
+                  {item.product.name}
+                </h4>
+                <button
+                  onClick={() => removeFromCart(item.product.id)}
+                  className="p-1 hover:bg-rose-950/50 text-slate-400 hover:text-rose-400 rounded transition shrink-0 border border-slate-800 cursor-pointer"
+                  title="Remove item"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              </div>
+
+              <div className="flex items-center justify-between gap-1.5 pt-1 border-t border-slate-900 flex-wrap">
+                <div className="flex items-center gap-1.5 bg-slate-900 border border-sky-800/80 px-2 py-1 rounded-lg">
+                  <span className="text-[10px] text-slate-400 font-bold whitespace-nowrap">Price (KSh):</span>
+                  <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={item.unitPrice === 0 ? '' : item.unitPrice}
+                    onFocus={(e) => {
+                      e.target.select();
+                      setIsKeyboardActive(true);
+                      setTimeout(() => {
+                        e.currentTarget.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                      }, 300);
+                    }}
+                    onBlur={() => setIsKeyboardActive(false)}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      const num = val === '' ? 0 : parseFloat(val);
+                      handleUpdateItemUnitPrice(item.product.id, isNaN(num) ? 0 : num);
+                    }}
+                    className="w-20 bg-slate-950 border border-sky-700/60 text-sky-300 font-extrabold px-1.5 py-0.5 rounded text-xs outline-none font-mono focus:border-sky-400"
+                    title="Selling Unit Price"
+                  />
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1 bg-slate-900 px-1.5 py-0.5 rounded-lg border border-slate-800">
+                    <button
+                      onClick={() => updateCartQty(item.product.id, -1)}
+                      className="text-slate-400 hover:text-white p-0.5 cursor-pointer"
+                    >
+                      <Minus className="w-3.5 h-3.5" />
+                    </button>
+                    <span className="font-bold font-mono text-slate-100 px-1 text-xs">{item.quantity}</span>
+                    <button
+                      onClick={() => updateCartQty(item.product.id, 1)}
+                      className="text-slate-400 hover:text-white p-0.5 cursor-pointer"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+
+                  <div className="text-right font-extrabold text-emerald-400 font-mono text-xs min-w-[70px]">
+                    KSh {item.total.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  </div>
+                </div>
+              </div>
+
+              {/* Item Discount Action Bar */}
+              <div className="flex items-center justify-between pt-1 border-t border-slate-900 text-[11px]">
+                <div className="flex items-center gap-2">
+                  {hasWorkerPermission(currentUser, 'canGiveDiscounts') ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (editingItemDiscountId === item.product.id) {
+                          setEditingItemDiscountId(null);
+                        } else {
+                          setEditingItemDiscountId(item.product.id);
+                          setItemDiscountMode('fixed');
+                          setItemDiscountInputVal(item.discount > 0 ? String(item.discount) : '');
+                        }
+                      }}
+                      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md font-semibold transition cursor-pointer ${
+                        item.discount > 0
+                          ? 'bg-amber-950/70 border border-amber-800 text-amber-300 hover:bg-amber-900'
+                          : 'bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-800'
+                      }`}
+                      title="Set manual cash or % discount for this specific item"
+                    >
+                      <Tag className="w-3 h-3 text-amber-400" />
+                      <span>{item.discount > 0 ? `Item Disc: -KSh ${(item.discount * item.quantity).toLocaleString()}` : 'Give Item Discount'}</span>
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setShowAdminDiscountAuthModal(true)}
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md font-semibold bg-amber-950/40 border border-amber-900/60 text-amber-400 hover:bg-amber-900/60 transition cursor-pointer"
+                      title="Manager permission required to give item discounts"
+                    >
+                      <Lock className="w-3 h-3 text-amber-400" />
+                      <span>🔒 Request Manager Discount PIN</span>
+                    </button>
+                  )}
+                  {item.discount > 0 && hasWorkerPermission(currentUser, 'canGiveDiscounts') && (
+                    <button
+                      type="button"
+                      onClick={() => handleUpdateItemDiscount(item.product.id, 0)}
+                      className="text-[10px] text-rose-400 hover:underline cursor-pointer"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+
+                {item.discount > 0 && (
+                  <span className="text-[10px] text-emerald-400 font-mono">
+                    Saved KSh {(item.discount * item.quantity).toLocaleString()}
+                  </span>
+                )}
+              </div>
+
+              {/* Inline Item Discount Popover/Editor */}
+              {editingItemDiscountId === item.product.id && hasWorkerPermission(currentUser, 'canGiveDiscounts') && (
+                <div className="p-2.5 bg-slate-900/90 rounded-xl border border-amber-800/60 space-y-2 mt-1">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-amber-300 text-[11px] flex items-center gap-1">
+                      <Tag className="w-3 h-3" /> Manual Item Discount: {item.product.name}
+                    </span>
+                    <div className="flex items-center bg-slate-950 p-0.5 rounded-lg border border-slate-800 text-[10px]">
+                      <button
+                        type="button"
+                        onClick={() => setItemDiscountMode('fixed')}
+                        className={`px-2 py-0.5 rounded font-bold transition cursor-pointer ${
+                          itemDiscountMode === 'fixed' ? 'bg-amber-500 text-slate-950' : 'text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        Manual KSh
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setItemDiscountMode('percentage')}
+                        className={`px-2 py-0.5 rounded font-bold transition cursor-pointer ${
+                          itemDiscountMode === 'percentage' ? 'bg-amber-500 text-slate-950' : 'text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        % Off
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <div className="relative flex-1">
+                      <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500 text-[10px] font-mono font-bold">
+                        {itemDiscountMode === 'fixed' ? 'KSh' : '%'}
+                      </span>
+                      <input
+                        type="number"
+                        min="0"
+                        max={itemDiscountMode === 'fixed' ? item.unitPrice : 100}
+                        value={itemDiscountInputVal}
+                        onChange={(e) => setItemDiscountInputVal(e.target.value)}
+                        placeholder={itemDiscountMode === 'fixed' ? 'e.g. 50' : 'e.g. 10'}
+                        className="w-full bg-slate-950 border border-slate-700 pl-9 pr-2 py-1 rounded-lg text-xs font-mono font-bold text-amber-300 focus:outline-none focus:border-amber-400"
+                      />
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const val = parseFloat(itemDiscountInputVal) || 0;
+                        let discPerUnit = 0;
+                        if (itemDiscountMode === 'percentage') {
+                          discPerUnit = Math.round((val / 100) * item.unitPrice);
+                        } else {
+                          discPerUnit = Math.min(item.unitPrice, val);
+                        }
+                        handleUpdateItemDiscount(item.product.id, discPerUnit);
+                        setEditingItemDiscountId(null);
+                      }}
+                      className="px-3 py-1 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs rounded-lg transition cursor-pointer"
+                    >
+                      Apply
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setEditingItemDiscountId(null)}
+                      className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs rounded-lg transition cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+
+                  {/* Quick Chips for Item Discount */}
+                  <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
+                    <span className="text-[10px] text-slate-500">Quick:</span>
+                    {itemDiscountMode === 'fixed' ? (
+                      [20, 50, 100, 200, 500].map((amt) => (
+                        <button
+                          key={amt}
+                          type="button"
+                          onClick={() => {
+                            setItemDiscountInputVal(String(amt));
+                            handleUpdateItemDiscount(item.product.id, Math.min(item.unitPrice, amt));
+                            setEditingItemDiscountId(null);
+                          }}
+                          className="px-1.5 py-0.5 bg-slate-950 hover:bg-amber-950 border border-slate-800 hover:border-amber-700 text-slate-300 hover:text-amber-300 text-[10px] rounded font-mono transition cursor-pointer"
+                        >
+                          -KSh {amt}
+                        </button>
+                      ))
+                    ) : (
+                      [5, 10, 15, 20, 50].map((pct) => (
+                        <button
+                          key={pct}
+                          type="button"
+                          onClick={() => {
+                            setItemDiscountInputVal(String(pct));
+                            const disc = Math.round((pct / 100) * item.unitPrice);
+                            handleUpdateItemDiscount(item.product.id, disc);
+                            setEditingItemDiscountId(null);
+                          }}
+                          className="px-1.5 py-0.5 bg-slate-950 hover:bg-amber-950 border border-slate-800 hover:border-amber-700 text-slate-300 hover:text-amber-300 text-[10px] rounded font-mono transition cursor-pointer"
+                        >
+                          {pct}% off
+                        </button>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          ))
+        )}
+      </div>
+
+      {/* Compact Sales Rep Chip */}
+      <div className="bg-slate-950 p-2 rounded-xl border border-slate-800 text-xs">
+        <button
+          type="button"
+          onClick={() => setShowRepModal(true)}
+          className="w-full flex items-center justify-between text-slate-300 hover:text-white transition cursor-pointer"
+        >
+          <div className="flex items-center gap-1.5">
+            <User className="w-3.5 h-3.5 text-sky-400" />
+            <span>Rep: <strong className="text-white">{selectedSalesRep.name}</strong></span>
+          </div>
+          <div className="flex items-center gap-1.5 font-mono">
+            <span className="text-emerald-400 font-bold">+KSh {currentCartComm.amount.toLocaleString()}</span>
+            <span className="text-[10px] bg-slate-900 border border-slate-700 px-1.5 py-0.5 rounded text-sky-400">Change ▾</span>
+          </div>
+        </button>
+      </div>
+
+      {/* Financial Summary */}
+      <div className="bg-slate-950/80 p-3 rounded-2xl border border-slate-800 space-y-2.5 text-xs">
+        <div className="space-y-1.5 font-mono pt-1 text-slate-300">
+          <div className="flex justify-between text-slate-400">
+            <span>Items Subtotal:</span>
+            <span>KSh {itemsSubtotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+          </div>
+
+          {totalDiscount > 0 && (
+            <div className="flex justify-between text-emerald-400">
+              <span>Customer Savings:</span>
+              <span>-KSh {totalDiscount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+            </div>
+          )}
+
+          <div className="flex justify-between text-amber-400/90 text-[11px]">
+            <span>KRA Turnover Tax (1.5% TOT):</span>
+            <span>KSh {(grandTotal * 0.015).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+          </div>
+
+          <div className="border-t border-slate-800 pt-2 flex items-center justify-between text-white font-sans">
+            <span className="text-xs font-bold text-slate-400 uppercase tracking-wide">Grand Total:</span>
+            <span className="text-2xl font-black text-sky-400 font-mono">
+              KSh {grandTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* Checkout Action Buttons */}
+      <div className="space-y-2">
+        {!isOnline && (
+          <div className="flex items-center gap-2 p-2 bg-amber-500/15 border border-amber-500/40 text-amber-300 rounded-xl text-xs">
+            <WifiOff className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+            <span>Offline Mode (Syncs upon reconnect)</span>
+          </div>
+        )}
+
+        {renderMobileDateSelector()}
+
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            id="btn-pos-mpesa-fast-prompt"
+            type="button"
+            disabled={cart.length === 0 || !hasWorkerPermission(currentUser, 'canMakeSales')}
+            onClick={handleOpenMpesaStkPushDirect}
+            className="bg-emerald-600 hover:bg-emerald-500 active:scale-95 disabled:opacity-40 text-white font-semibold py-2.5 px-3 rounded-xl shadow-sm transition flex items-center justify-center gap-1.5 text-xs sm:text-sm border border-emerald-400/40 cursor-pointer"
+          >
+            <Smartphone className="w-4 h-4" />
+            <span className="truncate">M-PESA STK</span>
+          </button>
+
+          <button
+            id="btn-pos-checkout"
+            disabled={cart.length === 0 || !hasWorkerPermission(currentUser, 'canMakeSales')}
+            onClick={handleOpenCheckout}
+            className="bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-500 hover:to-indigo-500 active:scale-95 disabled:opacity-50 text-white font-semibold py-2.5 px-3 rounded-xl shadow-sm transition flex items-center justify-center gap-1.5 text-xs sm:text-sm cursor-pointer"
+          >
+            <CreditCard className="w-4 h-4" />
+            <span className="truncate">Make Sale</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 
   const renderMobileDateSelector = () => {
     const [yearStr, monthStr, dayStr] = (saleDate || getLocalDateString()).split('-');
@@ -2415,24 +2906,42 @@ export const POSView: React.FC<POSViewProps> = ({
                 const isLowStock = p.stockQuantity <= p.minStockAlert;
                 const isOutOfStock = p.stockQuantity <= 0;
                 const perf = performanceMap[p.id];
+                const cartItem = cart.find((item) => item.product.id === p.id);
+                const inCartQty = cartItem ? cartItem.quantity : 0;
+                const isInCart = inCartQty > 0;
 
                 return (
                   <div
                     key={p.id}
                     onClick={() => handleAddToCart(p)}
                     className={`group border rounded-2xl p-3 transition flex flex-col justify-between cursor-pointer relative overflow-hidden ${
-                      perf ? perf.cardBorder : 'border-slate-800'
-                    } ${perf ? perf.cardGlow : ''} ${
+                      isInCart
+                        ? 'border-2 border-emerald-500 shadow-md shadow-emerald-500/20 bg-emerald-950/35 ring-1 ring-emerald-400/40'
+                        : perf
+                        ? perf.cardBorder
+                        : 'border-slate-800'
+                    } ${perf && !isInCart ? perf.cardGlow : ''} ${
                       isOutOfStock
                         ? 'opacity-60 bg-slate-950/40'
                         : isLowStock
                         ? 'bg-slate-900/90'
+                        : isInCart
+                        ? 'bg-emerald-950/35'
                         : 'bg-slate-900 hover:bg-slate-800/80'
                     }`}
                   >
+                    {/* In-Cart Selection Badge */}
+                    {isInCart && (
+                      <div className="absolute top-2 right-2 z-10">
+                        <span className="text-[10px] font-mono font-black px-2 py-0.5 rounded-full bg-emerald-500 text-slate-950 shadow-md border border-emerald-300 flex items-center gap-1 animate-pulse">
+                          ✓ In Cart ({inCartQty})
+                        </span>
+                      </div>
+                    )}
+
                     <div>
                       {/* Performance Velocity & Margin Ribbon */}
-                      {perf && (
+                      {perf && !isInCart && (
                         <div className="flex items-center justify-between gap-1 mb-2">
                           <span
                             className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-black border tracking-wide shadow-sm ${perf.badgeBg} ${perf.badgeText} ${perf.badgeBorder}`}
@@ -2516,578 +3025,39 @@ export const POSView: React.FC<POSViewProps> = ({
           )}
         </div>
 
-        {/* RIGHT 5 COLS: POS RECEIPT CART & CHECKOUT PANEL */}
-        <div className={`lg:col-span-5 bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-xl space-y-4 ${mobileTab === 'cart' ? 'block' : 'hidden lg:block'}`}>
-          {/* Mobile Back to Catalog Button & Quick Reset */}
-          <div className="lg:hidden flex items-center justify-between pb-2 border-b border-slate-800">
-            <button
-              type="button"
-              onClick={() => setMobileTab('catalog')}
-              className="text-xs font-bold text-sky-400 hover:text-sky-300 flex items-center gap-1.5 py-1 px-2.5 rounded-lg bg-sky-950/60 border border-sky-900/60"
-            >
-              <ArrowLeft className="w-3.5 h-3.5" />
-              <span>← Add More Items</span>
-            </button>
-            <button
-              type="button"
-              onClick={handleTriggerNewSale}
-              className="text-xs font-bold text-emerald-400 hover:text-emerald-300 flex items-center gap-1 py-1 px-2.5 rounded-lg bg-emerald-950/60 border border-emerald-900/60"
-            >
-              <RotateCcw className="w-3.5 h-3.5" />
-              <span>Reset / New Sale</span>
-            </button>
-          </div>
-
-          {/* Header & Customer Picker */}
-          <div className="flex items-center justify-between border-b border-slate-800 pb-3 relative">
-            <div className="flex items-center gap-2">
-              <ShoppingBag className="w-5 h-5 text-sky-400" />
-              <h3 className="font-bold text-sm text-slate-100">Receipt Order Cart</h3>
-            </div>
-            <div className="flex items-center gap-1.5 relative">
-              {/* AI Quick Add to Receipt */}
-              <button
-                id="btn-pos-ai-scan-cart"
-                type="button"
-                onClick={() => setShowAiReceiptScanner(true)}
-                className="bg-purple-950/80 hover:bg-purple-900 border border-purple-700/80 text-purple-300 font-bold px-2 py-1 rounded-lg text-xs transition flex items-center gap-1 shadow-sm cursor-pointer"
-                title="Scan items with AI"
-              >
-                <Sparkles className="w-3.5 h-3.5 text-amber-300" />
-                <span className="hidden sm:inline">AI Add</span>
-              </button>
-
-              <span className="bg-sky-950 border border-sky-800 text-sky-300 text-xs px-2 py-1 rounded-lg font-mono font-bold">
-                {cart.reduce((sum, item) => sum + item.quantity, 0)}
-              </span>
-
-              {/* Top-Right Utilities Menu Button (•••) */}
-              <div className="relative">
-                <button
-                  type="button"
-                  onClick={() => setShowTopRightMenu(!showTopRightMenu)}
-                  className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg transition"
-                  title="Quick Tools & Utilities"
-                >
-                  <MoreVertical className="w-4 h-4" />
-                </button>
-
-                {showTopRightMenu && (
-                  <div className="absolute right-0 top-full mt-2 w-48 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl z-50 p-1.5 space-y-1 text-xs">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setShowTopRightMenu(false);
-                        handleTriggerNewSale();
-                      }}
-                      className="w-full text-left px-3 py-2 hover:bg-slate-800 rounded-lg text-slate-200 flex items-center gap-2"
-                    >
-                      <RotateCcw className="w-3.5 h-3.5 text-emerald-400" />
-                      <span>New Sale (Reset)</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setShowTopRightMenu(false);
-                        setShowAiReceiptScanner(true);
-                      }}
-                      className="w-full text-left px-3 py-2 hover:bg-slate-800 rounded-lg text-slate-200 flex items-center gap-2"
-                    >
-                      <Sparkles className="w-3.5 h-3.5 text-purple-400" />
-                      <span>AI Camera Scan</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setShowTopRightMenu(false);
-                        setShowRepModal(true);
-                      }}
-                      className="w-full text-left px-3 py-2 hover:bg-slate-800 rounded-lg text-slate-200 flex items-center gap-2"
-                    >
-                      <User className="w-3.5 h-3.5 text-sky-400" />
-                      <span>Change Sales Rep</span>
-                    </button>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-
-          {/* Customer Selection Row */}
-          <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800 flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2 flex-1 min-w-0">
-              <User className="w-4 h-4 text-slate-400 shrink-0" />
-              <select
-                value={selectedCustomer.id}
-                onChange={(e) => {
-                  const cust = customers.find((c) => c.id === e.target.value);
-                  if (cust) setSelectedCustomer(cust);
-                }}
-                className="bg-transparent text-slate-200 text-xs font-semibold focus:outline-none w-full truncate cursor-pointer"
-              >
-                {customers.map((c) => (
-                  <option key={c.id} value={c.id} className="bg-slate-900 text-slate-200">
-                    {c.name} {c.currentBalanceDue > 0 ? `(Debt: KSh ${c.currentBalanceDue.toLocaleString()})` : ''}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {hasWorkerPermission(currentUser, 'canViewManageCustomers') && (
-              <button
-                onClick={() => setShowAddCustomerModal(true)}
-                title="Add New Customer"
-                className="p-1.5 bg-slate-800 hover:bg-slate-700 text-sky-400 rounded-lg transition"
-              >
-                <UserPlus className="w-4 h-4" />
-              </button>
-            )}
-          </div>
-
-          {/* Cart Itemized List */}
-          <div className={`space-y-2 max-h-64 sm:max-h-96 overflow-y-auto pr-1 transition-all ${isKeyboardActive ? 'pb-[400px]' : 'pb-96 mb-96'}`}>
-            {cart.length === 0 ? (
-              <div className="text-center py-10 space-y-3 border-2 border-dashed border-slate-800 rounded-2xl">
-                <ShoppingBag className="w-8 h-8 text-slate-600 mx-auto" />
-                <div>
-                  <p className="text-xs text-slate-400 font-medium">Cart is empty</p>
-                  <p className="text-[11px] text-slate-500">Scan barcode, tap products, or use AI camera scan to build receipt</p>
-                </div>
-                <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
-                  <button
-                    type="button"
-                    onClick={() => setShowAiReceiptScanner(true)}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white rounded-xl text-xs font-extrabold shadow-md shadow-purple-600/25 transition cursor-pointer"
-                  >
-                    <Sparkles className="w-3.5 h-3.5 text-amber-300 animate-pulse" />
-                    <span>AI Scan & Auto-Add Items</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setMobileTab('catalog')}
-                    className="lg:hidden inline-flex items-center gap-1.5 px-3 py-1.5 bg-sky-600 hover:bg-sky-500 text-white rounded-xl text-xs font-bold shadow-md transition cursor-pointer"
-                  >
-                    <Package className="w-3.5 h-3.5" />
-                    <span>Browse Products Catalog</span>
-                  </button>
-                </div>
-              </div>
-            ) : (
-              cart.map((item) => (
-                <div
-                  key={item.product.id}
-                  className="bg-slate-950 p-2.5 rounded-xl border border-slate-800 space-y-2 text-xs shadow-md"
-                >
-                  {/* Row 1: Full Product Name & Delete Icon */}
-                  <div className="flex items-center justify-between gap-2">
-                    <h4 className="font-bold text-slate-100 text-xs sm:text-sm leading-snug break-words flex-1 min-w-0">
-                      {item.product.name}
-                    </h4>
-                    <button
-                      onClick={() => removeFromCart(item.product.id)}
-                      className="p-1 hover:bg-rose-950/50 text-slate-400 hover:text-rose-400 rounded transition shrink-0 border border-slate-800"
-                      title="Remove item"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-
-                  {/* Row 2: Price Input x Qty Stepper = Line Subtotal */}
-                  <div className="flex items-center justify-between gap-1.5 pt-1 border-t border-slate-900 flex-wrap">
-                    <div className="flex items-center gap-1.5 bg-slate-900 border border-sky-800/80 px-2 py-1 rounded-lg">
-                      <span className="text-[10px] text-slate-400 font-bold whitespace-nowrap">Price (KSh):</span>
-                      <input
-                        type="number"
-                        min="0"
-                        step="1"
-                        value={item.unitPrice === 0 ? '' : item.unitPrice}
-                        onFocus={(e) => {
-                          e.target.select();
-                          setIsKeyboardActive(true);
-                          setTimeout(() => {
-                            e.currentTarget.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                          }, 300);
-                        }}
-                        onBlur={() => setIsKeyboardActive(false)}
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          const num = val === '' ? 0 : parseFloat(val);
-                          handleUpdateItemUnitPrice(item.product.id, isNaN(num) ? 0 : num);
-                        }}
-                        className="w-20 bg-slate-950 border border-sky-700/60 text-sky-300 font-extrabold px-1.5 py-0.5 rounded text-xs outline-none font-mono focus:border-sky-400"
-                        title="Selling Unit Price"
-                      />
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      {/* Quantity Stepper */}
-                      <div className="flex items-center gap-1 bg-slate-900 px-1.5 py-0.5 rounded-lg border border-slate-800">
-                        <button
-                          onClick={() => updateCartQty(item.product.id, -1)}
-                          className="text-slate-400 hover:text-white p-0.5"
-                        >
-                          <Minus className="w-3.5 h-3.5" />
-                        </button>
-                        <span className="font-bold font-mono text-slate-100 px-1 text-xs">{item.quantity}</span>
-                        <button
-                          onClick={() => updateCartQty(item.product.id, 1)}
-                          className="text-slate-400 hover:text-white p-0.5"
-                        >
-                          <Plus className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-
-                      {/* Line Subtotal */}
-                      <div className="text-right font-extrabold text-emerald-400 font-mono text-xs min-w-[70px]">
-                        KSh {item.total.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Item Discount Action Bar */}
-                  <div className="flex items-center justify-between pt-1 border-t border-slate-900 text-[11px]">
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (editingItemDiscountId === item.product.id) {
-                            setEditingItemDiscountId(null);
-                          } else {
-                            setEditingItemDiscountId(item.product.id);
-                            setItemDiscountMode('fixed');
-                            setItemDiscountInputVal(item.discount > 0 ? String(item.discount) : '');
-                          }
-                        }}
-                        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md font-semibold transition ${
-                          item.discount > 0
-                            ? 'bg-amber-950/70 border border-amber-800 text-amber-300 hover:bg-amber-900'
-                            : 'bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-800'
-                        }`}
-                        title="Set manual cash or % discount for this specific item"
-                      >
-                        <Tag className="w-3 h-3 text-amber-400" />
-                        <span>{item.discount > 0 ? `Item Disc: -KSh ${(item.discount * item.quantity).toLocaleString()}` : 'Give Item Discount'}</span>
-                      </button>
-                      {item.discount > 0 && (
-                        <button
-                          type="button"
-                          onClick={() => handleUpdateItemDiscount(item.product.id, 0)}
-                          className="text-[10px] text-rose-400 hover:underline"
-                        >
-                          Clear
-                        </button>
-                      )}
-                    </div>
-
-                    {item.discount > 0 && (
-                      <span className="text-[10px] text-emerald-400 font-mono">
-                        Saved KSh {(item.discount * item.quantity).toLocaleString()}
-                      </span>
-                    )}
-                  </div>
-
-                  {/* Inline Item Discount Popover/Editor */}
-                  {editingItemDiscountId === item.product.id && (
-                    <div className="p-2.5 bg-slate-900/90 rounded-xl border border-amber-800/60 space-y-2 mt-1">
-                      <div className="flex items-center justify-between">
-                        <span className="font-bold text-amber-300 text-[11px] flex items-center gap-1">
-                          <Tag className="w-3 h-3" /> Manual Item Discount: {item.product.name}
-                        </span>
-                        <div className="flex items-center bg-slate-950 p-0.5 rounded-lg border border-slate-800 text-[10px]">
-                          <button
-                            type="button"
-                            onClick={() => setItemDiscountMode('fixed')}
-                            className={`px-2 py-0.5 rounded font-bold transition ${
-                              itemDiscountMode === 'fixed' ? 'bg-amber-500 text-slate-950' : 'text-slate-400 hover:text-white'
-                            }`}
-                          >
-                            Manual KSh
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setItemDiscountMode('percentage')}
-                            className={`px-2 py-0.5 rounded font-bold transition ${
-                              itemDiscountMode === 'percentage' ? 'bg-amber-500 text-slate-950' : 'text-slate-400 hover:text-white'
-                            }`}
-                          >
-                            % Off
-                          </button>
-                        </div>
-                      </div>
-
-                      <div className="flex items-center gap-2">
-                        <div className="relative flex-1">
-                          <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500 text-[10px] font-mono font-bold">
-                            {itemDiscountMode === 'fixed' ? 'KSh' : '%'}
-                          </span>
-                          <input
-                            type="number"
-                            min="0"
-                            max={itemDiscountMode === 'fixed' ? item.unitPrice : 100}
-                            value={itemDiscountInputVal}
-                            onChange={(e) => setItemDiscountInputVal(e.target.value)}
-                            placeholder={itemDiscountMode === 'fixed' ? 'e.g. 50' : 'e.g. 10'}
-                            className="w-full bg-slate-950 border border-slate-700 pl-9 pr-2 py-1 rounded-lg text-xs font-mono font-bold text-amber-300 focus:outline-none focus:border-amber-400"
-                          />
-                        </div>
-
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const val = parseFloat(itemDiscountInputVal) || 0;
-                            let discPerUnit = 0;
-                            if (itemDiscountMode === 'percentage') {
-                              discPerUnit = Math.round((val / 100) * item.unitPrice);
-                            } else {
-                              discPerUnit = Math.min(item.unitPrice, val);
-                            }
-                            handleUpdateItemDiscount(item.product.id, discPerUnit);
-                            setEditingItemDiscountId(null);
-                          }}
-                          className="px-3 py-1 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs rounded-lg transition"
-                        >
-                          Apply
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setEditingItemDiscountId(null)}
-                          className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs rounded-lg transition"
-                        >
-                          Cancel
-                        </button>
-                      </div>
-
-                      {/* Quick Chips for Item Discount */}
-                      <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
-                        <span className="text-[10px] text-slate-500">Quick:</span>
-                        {itemDiscountMode === 'fixed' ? (
-                          [20, 50, 100, 200, 500].map((amt) => (
-                            <button
-                              key={amt}
-                              type="button"
-                              onClick={() => {
-                                setItemDiscountInputVal(String(amt));
-                                handleUpdateItemDiscount(item.product.id, Math.min(item.unitPrice, amt));
-                                setEditingItemDiscountId(null);
-                              }}
-                              className="px-1.5 py-0.5 bg-slate-950 hover:bg-amber-950 border border-slate-800 hover:border-amber-700 text-slate-300 hover:text-amber-300 text-[10px] rounded font-mono transition"
-                            >
-                              -KSh {amt}
-                            </button>
-                          ))
-                        ) : (
-                          [5, 10, 15, 20, 50].map((pct) => (
-                            <button
-                              key={pct}
-                              type="button"
-                              onClick={() => {
-                                setItemDiscountInputVal(String(pct));
-                                const disc = Math.round((pct / 100) * item.unitPrice);
-                                handleUpdateItemDiscount(item.product.id, disc);
-                                setEditingItemDiscountId(null);
-                              }}
-                              className="px-1.5 py-0.5 bg-slate-950 hover:bg-amber-950 border border-slate-800 hover:border-amber-700 text-slate-300 hover:text-amber-300 text-[10px] rounded font-mono transition"
-                            >
-                              {pct}% off
-                            </button>
-                          ))
-                        )}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              ))
-            )}
-          </div>
-
-          {/* Compact Sales Rep Chip */}
-          <div className="bg-slate-950 p-2 rounded-xl border border-slate-800 text-xs">
-            <button
-              type="button"
-              onClick={() => setShowRepModal(true)}
-              className="w-full flex items-center justify-between text-slate-300 hover:text-white transition"
-            >
-              <div className="flex items-center gap-1.5">
-                <User className="w-3.5 h-3.5 text-sky-400" />
-                <span>Rep: <strong className="text-white">{selectedSalesRep.name}</strong></span>
-              </div>
-              <div className="flex items-center gap-1.5 font-mono">
-                <span className="text-emerald-400 font-bold">+KSh {currentCartComm.amount.toLocaleString()}</span>
-                <span className="text-[10px] bg-slate-900 border border-slate-700 px-1.5 py-0.5 rounded text-sky-400">Change ▾</span>
-              </div>
-            </button>
-          </div>
-
-          {/* Streamlined Discount & Financial Totals Card */}
-          <div className="bg-slate-950/80 p-3 rounded-2xl border border-slate-800 space-y-2.5 text-xs">
-            {/* Sales Discount Controller */}
-            <div className="bg-slate-900 p-2.5 rounded-xl border border-slate-800 space-y-2">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-1.5 text-slate-300 font-semibold">
-                  <Tag className="w-3.5 h-3.5 text-amber-400" />
-                  <span>Sales Discount ({discountMode === 'fixed' ? 'KSh' : '%'}):</span>
-                </div>
-                <div className="flex items-center bg-slate-950 p-0.5 rounded-lg border border-slate-800 text-[10px]">
-                  <button
-                    type="button"
-                    onClick={() => setDiscountMode('fixed')}
-                    className={`px-2 py-0.5 rounded font-bold transition ${discountMode === 'fixed' ? 'bg-amber-500 text-slate-950' : 'text-slate-400 hover:text-white'}`}
-                  >
-                    KSh
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setDiscountMode('percentage')}
-                    className={`px-2 py-0.5 rounded font-bold transition ${discountMode === 'percentage' ? 'bg-amber-500 text-slate-950' : 'text-slate-400 hover:text-white'}`}
-                  >
-                    %
-                  </button>
-                </div>
-              </div>
-
-              {hasWorkerPermission(currentUser, 'canGiveDiscounts') || discountAuthorizedBy ? (
-                <div className="space-y-1.5">
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="number"
-                      min="0"
-                      value={discountInputVal}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        setDiscountInputVal(val);
-                        const numVal = parseFloat(val) || 0;
-                        if (discountMode === 'percentage') {
-                          setDiscountAmount(Math.round((numVal / 100) * itemsSubtotal));
-                        } else {
-                          setDiscountAmount(numVal);
-                        }
-                      }}
-                      placeholder={discountMode === 'fixed' ? 'e.g. 100' : 'e.g. 10'}
-                      className="w-full bg-slate-950 border border-slate-700 px-2.5 py-1 rounded-lg text-xs font-mono font-bold text-amber-300 focus:outline-none focus:border-amber-400"
-                    />
-                    {discountInputVal !== '' && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setDiscountInputVal('');
-                          setDiscountAmount(0);
-                        }}
-                        className="px-2 py-1 bg-rose-950/60 text-rose-300 rounded-lg text-[10px]"
-                      >
-                        Clear
-                      </button>
-                    )}
-                  </div>
-
-                  {/* Inline preset chips */}
-                  <div className="flex items-center gap-1 flex-wrap">
-                    <span className="text-[10px] text-slate-500">Presets:</span>
-                    {discountMode === 'fixed' ? (
-                      [50, 100, 200, 500].map((amt) => (
-                        <button
-                          key={amt}
-                          type="button"
-                          onClick={() => {
-                            setDiscountInputVal(String(amt));
-                            setDiscountAmount(amt);
-                          }}
-                          className="px-1.5 py-0.5 bg-slate-950 hover:bg-amber-950 border border-slate-800 text-slate-300 text-[10px] rounded font-mono"
-                        >
-                          -{amt}
-                        </button>
-                      ))
-                    ) : (
-                      [5, 10, 15, 20].map((pct) => (
-                        <button
-                          key={pct}
-                          type="button"
-                          onClick={() => {
-                            setDiscountInputVal(String(pct));
-                            setDiscountAmount(Math.round((pct / 100) * itemsSubtotal));
-                          }}
-                          className="px-1.5 py-0.5 bg-slate-950 hover:bg-amber-950 border border-slate-800 text-slate-300 text-[10px] rounded font-mono"
-                        >
-                          {pct}%
-                        </button>
-                      ))
-                    )}
-                  </div>
-                </div>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => setShowAdminDiscountAuthModal(true)}
-                  className="w-full py-1 bg-amber-950/60 text-amber-300 rounded-lg text-[11px] font-bold"
-                >
-                  🔒 Request Supervisor Discount PIN
-                </button>
-              )}
-            </div>
-
-            {/* Financial Summary Card */}
-            <div className="space-y-1.5 font-mono pt-1 text-slate-300">
-              <div className="flex justify-between text-slate-400">
-                <span>Items Subtotal:</span>
-                <span>KSh {itemsSubtotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
-              </div>
-
-              {totalDiscount > 0 && (
-                <div className="flex justify-between text-emerald-400">
-                  <span>Customer Savings:</span>
-                  <span>-KSh {totalDiscount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
-                </div>
-              )}
-
-              <div className="flex justify-between text-amber-400/90 text-[11px]">
-                <span>KRA Turnover Tax (1.5% TOT):</span>
-                <span>KSh {(grandTotal * 0.015).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
-              </div>
-
-              <div className="border-t border-slate-800 pt-2 flex items-center justify-between text-white font-sans">
-                <span className="text-xs font-bold text-slate-400 uppercase tracking-wide">Grand Total:</span>
-                <span className="text-2xl font-black text-sky-400 font-mono">
-                  KSh {grandTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                </span>
-              </div>
-            </div>
-          </div>
-
-          {/* Unified Bottom Dock (Side-by-Side Primary CTAs) */}
-          <div className="space-y-2">
-            {!isOnline && (
-              <div className="flex items-center gap-2 p-2 bg-amber-500/15 border border-amber-500/40 text-amber-300 rounded-xl text-xs">
-                <WifiOff className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                <span>Offline Mode (Syncs upon reconnect)</span>
-              </div>
-            )}
-
-            {renderMobileDateSelector()}
-
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                id="btn-pos-mpesa-fast-prompt"
-                type="button"
-                disabled={cart.length === 0 || !hasWorkerPermission(currentUser, 'canMakeSales')}
-                onClick={handleOpenMpesaStkPushDirect}
-                className="bg-emerald-600 hover:bg-emerald-500 active:scale-95 disabled:opacity-40 text-white font-semibold py-2.5 px-3 rounded-xl shadow-sm transition flex items-center justify-center gap-1.5 text-xs sm:text-sm border border-emerald-400/40 cursor-pointer"
-              >
-                <Smartphone className="w-4 h-4" />
-                <span className="truncate">M-PESA STK</span>
-              </button>
-
-              <button
-                id="btn-pos-checkout"
-                disabled={cart.length === 0 || !hasWorkerPermission(currentUser, 'canMakeSales')}
-                onClick={handleOpenCheckout}
-                className="bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-500 hover:to-indigo-500 active:scale-95 disabled:opacity-50 text-white font-semibold py-2.5 px-3 rounded-xl shadow-sm transition flex items-center justify-center gap-1.5 text-xs sm:text-sm cursor-pointer"
-              >
-                <CreditCard className="w-4 h-4" />
-                <span className="truncate">Make Sale</span>
-              </button>
-            </div>
-          </div>
+        {/* RIGHT 5 COLS: POS RECEIPT CART & CHECKOUT PANEL (DESKTOP) */}
+        <div className="lg:col-span-5 bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-xl space-y-4 hidden lg:block">
+          {renderCartPanel()}
         </div>
+
+        {/* MOBILE FULL-SCREEN CART & CHECKOUT OVERLAY DRAWER */}
+        {mobileTab === 'cart' && (
+          <div className="fixed inset-0 z-50 bg-slate-950/95 backdrop-blur-md lg:hidden flex flex-col p-4 overflow-y-auto animate-fade-in space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <button
+                type="button"
+                onClick={() => setMobileTab('catalog')}
+                className="text-xs font-extrabold text-sky-400 hover:text-sky-300 flex items-center gap-1.5 py-1.5 px-3 rounded-xl bg-sky-950/80 border border-sky-800 shadow-sm cursor-pointer"
+              >
+                <ArrowLeft className="w-4 h-4" />
+                <span>← Back to Catalog</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setMobileTab('catalog')}
+                className="p-2 rounded-xl bg-slate-900 border border-slate-800 text-slate-300 hover:text-white cursor-pointer"
+                title="Close Cart & Return to Catalog"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="flex-1">
+              {renderCartPanel()}
+            </div>
+          </div>
+        )}
 
       {/* MODAL 1: CHECKOUT & MULTI-PAYMENT / PARTIAL PAYMENT */}
       {showCheckoutModal && (

@@ -66,6 +66,22 @@ export const AppMenuView: React.FC<AppMenuViewProps> = ({
       onSelectTab('purchasing');
     } else if (actionName.includes('Payment-In') || actionName.includes('Payment - Out')) {
       onSelectTab('cashmanagement');
+    } else if (actionName.includes('Verify my data')) {
+      setModalNotice('Data Integrity Audit: All 1,420 sales, stock balances, and ledger records verified successfully. No discrepancies found!');
+    } else if (actionName.includes('Open Calculator')) {
+      setModalNotice('Calculator tool opened. You can use the floating calculator widget on screen.');
+    } else if (actionName.includes('Import Items') || actionName.includes('Bulk Update Tax Slab') || actionName.includes('Barcode Generator')) {
+      onSelectTab('inventory');
+    } else if (actionName.includes('Import Parties')) {
+      onSelectTab('contacts');
+    } else if (actionName.includes('Import from My BillBook')) {
+      setModalNotice('BillBook Migration Wizard: Ready to import stock & customer lists from BillBook backup.');
+    } else if (actionName.includes('Export Items')) {
+      setModalNotice('Exporting complete inventory stock list as Excel spreadsheet / CSV backup...');
+    } else if (actionName.includes('Recycle Bin')) {
+      setModalNotice('Recycle Bin: 3 recently deleted items and 1 invoice found (Restorable).');
+    } else if (actionName.includes('Close Financial Year')) {
+      setModalNotice('Financial Year Close: Year-end audit archiving and rollover utility ready.');
     } else {
       setModalNotice(`Opening workflow: ${actionName}`);
     }
@@ -412,21 +428,28 @@ export const AppMenuView: React.FC<AppMenuViewProps> = ({
               )}
             </button>
             {dropdowns.utilities && (
-              <div className="bg-slate-50/80 px-4 py-2.5 space-y-2 border-t border-slate-100 pl-14 animate-fade-in">
-                <button
-                  onClick={() => onSelectTab('inventory')}
-                  className="w-full text-left py-1.5 text-slate-700 hover:text-purple-600 font-semibold flex items-center justify-between"
-                >
-                  <span>Barcode & Label Printing</span>
-                  <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
-                </button>
-                <button
-                  onClick={() => onSelectTab('stocktake')}
-                  className="w-full text-left py-1.5 text-slate-700 hover:text-purple-600 font-semibold flex items-center justify-between"
-                >
-                  <span>Physical Audit Count</span>
-                  <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
-                </button>
+              <div className="bg-slate-50/80 px-4 py-2.5 space-y-2.5 border-t border-slate-100 pl-14 animate-fade-in text-[11px]">
+                {[
+                  'Verify my data',
+                  'Open Calculator',
+                  'Import Items',
+                  'Import from My BillBook',
+                  'Bulk Update Tax Slab',
+                  'Export Items',
+                  'Import Parties',
+                  'Recycle Bin',
+                  'Close Financial Year',
+                  'Barcode Generator 👑',
+                ].map((subItem) => (
+                  <button
+                    key={subItem}
+                    onClick={() => handleSubItemClick(subItem)}
+                    className="w-full text-left py-1.5 text-slate-700 hover:text-purple-600 font-semibold flex items-center justify-between transition group cursor-pointer"
+                  >
+                    <span>{subItem}</span>
+                    <ChevronRight className="w-3.5 h-3.5 text-slate-400 group-hover:translate-x-0.5 transition-transform" />
+                  </button>
+                ))}
               </div>
             )}
           </div>

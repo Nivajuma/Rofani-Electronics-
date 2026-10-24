@@ -17,7 +17,8 @@ import {
   CheckCircle,
   X,
   Printer,
-  Sparkles
+  Sparkles,
+  Tag
 } from 'lucide-react';
 import { Transaction, Product, Customer, Supplier, Expense, PurchaseOrder } from '../../types';
 
@@ -55,6 +56,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   const [datePreset, setDatePreset] = useState<'today' | 'yesterday' | 'week' | 'month' | 'custom'>('today');
   const [customStartDate, setCustomStartDate] = useState('');
   const [customEndDate, setCustomEndDate] = useState('');
+  const [modalSearchQuery, setModalSearchQuery] = useState('');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   const triggerToast = (msg: string) => {
@@ -91,15 +93,24 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
     {
       categoryTitle: 'Item/Stock reports',
       reports: [
-        { id: 'item_detail_report', title: 'Item Detail Report', description: 'Stock quantity on hand, cost price, and sales velocity per SKU.' },
-        { id: 'item_serial_report', title: 'Item Serial Report', description: 'Traceability and serial number tracking for electronics and high-value units.', isPremium: true },
-        { id: 'item_wise_discount', title: 'Item Wise Discount', description: 'Summary of discounts and promotional price cuts applied per product.' },
+        { id: 'stock_summary_report', title: 'Stock Summary Report', description: 'Total current stock quantities, valuation, and unit stock counts.' },
+        { id: 'item_report_by_party', title: 'Item Report by Party', description: 'Track item sales and purchases filtered by specific customer or supplier.' },
+        { id: 'item_wise_profit_loss', title: 'Item Wise Profit & Loss', description: 'Detailed margin breakdown per item (Selling Price minus Cost Price x Quantity Sold).' },
+        { id: 'low_stock_summary_report', title: 'Low Stock Summary Report', description: 'Instant filter list showing items at or below reorder thresholds.' },
+        { id: 'item_detail_report', title: 'Item Detail Report', description: 'Individual movement history, current stock, cost price, and sales history for selected items.' },
+        { id: 'stock_detail_report', title: 'Stock Detail Report', description: 'In-depth audit trail of all stock adjustments, inflows, and outflows.' },
+        { id: 'sale_purchase_by_item_category', title: 'Sale/Purchase By Item Category', description: 'Volume and revenue breakdown grouped by product categories (Electronics, Boutique, Accessories).' },
+        { id: 'stock_summary_by_item_category', title: 'Stock summary By Item Category', description: 'Inventory stock balance aggregated per category.' },
+        { id: 'item_batch_report', title: 'Item Batch Report', description: 'Track expiry dates, batch manufacturing codes, and batch-wise stock levels.' },
+        { id: 'item_serial_report', title: 'Item Serial Report', description: 'Unique IMEI / Serial Number tracking for smartphones, electronics, and warranty claims.', isPremium: true },
+        { id: 'item_wise_discount', title: 'Item Wise Discount', description: 'Track total discounts granted per item across all sales transactions.' },
       ],
     },
     {
       categoryTitle: 'Business status',
       reports: [
         { id: 'bank_statement', title: 'Bank Statement', description: 'M-Pesa till reconciliation, bank transfers, and electronic float settlements.' },
+        { id: 'discount_report', title: 'Discount Report', description: 'Track promotional discounts, sale markdowns, and item-level price cuts across all transactions.' },
       ],
     },
     {
@@ -164,16 +175,26 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
     const totalBalance = filteredTx.reduce((sum, tx) => sum + tx.balanceDue, 0);
 
     let totalCogs = 0;
+    let totalItemDiscounts = 0;
     filteredTx.forEach((tx) => {
       tx.items.forEach((it) => {
         totalCogs += (it.product.costPrice || 0) * it.quantity;
+        totalItemDiscounts += (it.discount || 0) * it.quantity;
       });
+      totalItemDiscounts += (tx.discountTotal || 0);
     });
 
     const grossProfit = totalRev - totalCogs;
     const totalExpenses = expenses.reduce((sum, e) => sum + e.amount, 0);
     const kraTot = totalRev * 0.015;
     const netProfit = grossProfit - totalExpenses - kraTot;
+
+    // Filtered products for item/stock reports
+    const filteredProducts = products.filter((p) => {
+      if (!modalSearchQuery.trim()) return true;
+      const q = modalSearchQuery.toLowerCase();
+      return p.name.toLowerCase().includes(q) || p.sku.toLowerCase().includes(q) || p.barcode.toLowerCase().includes(q) || p.category.toLowerCase().includes(q);
+    });
 
     return {
       txCount: filteredTx.length,
@@ -186,8 +207,10 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
       kraTot,
       netProfit,
       transactions: filteredTx,
+      products: filteredProducts,
+      totalItemDiscounts,
     };
-  }, [selectedReport, datePreset, customStartDate, customEndDate, transactions, expenses]);
+  }, [selectedReport, datePreset, customStartDate, customEndDate, transactions, expenses, products, modalSearchQuery]);
 
   const handleExportPDF = () => {
     triggerToast(`📄 ${selectedReport?.title} exported to PDF successfully!`);
@@ -262,7 +285,10 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                 {group.reports.map((report) => (
                   <button
                     key={report.id}
-                    onClick={() => setSelectedReport(report)}
+                    onClick={() => {
+                      setSelectedReport(report);
+                      setModalSearchQuery('');
+                    }}
                     className="w-full text-left p-4 flex items-center justify-between hover:bg-slate-50 active:bg-slate-100 transition group cursor-pointer"
                   >
                     <div className="space-y-0.5 pr-4">
@@ -295,7 +321,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
       {/* Interactive Report Generator / Detail View Modal */}
       {selectedReport && reportData && (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl w-full max-w-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh] animate-scale-up">
+          <div className="bg-white rounded-3xl w-full max-w-3xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh] animate-scale-up">
             {/* Modal Header */}
             <div className="bg-slate-900 text-white p-5 flex items-center justify-between">
               <div className="flex items-center gap-3">
@@ -318,51 +344,67 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
 
             {/* Modal Body */}
             <div className="p-6 space-y-5 overflow-y-auto flex-1 text-xs">
-              {/* Date Filter Presets */}
-              <div className="space-y-2">
-                <label className="block font-bold text-slate-700">Date Range Filter</label>
-                <div className="grid grid-cols-5 gap-1.5 bg-slate-100 p-1.5 rounded-2xl">
-                  {(['today', 'yesterday', 'week', 'month', 'custom'] as const).map((preset) => (
-                    <button
-                      key={preset}
-                      onClick={() => setDatePreset(preset)}
-                      className={`py-2 rounded-xl font-semibold capitalize transition cursor-pointer text-center ${
-                        datePreset === preset
-                          ? 'bg-blue-600 text-white shadow-sm'
-                          : 'text-slate-600 hover:bg-slate-200'
-                      }`}
-                    >
-                      {preset}
-                    </button>
-                  ))}
+              {/* Date Filter Presets & Instant Search Bar */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <label className="block font-bold text-slate-700">Date Range Filter</label>
+                  <div className="grid grid-cols-5 gap-1 bg-slate-100 p-1 rounded-xl text-[11px]">
+                    {(['today', 'yesterday', 'week', 'month', 'custom'] as const).map((preset) => (
+                      <button
+                        key={preset}
+                        onClick={() => setDatePreset(preset)}
+                        className={`py-1.5 rounded-lg font-semibold capitalize transition cursor-pointer text-center ${
+                          datePreset === preset
+                            ? 'bg-blue-600 text-white shadow-sm'
+                            : 'text-slate-600 hover:bg-slate-200'
+                        }`}
+                      >
+                        {preset}
+                      </button>
+                    ))}
+                  </div>
+
+                  {datePreset === 'custom' && (
+                    <div className="grid grid-cols-2 gap-2 pt-1">
+                      <div>
+                        <span className="text-[10px] text-slate-500 block mb-0.5 font-semibold">Start</span>
+                        <input
+                          type="date"
+                          value={customStartDate}
+                          onChange={(e) => setCustomStartDate(e.target.value)}
+                          className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-slate-800 font-mono text-xs"
+                        />
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-slate-500 block mb-0.5 font-semibold">End</span>
+                        <input
+                          type="date"
+                          value={customEndDate}
+                          onChange={(e) => setCustomEndDate(e.target.value)}
+                          className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-slate-800 font-mono text-xs"
+                        />
+                      </div>
+                    </div>
+                  )}
                 </div>
 
-                {datePreset === 'custom' && (
-                  <div className="grid grid-cols-2 gap-3 pt-2">
-                    <div>
-                      <span className="text-[10px] text-slate-500 block mb-1 font-semibold">Start Date</span>
-                      <input
-                        type="date"
-                        value={customStartDate}
-                        onChange={(e) => setCustomStartDate(e.target.value)}
-                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800 font-mono"
-                      />
-                    </div>
-                    <div>
-                      <span className="text-[10px] text-slate-500 block mb-1 font-semibold">End Date</span>
-                      <input
-                        type="date"
-                        value={customEndDate}
-                        onChange={(e) => setCustomEndDate(e.target.value)}
-                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800 font-mono"
-                      />
-                    </div>
+                <div className="space-y-2">
+                  <label className="block font-bold text-slate-700">Instant Report Search</label>
+                  <div className="relative">
+                    <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                    <input
+                      type="text"
+                      value={modalSearchQuery}
+                      onChange={(e) => setModalSearchQuery(e.target.value)}
+                      placeholder="Search items, SKU, serial #..."
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-3 py-2 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
                   </div>
-                )}
+                </div>
               </div>
 
               {/* Real-time Calculation Summary Cards */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-1">
                 <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl space-y-1">
                   <div className="text-[11px] text-slate-500 font-semibold">Total Revenue</div>
                   <div className="text-base font-extrabold text-blue-600 font-mono">
@@ -380,11 +422,11 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                 </div>
 
                 <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl space-y-1">
-                  <div className="text-[11px] text-amber-600 font-semibold">KRA TOT (1.5%)</div>
+                  <div className="text-[11px] text-amber-600 font-semibold">Total Discounts</div>
                   <div className="text-base font-extrabold text-amber-600 font-mono">
-                    KSh {reportData.kraTot.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                    KSh {reportData.totalItemDiscounts.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                   </div>
-                  <div className="text-[10px] text-amber-500">Tax Liability</div>
+                  <div className="text-[10px] text-amber-500">Promos & Markdowns</div>
                 </div>
 
                 <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl space-y-1">
@@ -396,30 +438,58 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                 </div>
               </div>
 
-              {/* Transactions Preview Table */}
+              {/* Data Preview Table */}
               <div className="bg-slate-50 border border-slate-200 rounded-2xl overflow-hidden">
                 <div className="p-3 bg-slate-100 border-b border-slate-200 font-bold text-slate-700 flex items-center justify-between">
-                  <span>Filtered Transactions Preview</span>
-                  <span className="font-mono text-slate-500">{reportData.transactions.length} receipts</span>
+                  <span>{selectedReport.title} - Data Breakdown</span>
+                  <span className="font-mono text-slate-500">
+                    {selectedReport.id.includes('item') || selectedReport.id.includes('stock')
+                      ? `${reportData.products.length} items`
+                      : `${reportData.transactions.length} receipts`}
+                  </span>
                 </div>
-                {reportData.transactions.length === 0 ? (
-                  <div className="p-8 text-center text-slate-400 text-xs">
-                    No transactions found for the selected date range.
-                  </div>
+
+                {selectedReport.id.includes('item') || selectedReport.id.includes('stock') ? (
+                  reportData.products.length === 0 ? (
+                    <div className="p-8 text-center text-slate-400 text-xs">
+                      No matching products found in inventory.
+                    </div>
+                  ) : (
+                    <div className="max-h-52 overflow-y-auto divide-y divide-slate-200">
+                      {reportData.products.map((p) => (
+                        <div key={p.id} className="p-3 flex items-center justify-between hover:bg-white transition">
+                          <div>
+                            <div className="font-bold text-slate-800">{p.name}</div>
+                            <div className="text-[10px] text-slate-500 font-mono">SKU: {p.sku} • Category: {p.category}</div>
+                          </div>
+                          <div className="text-right">
+                            <div className="font-mono font-bold text-emerald-600">KSh {p.sellingPrice.toLocaleString()}</div>
+                            <div className="text-[10px] text-slate-500 font-mono font-bold">Stock: {p.stockQuantity} {p.unit}</div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )
                 ) : (
-                  <div className="max-h-48 overflow-y-auto divide-y divide-slate-200">
-                    {reportData.transactions.map((tx) => (
-                      <div key={tx.id} className="p-3 flex items-center justify-between hover:bg-white transition">
-                        <div>
-                          <div className="font-bold font-mono text-slate-800">{tx.receiptNumber}</div>
-                          <div className="text-[10px] text-slate-500">{tx.customerName || 'Walk-in'} • {new Date(tx.date).toLocaleDateString()}</div>
+                  reportData.transactions.length === 0 ? (
+                    <div className="p-8 text-center text-slate-400 text-xs">
+                      No transactions found for the selected date range.
+                    </div>
+                  ) : (
+                    <div className="max-h-52 overflow-y-auto divide-y divide-slate-200">
+                      {reportData.transactions.map((tx) => (
+                        <div key={tx.id} className="p-3 flex items-center justify-between hover:bg-white transition">
+                          <div>
+                            <div className="font-bold font-mono text-slate-800">{tx.receiptNumber}</div>
+                            <div className="text-[10px] text-slate-500">{tx.customerName || 'Walk-in'} • {new Date(tx.date).toLocaleDateString()}</div>
+                          </div>
+                          <div className="text-right font-mono font-bold text-blue-600">
+                            KSh {tx.grandTotal.toLocaleString()}
+                          </div>
                         </div>
-                        <div className="text-right font-mono font-bold text-blue-600">
-                          KSh {tx.grandTotal.toLocaleString()}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
+                      ))}
+                    </div>
+                  )
                 )}
               </div>
             </div>
@@ -434,7 +504,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                   className="px-3.5 py-2.5 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-sm transition cursor-pointer active:scale-95"
                 >
                   <Printer className="w-3.5 h-3.5" />
-                  <span>PDF</span>
+                  <span>[ 📄 Export PDF ]</span>
                 </button>
 
                 <button
@@ -442,7 +512,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                   className="px-3.5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-sm transition cursor-pointer active:scale-95"
                 >
                   <Download className="w-3.5 h-3.5" />
-                  <span>Excel / CSV</span>
+                  <span>[ 📊 Export Excel ]</span>
                 </button>
 
                 <button
@@ -450,7 +520,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                   className="px-3.5 py-2.5 bg-sky-600 hover:bg-sky-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-sm transition cursor-pointer active:scale-95"
                 >
                   <Share2 className="w-3.5 h-3.5" />
-                  <span>WhatsApp</span>
+                  <span>[ 💬 Share ]</span>
                 </button>
               </div>
             </div>

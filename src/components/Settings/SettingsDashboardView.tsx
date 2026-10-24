@@ -23,6 +23,7 @@ import {
 import { Product, Customer, Supplier, Transaction, Expense, AttendanceRecord, User, StoreLocation } from '../../types';
 import { safeGetJSON, safeSetJSON } from '../../utils/safeStorage';
 import { ItemSettingsView } from './ItemSettingsView';
+import { GeneralSettingsView } from './GeneralSettingsView';
 
 interface SettingsDashboardViewProps {
   products: Product[];
@@ -361,8 +362,17 @@ export const SettingsDashboardView: React.FC<SettingsDashboardViewProps> = ({
         </div>
       )}
 
+      {activeSubPanel === 'general' && (
+        <div className="fixed inset-0 z-50 bg-[#F1F5F9] overflow-y-auto">
+          <GeneralSettingsView
+            onBack={() => setActiveSubPanel(null)}
+            onOpenStoreManager={onOpenStoreManager}
+          />
+        </div>
+      )}
+
       {/* Sub-Panel Modal Overlay */}
-      {activeSubPanel && activeSubPanel !== 'inventory' && (
+      {activeSubPanel && activeSubPanel !== 'inventory' && activeSubPanel !== 'general' && (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
             {/* Modal Header */}
@@ -398,46 +408,7 @@ export const SettingsDashboardView: React.FC<SettingsDashboardViewProps> = ({
 
             {/* Modal Body with Inputs */}
             <div className="p-6 space-y-4 overflow-y-auto flex-1 text-xs text-slate-300">
-              {activeSubPanel === 'general' && (
-                <div className="space-y-4">
-                  <div>
-                    <label className="block font-semibold text-slate-200 mb-1">Shop Name</label>
-                    <input
-                      type="text"
-                      value={shopName}
-                      onChange={(e) => setShopName(e.target.value)}
-                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2.5 text-slate-100 font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="block font-semibold text-slate-200 mb-1">Branch Location</label>
-                    <input
-                      type="text"
-                      value={branchLocation}
-                      onChange={(e) => setBranchLocation(e.target.value)}
-                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2.5 text-slate-100 font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="block font-semibold text-slate-200 mb-1">Store Contact Phone</label>
-                    <input
-                      type="text"
-                      value={storePhone}
-                      onChange={(e) => setStorePhone(e.target.value)}
-                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2.5 text-slate-100 font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="block font-semibold text-slate-200 mb-1">Receipt Footer Note</label>
-                    <textarea
-                      rows={3}
-                      value={receiptFooter}
-                      onChange={(e) => setReceiptFooter(e.target.value)}
-                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2.5 text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
-                    />
-                  </div>
-                </div>
-              )}
+
 
               {activeSubPanel === 'transaction' && (
                 <div className="space-y-4">

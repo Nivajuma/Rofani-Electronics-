@@ -426,7 +426,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
               </button>
               <div>
                 <h2 className="font-bold text-base text-slate-100">{selectedReport.title}</h2>
-                <p className="text-[11px] text-slate-400">Specialized Report View • Full-screen mobile layout</p>
+                <p className="text-[11px] text-slate-400">Specialized Report View • 100% Full-Screen Layout</p>
               </div>
             </div>
 
@@ -438,10 +438,10 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             </button>
           </div>
 
-          {/* Modal Body */}
-          <div className="p-4 sm:p-6 space-y-5 overflow-y-auto flex-1 text-xs">
+          {/* Modal Body - 100% Edge-to-Edge */}
+          <div className="w-full flex-1 px-3 sm:px-6 py-4 space-y-5 overflow-y-auto text-xs pb-24">
             {/* Date Filter Presets & Instant Search Bar */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="w-full grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-2">
                 <label className="block font-bold text-slate-700">Date Range Filter</label>
                 <div className="grid grid-cols-5 gap-1 bg-slate-100 p-1 rounded-xl text-[11px]">
@@ -503,7 +503,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
 
             {/* 1. SALES REPORT WITH INTERACTIVE DATE DRILL-DOWNS */}
             {selectedReport.id === 'sale_report' && (
-              <div className="space-y-4">
+              <div className="w-full space-y-4">
                 <div className="grid grid-cols-3 gap-3">
                   <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
                     <div className="text-[11px] text-slate-500 font-semibold">Total Revenue</div>
@@ -519,13 +519,13 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                   </div>
                 </div>
 
-                <div className="bg-slate-50 border border-slate-200 rounded-2xl overflow-hidden">
+                <div className="w-full bg-slate-50 border border-slate-200 rounded-2xl overflow-hidden">
                   <div className="p-3 bg-slate-100 border-b border-slate-200 font-bold text-slate-700 flex items-center justify-between">
                     <span>Daily Sales Summary (Tap any date for itemized drill-down)</span>
                     <span className="font-mono text-slate-500">{reportData.salesByDate.length} Days Recorded</span>
                   </div>
-                  <div className="overflow-x-auto w-full">
-                    <div className="divide-y divide-slate-200 max-h-80 overflow-y-auto min-w-[500px]">
+                  <div className="w-full overflow-x-auto">
+                    <div className="w-full divide-y divide-slate-200 max-h-80 overflow-y-auto min-w-[500px]">
                       {reportData.salesByDate.length === 0 ? (
                         <div className="p-8 text-center text-slate-400 text-xs">No sales recorded for this date range.</div>
                       ) : (
@@ -533,7 +533,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                           <div
                             key={idx}
                             onClick={() => setSelectedSaleDateGroup({ dateStr: group.dateStr, transactions: group.transactions })}
-                            className="p-3.5 grid grid-cols-3 items-center hover:bg-blue-50/70 active:bg-blue-100 transition cursor-pointer group font-mono text-xs"
+                            className="p-3.5 grid grid-cols-3 items-center hover:bg-blue-50/70 active:bg-blue-100 transition cursor-pointer group font-mono text-xs w-full"
                           >
                             <div>
                               <div className="font-bold text-slate-800 font-sans flex items-center gap-1.5">
@@ -558,7 +558,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
 
             {/* 2. PURCHASE REPORT WITH INTERACTIVE DATE DRILL-DOWNS */}
             {selectedReport.id === 'purchase_report' && (
-              <div className="space-y-4">
+              <div className="w-full space-y-4">
                 <div className="grid grid-cols-2 gap-3">
                   <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
                     <div className="text-[11px] text-slate-500 font-semibold">Total Purchases Cost</div>
@@ -574,13 +574,13 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                   </div>
                 </div>
 
-                <div className="bg-slate-50 border border-slate-200 rounded-2xl overflow-hidden">
+                <div className="w-full bg-slate-50 border border-slate-200 rounded-2xl overflow-hidden">
                   <div className="p-3 bg-slate-100 border-b border-slate-200 font-bold text-slate-700 flex items-center justify-between">
                     <span>Daily Purchase Orders Summary (Tap any date for itemized drill-down)</span>
                     <span className="font-mono text-slate-500">{reportData.purchasesByDate.length} Restock Days</span>
                   </div>
-                  <div className="overflow-x-auto w-full">
-                    <div className="divide-y divide-slate-200 max-h-80 overflow-y-auto min-w-[500px]">
+                  <div className="w-full overflow-x-auto">
+                    <div className="w-full divide-y divide-slate-200 max-h-80 overflow-y-auto min-w-[500px]">
                       {reportData.purchasesByDate.length === 0 ? (
                         <div className="p-8 text-center text-slate-400 text-xs">No purchase orders found.</div>
                       ) : (
@@ -588,7 +588,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                           <div
                             key={idx}
                             onClick={() => setSelectedPurchaseDateGroup({ dateStr: group.dateStr, orders: group.orders })}
-                            className="p-3.5 grid grid-cols-3 items-center hover:bg-purple-50/70 active:bg-purple-100 transition cursor-pointer group font-mono text-xs"
+                            className="p-3.5 grid grid-cols-3 items-center hover:bg-purple-50/70 active:bg-purple-100 transition cursor-pointer group font-mono text-xs w-full"
                           >
                             <div>
                               <div className="font-bold text-slate-800 font-sans flex items-center gap-1.5">
@@ -613,7 +613,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
 
             {/* 3. PARTY REPORTS */}
             {(selectedReport.id.includes('party') || selectedReport.id === 'all_parties_report') && (
-              <div className="space-y-4">
+              <div className="w-full space-y-4">
                 <div className="grid grid-cols-3 gap-3">
                   <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
                     <div className="text-[11px] text-slate-500 font-semibold">Total Registered Parties</div>
@@ -629,7 +629,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                   </div>
                 </div>
 
-                <div className="bg-slate-50 border border-slate-200 rounded-2xl overflow-hidden">
+                <div className="w-full bg-slate-50 border border-slate-200 rounded-2xl overflow-hidden">
                   <div className="p-3 bg-slate-100 border-b border-slate-200 font-bold text-slate-700 grid grid-cols-5 gap-2 min-w-[700px]">
                     <span>Customer / Supplier Name</span>
                     <span>Party Type</span>
@@ -637,13 +637,13 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                     <span>Total Sales / Purchases</span>
                     <span className="text-right">Outstanding Balance</span>
                   </div>
-                  <div className="overflow-x-auto w-full">
-                    <div className="divide-y divide-slate-200 max-h-80 overflow-y-auto min-w-[700px]">
+                  <div className="w-full overflow-x-auto">
+                    <div className="w-full divide-y divide-slate-200 max-h-80 overflow-y-auto min-w-[700px]">
                       {reportData.parties.map((party, idx) => (
                         <div
                           key={idx}
                           onClick={() => setSelectedPartyLedger(party)}
-                          className="p-3 grid grid-cols-5 gap-2 items-center hover:bg-slate-100 active:bg-slate-200 transition cursor-pointer group font-mono text-xs"
+                          className="p-3 grid grid-cols-5 gap-2 items-center hover:bg-slate-100 active:bg-slate-200 transition cursor-pointer group font-mono text-xs w-full"
                         >
                           <span className="font-bold text-slate-800 font-sans group-hover:text-blue-600 flex items-center gap-1.5">
                             <span>{party.name}</span>
@@ -667,7 +667,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
 
             {/* 4. LOAN & FINANCIAL STATUS REPORTS */}
             {(selectedReport.id.includes('loan') || selectedReport.id === 'bank_statement' || selectedReport.id === 'cashflow') && (
-              <div className="space-y-4">
+              <div className="w-full space-y-4">
                 <div className="grid grid-cols-4 gap-3">
                   <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
                     <div className="text-[11px] text-slate-500 font-semibold">Lender / Account Name</div>
@@ -687,7 +687,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                   </div>
                 </div>
 
-                <div className="bg-slate-50 border border-slate-200 rounded-2xl overflow-hidden">
+                <div className="w-full bg-slate-50 border border-slate-200 rounded-2xl overflow-hidden">
                   <div className="p-3 bg-slate-100 border-b border-slate-200 font-bold text-slate-700 grid grid-cols-6 gap-2 min-w-[750px]">
                     <span>Lender / Bank Name</span>
                     <span>Account Number</span>
@@ -696,13 +696,13 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                     <span>Payments Made</span>
                     <span className="text-right">Net Balance Due</span>
                   </div>
-                  <div className="overflow-x-auto w-full">
-                    <div className="divide-y divide-slate-200 max-h-80 overflow-y-auto min-w-[750px]">
+                  <div className="w-full overflow-x-auto">
+                    <div className="w-full divide-y divide-slate-200 max-h-80 overflow-y-auto min-w-[750px]">
                       {[
                         { name: 'Equity Bank Facility', acc: 'ACC-992838', principal: 110000, interest: '14.5% p.a.', paid: 70000, balance: 40000 },
                         { name: 'Worker Salary Advance Pool', acc: 'EMP-ADV-01', principal: 40000, interest: '0% (Advance)', paid: 25000, balance: 15000 }
                       ].map((item, idx) => (
-                        <div key={idx} className="p-3 grid grid-cols-6 gap-2 items-center hover:bg-slate-100 transition font-mono text-xs">
+                        <div key={idx} className="p-3 grid grid-cols-6 gap-2 items-center hover:bg-slate-100 transition font-mono text-xs w-full">
                           <span className="font-bold text-slate-800 font-sans">{item.name}</span>
                           <span className="text-slate-600">{item.acc}</span>
                           <span>KSh {item.principal.toLocaleString()}</span>
@@ -719,7 +719,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
 
             {/* 5. ITEM & INVENTORY REPORTS */}
             {(selectedReport.id.includes('stock') || selectedReport.id.includes('item_detail') || selectedReport.id === 'stock_summary_report' || selectedReport.id === 'low_stock_summary_report' || selectedReport.id === 'item_detail_report' || selectedReport.id === 'stock_detail_report') && (
-              <div className="space-y-4">
+              <div className="w-full space-y-4">
                 <div className="grid grid-cols-3 gap-3">
                   <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
                     <div className="text-[11px] text-slate-500 font-semibold">Total Catalog Items</div>
@@ -739,7 +739,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                   </div>
                 </div>
 
-                <div className="bg-slate-50 border border-slate-200 rounded-2xl overflow-hidden">
+                <div className="w-full bg-slate-50 border border-slate-200 rounded-2xl overflow-hidden">
                   <div className="p-3 bg-slate-100 border-b border-slate-200 font-bold text-slate-700 grid grid-cols-7 gap-2 min-w-[850px]">
                     <span>Item Name</span>
                     <span>SKU</span>
@@ -749,13 +749,13 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                     <span className="text-right">Unit Cost / Price</span>
                     <span className="text-right">Total Valuation</span>
                   </div>
-                  <div className="overflow-x-auto w-full">
-                    <div className="divide-y divide-slate-200 max-h-80 overflow-y-auto min-w-[850px]">
+                  <div className="w-full overflow-x-auto">
+                    <div className="w-full divide-y divide-slate-200 max-h-80 overflow-y-auto min-w-[850px]">
                       {reportData.products.map((p, idx) => (
                         <div
                           key={p.id}
                           onClick={() => setSelectedProductAudit(p)}
-                          className="p-3 grid grid-cols-7 gap-2 items-center hover:bg-slate-100 active:bg-slate-200 transition cursor-pointer group font-mono text-xs"
+                          className="p-3 grid grid-cols-7 gap-2 items-center hover:bg-slate-100 active:bg-slate-200 transition cursor-pointer group font-mono text-xs w-full"
                         >
                           <span className="font-bold text-slate-800 font-sans group-hover:text-blue-600 flex items-center gap-1">
                             <span>{p.name}</span>
@@ -783,8 +783,8 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
 
             {/* 6. BATCH & SERIAL REPORTS */}
             {(selectedReport.id === 'item_batch_report' || selectedReport.id === 'item_serial_report') && (
-              <div className="space-y-4">
-                <div className="bg-slate-50 border border-slate-200 rounded-2xl overflow-hidden">
+              <div className="w-full space-y-4">
+                <div className="w-full bg-slate-50 border border-slate-200 rounded-2xl overflow-hidden">
                   <div className="p-3 bg-slate-100 border-b border-slate-200 font-bold text-slate-700 grid grid-cols-5 gap-2 min-w-[700px]">
                     <span>Item Name</span>
                     <span>Serial Number / IMEI</span>
@@ -792,13 +792,13 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                     <span>Manufacturing Date</span>
                     <span>Expiry Date</span>
                   </div>
-                  <div className="overflow-x-auto w-full">
-                    <div className="divide-y divide-slate-200 max-h-80 overflow-y-auto min-w-[700px]">
+                  <div className="w-full overflow-x-auto">
+                    <div className="w-full divide-y divide-slate-200 max-h-80 overflow-y-auto min-w-[700px]">
                       {reportData.products.slice(0, 12).map((p, idx) => (
                         <div
                           key={p.id}
                           onClick={() => setSelectedProductAudit(p)}
-                          className="p-3 grid grid-cols-5 gap-2 items-center hover:bg-slate-100 active:bg-slate-200 transition cursor-pointer group font-mono text-xs"
+                          className="p-3 grid grid-cols-5 gap-2 items-center hover:bg-slate-100 active:bg-slate-200 transition cursor-pointer group font-mono text-xs w-full"
                         >
                           <span className="font-bold text-slate-800 font-sans group-hover:text-blue-600">{p.name}</span>
                           <span className="font-bold text-purple-700">IMEI-358920{idx + 1004}</span>
@@ -815,7 +815,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
 
             {/* 7. DISCOUNT & CATEGORY REPORTS */}
             {(selectedReport.id === 'item_wise_discount' || selectedReport.id === 'discount_report' || selectedReport.id.includes('category')) && (
-              <div className="space-y-4">
+              <div className="w-full space-y-4">
                 <div className="grid grid-cols-3 gap-3">
                   <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
                     <div className="text-[11px] text-slate-500 font-semibold">Total Discounts Granted</div>
@@ -831,7 +831,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                   </div>
                 </div>
 
-                <div className="bg-slate-50 border border-slate-200 rounded-2xl overflow-hidden">
+                <div className="w-full bg-slate-50 border border-slate-200 rounded-2xl overflow-hidden">
                   <div className="p-3 bg-slate-100 border-b border-slate-200 font-bold text-slate-700 grid grid-cols-5 gap-2 min-w-[700px]">
                     <span>Category Name</span>
                     <span>Items Count</span>
@@ -839,10 +839,10 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                     <span>Total Sales</span>
                     <span className="text-right">Category Valuation</span>
                   </div>
-                  <div className="overflow-x-auto w-full">
-                    <div className="divide-y divide-slate-200 max-h-80 overflow-y-auto min-w-[700px]">
+                  <div className="w-full overflow-x-auto">
+                    <div className="w-full divide-y divide-slate-200 max-h-80 overflow-y-auto min-w-[700px]">
                       {reportData.categories.map((cat, idx) => (
-                        <div key={idx} className="p-3 grid grid-cols-5 gap-2 items-center hover:bg-slate-100 transition font-mono text-xs">
+                        <div key={idx} className="p-3 grid grid-cols-5 gap-2 items-center hover:bg-slate-100 transition font-mono text-xs w-full">
                           <span className="font-bold text-slate-800 font-sans">{cat.category}</span>
                           <span className="text-blue-600 font-bold">{cat.count} Items</span>
                           <span className="text-amber-600">KSh {Math.round(reportData.totalItemDiscounts / Math.max(1, reportData.categories.length)).toLocaleString()}</span>
@@ -858,7 +858,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
 
             {/* 8. EXPENSE REPORTS */}
             {selectedReport.id.includes('expense') && (
-              <div className="space-y-4">
+              <div className="w-full space-y-4">
                 <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl flex items-center justify-between">
                   <div>
                     <div className="text-[11px] text-slate-500 font-semibold">Total Operating Expenses</div>
@@ -867,17 +867,17 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                   <div className="text-right text-[11px] text-slate-400">Tracked across recurrent vendor bills & utilities</div>
                 </div>
 
-                <div className="bg-slate-50 border border-slate-200 rounded-2xl overflow-hidden">
+                <div className="w-full bg-slate-50 border border-slate-200 rounded-2xl overflow-hidden">
                   <div className="p-3 bg-slate-100 border-b border-slate-200 font-bold text-slate-700 grid grid-cols-4 gap-2 min-w-[600px]">
                     <span>Expense Title</span>
                     <span>Category</span>
                     <span>Date</span>
                     <span className="text-right">Amount (KSh)</span>
                   </div>
-                  <div className="overflow-x-auto w-full">
-                    <div className="divide-y divide-slate-200 max-h-80 overflow-y-auto min-w-[600px]">
+                  <div className="w-full overflow-x-auto">
+                    <div className="w-full divide-y divide-slate-200 max-h-80 overflow-y-auto min-w-[600px]">
                       {reportData.expenses.map((e, idx) => (
-                        <div key={idx} className="p-3 grid grid-cols-4 gap-2 items-center hover:bg-slate-100 transition font-mono text-xs">
+                        <div key={idx} className="p-3 grid grid-cols-4 gap-2 items-center hover:bg-slate-100 transition font-mono text-xs w-full">
                           <span className="font-bold text-slate-800 font-sans">{e.description}</span>
                           <span>
                             <span className="bg-purple-100 text-purple-800 text-[10px] font-bold px-2 py-0.5 rounded-full">
@@ -970,7 +970,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                 </div>
 
                 {/* Data Preview Table */}
-                <div className="bg-slate-50 border border-slate-200 rounded-2xl overflow-hidden">
+                <div className="w-full bg-slate-50 border border-slate-200 rounded-2xl overflow-hidden">
                   <div className="p-3 bg-slate-100 border-b border-slate-200 font-bold text-slate-700 flex items-center justify-between">
                     <span>{selectedReport.title} - Data Breakdown (Tap row for drill-down)</span>
                     <span className="font-mono text-slate-500">
@@ -986,13 +986,13 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                         No matching products found in inventory.
                       </div>
                     ) : (
-                      <div className="overflow-x-auto w-full">
-                        <div className="max-h-80 overflow-y-auto divide-y divide-slate-200 min-w-[600px]">
+                      <div className="w-full overflow-x-auto">
+                        <div className="w-full max-h-80 overflow-y-auto divide-y divide-slate-200 min-w-[600px]">
                           {reportData.products.map((p) => (
                             <div
                               key={p.id}
                               onClick={() => setSelectedProductAudit(p)}
-                              className="p-3 flex items-center justify-between hover:bg-slate-100 active:bg-slate-200 transition cursor-pointer group"
+                              className="p-3 flex items-center justify-between hover:bg-slate-100 active:bg-slate-200 transition cursor-pointer group w-full"
                             >
                               <div>
                                 <div className="font-bold text-slate-800 group-hover:text-blue-600 transition flex items-center gap-2">
@@ -1021,13 +1021,13 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                         No transactions found for the selected date range.
                       </div>
                     ) : (
-                      <div className="overflow-x-auto w-full">
-                        <div className="max-h-80 overflow-y-auto divide-y divide-slate-200 min-w-[600px]">
+                      <div className="w-full overflow-x-auto">
+                        <div className="w-full max-h-80 overflow-y-auto divide-y divide-slate-200 min-w-[600px]">
                           {reportData.transactions.map((tx) => (
                             <div
                               key={tx.id}
                               onClick={() => setSelectedTransactionDetail(tx)}
-                              className="p-3 flex items-center justify-between hover:bg-slate-100 active:bg-slate-200 transition cursor-pointer group"
+                              className="p-3 flex items-center justify-between hover:bg-slate-100 active:bg-slate-200 transition cursor-pointer group w-full"
                             >
                               <div>
                                 <div className="font-bold font-mono text-slate-800 group-hover:text-blue-600 transition flex items-center gap-2">
@@ -1057,8 +1057,8 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             )}
           </div>
 
-          {/* Sticky Bottom Action Bar */}
-          <div className="sticky bottom-0 w-full bg-slate-50 border-t border-slate-200 p-3.5 flex items-center justify-between z-10 pb-6 shadow-lg shrink-0">
+          {/* Sticky Bottom Export Bar */}
+          <div className="sticky bottom-0 w-full bg-white border-t border-slate-200 p-3.5 flex items-center justify-between z-20 pb-8 shadow-lg shrink-0">
             <span className="text-xs font-semibold text-slate-600">Export & Share Options:</span>
             <div className="flex items-center gap-2">
               <button
@@ -1111,7 +1111,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             </button>
           </div>
 
-          <div className="p-4 sm:p-6 space-y-4 overflow-y-auto flex-1 text-xs">
+          <div className="w-full flex-1 px-4 sm:px-6 py-4 space-y-4 overflow-y-auto text-xs pb-24">
             <div className="grid grid-cols-2 gap-3">
               <div className="bg-slate-50 border border-slate-200 p-3 rounded-xl">
                 <div className="text-slate-500 font-semibold">Selling Price</div>
@@ -1136,7 +1136,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                 <Clock className="w-4 h-4 text-slate-500" />
                 <span>Movement Audit Timeline</span>
               </div>
-              <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-3 text-xs">
+              <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-3 text-xs w-full">
                 <div className="flex items-start justify-between border-b border-slate-200 pb-2">
                   <div>
                     <span className="font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded">Stock Initialized</span>
@@ -1155,7 +1155,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             </div>
           </div>
 
-          <div className="sticky bottom-0 w-full bg-slate-50 border-t border-slate-200 p-3.5 flex items-center justify-end z-10 pb-6 shadow-lg shrink-0">
+          <div className="sticky bottom-0 w-full bg-white border-t border-slate-200 p-3.5 flex items-center justify-end z-20 pb-8 shadow-lg shrink-0">
             <button
               onClick={() => setSelectedProductAudit(null)}
               className="px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl text-xs cursor-pointer shadow-sm"
@@ -1190,7 +1190,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             </button>
           </div>
 
-          <div className="p-4 sm:p-6 space-y-4 overflow-y-auto flex-1 text-xs">
+          <div className="w-full flex-1 px-4 sm:px-6 py-4 space-y-4 overflow-y-auto text-xs pb-24">
             <div className="grid grid-cols-2 gap-3">
               <div className="bg-slate-50 border border-slate-200 p-3 rounded-xl">
                 <div className="text-slate-500 font-semibold">Total Trade Volume</div>
@@ -1207,7 +1207,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                 <Receipt className="w-4 h-4 text-slate-500" />
                 <span>Account Ledger & Transaction History</span>
               </div>
-              <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-2 text-xs">
+              <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-2 text-xs w-full">
                 <div className="flex justify-between border-b pb-2 font-bold text-slate-700">
                   <span>Reference / Date</span>
                   <span>Status</span>
@@ -1225,7 +1225,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             </div>
           </div>
 
-          <div className="sticky bottom-0 w-full bg-slate-50 border-t border-slate-200 p-3.5 flex items-center justify-end z-10 pb-6 shadow-lg shrink-0">
+          <div className="sticky bottom-0 w-full bg-white border-t border-slate-200 p-3.5 flex items-center justify-end z-20 pb-8 shadow-lg shrink-0">
             <button
               onClick={() => setSelectedPartyLedger(null)}
               className="px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl text-xs cursor-pointer shadow-sm"
@@ -1260,14 +1260,14 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             </button>
           </div>
 
-          <div className="p-4 sm:p-6 space-y-4 overflow-y-auto flex-1 text-xs">
-            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-3">
+          <div className="w-full flex-1 px-4 sm:px-6 py-4 space-y-4 overflow-y-auto text-xs pb-24">
+            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-3 w-full">
               <div className="flex justify-between font-bold text-slate-700 border-b border-slate-200 pb-2">
                 <span>Item Description</span>
                 <span>Qty × Price = Total</span>
               </div>
               {selectedTransactionDetail.items.map((item, idx) => (
-                <div key={idx} className="flex justify-between items-center text-slate-800">
+                <div key={idx} className="flex justify-between items-center text-slate-800 w-full">
                   <div>
                     <div className="font-bold">{item.product.name}</div>
                     <div className="text-[10px] text-slate-500 font-mono">SKU: {item.product.sku}</div>
@@ -1279,7 +1279,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
               ))}
             </div>
 
-            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-2 font-mono text-xs">
+            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-2 font-mono text-xs w-full">
               <div className="flex justify-between text-slate-600">
                 <span>Payment Mode:</span>
                 <span className="font-bold uppercase text-slate-800">{selectedTransactionDetail.paymentMethod}</span>
@@ -1295,7 +1295,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             </div>
           </div>
 
-          <div className="sticky bottom-0 w-full bg-slate-50 border-t border-slate-200 p-3.5 flex items-center justify-between z-10 pb-6 shadow-lg shrink-0">
+          <div className="sticky bottom-0 w-full bg-white border-t border-slate-200 p-3.5 flex items-center justify-between z-20 pb-8 shadow-lg shrink-0">
             <button
               onClick={() => {
                 triggerToast(`🖨️ Reprinting receipt ${selectedTransactionDetail.receiptNumber}...`);
@@ -1344,8 +1344,8 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             </button>
           </div>
 
-          <div className="p-4 sm:p-6 space-y-4 overflow-y-auto flex-1 text-xs">
-            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-3 font-mono">
+          <div className="w-full flex-1 px-4 sm:px-6 py-4 space-y-4 overflow-y-auto text-xs pb-24">
+            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-3 font-mono w-full">
               {selectedMetricDetail === 'revenue' && (
                 <>
                   <div className="flex justify-between"><span>Cash Collected:</span><span className="font-bold text-emerald-600">KSh {reportData.totalCollected.toLocaleString()}</span></div>
@@ -1382,7 +1382,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             </div>
           </div>
 
-          <div className="sticky bottom-0 w-full bg-slate-50 border-t border-slate-200 p-3.5 flex items-center justify-end z-10 pb-6 shadow-lg shrink-0">
+          <div className="sticky bottom-0 w-full bg-white border-t border-slate-200 p-3.5 flex items-center justify-end z-20 pb-8 shadow-lg shrink-0">
             <button
               onClick={() => setSelectedMetricDetail(null)}
               className="px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl text-xs cursor-pointer shadow-sm"
@@ -1419,9 +1419,9 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             </button>
           </div>
 
-          <div className="p-4 sm:p-6 space-y-4 overflow-y-auto flex-1 text-xs">
+          <div className="w-full flex-1 px-4 sm:px-6 py-4 space-y-4 overflow-y-auto text-xs pb-24">
             {/* Instant Search Filter for Daily Sold Items */}
-            <div className="relative">
+            <div className="relative w-full">
               <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
               <input
                 type="text"
@@ -1433,7 +1433,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             </div>
 
             {/* Aggregated Itemized Sold List */}
-            <div className="bg-slate-50 border border-slate-200 rounded-2xl overflow-hidden">
+            <div className="w-full bg-slate-50 border border-slate-200 rounded-2xl overflow-hidden">
               <div className="p-3 bg-slate-100 border-b border-slate-200 font-bold text-slate-700 grid grid-cols-5 gap-2 min-w-[700px]">
                 <span>Item Name</span>
                 <span>SKU</span>
@@ -1441,8 +1441,8 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                 <span className="text-right">Avg Price</span>
                 <span className="text-right">Total Revenue</span>
               </div>
-              <div className="overflow-x-auto w-full">
-                <div className="divide-y divide-slate-200 max-h-80 overflow-y-auto min-w-[700px]">
+              <div className="w-full overflow-x-auto">
+                <div className="w-full divide-y divide-slate-200 max-h-80 overflow-y-auto min-w-[700px]">
                   {(() => {
                     const itemMap = new Map<string, { name: string; sku: string; qty: number; revenue: number; prices: number[] }>();
                     selectedSaleDateGroup.transactions.forEach(tx => {
@@ -1468,7 +1468,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                     return aggregatedItems.map((item, idx) => {
                       const avgPrice = item.prices.length > 0 ? item.prices.reduce((a, b) => a + b, 0) / item.prices.length : 0;
                       return (
-                        <div key={idx} className="p-3 grid grid-cols-5 gap-2 items-center hover:bg-slate-100 transition font-mono text-xs">
+                        <div key={idx} className="p-3 grid grid-cols-5 gap-2 items-center hover:bg-slate-100 transition font-mono text-xs w-full">
                           <span className="font-bold text-slate-800 font-sans">{item.name}</span>
                           <span className="text-slate-500">{item.sku}</span>
                           <span className="text-center font-bold text-blue-600">{item.qty}</span>
@@ -1483,7 +1483,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             </div>
           </div>
 
-          <div className="sticky bottom-0 w-full bg-slate-50 border-t border-slate-200 p-3.5 flex items-center justify-between z-10 pb-6 shadow-lg shrink-0">
+          <div className="sticky bottom-0 w-full bg-white border-t border-slate-200 p-3.5 flex items-center justify-between z-20 pb-8 shadow-lg shrink-0">
             <span className="text-xs font-semibold text-slate-600">Export Daily Items:</span>
             <div className="flex items-center gap-2">
               <button
@@ -1531,9 +1531,9 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             </button>
           </div>
 
-          <div className="p-4 sm:p-6 space-y-4 overflow-y-auto flex-1 text-xs">
+          <div className="w-full flex-1 px-4 sm:px-6 py-4 space-y-4 overflow-y-auto text-xs pb-24">
             {/* Instant Search Filter for Daily Purchased Items */}
-            <div className="relative">
+            <div className="relative w-full">
               <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
               <input
                 type="text"
@@ -1545,7 +1545,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             </div>
 
             {/* Itemized Purchase List */}
-            <div className="bg-slate-50 border border-slate-200 rounded-2xl overflow-hidden">
+            <div className="w-full bg-slate-50 border border-slate-200 rounded-2xl overflow-hidden">
               <div className="p-3 bg-slate-100 border-b border-slate-200 font-bold text-slate-700 grid grid-cols-5 gap-2 min-w-[700px]">
                 <span>Item Name</span>
                 <span>SKU / PO #</span>
@@ -1553,8 +1553,8 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                 <span>Supplier Name</span>
                 <span className="text-right">Total Cost</span>
               </div>
-              <div className="overflow-x-auto w-full">
-                <div className="divide-y divide-slate-200 max-h-80 overflow-y-auto min-w-[700px]">
+              <div className="w-full overflow-x-auto">
+                <div className="w-full divide-y divide-slate-200 max-h-80 overflow-y-auto min-w-[700px]">
                   {(() => {
                     const allPurchasedItems: Array<{ name: string; sku: string; qty: number; supplier: string; cost: number }> = [];
                     selectedPurchaseDateGroup.orders.forEach(po => {
@@ -1580,7 +1580,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                     }
 
                     return filteredPurchased.map((item, idx) => (
-                      <div key={idx} className="p-3 grid grid-cols-5 gap-2 items-center hover:bg-slate-100 transition font-mono text-xs">
+                      <div key={idx} className="p-3 grid grid-cols-5 gap-2 items-center hover:bg-slate-100 transition font-mono text-xs w-full">
                         <span className="font-bold text-slate-800 font-sans">{item.name}</span>
                         <span className="text-slate-500">{item.sku}</span>
                         <span className="text-center font-bold text-purple-600">{item.qty}</span>
@@ -1594,19 +1594,19 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             </div>
           </div>
 
-          <div className="sticky bottom-0 w-full bg-slate-50 border-t border-slate-200 p-3.5 flex items-center justify-between z-10 pb-6 shadow-lg shrink-0">
+          <div className="sticky bottom-0 w-full bg-white border-t border-slate-200 p-3.5 flex items-center justify-between z-20 pb-8 shadow-lg shrink-0">
             <span className="text-xs font-semibold text-slate-600">Export Restock Items:</span>
             <div className="flex items-center gap-2">
               <button
                 onClick={() => triggerToast('📄 Daily purchase items exported to PDF!')}
-                className="px-3.5 py-2.5 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 cursor-pointer shadow-sm"
+                className="px-3.5 py-2.5 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-sm transition cursor-pointer active:scale-95"
               >
                 <Printer className="w-3.5 h-3.5" />
                 <span>[ 📄 Export PDF ]</span>
               </button>
               <button
                 onClick={() => triggerToast('📊 Daily purchase items exported to Excel!')}
-                className="px-3.5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 cursor-pointer shadow-sm"
+                className="px-3.5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-sm transition cursor-pointer active:scale-95"
               >
                 <Download className="w-3.5 h-3.5" />
                 <span>[ 📊 Export Excel ]</span>

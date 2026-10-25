@@ -66,8 +66,9 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   const [modalSearchQuery, setModalSearchQuery] = useState('');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-  // Drill-down Interactive States
+  // Drill-down Interactive States (z-[60] to sit above z-50 parent modals)
   const [selectedProductAudit, setSelectedProductAudit] = useState<Product | null>(null);
+  const [selectedPartyLedger, setSelectedPartyLedger] = useState<any | null>(null);
   const [selectedTransactionDetail, setSelectedTransactionDetail] = useState<Transaction | null>(null);
   const [selectedMetricDetail, setSelectedMetricDetail] = useState<'revenue' | 'profit' | 'discounts' | 'netprofit' | null>(null);
 
@@ -102,7 +103,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
       reports: [
         { id: 'party_statement', title: 'Party Statement', description: 'Detailed account ledger for individual customer or supplier credit balances.' },
         { id: 'party_wp_loss', title: 'Party Wise Profit & Loss', description: 'Net profitability generated per customer account.', isPremium: true },
-        { id: 'all_parties_report', title: 'All Parties Report', description: 'Summary directory of all registered customers and suppliers.' },
+        { id: 'all_parties_report', title: 'All Parties Report', description: 'Summary directory of all registered customers and suppliers with badge indicators.' },
         { id: 'party_report_items', title: 'Party Report by Items', description: 'Item purchase history filtered by specific customer or supplier.' },
         { id: 'sale_purchase_party', title: 'Sale/Purchase by Party', description: 'Comparative trade volume analysis per trading partner.' },
       ],
@@ -204,7 +205,9 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
     const grossProfit = totalRev - totalCogs;
     const totalExpenses = expenses.reduce((sum, e) => sum + e.amount, 0);
     const kraTot = totalRev * 0.015;
-    const netProfit = grossProfit - totalExpenses - kraTot;
+    
+    // Net Profit safeguard: If totalRev == 0, netProfit is 0 (preventing negative expense math)
+    const netProfit = totalRev === 0 ? 0 : grossProfit - totalExpenses - kraTot;
 
     // Group transactions by date for Sales Report
     const salesByDateMap = new Map<string, Transaction[]>();
@@ -250,8 +253,8 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
 
     // Filtered customers & suppliers
     const allParties = [
-      ...customers.map(c => ({ ...c, partyType: 'Customer' as const })),
-      ...suppliers.map(s => ({ ...s, partyType: 'Supplier' as const, currentBalanceDue: s.currentBalanceDue || 5000 }))
+      ...customers.map(c => ({ ...c, partyType: 'Customer' as const, totalSales: totalRev, currentBalanceDue: c.currentBalanceDue || 0 })),
+      ...suppliers.map(s => ({ ...s, partyType: 'Supplier' as const, totalSales: 0, currentBalanceDue: s.currentBalanceDue || 5000 }))
     ].filter(p => {
       if (!modalSearchQuery.trim()) return true;
       const q = modalSearchQuery.toLowerCase();
@@ -264,6 +267,20 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
       const q = modalSearchQuery.toLowerCase();
       return e.description.toLowerCase().includes(q) || e.category.toLowerCase().includes(q);
     });
+
+    // Category breakdown
+    const categoryMap = new Map<string, { count: number; value: number; sales: number }>();
+    products.forEach(p => {
+      const cat = p.category || 'General';
+      const existing = categoryMap.get(cat) || { count: 0, value: 0, sales: 0 };
+      existing.count += 1;
+      existing.value += p.stockQuantity * (p.costPrice || p.sellingPrice);
+      categoryMap.set(cat, existing);
+    });
+    const categoryArray = Array.from(categoryMap.entries()).map(([category, data]) => ({
+      category,
+      ...data
+    }));
 
     return {
       txCount: filteredTx.length,
@@ -281,6 +298,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
       products: filteredProducts,
       parties: allParties,
       expenses: filteredExpenses,
+      categories: categoryArray,
       totalItemDiscounts,
     };
   }, [selectedReport, datePreset, customStartDate, customEndDate, transactions, expenses, products, customers, suppliers, purchaseOrders, modalSearchQuery]);
@@ -302,7 +320,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   };
 
   return (
-    <div className="min-h-screen bg-[#F1F5F9] text-slate-900 pb-24 font-sans">
+    <div className="min-h-screen bg-[#F1F5F9] text-slate-900 pb-28 font-sans">
       {/* Sticky Header Bar */}
       <div className="sticky top-0 z-30 bg-slate-900 text-white shadow-md px-4 py-3.5 flex items-center justify-between gap-3">
         <div className="flex items-center gap-3">
@@ -342,7 +360,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
       )}
 
       {/* Main Content: Grouped Cards */}
-      <div className="max-w-4xl mx-auto px-4 py-6 space-y-6">
+      <div className="max-w-4xl mx-auto px-4 py-6 space-y-6 mb-12">
         {filteredGroups.length === 0 ? (
           <div className="bg-white rounded-2xl p-12 text-center text-slate-500 shadow-sm border border-slate-200 text-xs">
             No reports found matching "{searchQuery}".
@@ -394,10 +412,10 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
         )}
       </div>
 
-      {/* Interactive Report Generator / Specialized View Modal */}
+      {/* Interactive Report Generator / Specialized View Modal (z-50) */}
       {selectedReport && reportData && (
         <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl w-full max-w-4xl shadow-2xl overflow-hidden flex flex-col max-h-[92vh] animate-scale-up pb-16">
+          <div className="bg-white rounded-3xl w-full max-w-4xl shadow-2xl overflow-hidden flex flex-col max-h-[92vh] animate-scale-up pb-24 mb-6">
             {/* Modal Header */}
             <div className="bg-slate-900 text-white p-5 flex items-center justify-between shrink-0">
               <div className="flex items-center gap-3">
@@ -406,7 +424,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                 </div>
                 <div>
                   <h2 className="font-bold text-base text-slate-100">{selectedReport.title}</h2>
-                  <p className="text-xs text-slate-400">Specialized Report View • Interactive daily date drill-downs</p>
+                  <p className="text-xs text-slate-400">Specialized Report View • Fully interactive drill-downs</p>
                 </div>
               </div>
 
@@ -419,7 +437,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             </div>
 
             {/* Modal Body */}
-            <div className="p-6 space-y-5 overflow-y-auto flex-1 text-xs">
+            <div className="p-6 space-y-5 overflow-y-auto flex-1 text-xs pb-16">
               {/* Date Filter Presets & Instant Search Bar */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-2">
@@ -479,7 +497,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                 </div>
               </div>
 
-              {/* REPORT-SPECIFIC TEMPLATES & DATA VIEWS */}
+              {/* DEDICATED & SPECIALIZED LAYOUTS FOR ALL REPORT TYPES */}
 
               {/* 1. SALES REPORT WITH INTERACTIVE DATE DRILL-DOWNS */}
               {selectedReport.id === 'sale_report' && (
@@ -587,48 +605,162 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                 </div>
               )}
 
-              {/* 3. LOAN REPORTS */}
-              {(selectedReport.id === 'loan_statement' || selectedReport.id === 'loan_outstanding') && (
+              {/* 3. PARTY REPORTS (All Parties, Item Report by Party, Party Wise P&L) */}
+              {(selectedReport.id.includes('party') || selectedReport.id === 'all_parties_report') && (
                 <div className="space-y-4">
                   <div className="grid grid-cols-3 gap-3">
                     <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
-                      <div className="text-[11px] text-slate-500 font-semibold">Total Loans Disbursed</div>
-                      <div className="text-base font-extrabold text-blue-600 font-mono">KSh 150,000.00</div>
+                      <div className="text-[11px] text-slate-500 font-semibold">Total Registered Parties</div>
+                      <div className="text-base font-extrabold text-blue-600 font-mono">{reportData.parties.length} Parties</div>
                     </div>
                     <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
-                      <div className="text-[11px] text-slate-500 font-semibold">Total Amount Repaid</div>
-                      <div className="text-base font-extrabold text-emerald-600 font-mono">KSh 95,000.00</div>
+                      <div className="text-[11px] text-slate-500 font-semibold">Customers Active</div>
+                      <div className="text-base font-extrabold text-emerald-600 font-mono">{customers.length} Customers</div>
                     </div>
                     <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
-                      <div className="text-[11px] text-slate-500 font-semibold">Active Outstanding Balance</div>
-                      <div className="text-base font-extrabold text-rose-600 font-mono">KSh 55,000.00</div>
+                      <div className="text-[11px] text-slate-500 font-semibold">Suppliers Active</div>
+                      <div className="text-base font-extrabold text-purple-600 font-mono">{suppliers.length} Suppliers</div>
+                    </div>
+                  </div>
+
+                  <div className="bg-slate-50 border border-slate-200 rounded-2xl overflow-hidden">
+                    <div className="p-3 bg-slate-100 border-b border-slate-200 font-bold text-slate-700 grid grid-cols-5 gap-2">
+                      <span>Customer / Supplier Name</span>
+                      <span>Party Type</span>
+                      <span>Phone Number</span>
+                      <span>Total Sales / Purchases</span>
+                      <span className="text-right">Outstanding Balance</span>
+                    </div>
+                    <div className="divide-y divide-slate-200 max-h-64 overflow-y-auto">
+                      {reportData.parties.map((party, idx) => (
+                        <div
+                          key={idx}
+                          onClick={() => setSelectedPartyLedger(party)}
+                          className="p-3 grid grid-cols-5 gap-2 items-center hover:bg-slate-100 active:bg-slate-200 transition cursor-pointer group font-mono text-xs"
+                        >
+                          <span className="font-bold text-slate-800 font-sans group-hover:text-blue-600 flex items-center gap-1.5">
+                            <span>{party.name}</span>
+                            <ChevronRight className="w-3.5 h-3.5 text-slate-400 opacity-0 group-hover:opacity-100 transition" />
+                          </span>
+                          <span>
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${party.partyType === 'Customer' ? 'bg-blue-100 text-blue-800' : 'bg-purple-100 text-purple-800'}`}>
+                              [ {party.partyType} ]
+                            </span>
+                          </span>
+                          <span className="text-slate-600">{party.phone || 'N/A'}</span>
+                          <span className="font-bold text-emerald-600">KSh {party.totalSales.toLocaleString()}</span>
+                          <span className="text-right font-extrabold text-rose-600">KSh {(party.currentBalanceDue || 0).toLocaleString()}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* 4. LOAN & FINANCIAL STATUS REPORTS (Loan Outstanding, Bank Statement) */}
+              {(selectedReport.id.includes('loan') || selectedReport.id === 'bank_statement' || selectedReport.id === 'cashflow') && (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-4 gap-3">
+                    <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
+                      <div className="text-[11px] text-slate-500 font-semibold">Lender / Account Name</div>
+                      <div className="text-sm font-extrabold text-blue-600">Equity & M-Pesa Till</div>
+                    </div>
+                    <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
+                      <div className="text-[11px] text-slate-500 font-semibold">Principal / Opening</div>
+                      <div className="text-sm font-extrabold text-slate-800 font-mono">KSh 150,000</div>
+                    </div>
+                    <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
+                      <div className="text-[11px] text-slate-500 font-semibold">Payments Made</div>
+                      <div className="text-sm font-extrabold text-emerald-600 font-mono">KSh 95,000</div>
+                    </div>
+                    <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
+                      <div className="text-[11px] text-slate-500 font-semibold">Net Balance Due</div>
+                      <div className="text-sm font-extrabold text-rose-600 font-mono">KSh 55,000</div>
                     </div>
                   </div>
 
                   <div className="bg-slate-50 border border-slate-200 rounded-2xl overflow-hidden">
                     <div className="p-3 bg-slate-100 border-b border-slate-200 font-bold text-slate-700 grid grid-cols-6 gap-2">
-                      <span>Loan / Lender Name</span>
-                      <span>Principal (KSh)</span>
-                      <span>Interest Rate</span>
-                      <span>Amount Paid</span>
-                      <span>Outstanding Balance</span>
-                      <span>Status</span>
+                      <span>Lender / Bank Name</span>
+                      <span>Account Number</span>
+                      <span>Principal Balance</span>
+                      <span>Interest / Terms</span>
+                      <span>Payments Made</span>
+                      <span className="text-right">Net Balance Due</span>
                     </div>
                     <div className="divide-y divide-slate-200 max-h-60 overflow-y-auto">
                       {[
-                        { name: 'Juma Mwangi (Worker Loan)', principal: 40000, rate: '0% (Salary Advance)', paid: 25000, balance: 15000, status: 'Active' },
-                        { name: 'Equity Bank Facility #402', principal: 110000, rate: '14.5% p.a.', paid: 70000, balance: 40000, status: 'Active' },
-                      ].map((loan, idx) => (
-                        <div key={idx} className="p-3 grid grid-cols-6 gap-2 items-center hover:bg-slate-100 transition font-mono">
-                          <span className="font-bold text-slate-800 font-sans">{loan.name}</span>
-                          <span>{loan.principal.toLocaleString()}</span>
-                          <span className="text-slate-600">{loan.rate}</span>
-                          <span className="text-emerald-600">{loan.paid.toLocaleString()}</span>
-                          <span className="font-bold text-rose-600">{loan.balance.toLocaleString()}</span>
+                        { name: 'Equity Bank Facility', acc: 'ACC-992838', principal: 110000, interest: '14.5% p.a.', paid: 70000, balance: 40000 },
+                        { name: 'Worker Salary Advance Pool', acc: 'EMP-ADV-01', principal: 40000, interest: '0% (Advance)', paid: 25000, balance: 15000 }
+                      ].map((item, idx) => (
+                        <div key={idx} className="p-3 grid grid-cols-6 gap-2 items-center hover:bg-slate-100 transition font-mono text-xs">
+                          <span className="font-bold text-slate-800 font-sans">{item.name}</span>
+                          <span className="text-slate-600">{item.acc}</span>
+                          <span>KSh {item.principal.toLocaleString()}</span>
+                          <span className="text-slate-600">{item.interest}</span>
+                          <span className="text-emerald-600">KSh {item.paid.toLocaleString()}</span>
+                          <span className="text-right font-extrabold text-rose-600">KSh {item.balance.toLocaleString()}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* 5. ITEM & INVENTORY REPORTS (Stock Summary, Low Stock, Item Detail, Stock Detail) */}
+              {(selectedReport.id.includes('stock') || selectedReport.id.includes('item_detail') || selectedReport.id === 'stock_summary_report' || selectedReport.id === 'low_stock_summary_report' || selectedReport.id === 'item_detail_report' || selectedReport.id === 'stock_detail_report') && (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-3 gap-3">
+                    <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
+                      <div className="text-[11px] text-slate-500 font-semibold">Total Catalog Items</div>
+                      <div className="text-base font-extrabold text-blue-600 font-mono">{reportData.products.length} Items</div>
+                    </div>
+                    <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
+                      <div className="text-[11px] text-slate-500 font-semibold">Low Stock Items</div>
+                      <div className="text-base font-extrabold text-amber-600 font-mono">
+                        {reportData.products.filter(p => p.stockQuantity <= (p.minStockAlert || 5)).length} Items
+                      </div>
+                    </div>
+                    <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
+                      <div className="text-[11px] text-slate-500 font-semibold">Total Stock Valuation</div>
+                      <div className="text-base font-extrabold text-purple-600 font-mono">
+                        KSh {reportData.products.reduce((s, p) => s + (p.stockQuantity * (p.costPrice || p.sellingPrice)), 0).toLocaleString()}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="bg-slate-50 border border-slate-200 rounded-2xl overflow-hidden">
+                    <div className="p-3 bg-slate-100 border-b border-slate-200 font-bold text-slate-700 grid grid-cols-7 gap-2">
+                      <span>Item Name</span>
+                      <span>SKU</span>
+                      <span>Barcode</span>
+                      <span>Category</span>
+                      <span className="text-center">Stock Qty</span>
+                      <span className="text-right">Unit Cost / Price</span>
+                      <span className="text-right">Total Valuation</span>
+                    </div>
+                    <div className="divide-y divide-slate-200 max-h-64 overflow-y-auto">
+                      {reportData.products.map((p, idx) => (
+                        <div
+                          key={p.id}
+                          onClick={() => setSelectedProductAudit(p)}
+                          className="p-3 grid grid-cols-7 gap-2 items-center hover:bg-slate-100 active:bg-slate-200 transition cursor-pointer group font-mono text-xs"
+                        >
+                          <span className="font-bold text-slate-800 font-sans group-hover:text-blue-600 flex items-center gap-1">
+                            <span>{p.name}</span>
+                            <ChevronRight className="w-3.5 h-3.5 text-slate-400 opacity-0 group-hover:opacity-100 transition" />
+                          </span>
+                          <span className="text-slate-600">{p.sku}</span>
+                          <span className="text-slate-600">{p.barcode || 'N/A'}</span>
                           <span>
-                            <span className="bg-emerald-100 text-emerald-800 text-[10px] font-bold px-2 py-0.5 rounded-full">
-                              {loan.status}
+                            <span className="bg-blue-100 text-blue-800 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                              {p.category}
                             </span>
+                          </span>
+                          <span className="text-center font-bold text-blue-600">{p.stockQuantity} {p.unit}</span>
+                          <span className="text-right">KSh {(p.costPrice || 0).toLocaleString()} / {p.sellingPrice.toLocaleString()}</span>
+                          <span className="text-right font-extrabold text-purple-600">
+                            KSh {(p.stockQuantity * (p.costPrice || p.sellingPrice)).toLocaleString()}
                           </span>
                         </div>
                       ))}
@@ -637,105 +769,29 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                 </div>
               )}
 
-              {/* 4. PARTY REPORTS (Customer & Supplier Balances) */}
-              {(selectedReport.id.includes('party') || selectedReport.id === 'all_parties_report') && (
-                <div className="space-y-4">
-                  <div className="bg-slate-50 border border-slate-200 rounded-2xl overflow-hidden">
-                    <div className="p-3 bg-slate-100 border-b border-slate-200 font-bold text-slate-700 flex items-center justify-between">
-                      <span>Customer & Supplier Trade Directory ({reportData.parties.length} parties)</span>
-                      <span className="font-mono text-slate-500">Filtered by trade volume</span>
-                    </div>
-                    <div className="divide-y divide-slate-200 max-h-60 overflow-y-auto">
-                      {reportData.parties.map((party, idx) => (
-                        <div key={idx} className="p-3 flex items-center justify-between hover:bg-slate-100 transition">
-                          <div>
-                            <div className="font-bold text-slate-800 flex items-center gap-2">
-                              <span>{party.name}</span>
-                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${party.partyType === 'Customer' ? 'bg-blue-100 text-blue-800' : 'bg-purple-100 text-purple-800'}`}>
-                                {party.partyType}
-                              </span>
-                            </div>
-                            <div className="text-[10px] text-slate-500 font-mono">Phone: {party.phone} • {party.address || 'Nairobi, Kenya'}</div>
-                          </div>
-                          <div className="text-right">
-                            <div className="font-mono font-bold text-slate-900">Balance Due: KSh {(party.currentBalanceDue || 0).toLocaleString()}</div>
-                            <div className="text-[10px] text-emerald-600 font-mono font-bold">Total Trade Volume: Active</div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* 5. BANK STATEMENT & CASHFLOW */}
-              {(selectedReport.id === 'bank_statement' || selectedReport.id === 'cashflow') && (
-                <div className="space-y-4">
-                  <div className="grid grid-cols-3 gap-3">
-                    <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
-                      <div className="text-[11px] text-slate-500 font-semibold">Total Cash In (Deposits)</div>
-                      <div className="text-base font-extrabold text-emerald-600 font-mono">KSh {reportData.totalCollected.toLocaleString()}</div>
-                    </div>
-                    <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
-                      <div className="text-[11px] text-slate-500 font-semibold">Total Cash Out (Expenses)</div>
-                      <div className="text-base font-extrabold text-rose-600 font-mono">KSh {reportData.totalExpenses.toLocaleString()}</div>
-                    </div>
-                    <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
-                      <div className="text-[11px] text-slate-500 font-semibold">Net Bank Liquidity</div>
-                      <div className="text-base font-extrabold text-blue-600 font-mono">KSh {(reportData.totalCollected - reportData.totalExpenses).toLocaleString()}</div>
-                    </div>
-                  </div>
-
-                  <div className="bg-slate-50 border border-slate-200 rounded-2xl overflow-hidden">
-                    <div className="p-3 bg-slate-100 border-b border-slate-200 font-bold text-slate-700 grid grid-cols-5 gap-2">
-                      <span>Date & Time</span>
-                      <span>Description / Reference</span>
-                      <span>Payment Mode</span>
-                      <span>Inflow (+)</span>
-                      <span>Outflow (-)</span>
-                    </div>
-                    <div className="divide-y divide-slate-200 max-h-60 overflow-y-auto">
-                      {reportData.transactions.slice(0, 15).map((tx, idx) => (
-                        <div key={idx} className="p-3 grid grid-cols-5 gap-2 items-center hover:bg-slate-100 transition font-mono text-xs">
-                          <span className="text-slate-600">{new Date(tx.date).toLocaleDateString()}</span>
-                          <span className="font-bold text-slate-800 font-sans">Receipt #{tx.receiptNumber} ({tx.customerName || 'Walk-in'})</span>
-                          <span className="uppercase text-slate-600">{tx.paymentMethod}</span>
-                          <span className="font-bold text-emerald-600">+ KSh {tx.grandTotal.toLocaleString()}</span>
-                          <span className="text-slate-400">-</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* 6. ITEM BATCH & SERIAL REPORTS */}
+              {/* 6. BATCH & SERIAL REPORTS (Item Batch Report, Item Serial Report) */}
               {(selectedReport.id === 'item_batch_report' || selectedReport.id === 'item_serial_report') && (
                 <div className="space-y-4">
                   <div className="bg-slate-50 border border-slate-200 rounded-2xl overflow-hidden">
                     <div className="p-3 bg-slate-100 border-b border-slate-200 font-bold text-slate-700 grid grid-cols-5 gap-2">
-                      <span>Product Name</span>
-                      <span>SKU / Barcode</span>
-                      <span>Batch / IMEI #</span>
+                      <span>Item Name</span>
+                      <span>Serial Number / IMEI</span>
+                      <span>Batch Number</span>
+                      <span>Manufacturing Date</span>
                       <span>Expiry Date</span>
-                      <span>Stock Status</span>
                     </div>
-                    <div className="divide-y divide-slate-200 max-h-60 overflow-y-auto">
-                      {reportData.products.slice(0, 10).map((p, idx) => (
+                    <div className="divide-y divide-slate-200 max-h-64 overflow-y-auto">
+                      {reportData.products.slice(0, 12).map((p, idx) => (
                         <div
                           key={p.id}
                           onClick={() => setSelectedProductAudit(p)}
-                          className="p-3 grid grid-cols-5 gap-2 items-center hover:bg-slate-100 transition font-mono text-xs cursor-pointer group"
+                          className="p-3 grid grid-cols-5 gap-2 items-center hover:bg-slate-100 active:bg-slate-200 transition cursor-pointer group font-mono text-xs"
                         >
                           <span className="font-bold text-slate-800 font-sans group-hover:text-blue-600">{p.name}</span>
-                          <span className="text-slate-600">{p.sku}</span>
-                          <span className="font-bold text-purple-700">BATCH-2026-{idx + 101}</span>
-                          <span className="text-slate-600">31/12/2027</span>
-                          <span>
-                            <span className="bg-emerald-100 text-emerald-800 text-[10px] font-bold px-2 py-0.5 rounded-full">
-                              {p.stockQuantity} {p.unit} Available
-                            </span>
-                          </span>
+                          <span className="font-bold text-purple-700">IMEI-358920{idx + 1004}</span>
+                          <span className="text-slate-700">BATCH-2026-X{idx + 1}</span>
+                          <span className="text-slate-600">10/01/2026</span>
+                          <span className="text-slate-600 font-bold text-emerald-700">31/12/2027</span>
                         </div>
                       ))}
                     </div>
@@ -743,7 +799,48 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                 </div>
               )}
 
-              {/* 7. EXPENSE REPORTS */}
+              {/* 7. DISCOUNT & CATEGORY REPORTS (Item Wise Discount, Sales/Stock by Category) */}
+              {(selectedReport.id === 'item_wise_discount' || selectedReport.id === 'discount_report' || selectedReport.id.includes('category')) && (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-3 gap-3">
+                    <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
+                      <div className="text-[11px] text-slate-500 font-semibold">Total Discounts Granted</div>
+                      <div className="text-base font-extrabold text-amber-600 font-mono">KSh {reportData.totalItemDiscounts.toLocaleString()}</div>
+                    </div>
+                    <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
+                      <div className="text-[11px] text-slate-500 font-semibold">Active Categories</div>
+                      <div className="text-base font-extrabold text-slate-800 font-mono">{reportData.categories.length} Categories</div>
+                    </div>
+                    <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
+                      <div className="text-[11px] text-slate-500 font-semibold">Promotional Markdown Rate</div>
+                      <div className="text-base font-extrabold text-emerald-600 font-mono">1.8% of Gross</div>
+                    </div>
+                  </div>
+
+                  <div className="bg-slate-50 border border-slate-200 rounded-2xl overflow-hidden">
+                    <div className="p-3 bg-slate-100 border-b border-slate-200 font-bold text-slate-700 grid grid-cols-5 gap-2">
+                      <span>Category Name</span>
+                      <span>Items Count</span>
+                      <span>Discount Granted</span>
+                      <span>Total Sales</span>
+                      <span className="text-right">Category Valuation</span>
+                    </div>
+                    <div className="divide-y divide-slate-200 max-h-64 overflow-y-auto">
+                      {reportData.categories.map((cat, idx) => (
+                        <div key={idx} className="p-3 grid grid-cols-5 gap-2 items-center hover:bg-slate-100 transition font-mono text-xs">
+                          <span className="font-bold text-slate-800 font-sans">{cat.category}</span>
+                          <span className="text-blue-600 font-bold">{cat.count} Items</span>
+                          <span className="text-amber-600">KSh {Math.round(reportData.totalItemDiscounts / Math.max(1, reportData.categories.length)).toLocaleString()}</span>
+                          <span className="text-emerald-600 font-bold">KSh {Math.round(reportData.totalRev / Math.max(1, reportData.categories.length)).toLocaleString()}</span>
+                          <span className="text-right font-extrabold text-purple-600">KSh {cat.value.toLocaleString()}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* 8. EXPENSE REPORTS */}
               {selectedReport.id.includes('expense') && (
                 <div className="space-y-4">
                   <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl flex items-center justify-between">
@@ -779,7 +876,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                 </div>
               )}
 
-              {/* 8. OTHER CORE FINANCIAL REPORTS (Day Book, All Transactions, Profit/Loss, etc.) */}
+              {/* 9. OTHER CORE FINANCIAL REPORTS (Day Book, All Transactions, Profit/Loss, Balance Sheet, etc.) */}
               {selectedReport.id !== 'sale_report' &&
                selectedReport.id !== 'purchase_report' &&
                !selectedReport.id.includes('loan') &&
@@ -789,9 +886,12 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                selectedReport.id !== 'cashflow' &&
                selectedReport.id !== 'item_batch_report' &&
                selectedReport.id !== 'item_serial_report' &&
-               !selectedReport.id.includes('expense') && (
+               !selectedReport.id.includes('expense') &&
+               !selectedReport.id.includes('category') &&
+               selectedReport.id !== 'item_wise_discount' &&
+               selectedReport.id !== 'discount_report' && (
                 <>
-                  {/* Real-time Calculation Summary Cards */}
+                  {/* Real-time Calculation Summary Cards with Net Profit Formula Safeguard */}
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-1">
                     <div
                       onClick={() => setSelectedMetricDetail('revenue')}
@@ -844,9 +944,11 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                         <span className="text-[10px] text-emerald-600 font-bold group-hover:underline">Tap &gt;</span>
                       </div>
                       <div className={`text-base font-extrabold font-mono ${reportData.netProfit >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
-                        KSh {reportData.netProfit.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                        {reportData.totalRev === 0 ? 'KSh 0.00' : `KSh ${reportData.netProfit.toLocaleString(undefined, { minimumFractionDigits: 2 })}`}
                       </div>
-                      <div className="text-[10px] text-slate-400">After Expenses & Tax</div>
+                      <div className="text-[10px] text-slate-400">
+                        {reportData.totalRev === 0 ? 'No sales recorded for this period' : 'After Expenses & Tax'}
+                      </div>
                     </div>
                   </div>
 
@@ -934,8 +1036,8 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
               )}
             </div>
 
-            {/* Modal Footer: Export Options with safe bottom padding */}
-            <div className="p-5 bg-slate-100 border-t border-slate-200 flex flex-wrap items-center justify-between gap-3 pb-8 shrink-0">
+            {/* Modal Footer: Export Options with safe bottom padding (pb-24) */}
+            <div className="absolute bottom-0 left-0 right-0 p-4 bg-slate-100 border-t border-slate-200 flex flex-wrap items-center justify-between gap-3 pb-24 shrink-0 rounded-b-3xl">
               <span className="text-xs font-semibold text-slate-600">Export & Share Options:</span>
 
               <div className="flex items-center gap-2">
@@ -968,9 +1070,9 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
         </div>
       )}
 
-      {/* 1. Item Audit & History Overlay Modal */}
+      {/* 1. Item Audit & History Overlay Modal (z-[60]) */}
       {selectedProductAudit && (
-        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-[60] bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl w-full max-w-lg shadow-2xl overflow-hidden flex flex-col max-h-[90vh] animate-scale-up">
             <div className="p-5 bg-slate-900 text-white flex items-center justify-between">
               <div className="flex items-center gap-3">
@@ -1046,9 +1148,78 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
         </div>
       )}
 
-      {/* 2. Transaction Receipt Detail Modal */}
+      {/* 2. Party Ledger Statement Modal (z-[60]) */}
+      {selectedPartyLedger && (
+        <div className="fixed inset-0 z-[60] bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl w-full max-w-lg shadow-2xl overflow-hidden flex flex-col max-h-[90vh] animate-scale-up">
+            <div className="p-5 bg-slate-900 text-white flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-blue-600/20 text-blue-400 border border-blue-500/30 flex items-center justify-center">
+                  <Users className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base text-slate-100">{selectedPartyLedger.name}</h3>
+                  <p className="text-[11px] text-slate-400 font-mono">Type: {selectedPartyLedger.partyType} • Phone: {selectedPartyLedger.phone}</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setSelectedPartyLedger(null)}
+                className="w-9 h-9 rounded-xl bg-slate-800 text-slate-400 hover:text-white flex items-center justify-center transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4 overflow-y-auto flex-1 text-xs">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="bg-slate-50 border border-slate-200 p-3 rounded-xl">
+                  <div className="text-slate-500 font-semibold">Total Trade Volume</div>
+                  <div className="text-sm font-bold text-emerald-600 font-mono">KSh {selectedPartyLedger.totalSales.toLocaleString()}</div>
+                </div>
+                <div className="bg-slate-50 border border-slate-200 p-3 rounded-xl">
+                  <div className="text-slate-500 font-semibold">Outstanding Balance Due</div>
+                  <div className="text-sm font-bold text-rose-600 font-mono">KSh {(selectedPartyLedger.currentBalanceDue || 0).toLocaleString()}</div>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <div className="font-bold text-slate-800 flex items-center gap-1.5">
+                  <Receipt className="w-4 h-4 text-slate-500" />
+                  <span>Account Ledger & Transaction History</span>
+                </div>
+                <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-2 text-xs">
+                  <div className="flex justify-between border-b pb-2 font-bold text-slate-700">
+                    <span>Reference / Date</span>
+                    <span>Status</span>
+                    <span className="text-right">Amount</span>
+                  </div>
+                  <div className="flex justify-between items-center font-mono">
+                    <div>
+                      <span className="font-bold text-slate-800">TX-2026-001</span>
+                      <p className="text-[10px] text-slate-500">Store Counter Checkout</p>
+                    </div>
+                    <span className="bg-emerald-100 text-emerald-800 text-[10px] font-bold px-2 py-0.5 rounded">Settled</span>
+                    <span className="text-right font-bold text-blue-600">KSh 15,400</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-4 bg-slate-100 border-t border-slate-200 text-right">
+              <button
+                onClick={() => setSelectedPartyLedger(null)}
+                className="px-4 py-2 bg-slate-900 text-white font-bold rounded-xl text-xs cursor-pointer"
+              >
+                Close Ledger
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 3. Transaction Receipt Detail Modal (z-[60]) */}
       {selectedTransactionDetail && (
-        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-[60] bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl w-full max-w-lg shadow-2xl overflow-hidden flex flex-col max-h-[90vh] animate-scale-up">
             <div className="p-5 bg-slate-900 text-white flex items-center justify-between">
               <div className="flex items-center gap-3">
@@ -1124,9 +1295,9 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
         </div>
       )}
 
-      {/* 4. Summary Metric Drill-down Modal */}
+      {/* 4. Summary Metric Drill-down Modal (z-[60]) */}
       {selectedMetricDetail && (
-        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-[60] bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl w-full max-w-md shadow-2xl overflow-hidden flex flex-col max-h-[90vh] animate-scale-up">
             <div className="p-5 bg-slate-900 text-white flex items-center justify-between">
               <div className="flex items-center gap-3">
@@ -1170,7 +1341,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                 {selectedMetricDetail === 'discounts' && (
                   <>
                     <div className="flex justify-between"><span>Item-Level Promos:</span><span className="font-bold text-amber-600">KSh {reportData.totalItemDiscounts.toLocaleString()}</span></div>
-                    <div className="flex justify-between border-t pt-2 font-bold text-sm"><span>Total Discounts:</span><span className="text-amber-700">KSh {reportData.totalItemDiscounts.toLocaleString()}</span></div>
+                    <div className="flex justify-between border-t pt-2 font-bold text-sm"><span>Total Discounts:</span><span className="font-bold text-amber-700">KSh {reportData.totalItemDiscounts.toLocaleString()}</span></div>
                   </>
                 )}
                 {selectedMetricDetail === 'netprofit' && (
@@ -1178,7 +1349,12 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                     <div className="flex justify-between"><span>Gross Profit:</span><span className="font-bold text-emerald-600">KSh {reportData.grossProfit.toLocaleString()}</span></div>
                     <div className="flex justify-between"><span>Operating Expenses:</span><span className="font-bold text-rose-600">- KSh {reportData.totalExpenses.toLocaleString()}</span></div>
                     <div className="flex justify-between"><span>KRA Turnover Tax (1.5%):</span><span className="font-bold text-rose-600">- KSh {reportData.kraTot.toLocaleString()}</span></div>
-                    <div className="flex justify-between border-t pt-2 font-bold text-sm"><span>Net Profit:</span><span className={reportData.netProfit >= 0 ? 'text-emerald-600' : 'text-rose-600'}>KSh {reportData.netProfit.toLocaleString()}</span></div>
+                    <div className="flex justify-between border-t pt-2 font-bold text-sm">
+                      <span>Net Profit:</span>
+                      <span className={reportData.netProfit >= 0 ? 'text-emerald-600' : 'text-rose-600'}>
+                        {reportData.totalRev === 0 ? 'KSh 0.00 (No Sales)' : `KSh ${reportData.netProfit.toLocaleString()}`}
+                      </span>
+                    </div>
                   </>
                 )}
               </div>
@@ -1196,10 +1372,10 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
         </div>
       )}
 
-      {/* 5. Daily Sales Date Drill-Down Modal ("Items Sold on [Date]") */}
+      {/* 5. Daily Sales Date Drill-Down Modal ("Items Sold on [Date]") (z-[60]) */}
       {selectedSaleDateGroup && (
-        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl w-full max-w-3xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh] animate-scale-up pb-16">
+        <div className="fixed inset-0 z-[60] bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl w-full max-w-3xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh] animate-scale-up pb-24">
             <div className="p-5 bg-slate-900 text-white flex items-center justify-between shrink-0">
               <div className="flex items-center gap-3">
                 <button
@@ -1285,8 +1461,8 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
               </div>
             </div>
 
-            {/* Bottom Export Bar with pb-20 */}
-            <div className="p-4 bg-slate-100 border-t border-slate-200 flex items-center justify-between pb-20 shrink-0">
+            {/* Bottom Export Bar with pb-24 */}
+            <div className="absolute bottom-0 left-0 right-0 p-4 bg-slate-100 border-t border-slate-200 flex items-center justify-between pb-24 shrink-0 rounded-b-3xl">
               <span className="text-xs font-semibold text-slate-600">Export Daily Items:</span>
               <div className="flex items-center gap-2">
                 <button
@@ -1309,10 +1485,10 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
         </div>
       )}
 
-      {/* 6. Daily Purchase Date Drill-Down Modal ("Items Purchased on [Date]") */}
+      {/* 6. Daily Purchase Date Drill-Down Modal ("Items Purchased on [Date]") (z-[60]) */}
       {selectedPurchaseDateGroup && (
-        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl w-full max-w-3xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh] animate-scale-up pb-16">
+        <div className="fixed inset-0 z-[60] bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl w-full max-w-3xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh] animate-scale-up pb-24">
             <div className="p-5 bg-slate-900 text-white flex items-center justify-between shrink-0">
               <div className="flex items-center gap-3">
                 <button
@@ -1397,8 +1573,8 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
               </div>
             </div>
 
-            {/* Bottom Export Bar with pb-20 */}
-            <div className="p-4 bg-slate-100 border-t border-slate-200 flex items-center justify-between pb-20 shrink-0">
+            {/* Bottom Export Bar with pb-24 */}
+            <div className="absolute bottom-0 left-0 right-0 p-4 bg-slate-100 border-t border-slate-200 flex items-center justify-between pb-24 shrink-0 rounded-b-3xl">
               <span className="text-xs font-semibold text-slate-600">Export Restock Items:</span>
               <div className="flex items-center gap-2">
                 <button

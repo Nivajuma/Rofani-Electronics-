@@ -13,7 +13,10 @@ import {
   Database,
   FileText,
   Sliders,
-  ChevronRight
+  ChevronRight,
+  KeyRound,
+  X,
+  Lock
 } from 'lucide-react';
 import { safeGetJSON, safeSetJSON } from '../../utils/safeStorage';
 
@@ -77,6 +80,11 @@ export const GeneralSettingsView: React.FC<GeneralSettingsViewProps> = ({
     safeGetJSON<GeneralSettingsState>('rofani_general_settings_v1', GENERAL_SETTINGS_DEFAULT)
   );
 
+  // PIN Setup Modal state
+  const [showPinSetupModal, setShowPinSetupModal] = useState(false);
+  const [pinInput, setPinInput] = useState(() => safeGetJSON<string>('rofani_app_pin', '1234'));
+  const [pinError, setPinError] = useState('');
+
   useEffect(() => {
     safeSetJSON('rofani_general_settings_v1', settings);
   }, [settings]);
@@ -89,6 +97,25 @@ export const GeneralSettingsView: React.FC<GeneralSettingsViewProps> = ({
   const updateSetting = <K extends keyof GeneralSettingsState>(key: K, value: GeneralSettingsState[K]) => {
     setSettings((prev) => ({ ...prev, [key]: value }));
     triggerToast('General settings updated successfully!');
+  };
+
+  const handleSavePinSetup = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!pinInput || pinInput.length < 4) {
+      setPinError('Please enter a valid 4-digit PIN code.');
+      return;
+    }
+    safeSetJSON('rofani_app_pin', pinInput);
+    safeSetJSON('retail_pos_master_pin', pinInput);
+    setSettings((prev) => ({ ...prev, passcodeFingerprint: true }));
+    setShowPinSetupModal(false);
+    setPinError('');
+    triggerToast('🔒 Register PIN passcode set successfully!');
+  };
+
+  const handleDisablePasscode = () => {
+    setSettings((prev) => ({ ...prev, passcodeFingerprint: false }));
+    triggerToast('🔓 PIN passcode lock disabled.');
   };
 
   return (
@@ -194,7 +221,7 @@ export const GeneralSettingsView: React.FC<GeneralSettingsViewProps> = ({
                 <button
                   type="button"
                   onClick={() => updateSetting('decimalPlaces', Math.max(0, settings.decimalPlaces - 1))}
-                  className="w-5 h-5 bg-white rounded-lg shadow-sm flex items-center justify-center hover:bg-slate-200 transition"
+                  className="w-5 h-5 bg-white rounded-lg shadow-sm flex items-center justify-center hover:bg-slate-200 transition cursor-pointer"
                 >
                   -
                 </button>
@@ -202,7 +229,7 @@ export const GeneralSettingsView: React.FC<GeneralSettingsViewProps> = ({
                 <button
                   type="button"
                   onClick={() => updateSetting('decimalPlaces', Math.min(4, settings.decimalPlaces + 1))}
-                  className="w-5 h-5 bg-white rounded-lg shadow-sm flex items-center justify-center hover:bg-slate-200 transition"
+                  className="w-5 h-5 bg-white rounded-lg shadow-sm flex items-center justify-center hover:bg-slate-200 transition cursor-pointer"
                 >
                   +
                 </button>
@@ -281,19 +308,37 @@ export const GeneralSettingsView: React.FC<GeneralSettingsViewProps> = ({
             <div className="space-y-0.5 flex-1 pr-4">
               <div className="font-bold text-slate-800 flex items-center gap-1.5">
                 <span>Passcode / FingerPrint Lock</span>
-                <span title="Require biometric or 4-digit PIN verification on app startup"><Info className="w-3.5 h-3.5 text-slate-400" /></span>
+                <span title="Require 4-digit PIN verification on app startup"><Info className="w-3.5 h-3.5 text-slate-400" /></span>
               </div>
-              <div className="text-[11px] text-slate-500">Secure access on app open or idle timeout</div>
+              <div className="text-[11px] text-slate-500">Secure register access with a 4-digit PIN lock</div>
             </div>
-            <label className="relative inline-flex items-center cursor-pointer">
-              <input
-                type="checkbox"
-                checked={settings.passcodeFingerprint}
-                onChange={(e) => updateSetting('passcodeFingerprint', e.target.checked)}
-                className="sr-only peer"
-              />
-              <div className="w-9 h-5 bg-slate-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-amber-600"></div>
-            </label>
+            <div className="flex items-center gap-3">
+              {settings.passcodeFingerprint && (
+                <button
+                  type="button"
+                  onClick={() => setShowPinSetupModal(true)}
+                  className="px-2.5 py-1 bg-amber-50 text-amber-800 border border-amber-300 rounded-lg text-[11px] font-bold hover:bg-amber-100 transition cursor-pointer"
+                >
+                  Change PIN
+                </button>
+              )}
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={settings.passcodeFingerprint}
+                  onChange={(e) => {
+                    const val = e.target.checked;
+                    if (val) {
+                      setShowPinSetupModal(true);
+                    } else {
+                      handleDisablePasscode();
+                    }
+                  }}
+                  className="sr-only peer"
+                />
+                <div className="w-9 h-5 bg-slate-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-amber-600"></div>
+              </label>
+            </div>
           </div>
         </div>
 
@@ -541,6 +586,71 @@ export const GeneralSettingsView: React.FC<GeneralSettingsViewProps> = ({
         </div>
 
       </div>
+
+      {/* Set Your 4-Digit Register PIN Modal */}
+      {showPinSetupModal && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl w-full max-w-md shadow-2xl overflow-hidden flex flex-col animate-scale-up">
+            <div className="p-5 bg-slate-900 text-white flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-amber-600/20 text-amber-400 border border-amber-500/30 flex items-center justify-center">
+                  <KeyRound className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base text-slate-100">Set Your 4-Digit Register PIN</h3>
+                  <p className="text-[11px] text-slate-400">Secure register access with in-app PIN protection</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowPinSetupModal(false)}
+                className="w-9 h-9 rounded-xl bg-slate-800 text-slate-400 hover:text-white flex items-center justify-center transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSavePinSetup} className="p-6 space-y-4">
+              <div>
+                <label className="block font-bold text-slate-700 mb-1.5">Enter 4-Digit PIN Code</label>
+                <input
+                  type="password"
+                  maxLength={6}
+                  value={pinInput}
+                  onChange={(e) => setPinInput(e.target.value.replace(/\D/g, ''))}
+                  placeholder="e.g. 1234"
+                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-3 text-center text-xl font-mono font-bold tracking-widest text-slate-900 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                  autoFocus
+                />
+                <p className="text-[11px] text-slate-500 mt-1.5">
+                  Cashiers will be required to enter this 4-digit PIN whenever unlocking the POS register.
+                </p>
+              </div>
+
+              {pinError && (
+                <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 rounded-xl text-xs font-medium">
+                  {pinError}
+                </div>
+              )}
+
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowPinSetupModal(false)}
+                  className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2.5 bg-amber-600 hover:bg-amber-500 text-white font-bold rounded-xl text-xs shadow-md transition cursor-pointer"
+                >
+                  Save Register PIN
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

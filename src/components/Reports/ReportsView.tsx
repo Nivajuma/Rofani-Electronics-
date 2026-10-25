@@ -412,117 +412,120 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
         )}
       </div>
 
-      {/* Interactive Report Generator / Specialized View Modal (z-50) */}
+      {/* 100% Full-Screen Report Modal Overlay */}
       {selectedReport && reportData && (
-        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl w-full max-w-4xl shadow-2xl overflow-hidden flex flex-col max-h-[92vh] animate-scale-up pb-24 mb-6">
-            {/* Modal Header */}
-            <div className="bg-slate-900 text-white p-5 flex items-center justify-between shrink-0">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-blue-600/20 text-blue-400 border border-blue-500/30 flex items-center justify-center">
-                  <FileText className="w-5 h-5" />
-                </div>
-                <div>
-                  <h2 className="font-bold text-base text-slate-100">{selectedReport.title}</h2>
-                  <p className="text-xs text-slate-400">Specialized Report View • Fully interactive drill-downs</p>
-                </div>
-              </div>
-
+        <div className="fixed inset-0 w-full h-full min-h-screen z-50 bg-white flex flex-col m-0 p-0 rounded-none overflow-hidden animate-fade-in">
+          {/* Sticky Full-Width Header */}
+          <div className="w-full sticky top-0 bg-slate-900 text-white px-4 py-3.5 z-10 flex items-center justify-between shadow-md shrink-0">
+            <div className="flex items-center gap-3">
               <button
                 onClick={() => setSelectedReport(null)}
-                className="w-9 h-9 rounded-xl bg-slate-800 text-slate-400 hover:text-white flex items-center justify-center transition cursor-pointer"
+                className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl transition cursor-pointer"
               >
-                <X className="w-5 h-5" />
+                <ArrowLeft className="w-5 h-5" />
               </button>
+              <div>
+                <h2 className="font-bold text-base text-slate-100">{selectedReport.title}</h2>
+                <p className="text-[11px] text-slate-400">Specialized Report View • Full-screen mobile layout</p>
+              </div>
             </div>
 
-            {/* Modal Body */}
-            <div className="p-6 space-y-5 overflow-y-auto flex-1 text-xs pb-16">
-              {/* Date Filter Presets & Instant Search Bar */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <label className="block font-bold text-slate-700">Date Range Filter</label>
-                  <div className="grid grid-cols-5 gap-1 bg-slate-100 p-1 rounded-xl text-[11px]">
-                    {(['today', 'yesterday', 'week', 'month', 'custom'] as const).map((preset) => (
-                      <button
-                        key={preset}
-                        onClick={() => setDatePreset(preset)}
-                        className={`py-1.5 rounded-lg font-semibold capitalize transition cursor-pointer text-center ${
-                          datePreset === preset
-                            ? 'bg-blue-600 text-white shadow-sm'
-                            : 'text-slate-600 hover:bg-slate-200'
-                        }`}
-                      >
-                        {preset}
-                      </button>
-                    ))}
-                  </div>
+            <button
+              onClick={() => setSelectedReport(null)}
+              className="w-9 h-9 rounded-xl bg-slate-800 text-slate-400 hover:text-white flex items-center justify-center transition cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
 
-                  {datePreset === 'custom' && (
-                    <div className="grid grid-cols-2 gap-2 pt-1">
-                      <div>
-                        <span className="text-[10px] text-slate-500 block mb-0.5 font-semibold">Start</span>
-                        <input
-                          type="date"
-                          value={customStartDate}
-                          onChange={(e) => setCustomStartDate(e.target.value)}
-                          className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-slate-800 font-mono text-xs"
-                        />
-                      </div>
-                      <div>
-                        <span className="text-[10px] text-slate-500 block mb-0.5 font-semibold">End</span>
-                        <input
-                          type="date"
-                          value={customEndDate}
-                          onChange={(e) => setCustomEndDate(e.target.value)}
-                          className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-slate-800 font-mono text-xs"
-                        />
-                      </div>
+          {/* Modal Body */}
+          <div className="p-4 sm:p-6 space-y-5 overflow-y-auto flex-1 text-xs">
+            {/* Date Filter Presets & Instant Search Bar */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <label className="block font-bold text-slate-700">Date Range Filter</label>
+                <div className="grid grid-cols-5 gap-1 bg-slate-100 p-1 rounded-xl text-[11px]">
+                  {(['today', 'yesterday', 'week', 'month', 'custom'] as const).map((preset) => (
+                    <button
+                      key={preset}
+                      onClick={() => setDatePreset(preset)}
+                      className={`py-1.5 rounded-lg font-semibold capitalize transition cursor-pointer text-center ${
+                        datePreset === preset
+                          ? 'bg-blue-600 text-white shadow-sm'
+                          : 'text-slate-600 hover:bg-slate-200'
+                      }`}
+                    >
+                      {preset}
+                    </button>
+                  ))}
+                </div>
+
+                {datePreset === 'custom' && (
+                  <div className="grid grid-cols-2 gap-2 pt-1">
+                    <div>
+                      <span className="text-[10px] text-slate-500 block mb-0.5 font-semibold">Start</span>
+                      <input
+                        type="date"
+                        value={customStartDate}
+                        onChange={(e) => setCustomStartDate(e.target.value)}
+                        className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-slate-800 font-mono text-xs"
+                      />
                     </div>
-                  )}
-                </div>
-
-                <div className="space-y-2">
-                  <label className="block font-bold text-slate-700">Instant Report Search</label>
-                  <div className="relative">
-                    <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
-                    <input
-                      type="text"
-                      value={modalSearchQuery}
-                      onChange={(e) => setModalSearchQuery(e.target.value)}
-                      placeholder="Search items, parties, refs..."
-                      className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-3 py-2 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
+                    <div>
+                      <span className="text-[10px] text-slate-500 block mb-0.5 font-semibold">End</span>
+                      <input
+                        type="date"
+                        value={customEndDate}
+                        onChange={(e) => setCustomEndDate(e.target.value)}
+                        className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-slate-800 font-mono text-xs"
+                      />
+                    </div>
                   </div>
-                </div>
+                )}
               </div>
 
-              {/* DEDICATED & SPECIALIZED LAYOUTS FOR ALL REPORT TYPES */}
+              <div className="space-y-2">
+                <label className="block font-bold text-slate-700">Instant Report Search</label>
+                <div className="relative">
+                  <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                  <input
+                    type="text"
+                    value={modalSearchQuery}
+                    onChange={(e) => setModalSearchQuery(e.target.value)}
+                    placeholder="Search items, parties, refs..."
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-3 py-2 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+            </div>
 
-              {/* 1. SALES REPORT WITH INTERACTIVE DATE DRILL-DOWNS */}
-              {selectedReport.id === 'sale_report' && (
-                <div className="space-y-4">
-                  <div className="grid grid-cols-3 gap-3">
-                    <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
-                      <div className="text-[11px] text-slate-500 font-semibold">Total Revenue</div>
-                      <div className="text-base font-extrabold text-blue-600 font-mono">KSh {reportData.totalRev.toLocaleString()}</div>
-                    </div>
-                    <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
-                      <div className="text-[11px] text-slate-500 font-semibold">Transactions Count</div>
-                      <div className="text-base font-extrabold text-slate-800 font-mono">{reportData.txCount} Receipts</div>
-                    </div>
-                    <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
-                      <div className="text-[11px] text-slate-500 font-semibold">Gross Profit</div>
-                      <div className="text-base font-extrabold text-emerald-600 font-mono">KSh {reportData.grossProfit.toLocaleString()}</div>
-                    </div>
+            {/* DEDICATED & SPECIALIZED LAYOUTS FOR ALL REPORT TYPES */}
+
+            {/* 1. SALES REPORT WITH INTERACTIVE DATE DRILL-DOWNS */}
+            {selectedReport.id === 'sale_report' && (
+              <div className="space-y-4">
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
+                    <div className="text-[11px] text-slate-500 font-semibold">Total Revenue</div>
+                    <div className="text-base font-extrabold text-blue-600 font-mono">KSh {reportData.totalRev.toLocaleString()}</div>
                   </div>
+                  <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
+                    <div className="text-[11px] text-slate-500 font-semibold">Transactions Count</div>
+                    <div className="text-base font-extrabold text-slate-800 font-mono">{reportData.txCount} Receipts</div>
+                  </div>
+                  <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
+                    <div className="text-[11px] text-slate-500 font-semibold">Gross Profit</div>
+                    <div className="text-base font-extrabold text-emerald-600 font-mono">KSh {reportData.grossProfit.toLocaleString()}</div>
+                  </div>
+                </div>
 
-                  <div className="bg-slate-50 border border-slate-200 rounded-2xl overflow-hidden">
-                    <div className="p-3 bg-slate-100 border-b border-slate-200 font-bold text-slate-700 flex items-center justify-between">
-                      <span>Daily Sales Summary (Tap any date for itemized drill-down)</span>
-                      <span className="font-mono text-slate-500">{reportData.salesByDate.length} Days Recorded</span>
-                    </div>
-                    <div className="divide-y divide-slate-200 max-h-64 overflow-y-auto">
+                <div className="bg-slate-50 border border-slate-200 rounded-2xl overflow-hidden">
+                  <div className="p-3 bg-slate-100 border-b border-slate-200 font-bold text-slate-700 flex items-center justify-between">
+                    <span>Daily Sales Summary (Tap any date for itemized drill-down)</span>
+                    <span className="font-mono text-slate-500">{reportData.salesByDate.length} Days Recorded</span>
+                  </div>
+                  <div className="overflow-x-auto w-full">
+                    <div className="divide-y divide-slate-200 max-h-80 overflow-y-auto min-w-[500px]">
                       {reportData.salesByDate.length === 0 ? (
                         <div className="p-8 text-center text-slate-400 text-xs">No sales recorded for this date range.</div>
                       ) : (
@@ -550,32 +553,34 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                     </div>
                   </div>
                 </div>
-              )}
+              </div>
+            )}
 
-              {/* 2. PURCHASE REPORT WITH INTERACTIVE DATE DRILL-DOWNS */}
-              {selectedReport.id === 'purchase_report' && (
-                <div className="space-y-4">
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
-                      <div className="text-[11px] text-slate-500 font-semibold">Total Purchases Cost</div>
-                      <div className="text-base font-extrabold text-purple-600 font-mono">
-                        KSh {reportData.purchasesByDate.reduce((s, p) => s + p.totalCost, 0).toLocaleString()}
-                      </div>
-                    </div>
-                    <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
-                      <div className="text-[11px] text-slate-500 font-semibold">Restock Orders</div>
-                      <div className="text-base font-extrabold text-slate-800 font-mono">
-                        {reportData.purchasesByDate.reduce((s, p) => s + p.totalCount, 0)} Orders
-                      </div>
+            {/* 2. PURCHASE REPORT WITH INTERACTIVE DATE DRILL-DOWNS */}
+            {selectedReport.id === 'purchase_report' && (
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
+                    <div className="text-[11px] text-slate-500 font-semibold">Total Purchases Cost</div>
+                    <div className="text-base font-extrabold text-purple-600 font-mono">
+                      KSh {reportData.purchasesByDate.reduce((s, p) => s + p.totalCost, 0).toLocaleString()}
                     </div>
                   </div>
-
-                  <div className="bg-slate-50 border border-slate-200 rounded-2xl overflow-hidden">
-                    <div className="p-3 bg-slate-100 border-b border-slate-200 font-bold text-slate-700 flex items-center justify-between">
-                      <span>Daily Purchase Orders Summary (Tap any date for itemized drill-down)</span>
-                      <span className="font-mono text-slate-500">{reportData.purchasesByDate.length} Restock Days</span>
+                  <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
+                    <div className="text-[11px] text-slate-500 font-semibold">Restock Orders</div>
+                    <div className="text-base font-extrabold text-slate-800 font-mono">
+                      {reportData.purchasesByDate.reduce((s, p) => s + p.totalCount, 0)} Orders
                     </div>
-                    <div className="divide-y divide-slate-200 max-h-64 overflow-y-auto">
+                  </div>
+                </div>
+
+                <div className="bg-slate-50 border border-slate-200 rounded-2xl overflow-hidden">
+                  <div className="p-3 bg-slate-100 border-b border-slate-200 font-bold text-slate-700 flex items-center justify-between">
+                    <span>Daily Purchase Orders Summary (Tap any date for itemized drill-down)</span>
+                    <span className="font-mono text-slate-500">{reportData.purchasesByDate.length} Restock Days</span>
+                  </div>
+                  <div className="overflow-x-auto w-full">
+                    <div className="divide-y divide-slate-200 max-h-80 overflow-y-auto min-w-[500px]">
                       {reportData.purchasesByDate.length === 0 ? (
                         <div className="p-8 text-center text-slate-400 text-xs">No purchase orders found.</div>
                       ) : (
@@ -603,35 +608,37 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                     </div>
                   </div>
                 </div>
-              )}
+              </div>
+            )}
 
-              {/* 3. PARTY REPORTS (All Parties, Item Report by Party, Party Wise P&L) */}
-              {(selectedReport.id.includes('party') || selectedReport.id === 'all_parties_report') && (
-                <div className="space-y-4">
-                  <div className="grid grid-cols-3 gap-3">
-                    <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
-                      <div className="text-[11px] text-slate-500 font-semibold">Total Registered Parties</div>
-                      <div className="text-base font-extrabold text-blue-600 font-mono">{reportData.parties.length} Parties</div>
-                    </div>
-                    <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
-                      <div className="text-[11px] text-slate-500 font-semibold">Customers Active</div>
-                      <div className="text-base font-extrabold text-emerald-600 font-mono">{customers.length} Customers</div>
-                    </div>
-                    <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
-                      <div className="text-[11px] text-slate-500 font-semibold">Suppliers Active</div>
-                      <div className="text-base font-extrabold text-purple-600 font-mono">{suppliers.length} Suppliers</div>
-                    </div>
+            {/* 3. PARTY REPORTS */}
+            {(selectedReport.id.includes('party') || selectedReport.id === 'all_parties_report') && (
+              <div className="space-y-4">
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
+                    <div className="text-[11px] text-slate-500 font-semibold">Total Registered Parties</div>
+                    <div className="text-base font-extrabold text-blue-600 font-mono">{reportData.parties.length} Parties</div>
                   </div>
+                  <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
+                    <div className="text-[11px] text-slate-500 font-semibold">Customers Active</div>
+                    <div className="text-base font-extrabold text-emerald-600 font-mono">{customers.length} Customers</div>
+                  </div>
+                  <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
+                    <div className="text-[11px] text-slate-500 font-semibold">Suppliers Active</div>
+                    <div className="text-base font-extrabold text-purple-600 font-mono">{suppliers.length} Suppliers</div>
+                  </div>
+                </div>
 
-                  <div className="bg-slate-50 border border-slate-200 rounded-2xl overflow-hidden">
-                    <div className="p-3 bg-slate-100 border-b border-slate-200 font-bold text-slate-700 grid grid-cols-5 gap-2">
-                      <span>Customer / Supplier Name</span>
-                      <span>Party Type</span>
-                      <span>Phone Number</span>
-                      <span>Total Sales / Purchases</span>
-                      <span className="text-right">Outstanding Balance</span>
-                    </div>
-                    <div className="divide-y divide-slate-200 max-h-64 overflow-y-auto">
+                <div className="bg-slate-50 border border-slate-200 rounded-2xl overflow-hidden">
+                  <div className="p-3 bg-slate-100 border-b border-slate-200 font-bold text-slate-700 grid grid-cols-5 gap-2 min-w-[700px]">
+                    <span>Customer / Supplier Name</span>
+                    <span>Party Type</span>
+                    <span>Phone Number</span>
+                    <span>Total Sales / Purchases</span>
+                    <span className="text-right">Outstanding Balance</span>
+                  </div>
+                  <div className="overflow-x-auto w-full">
+                    <div className="divide-y divide-slate-200 max-h-80 overflow-y-auto min-w-[700px]">
                       {reportData.parties.map((party, idx) => (
                         <div
                           key={idx}
@@ -655,40 +662,42 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                     </div>
                   </div>
                 </div>
-              )}
+              </div>
+            )}
 
-              {/* 4. LOAN & FINANCIAL STATUS REPORTS (Loan Outstanding, Bank Statement) */}
-              {(selectedReport.id.includes('loan') || selectedReport.id === 'bank_statement' || selectedReport.id === 'cashflow') && (
-                <div className="space-y-4">
-                  <div className="grid grid-cols-4 gap-3">
-                    <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
-                      <div className="text-[11px] text-slate-500 font-semibold">Lender / Account Name</div>
-                      <div className="text-sm font-extrabold text-blue-600">Equity & M-Pesa Till</div>
-                    </div>
-                    <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
-                      <div className="text-[11px] text-slate-500 font-semibold">Principal / Opening</div>
-                      <div className="text-sm font-extrabold text-slate-800 font-mono">KSh 150,000</div>
-                    </div>
-                    <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
-                      <div className="text-[11px] text-slate-500 font-semibold">Payments Made</div>
-                      <div className="text-sm font-extrabold text-emerald-600 font-mono">KSh 95,000</div>
-                    </div>
-                    <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
-                      <div className="text-[11px] text-slate-500 font-semibold">Net Balance Due</div>
-                      <div className="text-sm font-extrabold text-rose-600 font-mono">KSh 55,000</div>
-                    </div>
+            {/* 4. LOAN & FINANCIAL STATUS REPORTS */}
+            {(selectedReport.id.includes('loan') || selectedReport.id === 'bank_statement' || selectedReport.id === 'cashflow') && (
+              <div className="space-y-4">
+                <div className="grid grid-cols-4 gap-3">
+                  <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
+                    <div className="text-[11px] text-slate-500 font-semibold">Lender / Account Name</div>
+                    <div className="text-sm font-extrabold text-blue-600">Equity & M-Pesa Till</div>
                   </div>
+                  <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
+                    <div className="text-[11px] text-slate-500 font-semibold">Principal / Opening</div>
+                    <div className="text-sm font-extrabold text-slate-800 font-mono">KSh 150,000</div>
+                  </div>
+                  <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
+                    <div className="text-[11px] text-slate-500 font-semibold">Payments Made</div>
+                    <div className="text-sm font-extrabold text-emerald-600 font-mono">KSh 95,000</div>
+                  </div>
+                  <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
+                    <div className="text-[11px] text-slate-500 font-semibold">Net Balance Due</div>
+                    <div className="text-sm font-extrabold text-rose-600 font-mono">KSh 55,000</div>
+                  </div>
+                </div>
 
-                  <div className="bg-slate-50 border border-slate-200 rounded-2xl overflow-hidden">
-                    <div className="p-3 bg-slate-100 border-b border-slate-200 font-bold text-slate-700 grid grid-cols-6 gap-2">
-                      <span>Lender / Bank Name</span>
-                      <span>Account Number</span>
-                      <span>Principal Balance</span>
-                      <span>Interest / Terms</span>
-                      <span>Payments Made</span>
-                      <span className="text-right">Net Balance Due</span>
-                    </div>
-                    <div className="divide-y divide-slate-200 max-h-60 overflow-y-auto">
+                <div className="bg-slate-50 border border-slate-200 rounded-2xl overflow-hidden">
+                  <div className="p-3 bg-slate-100 border-b border-slate-200 font-bold text-slate-700 grid grid-cols-6 gap-2 min-w-[750px]">
+                    <span>Lender / Bank Name</span>
+                    <span>Account Number</span>
+                    <span>Principal Balance</span>
+                    <span>Interest / Terms</span>
+                    <span>Payments Made</span>
+                    <span className="text-right">Net Balance Due</span>
+                  </div>
+                  <div className="overflow-x-auto w-full">
+                    <div className="divide-y divide-slate-200 max-h-80 overflow-y-auto min-w-[750px]">
                       {[
                         { name: 'Equity Bank Facility', acc: 'ACC-992838', principal: 110000, interest: '14.5% p.a.', paid: 70000, balance: 40000 },
                         { name: 'Worker Salary Advance Pool', acc: 'EMP-ADV-01', principal: 40000, interest: '0% (Advance)', paid: 25000, balance: 15000 }
@@ -705,41 +714,43 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                     </div>
                   </div>
                 </div>
-              )}
+              </div>
+            )}
 
-              {/* 5. ITEM & INVENTORY REPORTS (Stock Summary, Low Stock, Item Detail, Stock Detail) */}
-              {(selectedReport.id.includes('stock') || selectedReport.id.includes('item_detail') || selectedReport.id === 'stock_summary_report' || selectedReport.id === 'low_stock_summary_report' || selectedReport.id === 'item_detail_report' || selectedReport.id === 'stock_detail_report') && (
-                <div className="space-y-4">
-                  <div className="grid grid-cols-3 gap-3">
-                    <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
-                      <div className="text-[11px] text-slate-500 font-semibold">Total Catalog Items</div>
-                      <div className="text-base font-extrabold text-blue-600 font-mono">{reportData.products.length} Items</div>
-                    </div>
-                    <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
-                      <div className="text-[11px] text-slate-500 font-semibold">Low Stock Items</div>
-                      <div className="text-base font-extrabold text-amber-600 font-mono">
-                        {reportData.products.filter(p => p.stockQuantity <= (p.minStockAlert || 5)).length} Items
-                      </div>
-                    </div>
-                    <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
-                      <div className="text-[11px] text-slate-500 font-semibold">Total Stock Valuation</div>
-                      <div className="text-base font-extrabold text-purple-600 font-mono">
-                        KSh {reportData.products.reduce((s, p) => s + (p.stockQuantity * (p.costPrice || p.sellingPrice)), 0).toLocaleString()}
-                      </div>
+            {/* 5. ITEM & INVENTORY REPORTS */}
+            {(selectedReport.id.includes('stock') || selectedReport.id.includes('item_detail') || selectedReport.id === 'stock_summary_report' || selectedReport.id === 'low_stock_summary_report' || selectedReport.id === 'item_detail_report' || selectedReport.id === 'stock_detail_report') && (
+              <div className="space-y-4">
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
+                    <div className="text-[11px] text-slate-500 font-semibold">Total Catalog Items</div>
+                    <div className="text-base font-extrabold text-blue-600 font-mono">{reportData.products.length} Items</div>
+                  </div>
+                  <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
+                    <div className="text-[11px] text-slate-500 font-semibold">Low Stock Items</div>
+                    <div className="text-base font-extrabold text-amber-600 font-mono">
+                      {reportData.products.filter(p => p.stockQuantity <= (p.minStockAlert || 5)).length} Items
                     </div>
                   </div>
-
-                  <div className="bg-slate-50 border border-slate-200 rounded-2xl overflow-hidden">
-                    <div className="p-3 bg-slate-100 border-b border-slate-200 font-bold text-slate-700 grid grid-cols-7 gap-2">
-                      <span>Item Name</span>
-                      <span>SKU</span>
-                      <span>Barcode</span>
-                      <span>Category</span>
-                      <span className="text-center">Stock Qty</span>
-                      <span className="text-right">Unit Cost / Price</span>
-                      <span className="text-right">Total Valuation</span>
+                  <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
+                    <div className="text-[11px] text-slate-500 font-semibold">Total Stock Valuation</div>
+                    <div className="text-base font-extrabold text-purple-600 font-mono">
+                      KSh {reportData.products.reduce((s, p) => s + (p.stockQuantity * (p.costPrice || p.sellingPrice)), 0).toLocaleString()}
                     </div>
-                    <div className="divide-y divide-slate-200 max-h-64 overflow-y-auto">
+                  </div>
+                </div>
+
+                <div className="bg-slate-50 border border-slate-200 rounded-2xl overflow-hidden">
+                  <div className="p-3 bg-slate-100 border-b border-slate-200 font-bold text-slate-700 grid grid-cols-7 gap-2 min-w-[850px]">
+                    <span>Item Name</span>
+                    <span>SKU</span>
+                    <span>Barcode</span>
+                    <span>Category</span>
+                    <span className="text-center">Stock Qty</span>
+                    <span className="text-right">Unit Cost / Price</span>
+                    <span className="text-right">Total Valuation</span>
+                  </div>
+                  <div className="overflow-x-auto w-full">
+                    <div className="divide-y divide-slate-200 max-h-80 overflow-y-auto min-w-[850px]">
                       {reportData.products.map((p, idx) => (
                         <div
                           key={p.id}
@@ -767,20 +778,22 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                     </div>
                   </div>
                 </div>
-              )}
+              </div>
+            )}
 
-              {/* 6. BATCH & SERIAL REPORTS (Item Batch Report, Item Serial Report) */}
-              {(selectedReport.id === 'item_batch_report' || selectedReport.id === 'item_serial_report') && (
-                <div className="space-y-4">
-                  <div className="bg-slate-50 border border-slate-200 rounded-2xl overflow-hidden">
-                    <div className="p-3 bg-slate-100 border-b border-slate-200 font-bold text-slate-700 grid grid-cols-5 gap-2">
-                      <span>Item Name</span>
-                      <span>Serial Number / IMEI</span>
-                      <span>Batch Number</span>
-                      <span>Manufacturing Date</span>
-                      <span>Expiry Date</span>
-                    </div>
-                    <div className="divide-y divide-slate-200 max-h-64 overflow-y-auto">
+            {/* 6. BATCH & SERIAL REPORTS */}
+            {(selectedReport.id === 'item_batch_report' || selectedReport.id === 'item_serial_report') && (
+              <div className="space-y-4">
+                <div className="bg-slate-50 border border-slate-200 rounded-2xl overflow-hidden">
+                  <div className="p-3 bg-slate-100 border-b border-slate-200 font-bold text-slate-700 grid grid-cols-5 gap-2 min-w-[700px]">
+                    <span>Item Name</span>
+                    <span>Serial Number / IMEI</span>
+                    <span>Batch Number</span>
+                    <span>Manufacturing Date</span>
+                    <span>Expiry Date</span>
+                  </div>
+                  <div className="overflow-x-auto w-full">
+                    <div className="divide-y divide-slate-200 max-h-80 overflow-y-auto min-w-[700px]">
                       {reportData.products.slice(0, 12).map((p, idx) => (
                         <div
                           key={p.id}
@@ -797,35 +810,37 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                     </div>
                   </div>
                 </div>
-              )}
+              </div>
+            )}
 
-              {/* 7. DISCOUNT & CATEGORY REPORTS (Item Wise Discount, Sales/Stock by Category) */}
-              {(selectedReport.id === 'item_wise_discount' || selectedReport.id === 'discount_report' || selectedReport.id.includes('category')) && (
-                <div className="space-y-4">
-                  <div className="grid grid-cols-3 gap-3">
-                    <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
-                      <div className="text-[11px] text-slate-500 font-semibold">Total Discounts Granted</div>
-                      <div className="text-base font-extrabold text-amber-600 font-mono">KSh {reportData.totalItemDiscounts.toLocaleString()}</div>
-                    </div>
-                    <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
-                      <div className="text-[11px] text-slate-500 font-semibold">Active Categories</div>
-                      <div className="text-base font-extrabold text-slate-800 font-mono">{reportData.categories.length} Categories</div>
-                    </div>
-                    <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
-                      <div className="text-[11px] text-slate-500 font-semibold">Promotional Markdown Rate</div>
-                      <div className="text-base font-extrabold text-emerald-600 font-mono">1.8% of Gross</div>
-                    </div>
+            {/* 7. DISCOUNT & CATEGORY REPORTS */}
+            {(selectedReport.id === 'item_wise_discount' || selectedReport.id === 'discount_report' || selectedReport.id.includes('category')) && (
+              <div className="space-y-4">
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
+                    <div className="text-[11px] text-slate-500 font-semibold">Total Discounts Granted</div>
+                    <div className="text-base font-extrabold text-amber-600 font-mono">KSh {reportData.totalItemDiscounts.toLocaleString()}</div>
                   </div>
+                  <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
+                    <div className="text-[11px] text-slate-500 font-semibold">Active Categories</div>
+                    <div className="text-base font-extrabold text-slate-800 font-mono">{reportData.categories.length} Categories</div>
+                  </div>
+                  <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
+                    <div className="text-[11px] text-slate-500 font-semibold">Promotional Markdown Rate</div>
+                    <div className="text-base font-extrabold text-emerald-600 font-mono">1.8% of Gross</div>
+                  </div>
+                </div>
 
-                  <div className="bg-slate-50 border border-slate-200 rounded-2xl overflow-hidden">
-                    <div className="p-3 bg-slate-100 border-b border-slate-200 font-bold text-slate-700 grid grid-cols-5 gap-2">
-                      <span>Category Name</span>
-                      <span>Items Count</span>
-                      <span>Discount Granted</span>
-                      <span>Total Sales</span>
-                      <span className="text-right">Category Valuation</span>
-                    </div>
-                    <div className="divide-y divide-slate-200 max-h-64 overflow-y-auto">
+                <div className="bg-slate-50 border border-slate-200 rounded-2xl overflow-hidden">
+                  <div className="p-3 bg-slate-100 border-b border-slate-200 font-bold text-slate-700 grid grid-cols-5 gap-2 min-w-[700px]">
+                    <span>Category Name</span>
+                    <span>Items Count</span>
+                    <span>Discount Granted</span>
+                    <span>Total Sales</span>
+                    <span className="text-right">Category Valuation</span>
+                  </div>
+                  <div className="overflow-x-auto w-full">
+                    <div className="divide-y divide-slate-200 max-h-80 overflow-y-auto min-w-[700px]">
                       {reportData.categories.map((cat, idx) => (
                         <div key={idx} className="p-3 grid grid-cols-5 gap-2 items-center hover:bg-slate-100 transition font-mono text-xs">
                           <span className="font-bold text-slate-800 font-sans">{cat.category}</span>
@@ -838,27 +853,29 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                     </div>
                   </div>
                 </div>
-              )}
+              </div>
+            )}
 
-              {/* 8. EXPENSE REPORTS */}
-              {selectedReport.id.includes('expense') && (
-                <div className="space-y-4">
-                  <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl flex items-center justify-between">
-                    <div>
-                      <div className="text-[11px] text-slate-500 font-semibold">Total Operating Expenses</div>
-                      <div className="text-base font-extrabold text-rose-600 font-mono">KSh {reportData.totalExpenses.toLocaleString()}</div>
-                    </div>
-                    <div className="text-right text-[11px] text-slate-400">Tracked across recurrent vendor bills & utilities</div>
+            {/* 8. EXPENSE REPORTS */}
+            {selectedReport.id.includes('expense') && (
+              <div className="space-y-4">
+                <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl flex items-center justify-between">
+                  <div>
+                    <div className="text-[11px] text-slate-500 font-semibold">Total Operating Expenses</div>
+                    <div className="text-base font-extrabold text-rose-600 font-mono">KSh {reportData.totalExpenses.toLocaleString()}</div>
                   </div>
+                  <div className="text-right text-[11px] text-slate-400">Tracked across recurrent vendor bills & utilities</div>
+                </div>
 
-                  <div className="bg-slate-50 border border-slate-200 rounded-2xl overflow-hidden">
-                    <div className="p-3 bg-slate-100 border-b border-slate-200 font-bold text-slate-700 grid grid-cols-4 gap-2">
-                      <span>Expense Title</span>
-                      <span>Category</span>
-                      <span>Date</span>
-                      <span className="text-right">Amount (KSh)</span>
-                    </div>
-                    <div className="divide-y divide-slate-200 max-h-60 overflow-y-auto">
+                <div className="bg-slate-50 border border-slate-200 rounded-2xl overflow-hidden">
+                  <div className="p-3 bg-slate-100 border-b border-slate-200 font-bold text-slate-700 grid grid-cols-4 gap-2 min-w-[600px]">
+                    <span>Expense Title</span>
+                    <span>Category</span>
+                    <span>Date</span>
+                    <span className="text-right">Amount (KSh)</span>
+                  </div>
+                  <div className="overflow-x-auto w-full">
+                    <div className="divide-y divide-slate-200 max-h-80 overflow-y-auto min-w-[600px]">
                       {reportData.expenses.map((e, idx) => (
                         <div key={idx} className="p-3 grid grid-cols-4 gap-2 items-center hover:bg-slate-100 transition font-mono text-xs">
                           <span className="font-bold text-slate-800 font-sans">{e.description}</span>
@@ -874,102 +891,103 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                     </div>
                   </div>
                 </div>
-              )}
+              </div>
+            )}
 
-              {/* 9. OTHER CORE FINANCIAL REPORTS (Day Book, All Transactions, Profit/Loss, Balance Sheet, etc.) */}
-              {selectedReport.id !== 'sale_report' &&
-               selectedReport.id !== 'purchase_report' &&
-               !selectedReport.id.includes('loan') &&
-               !selectedReport.id.includes('party') &&
-               selectedReport.id !== 'all_parties_report' &&
-               selectedReport.id !== 'bank_statement' &&
-               selectedReport.id !== 'cashflow' &&
-               selectedReport.id !== 'item_batch_report' &&
-               selectedReport.id !== 'item_serial_report' &&
-               !selectedReport.id.includes('expense') &&
-               !selectedReport.id.includes('category') &&
-               selectedReport.id !== 'item_wise_discount' &&
-               selectedReport.id !== 'discount_report' && (
-                <>
-                  {/* Real-time Calculation Summary Cards with Net Profit Formula Safeguard */}
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-1">
-                    <div
-                      onClick={() => setSelectedMetricDetail('revenue')}
-                      className="bg-slate-50 hover:bg-blue-50/70 border border-slate-200 hover:border-blue-300 p-3.5 rounded-2xl space-y-1 transition cursor-pointer group shadow-xs"
-                    >
-                      <div className="text-[11px] text-slate-500 font-semibold flex items-center justify-between">
-                        <span>Total Revenue</span>
-                        <span className="text-[10px] text-blue-600 font-bold group-hover:underline">Tap &gt;</span>
-                      </div>
-                      <div className="text-base font-extrabold text-blue-600 font-mono">
-                        KSh {reportData.totalRev.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                      </div>
-                      <div className="text-[10px] text-slate-400">{reportData.txCount} transactions</div>
+            {/* 9. OTHER CORE FINANCIAL REPORTS */}
+            {selectedReport.id !== 'sale_report' &&
+             selectedReport.id !== 'purchase_report' &&
+             !selectedReport.id.includes('loan') &&
+             !selectedReport.id.includes('party') &&
+             selectedReport.id !== 'all_parties_report' &&
+             selectedReport.id !== 'bank_statement' &&
+             selectedReport.id !== 'cashflow' &&
+             selectedReport.id !== 'item_batch_report' &&
+             selectedReport.id !== 'item_serial_report' &&
+             !selectedReport.id.includes('expense') &&
+             !selectedReport.id.includes('category') &&
+             selectedReport.id !== 'item_wise_discount' &&
+             selectedReport.id !== 'discount_report' && (
+              <>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-1">
+                  <div
+                    onClick={() => setSelectedMetricDetail('revenue')}
+                    className="bg-slate-50 hover:bg-blue-50/70 border border-slate-200 hover:border-blue-300 p-3.5 rounded-2xl space-y-1 transition cursor-pointer group shadow-xs"
+                  >
+                    <div className="text-[11px] text-slate-500 font-semibold flex items-center justify-between">
+                      <span>Total Revenue</span>
+                      <span className="text-[10px] text-blue-600 font-bold group-hover:underline">Tap &gt;</span>
                     </div>
-
-                    <div
-                      onClick={() => setSelectedMetricDetail('profit')}
-                      className="bg-slate-50 hover:bg-emerald-50/70 border border-slate-200 hover:border-emerald-300 p-3.5 rounded-2xl space-y-1 transition cursor-pointer group shadow-xs"
-                    >
-                      <div className="text-[11px] text-slate-500 font-semibold flex items-center justify-between">
-                        <span>Gross Profit</span>
-                        <span className="text-[10px] text-emerald-600 font-bold group-hover:underline">Tap &gt;</span>
-                      </div>
-                      <div className="text-base font-extrabold text-emerald-600 font-mono">
-                        KSh {reportData.grossProfit.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                      </div>
-                      <div className="text-[10px] text-slate-400">COGS: KSh {reportData.totalCogs.toLocaleString()}</div>
+                    <div className="text-base font-extrabold text-blue-600 font-mono">
+                      KSh {reportData.totalRev.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                     </div>
-
-                    <div
-                      onClick={() => setSelectedMetricDetail('discounts')}
-                      className="bg-slate-50 hover:bg-amber-50/70 border border-slate-200 hover:border-amber-300 p-3.5 rounded-2xl space-y-1 transition cursor-pointer group shadow-xs"
-                    >
-                      <div className="text-[11px] text-amber-600 font-semibold flex items-center justify-between">
-                        <span>Total Discounts</span>
-                        <span className="text-[10px] text-amber-700 font-bold group-hover:underline">Tap &gt;</span>
-                      </div>
-                      <div className="text-base font-extrabold text-amber-600 font-mono">
-                        KSh {reportData.totalItemDiscounts.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                      </div>
-                      <div className="text-[10px] text-amber-500">Promos & Markdowns</div>
-                    </div>
-
-                    <div
-                      onClick={() => setSelectedMetricDetail('netprofit')}
-                      className="bg-slate-50 hover:bg-emerald-50/70 border border-slate-200 hover:border-emerald-300 p-3.5 rounded-2xl space-y-1 transition cursor-pointer group shadow-xs"
-                    >
-                      <div className="text-[11px] text-slate-500 font-semibold flex items-center justify-between">
-                        <span>Net Profit</span>
-                        <span className="text-[10px] text-emerald-600 font-bold group-hover:underline">Tap &gt;</span>
-                      </div>
-                      <div className={`text-base font-extrabold font-mono ${reportData.netProfit >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
-                        {reportData.totalRev === 0 ? 'KSh 0.00' : `KSh ${reportData.netProfit.toLocaleString(undefined, { minimumFractionDigits: 2 })}`}
-                      </div>
-                      <div className="text-[10px] text-slate-400">
-                        {reportData.totalRev === 0 ? 'No sales recorded for this period' : 'After Expenses & Tax'}
-                      </div>
-                    </div>
+                    <div className="text-[10px] text-slate-400">{reportData.txCount} transactions</div>
                   </div>
 
-                  {/* Data Preview Table */}
-                  <div className="bg-slate-50 border border-slate-200 rounded-2xl overflow-hidden">
-                    <div className="p-3 bg-slate-100 border-b border-slate-200 font-bold text-slate-700 flex items-center justify-between">
-                      <span>{selectedReport.title} - Data Breakdown (Tap row for drill-down)</span>
-                      <span className="font-mono text-slate-500">
-                        {selectedReport.id.includes('item') || selectedReport.id.includes('stock')
-                          ? `${reportData.products.length} items`
-                          : `${reportData.transactions.length} receipts`}
-                      </span>
+                  <div
+                    onClick={() => setSelectedMetricDetail('profit')}
+                    className="bg-slate-50 hover:bg-emerald-50/70 border border-slate-200 hover:border-emerald-300 p-3.5 rounded-2xl space-y-1 transition cursor-pointer group shadow-xs"
+                  >
+                    <div className="text-[11px] text-slate-500 font-semibold flex items-center justify-between">
+                      <span>Gross Profit</span>
+                      <span className="text-[10px] text-emerald-600 font-bold group-hover:underline">Tap &gt;</span>
                     </div>
+                    <div className="text-base font-extrabold text-emerald-600 font-mono">
+                      KSh {reportData.grossProfit.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                    </div>
+                    <div className="text-[10px] text-slate-400">COGS: KSh {reportData.totalCogs.toLocaleString()}</div>
+                  </div>
 
-                    {selectedReport.id.includes('item') || selectedReport.id.includes('stock') ? (
-                      reportData.products.length === 0 ? (
-                        <div className="p-8 text-center text-slate-400 text-xs">
-                          No matching products found in inventory.
-                        </div>
-                      ) : (
-                        <div className="max-h-60 overflow-y-auto divide-y divide-slate-200">
+                  <div
+                    onClick={() => setSelectedMetricDetail('discounts')}
+                    className="bg-slate-50 hover:bg-amber-50/70 border border-slate-200 hover:border-amber-300 p-3.5 rounded-2xl space-y-1 transition cursor-pointer group shadow-xs"
+                  >
+                    <div className="text-[11px] text-amber-600 font-semibold flex items-center justify-between">
+                      <span>Total Discounts</span>
+                      <span className="text-[10px] text-amber-700 font-bold group-hover:underline">Tap &gt;</span>
+                    </div>
+                    <div className="text-base font-extrabold text-amber-600 font-mono">
+                      KSh {reportData.totalItemDiscounts.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                    </div>
+                    <div className="text-[10px] text-amber-500">Promos & Markdowns</div>
+                  </div>
+
+                  <div
+                    onClick={() => setSelectedMetricDetail('netprofit')}
+                    className="bg-slate-50 hover:bg-emerald-50/70 border border-slate-200 hover:border-emerald-300 p-3.5 rounded-2xl space-y-1 transition cursor-pointer group shadow-xs"
+                  >
+                    <div className="text-[11px] text-slate-500 font-semibold flex items-center justify-between">
+                      <span>Net Profit</span>
+                      <span className="text-[10px] text-emerald-600 font-bold group-hover:underline">Tap &gt;</span>
+                    </div>
+                    <div className={`text-base font-extrabold font-mono ${reportData.netProfit >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                      {reportData.totalRev === 0 ? 'KSh 0.00' : `KSh ${reportData.netProfit.toLocaleString(undefined, { minimumFractionDigits: 2 })}`}
+                    </div>
+                    <div className="text-[10px] text-slate-400">
+                      {reportData.totalRev === 0 ? 'No sales recorded for this period' : 'After Expenses & Tax'}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Data Preview Table */}
+                <div className="bg-slate-50 border border-slate-200 rounded-2xl overflow-hidden">
+                  <div className="p-3 bg-slate-100 border-b border-slate-200 font-bold text-slate-700 flex items-center justify-between">
+                    <span>{selectedReport.title} - Data Breakdown (Tap row for drill-down)</span>
+                    <span className="font-mono text-slate-500">
+                      {selectedReport.id.includes('item') || selectedReport.id.includes('stock')
+                        ? `${reportData.products.length} items`
+                        : `${reportData.transactions.length} receipts`}
+                    </span>
+                  </div>
+
+                  {selectedReport.id.includes('item') || selectedReport.id.includes('stock') ? (
+                    reportData.products.length === 0 ? (
+                      <div className="p-8 text-center text-slate-400 text-xs">
+                        No matching products found in inventory.
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto w-full">
+                        <div className="max-h-80 overflow-y-auto divide-y divide-slate-200 min-w-[600px]">
                           {reportData.products.map((p) => (
                             <div
                               key={p.id}
@@ -995,14 +1013,16 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                             </div>
                           ))}
                         </div>
-                      )
+                      </div>
+                    )
+                  ) : (
+                    reportData.transactions.length === 0 ? (
+                      <div className="p-8 text-center text-slate-400 text-xs">
+                        No transactions found for the selected date range.
+                      </div>
                     ) : (
-                      reportData.transactions.length === 0 ? (
-                        <div className="p-8 text-center text-slate-400 text-xs">
-                          No transactions found for the selected date range.
-                        </div>
-                      ) : (
-                        <div className="max-h-60 overflow-y-auto divide-y divide-slate-200">
+                      <div className="overflow-x-auto w-full">
+                        <div className="max-h-80 overflow-y-auto divide-y divide-slate-200 min-w-[600px]">
                           {reportData.transactions.map((tx) => (
                             <div
                               key={tx.id}
@@ -1029,399 +1049,400 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                             </div>
                           ))}
                         </div>
-                      )
-                    )}
+                      </div>
+                    )
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+
+          {/* Sticky Bottom Action Bar */}
+          <div className="sticky bottom-0 w-full bg-slate-50 border-t border-slate-200 p-3.5 flex items-center justify-between z-10 pb-6 shadow-lg shrink-0">
+            <span className="text-xs font-semibold text-slate-600">Export & Share Options:</span>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleExportPDF}
+                className="px-3.5 py-2.5 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-sm transition cursor-pointer active:scale-95"
+              >
+                <Printer className="w-3.5 h-3.5" />
+                <span>[ 📄 Export PDF ]</span>
+              </button>
+              <button
+                onClick={handleExportCSV}
+                className="px-3.5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-sm transition cursor-pointer active:scale-95"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>[ 📊 Export Excel ]</span>
+              </button>
+              <button
+                onClick={handleShareWhatsApp}
+                className="px-3.5 py-2.5 bg-sky-600 hover:bg-sky-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-sm transition cursor-pointer active:scale-95"
+              >
+                <Share2 className="w-3.5 h-3.5" />
+                <span>[ 💬 Share ]</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 1. Item Audit & History Overlay Modal (100% Full-Screen) */}
+      {selectedProductAudit && (
+        <div className="fixed inset-0 w-full h-full min-h-screen z-[60] bg-white flex flex-col m-0 p-0 rounded-none overflow-hidden animate-fade-in">
+          <div className="w-full sticky top-0 bg-slate-900 text-white px-4 py-3.5 z-10 flex items-center justify-between shadow-md shrink-0">
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => setSelectedProductAudit(null)}
+                className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl transition cursor-pointer"
+              >
+                <ArrowLeft className="w-5 h-5" />
+              </button>
+              <div>
+                <h3 className="font-bold text-base text-slate-100">{selectedProductAudit.name}</h3>
+                <p className="text-[11px] text-slate-400 font-mono">SKU: {selectedProductAudit.sku} • {selectedProductAudit.category}</p>
+              </div>
+            </div>
+            <button
+              onClick={() => setSelectedProductAudit(null)}
+              className="w-9 h-9 rounded-xl bg-slate-800 text-slate-400 hover:text-white flex items-center justify-center transition cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+
+          <div className="p-4 sm:p-6 space-y-4 overflow-y-auto flex-1 text-xs">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="bg-slate-50 border border-slate-200 p-3 rounded-xl">
+                <div className="text-slate-500 font-semibold">Selling Price</div>
+                <div className="text-sm font-bold text-emerald-600 font-mono">KSh {selectedProductAudit.sellingPrice.toLocaleString()}</div>
+              </div>
+              <div className="bg-slate-50 border border-slate-200 p-3 rounded-xl">
+                <div className="text-slate-500 font-semibold">Cost Price (COGS)</div>
+                <div className="text-sm font-bold text-slate-700 font-mono">KSh {(selectedProductAudit.costPrice || 0).toLocaleString()}</div>
+              </div>
+              <div className="bg-slate-50 border border-slate-200 p-3 rounded-xl">
+                <div className="text-slate-500 font-semibold">Current Stock Qty</div>
+                <div className="text-sm font-bold text-blue-600 font-mono">{selectedProductAudit.stockQuantity} {selectedProductAudit.unit}</div>
+              </div>
+              <div className="bg-slate-50 border border-slate-200 p-3 rounded-xl">
+                <div className="text-slate-500 font-semibold">Stock Valuation</div>
+                <div className="text-sm font-bold text-purple-600 font-mono">KSh {(selectedProductAudit.stockQuantity * (selectedProductAudit.costPrice || selectedProductAudit.sellingPrice)).toLocaleString()}</div>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <div className="font-bold text-slate-800 flex items-center gap-1.5">
+                <Clock className="w-4 h-4 text-slate-500" />
+                <span>Movement Audit Timeline</span>
+              </div>
+              <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-3 text-xs">
+                <div className="flex items-start justify-between border-b border-slate-200 pb-2">
+                  <div>
+                    <span className="font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded">Stock Initialized</span>
+                    <p className="text-slate-600 mt-1">Catalog catalogued into Rofani Electronics inventory.</p>
+                  </div>
+                  <span className="text-[10px] text-slate-400 font-mono">Active</span>
+                </div>
+                <div className="flex items-start justify-between">
+                  <div>
+                    <span className="font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded">POS Sales Outflow</span>
+                    <p className="text-slate-600 mt-1">Tracked across recent customer checkout receipts.</p>
+                  </div>
+                  <span className="text-[10px] text-slate-400 font-mono">Live</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="sticky bottom-0 w-full bg-slate-50 border-t border-slate-200 p-3.5 flex items-center justify-end z-10 pb-6 shadow-lg shrink-0">
+            <button
+              onClick={() => setSelectedProductAudit(null)}
+              className="px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl text-xs cursor-pointer shadow-sm"
+            >
+              Close Audit
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* 2. Party Ledger Statement Modal (100% Full-Screen) */}
+      {selectedPartyLedger && (
+        <div className="fixed inset-0 w-full h-full min-h-screen z-[60] bg-white flex flex-col m-0 p-0 rounded-none overflow-hidden animate-fade-in">
+          <div className="w-full sticky top-0 bg-slate-900 text-white px-4 py-3.5 z-10 flex items-center justify-between shadow-md shrink-0">
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => setSelectedPartyLedger(null)}
+                className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl transition cursor-pointer"
+              >
+                <ArrowLeft className="w-5 h-5" />
+              </button>
+              <div>
+                <h3 className="font-bold text-base text-slate-100">{selectedPartyLedger.name}</h3>
+                <p className="text-[11px] text-slate-400 font-mono">Type: {selectedPartyLedger.partyType} • Phone: {selectedPartyLedger.phone}</p>
+              </div>
+            </div>
+            <button
+              onClick={() => setSelectedPartyLedger(null)}
+              className="w-9 h-9 rounded-xl bg-slate-800 text-slate-400 hover:text-white flex items-center justify-center transition cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+
+          <div className="p-4 sm:p-6 space-y-4 overflow-y-auto flex-1 text-xs">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="bg-slate-50 border border-slate-200 p-3 rounded-xl">
+                <div className="text-slate-500 font-semibold">Total Trade Volume</div>
+                <div className="text-sm font-bold text-emerald-600 font-mono">KSh {selectedPartyLedger.totalSales.toLocaleString()}</div>
+              </div>
+              <div className="bg-slate-50 border border-slate-200 p-3 rounded-xl">
+                <div className="text-slate-500 font-semibold">Outstanding Balance Due</div>
+                <div className="text-sm font-bold text-rose-600 font-mono">KSh {(selectedPartyLedger.currentBalanceDue || 0).toLocaleString()}</div>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <div className="font-bold text-slate-800 flex items-center gap-1.5">
+                <Receipt className="w-4 h-4 text-slate-500" />
+                <span>Account Ledger & Transaction History</span>
+              </div>
+              <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-2 text-xs">
+                <div className="flex justify-between border-b pb-2 font-bold text-slate-700">
+                  <span>Reference / Date</span>
+                  <span>Status</span>
+                  <span className="text-right">Amount</span>
+                </div>
+                <div className="flex justify-between items-center font-mono">
+                  <div>
+                    <span className="font-bold text-slate-800">TX-2026-001</span>
+                    <p className="text-[10px] text-slate-500">Store Counter Checkout</p>
+                  </div>
+                  <span className="bg-emerald-100 text-emerald-800 text-[10px] font-bold px-2 py-0.5 rounded">Settled</span>
+                  <span className="text-right font-bold text-blue-600">KSh 15,400</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="sticky bottom-0 w-full bg-slate-50 border-t border-slate-200 p-3.5 flex items-center justify-end z-10 pb-6 shadow-lg shrink-0">
+            <button
+              onClick={() => setSelectedPartyLedger(null)}
+              className="px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl text-xs cursor-pointer shadow-sm"
+            >
+              Close Ledger
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* 3. Transaction Receipt Detail Modal (100% Full-Screen) */}
+      {selectedTransactionDetail && (
+        <div className="fixed inset-0 w-full h-full min-h-screen z-[60] bg-white flex flex-col m-0 p-0 rounded-none overflow-hidden animate-fade-in">
+          <div className="w-full sticky top-0 bg-slate-900 text-white px-4 py-3.5 z-10 flex items-center justify-between shadow-md shrink-0">
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => setSelectedTransactionDetail(null)}
+                className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl transition cursor-pointer"
+              >
+                <ArrowLeft className="w-5 h-5" />
+              </button>
+              <div>
+                <h3 className="font-bold text-base text-slate-100 font-mono">{selectedTransactionDetail.receiptNumber}</h3>
+                <p className="text-[11px] text-slate-400">{selectedTransactionDetail.customerName || 'Walk-in Customer'} • {new Date(selectedTransactionDetail.date).toLocaleString()}</p>
+              </div>
+            </div>
+            <button
+              onClick={() => setSelectedTransactionDetail(null)}
+              className="w-9 h-9 rounded-xl bg-slate-800 text-slate-400 hover:text-white flex items-center justify-center transition cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+
+          <div className="p-4 sm:p-6 space-y-4 overflow-y-auto flex-1 text-xs">
+            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-3">
+              <div className="flex justify-between font-bold text-slate-700 border-b border-slate-200 pb-2">
+                <span>Item Description</span>
+                <span>Qty × Price = Total</span>
+              </div>
+              {selectedTransactionDetail.items.map((item, idx) => (
+                <div key={idx} className="flex justify-between items-center text-slate-800">
+                  <div>
+                    <div className="font-bold">{item.product.name}</div>
+                    <div className="text-[10px] text-slate-500 font-mono">SKU: {item.product.sku}</div>
+                  </div>
+                  <div className="font-mono text-right">
+                    {item.quantity} × {item.unitPrice.toLocaleString()} = <span className="font-bold text-blue-600">KSh {(item.quantity * item.unitPrice).toLocaleString()}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-2 font-mono text-xs">
+              <div className="flex justify-between text-slate-600">
+                <span>Payment Mode:</span>
+                <span className="font-bold uppercase text-slate-800">{selectedTransactionDetail.paymentMethod}</span>
+              </div>
+              <div className="flex justify-between text-slate-600">
+                <span>Amount Paid:</span>
+                <span className="font-bold text-emerald-600">KSh {selectedTransactionDetail.amountPaid.toLocaleString()}</span>
+              </div>
+              <div className="flex justify-between text-slate-600 border-t border-slate-200 pt-2 font-bold text-sm">
+                <span>Grand Total:</span>
+                <span className="text-blue-600">KSh {selectedTransactionDetail.grandTotal.toLocaleString()}</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="sticky bottom-0 w-full bg-slate-50 border-t border-slate-200 p-3.5 flex items-center justify-between z-10 pb-6 shadow-lg shrink-0">
+            <button
+              onClick={() => {
+                triggerToast(`🖨️ Reprinting receipt ${selectedTransactionDetail.receiptNumber}...`);
+              }}
+              className="px-4 py-2.5 bg-purple-600 hover:bg-purple-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 cursor-pointer shadow-sm"
+            >
+              <Printer className="w-3.5 h-3.5" />
+              <span>Reprint Receipt</span>
+            </button>
+            <button
+              onClick={() => setSelectedTransactionDetail(null)}
+              className="px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl text-xs cursor-pointer shadow-sm"
+            >
+              Close Receipt
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* 4. Summary Metric Drill-down Modal (100% Full-Screen) */}
+      {selectedMetricDetail && (
+        <div className="fixed inset-0 w-full h-full min-h-screen z-[60] bg-white flex flex-col m-0 p-0 rounded-none overflow-hidden animate-fade-in">
+          <div className="w-full sticky top-0 bg-slate-900 text-white px-4 py-3.5 z-10 flex items-center justify-between shadow-md shrink-0">
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => setSelectedMetricDetail(null)}
+                className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl transition cursor-pointer"
+              >
+                <ArrowLeft className="w-5 h-5" />
+              </button>
+              <div>
+                <h3 className="font-bold text-base text-slate-100 capitalize">
+                  {selectedMetricDetail === 'revenue' && 'Total Revenue Breakdown'}
+                  {selectedMetricDetail === 'profit' && 'Gross Profit Margin Breakdown'}
+                  {selectedMetricDetail === 'discounts' && 'Promotional Discounts & Markdowns'}
+                  {selectedMetricDetail === 'netprofit' && 'Net Profit & Operating Summary'}
+                </h3>
+                <p className="text-[11px] text-slate-400">Rofani Electronics Analytics Drill-Down</p>
+              </div>
+            </div>
+            <button
+              onClick={() => setSelectedMetricDetail(null)}
+              className="w-9 h-9 rounded-xl bg-slate-800 text-slate-400 hover:text-white flex items-center justify-center transition cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+
+          <div className="p-4 sm:p-6 space-y-4 overflow-y-auto flex-1 text-xs">
+            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-3 font-mono">
+              {selectedMetricDetail === 'revenue' && (
+                <>
+                  <div className="flex justify-between"><span>Cash Collected:</span><span className="font-bold text-emerald-600">KSh {reportData.totalCollected.toLocaleString()}</span></div>
+                  <div className="flex justify-between"><span>Credit / Balance Due:</span><span className="font-bold text-amber-600">KSh {reportData.totalBalance.toLocaleString()}</span></div>
+                  <div className="flex justify-between border-t pt-2 font-bold text-sm"><span>Total Revenue:</span><span className="text-blue-600">KSh {reportData.totalRev.toLocaleString()}</span></div>
+                </>
+              )}
+              {selectedMetricDetail === 'profit' && (
+                <>
+                  <div className="flex justify-between"><span>Total Revenue:</span><span className="font-bold text-blue-600">KSh {reportData.totalRev.toLocaleString()}</span></div>
+                  <div className="flex justify-between"><span>Cost of Goods Sold (COGS):</span><span className="font-bold text-rose-600">- KSh {reportData.totalCogs.toLocaleString()}</span></div>
+                  <div className="flex justify-between border-t pt-2 font-bold text-sm"><span>Gross Profit Margin:</span><span className="text-emerald-600">KSh {reportData.grossProfit.toLocaleString()}</span></div>
+                </>
+              )}
+              {selectedMetricDetail === 'discounts' && (
+                <>
+                  <div className="flex justify-between"><span>Item-Level Promos:</span><span className="font-bold text-amber-600">KSh {reportData.totalItemDiscounts.toLocaleString()}</span></div>
+                  <div className="flex justify-between border-t pt-2 font-bold text-sm"><span>Total Discounts:</span><span className="font-bold text-amber-700">KSh {reportData.totalItemDiscounts.toLocaleString()}</span></div>
+                </>
+              )}
+              {selectedMetricDetail === 'netprofit' && (
+                <>
+                  <div className="flex justify-between"><span>Gross Profit:</span><span className="font-bold text-emerald-600">KSh {reportData.grossProfit.toLocaleString()}</span></div>
+                  <div className="flex justify-between"><span>Operating Expenses:</span><span className="font-bold text-rose-600">- KSh {reportData.totalExpenses.toLocaleString()}</span></div>
+                  <div className="flex justify-between"><span>KRA Turnover Tax (1.5%):</span><span className="font-bold text-rose-600">- KSh {reportData.kraTot.toLocaleString()}</span></div>
+                  <div className="flex justify-between border-t pt-2 font-bold text-sm">
+                    <span>Net Profit:</span>
+                    <span className={reportData.netProfit >= 0 ? 'text-emerald-600' : 'text-rose-600'}>
+                      {reportData.totalRev === 0 ? 'KSh 0.00 (No Sales)' : `KSh ${reportData.netProfit.toLocaleString()}`}
+                    </span>
                   </div>
                 </>
               )}
             </div>
+          </div>
 
-            {/* Modal Footer: Export Options with safe bottom padding (pb-24) */}
-            <div className="absolute bottom-0 left-0 right-0 p-4 bg-slate-100 border-t border-slate-200 flex flex-wrap items-center justify-between gap-3 pb-24 shrink-0 rounded-b-3xl">
-              <span className="text-xs font-semibold text-slate-600">Export & Share Options:</span>
-
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={handleExportPDF}
-                  className="px-3.5 py-2.5 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-sm transition cursor-pointer active:scale-95"
-                >
-                  <Printer className="w-3.5 h-3.5" />
-                  <span>[ 📄 Export PDF ]</span>
-                </button>
-
-                <button
-                  onClick={handleExportCSV}
-                  className="px-3.5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-sm transition cursor-pointer active:scale-95"
-                >
-                  <Download className="w-3.5 h-3.5" />
-                  <span>[ 📊 Export Excel ]</span>
-                </button>
-
-                <button
-                  onClick={handleShareWhatsApp}
-                  className="px-3.5 py-2.5 bg-sky-600 hover:bg-sky-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-sm transition cursor-pointer active:scale-95"
-                >
-                  <Share2 className="w-3.5 h-3.5" />
-                  <span>[ 💬 Share ]</span>
-                </button>
-              </div>
-            </div>
+          <div className="sticky bottom-0 w-full bg-slate-50 border-t border-slate-200 p-3.5 flex items-center justify-end z-10 pb-6 shadow-lg shrink-0">
+            <button
+              onClick={() => setSelectedMetricDetail(null)}
+              className="px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl text-xs cursor-pointer shadow-sm"
+            >
+              Close Summary
+            </button>
           </div>
         </div>
       )}
 
-      {/* 1. Item Audit & History Overlay Modal (z-[60]) */}
-      {selectedProductAudit && (
-        <div className="fixed inset-0 z-[60] bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl w-full max-w-lg shadow-2xl overflow-hidden flex flex-col max-h-[90vh] animate-scale-up">
-            <div className="p-5 bg-slate-900 text-white flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-emerald-600/20 text-emerald-400 border border-emerald-500/30 flex items-center justify-center">
-                  <Package className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="font-bold text-base text-slate-100">{selectedProductAudit.name}</h3>
-                  <p className="text-[11px] text-slate-400 font-mono">SKU: {selectedProductAudit.sku} • {selectedProductAudit.category}</p>
-                </div>
-              </div>
-              <button
-                onClick={() => setSelectedProductAudit(null)}
-                className="w-9 h-9 rounded-xl bg-slate-800 text-slate-400 hover:text-white flex items-center justify-center transition cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="p-6 space-y-4 overflow-y-auto flex-1 text-xs">
-              <div className="grid grid-cols-2 gap-3">
-                <div className="bg-slate-50 border border-slate-200 p-3 rounded-xl">
-                  <div className="text-slate-500 font-semibold">Selling Price</div>
-                  <div className="text-sm font-bold text-emerald-600 font-mono">KSh {selectedProductAudit.sellingPrice.toLocaleString()}</div>
-                </div>
-                <div className="bg-slate-50 border border-slate-200 p-3 rounded-xl">
-                  <div className="text-slate-500 font-semibold">Cost Price (COGS)</div>
-                  <div className="text-sm font-bold text-slate-700 font-mono">KSh {(selectedProductAudit.costPrice || 0).toLocaleString()}</div>
-                </div>
-                <div className="bg-slate-50 border border-slate-200 p-3 rounded-xl">
-                  <div className="text-slate-500 font-semibold">Current Stock Qty</div>
-                  <div className="text-sm font-bold text-blue-600 font-mono">{selectedProductAudit.stockQuantity} {selectedProductAudit.unit}</div>
-                </div>
-                <div className="bg-slate-50 border border-slate-200 p-3 rounded-xl">
-                  <div className="text-slate-500 font-semibold">Stock Valuation</div>
-                  <div className="text-sm font-bold text-purple-600 font-mono">KSh {(selectedProductAudit.stockQuantity * (selectedProductAudit.costPrice || selectedProductAudit.sellingPrice)).toLocaleString()}</div>
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <div className="font-bold text-slate-800 flex items-center gap-1.5">
-                  <Clock className="w-4 h-4 text-slate-500" />
-                  <span>Movement Audit Timeline</span>
-                </div>
-                <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-3 text-xs">
-                  <div className="flex items-start justify-between border-b border-slate-200 pb-2">
-                    <div>
-                      <span className="font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded">Stock Initialized</span>
-                      <p className="text-slate-600 mt-1">Catalog catalogued into Rofani Electronics inventory.</p>
-                    </div>
-                    <span className="text-[10px] text-slate-400 font-mono">Active</span>
-                  </div>
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <span className="font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded">POS Sales Outflow</span>
-                      <p className="text-slate-600 mt-1">Tracked across recent customer checkout receipts.</p>
-                    </div>
-                    <span className="text-[10px] text-slate-400 font-mono">Live</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="p-4 bg-slate-100 border-t border-slate-200 text-right">
-              <button
-                onClick={() => setSelectedProductAudit(null)}
-                className="px-4 py-2 bg-slate-900 text-white font-bold rounded-xl text-xs cursor-pointer"
-              >
-                Close Audit
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* 2. Party Ledger Statement Modal (z-[60]) */}
-      {selectedPartyLedger && (
-        <div className="fixed inset-0 z-[60] bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl w-full max-w-lg shadow-2xl overflow-hidden flex flex-col max-h-[90vh] animate-scale-up">
-            <div className="p-5 bg-slate-900 text-white flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-blue-600/20 text-blue-400 border border-blue-500/30 flex items-center justify-center">
-                  <Users className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="font-bold text-base text-slate-100">{selectedPartyLedger.name}</h3>
-                  <p className="text-[11px] text-slate-400 font-mono">Type: {selectedPartyLedger.partyType} • Phone: {selectedPartyLedger.phone}</p>
-                </div>
-              </div>
-              <button
-                onClick={() => setSelectedPartyLedger(null)}
-                className="w-9 h-9 rounded-xl bg-slate-800 text-slate-400 hover:text-white flex items-center justify-center transition cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="p-6 space-y-4 overflow-y-auto flex-1 text-xs">
-              <div className="grid grid-cols-2 gap-3">
-                <div className="bg-slate-50 border border-slate-200 p-3 rounded-xl">
-                  <div className="text-slate-500 font-semibold">Total Trade Volume</div>
-                  <div className="text-sm font-bold text-emerald-600 font-mono">KSh {selectedPartyLedger.totalSales.toLocaleString()}</div>
-                </div>
-                <div className="bg-slate-50 border border-slate-200 p-3 rounded-xl">
-                  <div className="text-slate-500 font-semibold">Outstanding Balance Due</div>
-                  <div className="text-sm font-bold text-rose-600 font-mono">KSh {(selectedPartyLedger.currentBalanceDue || 0).toLocaleString()}</div>
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <div className="font-bold text-slate-800 flex items-center gap-1.5">
-                  <Receipt className="w-4 h-4 text-slate-500" />
-                  <span>Account Ledger & Transaction History</span>
-                </div>
-                <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-2 text-xs">
-                  <div className="flex justify-between border-b pb-2 font-bold text-slate-700">
-                    <span>Reference / Date</span>
-                    <span>Status</span>
-                    <span className="text-right">Amount</span>
-                  </div>
-                  <div className="flex justify-between items-center font-mono">
-                    <div>
-                      <span className="font-bold text-slate-800">TX-2026-001</span>
-                      <p className="text-[10px] text-slate-500">Store Counter Checkout</p>
-                    </div>
-                    <span className="bg-emerald-100 text-emerald-800 text-[10px] font-bold px-2 py-0.5 rounded">Settled</span>
-                    <span className="text-right font-bold text-blue-600">KSh 15,400</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="p-4 bg-slate-100 border-t border-slate-200 text-right">
-              <button
-                onClick={() => setSelectedPartyLedger(null)}
-                className="px-4 py-2 bg-slate-900 text-white font-bold rounded-xl text-xs cursor-pointer"
-              >
-                Close Ledger
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* 3. Transaction Receipt Detail Modal (z-[60]) */}
-      {selectedTransactionDetail && (
-        <div className="fixed inset-0 z-[60] bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl w-full max-w-lg shadow-2xl overflow-hidden flex flex-col max-h-[90vh] animate-scale-up">
-            <div className="p-5 bg-slate-900 text-white flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-blue-600/20 text-blue-400 border border-blue-500/30 flex items-center justify-center">
-                  <Receipt className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="font-bold text-base text-slate-100 font-mono">{selectedTransactionDetail.receiptNumber}</h3>
-                  <p className="text-[11px] text-slate-400">{selectedTransactionDetail.customerName || 'Walk-in Customer'} • {new Date(selectedTransactionDetail.date).toLocaleString()}</p>
-                </div>
-              </div>
-              <button
-                onClick={() => setSelectedTransactionDetail(null)}
-                className="w-9 h-9 rounded-xl bg-slate-800 text-slate-400 hover:text-white flex items-center justify-center transition cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="p-6 space-y-4 overflow-y-auto flex-1 text-xs">
-              <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-3">
-                <div className="flex justify-between font-bold text-slate-700 border-b border-slate-200 pb-2">
-                  <span>Item Description</span>
-                  <span>Qty × Price = Total</span>
-                </div>
-                {selectedTransactionDetail.items.map((item, idx) => (
-                  <div key={idx} className="flex justify-between items-center text-slate-800">
-                    <div>
-                      <div className="font-bold">{item.product.name}</div>
-                      <div className="text-[10px] text-slate-500 font-mono">SKU: {item.product.sku}</div>
-                    </div>
-                    <div className="font-mono text-right">
-                      {item.quantity} × {item.unitPrice.toLocaleString()} = <span className="font-bold text-blue-600">KSh {(item.quantity * item.unitPrice).toLocaleString()}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-2 font-mono text-xs">
-                <div className="flex justify-between text-slate-600">
-                  <span>Payment Mode:</span>
-                  <span className="font-bold uppercase text-slate-800">{selectedTransactionDetail.paymentMethod}</span>
-                </div>
-                <div className="flex justify-between text-slate-600">
-                  <span>Amount Paid:</span>
-                  <span className="font-bold text-emerald-600">KSh {selectedTransactionDetail.amountPaid.toLocaleString()}</span>
-                </div>
-                <div className="flex justify-between text-slate-600 border-t border-slate-200 pt-2 font-bold text-sm">
-                  <span>Grand Total:</span>
-                  <span className="text-blue-600">KSh {selectedTransactionDetail.grandTotal.toLocaleString()}</span>
-                </div>
-              </div>
-            </div>
-
-            <div className="p-4 bg-slate-100 border-t border-slate-200 flex justify-between items-center">
-              <button
-                onClick={() => {
-                  triggerToast(`🖨️ Reprinting receipt ${selectedTransactionDetail.receiptNumber}...`);
-                }}
-                className="px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 cursor-pointer"
-              >
-                <Printer className="w-3.5 h-3.5" />
-                <span>Reprint Receipt</span>
-              </button>
-              <button
-                onClick={() => setSelectedTransactionDetail(null)}
-                className="px-4 py-2 bg-slate-900 text-white font-bold rounded-xl text-xs cursor-pointer"
-              >
-                Close Receipt
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* 4. Summary Metric Drill-down Modal (z-[60]) */}
-      {selectedMetricDetail && (
-        <div className="fixed inset-0 z-[60] bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl w-full max-w-md shadow-2xl overflow-hidden flex flex-col max-h-[90vh] animate-scale-up">
-            <div className="p-5 bg-slate-900 text-white flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-purple-600/20 text-purple-400 border border-purple-500/30 flex items-center justify-center">
-                  <PieChart className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="font-bold text-base text-slate-100 capitalize">
-                    {selectedMetricDetail === 'revenue' && 'Total Revenue Breakdown'}
-                    {selectedMetricDetail === 'profit' && 'Gross Profit Margin Breakdown'}
-                    {selectedMetricDetail === 'discounts' && 'Promotional Discounts & Markdowns'}
-                    {selectedMetricDetail === 'netprofit' && 'Net Profit & Operating Summary'}
-                  </h3>
-                  <p className="text-[11px] text-slate-400">Rofani Electronics Analytics Drill-Down</p>
-                </div>
-              </div>
-              <button
-                onClick={() => setSelectedMetricDetail(null)}
-                className="w-9 h-9 rounded-xl bg-slate-800 text-slate-400 hover:text-white flex items-center justify-center transition cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="p-6 space-y-4 overflow-y-auto flex-1 text-xs">
-              <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-3 font-mono">
-                {selectedMetricDetail === 'revenue' && (
-                  <>
-                    <div className="flex justify-between"><span>Cash Collected:</span><span className="font-bold text-emerald-600">KSh {reportData.totalCollected.toLocaleString()}</span></div>
-                    <div className="flex justify-between"><span>Credit / Balance Due:</span><span className="font-bold text-amber-600">KSh {reportData.totalBalance.toLocaleString()}</span></div>
-                    <div className="flex justify-between border-t pt-2 font-bold text-sm"><span>Total Revenue:</span><span className="text-blue-600">KSh {reportData.totalRev.toLocaleString()}</span></div>
-                  </>
-                )}
-                {selectedMetricDetail === 'profit' && (
-                  <>
-                    <div className="flex justify-between"><span>Total Revenue:</span><span className="font-bold text-blue-600">KSh {reportData.totalRev.toLocaleString()}</span></div>
-                    <div className="flex justify-between"><span>Cost of Goods Sold (COGS):</span><span className="font-bold text-rose-600">- KSh {reportData.totalCogs.toLocaleString()}</span></div>
-                    <div className="flex justify-between border-t pt-2 font-bold text-sm"><span>Gross Profit Margin:</span><span className="text-emerald-600">KSh {reportData.grossProfit.toLocaleString()}</span></div>
-                  </>
-                )}
-                {selectedMetricDetail === 'discounts' && (
-                  <>
-                    <div className="flex justify-between"><span>Item-Level Promos:</span><span className="font-bold text-amber-600">KSh {reportData.totalItemDiscounts.toLocaleString()}</span></div>
-                    <div className="flex justify-between border-t pt-2 font-bold text-sm"><span>Total Discounts:</span><span className="font-bold text-amber-700">KSh {reportData.totalItemDiscounts.toLocaleString()}</span></div>
-                  </>
-                )}
-                {selectedMetricDetail === 'netprofit' && (
-                  <>
-                    <div className="flex justify-between"><span>Gross Profit:</span><span className="font-bold text-emerald-600">KSh {reportData.grossProfit.toLocaleString()}</span></div>
-                    <div className="flex justify-between"><span>Operating Expenses:</span><span className="font-bold text-rose-600">- KSh {reportData.totalExpenses.toLocaleString()}</span></div>
-                    <div className="flex justify-between"><span>KRA Turnover Tax (1.5%):</span><span className="font-bold text-rose-600">- KSh {reportData.kraTot.toLocaleString()}</span></div>
-                    <div className="flex justify-between border-t pt-2 font-bold text-sm">
-                      <span>Net Profit:</span>
-                      <span className={reportData.netProfit >= 0 ? 'text-emerald-600' : 'text-rose-600'}>
-                        {reportData.totalRev === 0 ? 'KSh 0.00 (No Sales)' : `KSh ${reportData.netProfit.toLocaleString()}`}
-                      </span>
-                    </div>
-                  </>
-                )}
-              </div>
-            </div>
-
-            <div className="p-4 bg-slate-100 border-t border-slate-200 text-right">
-              <button
-                onClick={() => setSelectedMetricDetail(null)}
-                className="px-4 py-2 bg-slate-900 text-white font-bold rounded-xl text-xs cursor-pointer"
-              >
-                Close Summary
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* 5. Daily Sales Date Drill-Down Modal ("Items Sold on [Date]") (z-[60]) */}
+      {/* 5. Daily Sales Date Drill-Down Modal ("Items Sold on [Date]") (100% Full-Screen) */}
       {selectedSaleDateGroup && (
-        <div className="fixed inset-0 z-[60] bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl w-full max-w-3xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh] animate-scale-up pb-24">
-            <div className="p-5 bg-slate-900 text-white flex items-center justify-between shrink-0">
-              <div className="flex items-center gap-3">
-                <button
-                  onClick={() => setSelectedSaleDateGroup(null)}
-                  className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl transition cursor-pointer"
-                >
-                  <ArrowLeft className="w-5 h-5" />
-                </button>
-                <div>
-                  <h3 className="font-bold text-base text-slate-100">
-                    Items Sold on {new Date(selectedSaleDateGroup.dateStr).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })}
-                  </h3>
-                  <p className="text-[11px] text-slate-400">{selectedSaleDateGroup.transactions.length} receipts processed on this date</p>
-                </div>
-              </div>
+        <div className="fixed inset-0 w-full h-full min-h-screen z-[60] bg-white flex flex-col m-0 p-0 rounded-none overflow-hidden animate-fade-in">
+          <div className="w-full sticky top-0 bg-slate-900 text-white px-4 py-3.5 z-10 flex items-center justify-between shadow-md shrink-0">
+            <div className="flex items-center gap-3">
               <button
                 onClick={() => setSelectedSaleDateGroup(null)}
-                className="w-9 h-9 rounded-xl bg-slate-800 text-slate-400 hover:text-white flex items-center justify-center transition cursor-pointer"
+                className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl transition cursor-pointer"
               >
-                <X className="w-5 h-5" />
+                <ArrowLeft className="w-5 h-5" />
               </button>
+              <div>
+                <h3 className="font-bold text-base text-slate-100">
+                  Items Sold on {new Date(selectedSaleDateGroup.dateStr).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })}
+                </h3>
+                <p className="text-[11px] text-slate-400">{selectedSaleDateGroup.transactions.length} receipts processed on this date</p>
+              </div>
+            </div>
+            <button
+              onClick={() => setSelectedSaleDateGroup(null)}
+              className="w-9 h-9 rounded-xl bg-slate-800 text-slate-400 hover:text-white flex items-center justify-center transition cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+
+          <div className="p-4 sm:p-6 space-y-4 overflow-y-auto flex-1 text-xs">
+            {/* Instant Search Filter for Daily Sold Items */}
+            <div className="relative">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+              <input
+                type="text"
+                value={dateModalSearchQuery}
+                onChange={(e) => setDateModalSearchQuery(e.target.value)}
+                placeholder="Search items sold on this date..."
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-3 py-2 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
             </div>
 
-            <div className="p-6 space-y-4 overflow-y-auto flex-1 text-xs">
-              {/* Instant Search Filter for Daily Sold Items */}
-              <div className="relative">
-                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
-                <input
-                  type="text"
-                  value={dateModalSearchQuery}
-                  onChange={(e) => setDateModalSearchQuery(e.target.value)}
-                  placeholder="Search items sold on this date..."
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-3 py-2 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
+            {/* Aggregated Itemized Sold List */}
+            <div className="bg-slate-50 border border-slate-200 rounded-2xl overflow-hidden">
+              <div className="p-3 bg-slate-100 border-b border-slate-200 font-bold text-slate-700 grid grid-cols-5 gap-2 min-w-[700px]">
+                <span>Item Name</span>
+                <span>SKU</span>
+                <span className="text-center">Qty Sold</span>
+                <span className="text-right">Avg Price</span>
+                <span className="text-right">Total Revenue</span>
               </div>
-
-              {/* Aggregated Itemized Sold List */}
-              <div className="bg-slate-50 border border-slate-200 rounded-2xl overflow-hidden">
-                <div className="p-3 bg-slate-100 border-b border-slate-200 font-bold text-slate-700 grid grid-cols-5 gap-2">
-                  <span>Item Name</span>
-                  <span>SKU</span>
-                  <span className="text-center">Qty Sold</span>
-                  <span className="text-right">Avg Price</span>
-                  <span className="text-right">Total Revenue</span>
-                </div>
-                <div className="divide-y divide-slate-200 max-h-64 overflow-y-auto">
+              <div className="overflow-x-auto w-full">
+                <div className="divide-y divide-slate-200 max-h-80 overflow-y-auto min-w-[700px]">
                   {(() => {
                     const itemMap = new Map<string, { name: string; sku: string; qty: number; revenue: number; prices: number[] }>();
                     selectedSaleDateGroup.transactions.forEach(tx => {
@@ -1460,81 +1481,80 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                 </div>
               </div>
             </div>
+          </div>
 
-            {/* Bottom Export Bar with pb-24 */}
-            <div className="absolute bottom-0 left-0 right-0 p-4 bg-slate-100 border-t border-slate-200 flex items-center justify-between pb-24 shrink-0 rounded-b-3xl">
-              <span className="text-xs font-semibold text-slate-600">Export Daily Items:</span>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => triggerToast('📄 Daily sales items exported to PDF!')}
-                  className="px-3.5 py-2 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 cursor-pointer shadow-sm"
-                >
-                  <Printer className="w-3.5 h-3.5" />
-                  <span>[ 📄 Export PDF ]</span>
-                </button>
-                <button
-                  onClick={() => triggerToast('📊 Daily sales items exported to Excel!')}
-                  className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 cursor-pointer shadow-sm"
-                >
-                  <Download className="w-3.5 h-3.5" />
-                  <span>[ 📊 Export Excel ]</span>
-                </button>
-              </div>
+          <div className="sticky bottom-0 w-full bg-slate-50 border-t border-slate-200 p-3.5 flex items-center justify-between z-10 pb-6 shadow-lg shrink-0">
+            <span className="text-xs font-semibold text-slate-600">Export Daily Items:</span>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => triggerToast('📄 Daily sales items exported to PDF!')}
+                className="px-3.5 py-2.5 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 cursor-pointer shadow-sm"
+              >
+                <Printer className="w-3.5 h-3.5" />
+                <span>[ 📄 Export PDF ]</span>
+              </button>
+              <button
+                onClick={() => triggerToast('📊 Daily sales items exported to Excel!')}
+                className="px-3.5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 cursor-pointer shadow-sm"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>[ 📊 Export Excel ]</span>
+              </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* 6. Daily Purchase Date Drill-Down Modal ("Items Purchased on [Date]") (z-[60]) */}
+      {/* 6. Daily Purchase Date Drill-Down Modal ("Items Purchased on [Date]") (100% Full-Screen) */}
       {selectedPurchaseDateGroup && (
-        <div className="fixed inset-0 z-[60] bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl w-full max-w-3xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh] animate-scale-up pb-24">
-            <div className="p-5 bg-slate-900 text-white flex items-center justify-between shrink-0">
-              <div className="flex items-center gap-3">
-                <button
-                  onClick={() => setSelectedPurchaseDateGroup(null)}
-                  className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl transition cursor-pointer"
-                >
-                  <ArrowLeft className="w-5 h-5" />
-                </button>
-                <div>
-                  <h3 className="font-bold text-base text-slate-100">
-                    Items Purchased on {new Date(selectedPurchaseDateGroup.dateStr).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })}
-                  </h3>
-                  <p className="text-[11px] text-slate-400">{selectedPurchaseDateGroup.orders.length} restocking purchase orders recorded</p>
-                </div>
-              </div>
+        <div className="fixed inset-0 w-full h-full min-h-screen z-[60] bg-white flex flex-col m-0 p-0 rounded-none overflow-hidden animate-fade-in">
+          <div className="w-full sticky top-0 bg-slate-900 text-white px-4 py-3.5 z-10 flex items-center justify-between shadow-md shrink-0">
+            <div className="flex items-center gap-3">
               <button
                 onClick={() => setSelectedPurchaseDateGroup(null)}
-                className="w-9 h-9 rounded-xl bg-slate-800 text-slate-400 hover:text-white flex items-center justify-center transition cursor-pointer"
+                className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl transition cursor-pointer"
               >
-                <X className="w-5 h-5" />
+                <ArrowLeft className="w-5 h-5" />
               </button>
+              <div>
+                <h3 className="font-bold text-base text-slate-100">
+                  Items Purchased on {new Date(selectedPurchaseDateGroup.dateStr).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })}
+                </h3>
+                <p className="text-[11px] text-slate-400">{selectedPurchaseDateGroup.orders.length} restocking purchase orders recorded</p>
+              </div>
+            </div>
+            <button
+              onClick={() => setSelectedPurchaseDateGroup(null)}
+              className="w-9 h-9 rounded-xl bg-slate-800 text-slate-400 hover:text-white flex items-center justify-center transition cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+
+          <div className="p-4 sm:p-6 space-y-4 overflow-y-auto flex-1 text-xs">
+            {/* Instant Search Filter for Daily Purchased Items */}
+            <div className="relative">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+              <input
+                type="text"
+                value={dateModalSearchQuery}
+                onChange={(e) => setDateModalSearchQuery(e.target.value)}
+                placeholder="Search restocked items, suppliers..."
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-3 py-2 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
             </div>
 
-            <div className="p-6 space-y-4 overflow-y-auto flex-1 text-xs">
-              {/* Instant Search Filter for Daily Purchased Items */}
-              <div className="relative">
-                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
-                <input
-                  type="text"
-                  value={dateModalSearchQuery}
-                  onChange={(e) => setDateModalSearchQuery(e.target.value)}
-                  placeholder="Search restocked items, suppliers..."
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-3 py-2 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
+            {/* Itemized Purchase List */}
+            <div className="bg-slate-50 border border-slate-200 rounded-2xl overflow-hidden">
+              <div className="p-3 bg-slate-100 border-b border-slate-200 font-bold text-slate-700 grid grid-cols-5 gap-2 min-w-[700px]">
+                <span>Item Name</span>
+                <span>SKU / PO #</span>
+                <span className="text-center">Qty Restocked</span>
+                <span>Supplier Name</span>
+                <span className="text-right">Total Cost</span>
               </div>
-
-              {/* Itemized Purchase List */}
-              <div className="bg-slate-50 border border-slate-200 rounded-2xl overflow-hidden">
-                <div className="p-3 bg-slate-100 border-b border-slate-200 font-bold text-slate-700 grid grid-cols-5 gap-2">
-                  <span>Item Name</span>
-                  <span>SKU / PO #</span>
-                  <span className="text-center">Qty Restocked</span>
-                  <span>Supplier Name</span>
-                  <span className="text-right">Total Cost</span>
-                </div>
-                <div className="divide-y divide-slate-200 max-h-64 overflow-y-auto">
+              <div className="overflow-x-auto w-full">
+                <div className="divide-y divide-slate-200 max-h-80 overflow-y-auto min-w-[700px]">
                   {(() => {
                     const allPurchasedItems: Array<{ name: string; sku: string; qty: number; supplier: string; cost: number }> = [];
                     selectedPurchaseDateGroup.orders.forEach(po => {
@@ -1572,26 +1592,25 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                 </div>
               </div>
             </div>
+          </div>
 
-            {/* Bottom Export Bar with pb-24 */}
-            <div className="absolute bottom-0 left-0 right-0 p-4 bg-slate-100 border-t border-slate-200 flex items-center justify-between pb-24 shrink-0 rounded-b-3xl">
-              <span className="text-xs font-semibold text-slate-600">Export Restock Items:</span>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => triggerToast('📄 Daily purchase items exported to PDF!')}
-                  className="px-3.5 py-2 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 cursor-pointer shadow-sm"
-                >
-                  <Printer className="w-3.5 h-3.5" />
-                  <span>[ 📄 Export PDF ]</span>
-                </button>
-                <button
-                  onClick={() => triggerToast('📊 Daily purchase items exported to Excel!')}
-                  className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 cursor-pointer shadow-sm"
-                >
-                  <Download className="w-3.5 h-3.5" />
-                  <span>[ 📊 Export Excel ]</span>
-                </button>
-              </div>
+          <div className="sticky bottom-0 w-full bg-slate-50 border-t border-slate-200 p-3.5 flex items-center justify-between z-10 pb-6 shadow-lg shrink-0">
+            <span className="text-xs font-semibold text-slate-600">Export Restock Items:</span>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => triggerToast('📄 Daily purchase items exported to PDF!')}
+                className="px-3.5 py-2.5 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 cursor-pointer shadow-sm"
+              >
+                <Printer className="w-3.5 h-3.5" />
+                <span>[ 📄 Export PDF ]</span>
+              </button>
+              <button
+                onClick={() => triggerToast('📊 Daily purchase items exported to Excel!')}
+                className="px-3.5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 cursor-pointer shadow-sm"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>[ 📊 Export Excel ]</span>
+              </button>
             </div>
           </div>
         </div>

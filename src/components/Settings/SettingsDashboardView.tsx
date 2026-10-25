@@ -24,6 +24,7 @@ import { Product, Customer, Supplier, Transaction, Expense, AttendanceRecord, Us
 import { safeGetJSON, safeSetJSON } from '../../utils/safeStorage';
 import { ItemSettingsView } from './ItemSettingsView';
 import { GeneralSettingsView } from './GeneralSettingsView';
+import { PrintAndTaxSettingsView } from './PrintAndTaxSettingsView';
 
 interface SettingsDashboardViewProps {
   products: Product[];
@@ -57,8 +58,7 @@ interface SettingsDashboardViewProps {
 type SettingCategoryKey =
   | 'general'
   | 'transaction'
-  | 'invoice'
-  | 'taxes'
+  | 'print_tax'
   | 'users'
   | 'reminders'
   | 'party'
@@ -213,20 +213,12 @@ export const SettingsDashboardView: React.FC<SettingsDashboardViewProps> = ({
       keywords: ['payment', 'cash', 'mpesa', 'receipt', 'print', 'sales rep', 'transaction']
     },
     {
-      id: 'invoice' as SettingCategoryKey,
+      id: 'print_tax' as SettingCategoryKey,
       icon: Printer,
       color: 'text-purple-400 bg-purple-500/10 border-purple-500/30',
-      title: 'Invoice Print',
-      description: 'Paper size selection (58mm thermal vs 80mm vs A4 PDF), shop logo display toggle, custom header/footer text.',
-      keywords: ['invoice', 'print', 'paper', '58mm', '80mm', 'a4', 'logo', 'thermal']
-    },
-    {
-      id: 'taxes' as SettingCategoryKey,
-      icon: Percent,
-      color: 'text-amber-400 bg-amber-500/10 border-amber-500/30',
-      title: 'Taxes',
-      description: 'KRA Turnover Tax (1.5% TOT) toggle/rate, VAT configuration, tax-inclusive vs tax-exclusive pricing defaults.',
-      keywords: ['tax', 'kra', 'tot', 'vat', 'inclusive', 'exclusive', 'pricing']
+      title: 'Invoice Print & Taxes',
+      description: 'Paper size selection, receipt header/footer, KRA Turnover Tax (TOT), VAT configuration, and KRA PIN.',
+      keywords: ['invoice', 'print', 'paper', '58mm', '80mm', 'a4', 'logo', 'thermal', 'tax', 'kra', 'tot', 'vat']
     },
     {
       id: 'users' as SettingCategoryKey,
@@ -371,8 +363,14 @@ export const SettingsDashboardView: React.FC<SettingsDashboardViewProps> = ({
         </div>
       )}
 
+      {activeSubPanel === 'print_tax' && (
+        <div className="fixed inset-0 z-50 bg-[#F1F5F9] overflow-y-auto">
+          <PrintAndTaxSettingsView onBack={() => setActiveSubPanel(null)} />
+        </div>
+      )}
+
       {/* Sub-Panel Modal Overlay */}
-      {activeSubPanel && activeSubPanel !== 'inventory' && activeSubPanel !== 'general' && (
+      {activeSubPanel && activeSubPanel !== 'inventory' && activeSubPanel !== 'general' && activeSubPanel !== 'print_tax' && (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
             {/* Modal Header */}
@@ -383,14 +381,10 @@ export const SettingsDashboardView: React.FC<SettingsDashboardViewProps> = ({
                 </div>
                 <div>
                   <h3 className="font-bold text-base text-slate-100 capitalize">
-                    {(activeSubPanel as string) === 'general' && '⚙️ General Shop Settings'}
                     {(activeSubPanel as string) === 'transaction' && '💱 Transaction & POS Settings'}
-                    {(activeSubPanel as string) === 'invoice' && '🖨️ Invoice & Receipt Print Settings'}
-                    {(activeSubPanel as string) === 'taxes' && '% Taxes & KRA Configuration'}
                     {(activeSubPanel as string) === 'users' && '👥 User Management & Roles'}
                     {(activeSubPanel as string) === 'reminders' && '🔔 Reminders & Low Stock Alerts'}
                     {(activeSubPanel as string) === 'party' && '🤝 Party & Customer Management'}
-                    {(activeSubPanel as string) === 'inventory' && '📦 Item & Inventory Defaults'}
                     {(activeSubPanel as string) === 'currency' && '🪙 Multi-Currency & Formatting'}
                   </h3>
                   <p className="text-xs text-slate-400">Configure parameters and save changes instantly</p>
@@ -454,94 +448,7 @@ export const SettingsDashboardView: React.FC<SettingsDashboardViewProps> = ({
                 </div>
               )}
 
-              {activeSubPanel === 'invoice' && (
-                <div className="space-y-4">
-                  <div>
-                    <label className="block font-semibold text-slate-200 mb-1">Receipt Paper Size</label>
-                    <select
-                      value={paperSize}
-                      onChange={(e) => setPaperSize(e.target.value)}
-                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2.5 text-slate-100 focus:outline-none focus:ring-2 focus:ring-purple-500 font-medium"
-                    >
-                      <option value="58mm">58mm Thermal Receipt Printer</option>
-                      <option value="80mm">80mm Thermal Receipt Printer</option>
-                      <option value="a4">A4 PDF Invoice Sheet</option>
-                    </select>
-                  </div>
 
-                  <div className="flex items-center justify-between p-3.5 bg-slate-950/60 border border-slate-800 rounded-xl">
-                    <div>
-                      <div className="font-bold text-slate-100">Display Shop Logo / Branding on Receipt</div>
-                      <div className="text-[11px] text-slate-400">Include store watermark at top of printed receipt</div>
-                    </div>
-                    <label className="relative inline-flex items-center cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={showLogoOnReceipt}
-                        onChange={(e) => setShowLogoOnReceipt(e.target.checked)}
-                        className="sr-only peer"
-                      />
-                      <div className="w-9 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-purple-600"></div>
-                    </label>
-                  </div>
-
-                  <div>
-                    <label className="block font-semibold text-slate-200 mb-1">Custom Header Title</label>
-                    <input
-                      type="text"
-                      value={customHeader}
-                      onChange={(e) => setCustomHeader(e.target.value)}
-                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2.5 text-slate-100 font-bold focus:outline-none focus:ring-2 focus:ring-purple-500"
-                    />
-                  </div>
-                </div>
-              )}
-
-              {activeSubPanel === 'taxes' && (
-                <div className="space-y-4">
-                  <div>
-                    <label className="block font-semibold text-slate-200 mb-1">KRA Turnover Tax (TOT) Rate %</label>
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="number"
-                        step="0.1"
-                        value={kraTotRate}
-                        onChange={(e) => setKraTotRate(parseFloat(e.target.value) || 0)}
-                        className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2.5 text-amber-400 font-mono font-bold focus:outline-none focus:ring-2 focus:ring-amber-500"
-                      />
-                      <span className="font-bold text-slate-400">%</span>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center justify-between p-3.5 bg-slate-950/60 border border-slate-800 rounded-xl">
-                    <div>
-                      <div className="font-bold text-slate-100">Enable VAT (Value Added Tax 16%)</div>
-                      <div className="text-[11px] text-slate-400">Calculate Kenya VAT on applicable electronic items</div>
-                    </div>
-                    <label className="relative inline-flex items-center cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={enableVat}
-                        onChange={(e) => setEnableVat(e.target.checked)}
-                        className="sr-only peer"
-                      />
-                      <div className="w-9 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-amber-600"></div>
-                    </label>
-                  </div>
-
-                  <div>
-                    <label className="block font-semibold text-slate-200 mb-1">Catalog Pricing Default</label>
-                    <select
-                      value={pricingMode}
-                      onChange={(e) => setPricingMode(e.target.value)}
-                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2.5 text-slate-100 focus:outline-none focus:ring-2 focus:ring-amber-500 font-medium"
-                    >
-                      <option value="tax_inclusive">Tax Inclusive (Prices include TOT/VAT)</option>
-                      <option value="tax_exclusive">Tax Exclusive (Add tax at checkout)</option>
-                    </select>
-                  </div>
-                </div>
-              )}
 
               {activeSubPanel === 'users' && (
                 <div className="space-y-4">

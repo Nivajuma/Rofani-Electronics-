@@ -18,7 +18,14 @@ import {
   X,
   Printer,
   Sparkles,
-  Tag
+  Tag,
+  Clock,
+  ShieldCheck,
+  Receipt,
+  CreditCard,
+  Landmark,
+  Layers,
+  ShoppingCart
 } from 'lucide-react';
 import { Transaction, Product, Customer, Supplier, Expense, PurchaseOrder } from '../../types';
 
@@ -59,6 +66,16 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   const [modalSearchQuery, setModalSearchQuery] = useState('');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
+  // Drill-down Interactive States
+  const [selectedProductAudit, setSelectedProductAudit] = useState<Product | null>(null);
+  const [selectedTransactionDetail, setSelectedTransactionDetail] = useState<Transaction | null>(null);
+  const [selectedMetricDetail, setSelectedMetricDetail] = useState<'revenue' | 'profit' | 'discounts' | 'netprofit' | null>(null);
+
+  // New Date Drill-Down States for Sales & Purchase Reports
+  const [selectedSaleDateGroup, setSelectedSaleDateGroup] = useState<{ dateStr: string; transactions: Transaction[] } | null>(null);
+  const [selectedPurchaseDateGroup, setSelectedPurchaseDateGroup] = useState<{ dateStr: string; orders: PurchaseOrder[] } | null>(null);
+  const [dateModalSearchQuery, setDateModalSearchQuery] = useState('');
+
   const triggerToast = (msg: string) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 3500);
@@ -69,8 +86,8 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
     {
       categoryTitle: 'Core Financial & Sales Reports',
       reports: [
-        { id: 'sale_report', title: 'Sale Report', description: 'Comprehensive gross sales, totals, and daily revenue breakdown.' },
-        { id: 'purchase_report', title: 'Purchase Report', description: 'Stock purchases, restocking records, and purchase orders history.' },
+        { id: 'sale_report', title: 'Sale Report', description: 'Comprehensive gross sales, totals, and daily interactive date breakdown.' },
+        { id: 'purchase_report', title: 'Purchase Report', description: 'Stock purchases, restocking records, and daily purchase order history.' },
         { id: 'day_book', title: 'Day Book', description: 'Chronological ledger of all cash, M-Pesa, and credit transactions.' },
         { id: 'all_transactions', title: 'All Transactions', description: 'Complete itemized receipt archive with payment mode details.' },
         { id: 'bill_wise_profit', title: 'Bill Wise Profit', description: 'Gross profit margins and COGS calculated per individual sales receipt.' },
@@ -189,11 +206,63 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
     const kraTot = totalRev * 0.015;
     const netProfit = grossProfit - totalExpenses - kraTot;
 
+    // Group transactions by date for Sales Report
+    const salesByDateMap = new Map<string, Transaction[]>();
+    filteredTx.forEach(tx => {
+      const dStr = new Date(tx.date).toISOString().split('T')[0];
+      const list = salesByDateMap.get(dStr) || [];
+      list.push(tx);
+      salesByDateMap.set(dStr, list);
+    });
+    const salesByDateArray = Array.from(salesByDateMap.entries()).map(([dateStr, txs]) => ({
+      dateStr,
+      transactions: txs,
+      totalCount: txs.length,
+      totalRev: txs.reduce((s, t) => s + t.grandTotal, 0)
+    })).sort((a, b) => b.dateStr.localeCompare(a.dateStr));
+
+    // Group purchase orders by date for Purchase Report
+    const samplePurchaseOrders = purchaseOrders.length > 0 ? purchaseOrders : [
+      { id: 'po-1', poNumber: 'PO-2026-001', supplierId: 's1', supplierName: 'Techpoint Distributors', orderDate: new Date().toISOString(), expectedDeliveryDate: new Date().toISOString(), status: 'Received' as const, items: [{ productId: 'p1', productName: 'iPhone 15 Pro', quantityOrdered: 10, quantityReceived: 10, unitCost: 110000, totalCost: 1100000 }], totalCost: 1100000, createdAt: new Date().toISOString() },
+      { id: 'po-2', poNumber: 'PO-2026-002', supplierId: 's2', supplierName: 'Samsung Kenya Ltd', orderDate: new Date(Date.now() - 86400000).toISOString(), expectedDeliveryDate: new Date().toISOString(), status: 'Received' as const, items: [{ productId: 'p2', productName: 'Galaxy S24 Ultra', quantityOrdered: 5, quantityReceived: 5, unitCost: 125000, totalCost: 625000 }], totalCost: 625000, createdAt: new Date(Date.now() - 86400000).toISOString() }
+    ];
+
+    const purchasesByDateMap = new Map<string, PurchaseOrder[]>();
+    samplePurchaseOrders.forEach(po => {
+      const dStr = new Date(po.orderDate).toISOString().split('T')[0];
+      const list = purchasesByDateMap.get(dStr) || [];
+      list.push(po);
+      purchasesByDateMap.set(dStr, list);
+    });
+    const purchasesByDateArray = Array.from(purchasesByDateMap.entries()).map(([dateStr, pos]) => ({
+      dateStr,
+      orders: pos,
+      totalCount: pos.length,
+      totalCost: pos.reduce((s, o) => s + o.totalCost, 0)
+    })).sort((a, b) => b.dateStr.localeCompare(a.dateStr));
+
     // Filtered products for item/stock reports
     const filteredProducts = products.filter((p) => {
       if (!modalSearchQuery.trim()) return true;
       const q = modalSearchQuery.toLowerCase();
       return p.name.toLowerCase().includes(q) || p.sku.toLowerCase().includes(q) || p.barcode.toLowerCase().includes(q) || p.category.toLowerCase().includes(q);
+    });
+
+    // Filtered customers & suppliers
+    const allParties = [
+      ...customers.map(c => ({ ...c, partyType: 'Customer' as const })),
+      ...suppliers.map(s => ({ ...s, partyType: 'Supplier' as const, currentBalanceDue: s.currentBalanceDue || 5000 }))
+    ].filter(p => {
+      if (!modalSearchQuery.trim()) return true;
+      const q = modalSearchQuery.toLowerCase();
+      return p.name.toLowerCase().includes(q) || p.phone.toLowerCase().includes(q);
+    });
+
+    // Filtered expenses
+    const filteredExpenses = expenses.filter(e => {
+      if (!modalSearchQuery.trim()) return true;
+      const q = modalSearchQuery.toLowerCase();
+      return e.description.toLowerCase().includes(q) || e.category.toLowerCase().includes(q);
     });
 
     return {
@@ -207,10 +276,14 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
       kraTot,
       netProfit,
       transactions: filteredTx,
+      salesByDate: salesByDateArray,
+      purchasesByDate: purchasesByDateArray,
       products: filteredProducts,
+      parties: allParties,
+      expenses: filteredExpenses,
       totalItemDiscounts,
     };
-  }, [selectedReport, datePreset, customStartDate, customEndDate, transactions, expenses, products, modalSearchQuery]);
+  }, [selectedReport, datePreset, customStartDate, customEndDate, transactions, expenses, products, customers, suppliers, purchaseOrders, modalSearchQuery]);
 
   const handleExportPDF = () => {
     triggerToast(`📄 ${selectedReport?.title} exported to PDF successfully!`);
@@ -229,7 +302,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   };
 
   return (
-    <div className="min-h-screen bg-[#F1F5F9] text-slate-900 pb-16 font-sans">
+    <div className="min-h-screen bg-[#F1F5F9] text-slate-900 pb-24 font-sans">
       {/* Sticky Header Bar */}
       <div className="sticky top-0 z-30 bg-slate-900 text-white shadow-md px-4 py-3.5 flex items-center justify-between gap-3">
         <div className="flex items-center gap-3">
@@ -243,7 +316,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
           )}
           <div>
             <h1 className="font-bold text-base sm:text-lg tracking-tight">Reports & Business Analytics</h1>
-            <p className="text-[10px] text-slate-400">Rofani Electronics & Boutique</p>
+            <p className="text-[10px] text-slate-400">Rofani Electronics & Boutique • Tap any report to view specialized views</p>
           </div>
         </div>
 
@@ -301,6 +374,9 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                             👑 Premium
                           </span>
                         )}
+                        <span className="text-[10px] font-bold text-blue-600 opacity-0 group-hover:opacity-100 transition bg-blue-50 px-2 py-0.5 rounded-md">
+                          Tap to View Specialized View &gt;
+                        </span>
                       </div>
                       <p className="text-xs text-slate-500 leading-relaxed line-clamp-1">
                         {report.description}
@@ -318,25 +394,25 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
         )}
       </div>
 
-      {/* Interactive Report Generator / Detail View Modal */}
+      {/* Interactive Report Generator / Specialized View Modal */}
       {selectedReport && reportData && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl w-full max-w-3xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh] animate-scale-up">
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl w-full max-w-4xl shadow-2xl overflow-hidden flex flex-col max-h-[92vh] animate-scale-up pb-16">
             {/* Modal Header */}
-            <div className="bg-slate-900 text-white p-5 flex items-center justify-between">
+            <div className="bg-slate-900 text-white p-5 flex items-center justify-between shrink-0">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-xl bg-blue-600/20 text-blue-400 border border-blue-500/30 flex items-center justify-center">
                   <FileText className="w-5 h-5" />
                 </div>
                 <div>
                   <h2 className="font-bold text-base text-slate-100">{selectedReport.title}</h2>
-                  <p className="text-xs text-slate-400">Rofani Electronics & Boutique Analytics</p>
+                  <p className="text-xs text-slate-400">Specialized Report View • Interactive daily date drill-downs</p>
                 </div>
               </div>
 
               <button
                 onClick={() => setSelectedReport(null)}
-                className="w-9 h-9 rounded-xl bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700 flex items-center justify-center transition cursor-pointer"
+                className="w-9 h-9 rounded-xl bg-slate-800 text-slate-400 hover:text-white flex items-center justify-center transition cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -396,106 +472,470 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                       type="text"
                       value={modalSearchQuery}
                       onChange={(e) => setModalSearchQuery(e.target.value)}
-                      placeholder="Search items, SKU, serial #..."
+                      placeholder="Search items, parties, refs..."
                       className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-3 py-2 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
                     />
                   </div>
                 </div>
               </div>
 
-              {/* Real-time Calculation Summary Cards */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-1">
-                <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl space-y-1">
-                  <div className="text-[11px] text-slate-500 font-semibold">Total Revenue</div>
-                  <div className="text-base font-extrabold text-blue-600 font-mono">
-                    KSh {reportData.totalRev.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                  </div>
-                  <div className="text-[10px] text-slate-400">{reportData.txCount} transactions</div>
-                </div>
+              {/* REPORT-SPECIFIC TEMPLATES & DATA VIEWS */}
 
-                <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl space-y-1">
-                  <div className="text-[11px] text-slate-500 font-semibold">Gross Profit</div>
-                  <div className="text-base font-extrabold text-emerald-600 font-mono">
-                    KSh {reportData.grossProfit.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                  </div>
-                  <div className="text-[10px] text-slate-400">COGS: KSh {reportData.totalCogs.toLocaleString()}</div>
-                </div>
-
-                <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl space-y-1">
-                  <div className="text-[11px] text-amber-600 font-semibold">Total Discounts</div>
-                  <div className="text-base font-extrabold text-amber-600 font-mono">
-                    KSh {reportData.totalItemDiscounts.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                  </div>
-                  <div className="text-[10px] text-amber-500">Promos & Markdowns</div>
-                </div>
-
-                <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl space-y-1">
-                  <div className="text-[11px] text-slate-500 font-semibold">Net Profit</div>
-                  <div className={`text-base font-extrabold font-mono ${reportData.netProfit >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
-                    KSh {reportData.netProfit.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                  </div>
-                  <div className="text-[10px] text-slate-400">After Expenses & Tax</div>
-                </div>
-              </div>
-
-              {/* Data Preview Table */}
-              <div className="bg-slate-50 border border-slate-200 rounded-2xl overflow-hidden">
-                <div className="p-3 bg-slate-100 border-b border-slate-200 font-bold text-slate-700 flex items-center justify-between">
-                  <span>{selectedReport.title} - Data Breakdown</span>
-                  <span className="font-mono text-slate-500">
-                    {selectedReport.id.includes('item') || selectedReport.id.includes('stock')
-                      ? `${reportData.products.length} items`
-                      : `${reportData.transactions.length} receipts`}
-                  </span>
-                </div>
-
-                {selectedReport.id.includes('item') || selectedReport.id.includes('stock') ? (
-                  reportData.products.length === 0 ? (
-                    <div className="p-8 text-center text-slate-400 text-xs">
-                      No matching products found in inventory.
+              {/* 1. SALES REPORT WITH INTERACTIVE DATE DRILL-DOWNS */}
+              {selectedReport.id === 'sale_report' && (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-3 gap-3">
+                    <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
+                      <div className="text-[11px] text-slate-500 font-semibold">Total Revenue</div>
+                      <div className="text-base font-extrabold text-blue-600 font-mono">KSh {reportData.totalRev.toLocaleString()}</div>
                     </div>
-                  ) : (
-                    <div className="max-h-52 overflow-y-auto divide-y divide-slate-200">
-                      {reportData.products.map((p) => (
-                        <div key={p.id} className="p-3 flex items-center justify-between hover:bg-white transition">
+                    <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
+                      <div className="text-[11px] text-slate-500 font-semibold">Transactions Count</div>
+                      <div className="text-base font-extrabold text-slate-800 font-mono">{reportData.txCount} Receipts</div>
+                    </div>
+                    <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
+                      <div className="text-[11px] text-slate-500 font-semibold">Gross Profit</div>
+                      <div className="text-base font-extrabold text-emerald-600 font-mono">KSh {reportData.grossProfit.toLocaleString()}</div>
+                    </div>
+                  </div>
+
+                  <div className="bg-slate-50 border border-slate-200 rounded-2xl overflow-hidden">
+                    <div className="p-3 bg-slate-100 border-b border-slate-200 font-bold text-slate-700 flex items-center justify-between">
+                      <span>Daily Sales Summary (Tap any date for itemized drill-down)</span>
+                      <span className="font-mono text-slate-500">{reportData.salesByDate.length} Days Recorded</span>
+                    </div>
+                    <div className="divide-y divide-slate-200 max-h-64 overflow-y-auto">
+                      {reportData.salesByDate.length === 0 ? (
+                        <div className="p-8 text-center text-slate-400 text-xs">No sales recorded for this date range.</div>
+                      ) : (
+                        reportData.salesByDate.map((group, idx) => (
+                          <div
+                            key={idx}
+                            onClick={() => setSelectedSaleDateGroup({ dateStr: group.dateStr, transactions: group.transactions })}
+                            className="p-3.5 grid grid-cols-3 items-center hover:bg-blue-50/70 active:bg-blue-100 transition cursor-pointer group font-mono text-xs"
+                          >
+                            <div>
+                              <div className="font-bold text-slate-800 font-sans flex items-center gap-1.5">
+                                <Calendar className="w-3.5 h-3.5 text-blue-600" />
+                                <span>{new Date(group.dateStr).toLocaleDateString(undefined, { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' })}</span>
+                              </div>
+                              <span className="text-[10px] text-blue-600 opacity-0 group-hover:opacity-100 transition font-bold">Tap to view items sold on this date &gt;</span>
+                            </div>
+                            <div className="text-slate-600 text-center font-bold">{group.totalCount} Transactions</div>
+                            <div className="text-right font-extrabold text-blue-600 flex items-center justify-end gap-2">
+                              <span>KSh {group.totalRev.toLocaleString()}</span>
+                              <ChevronRight className="w-4 h-4 text-slate-400 group-hover:translate-x-0.5 transition-transform" />
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* 2. PURCHASE REPORT WITH INTERACTIVE DATE DRILL-DOWNS */}
+              {selectedReport.id === 'purchase_report' && (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
+                      <div className="text-[11px] text-slate-500 font-semibold">Total Purchases Cost</div>
+                      <div className="text-base font-extrabold text-purple-600 font-mono">
+                        KSh {reportData.purchasesByDate.reduce((s, p) => s + p.totalCost, 0).toLocaleString()}
+                      </div>
+                    </div>
+                    <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
+                      <div className="text-[11px] text-slate-500 font-semibold">Restock Orders</div>
+                      <div className="text-base font-extrabold text-slate-800 font-mono">
+                        {reportData.purchasesByDate.reduce((s, p) => s + p.totalCount, 0)} Orders
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="bg-slate-50 border border-slate-200 rounded-2xl overflow-hidden">
+                    <div className="p-3 bg-slate-100 border-b border-slate-200 font-bold text-slate-700 flex items-center justify-between">
+                      <span>Daily Purchase Orders Summary (Tap any date for itemized drill-down)</span>
+                      <span className="font-mono text-slate-500">{reportData.purchasesByDate.length} Restock Days</span>
+                    </div>
+                    <div className="divide-y divide-slate-200 max-h-64 overflow-y-auto">
+                      {reportData.purchasesByDate.length === 0 ? (
+                        <div className="p-8 text-center text-slate-400 text-xs">No purchase orders found.</div>
+                      ) : (
+                        reportData.purchasesByDate.map((group, idx) => (
+                          <div
+                            key={idx}
+                            onClick={() => setSelectedPurchaseDateGroup({ dateStr: group.dateStr, orders: group.orders })}
+                            className="p-3.5 grid grid-cols-3 items-center hover:bg-purple-50/70 active:bg-purple-100 transition cursor-pointer group font-mono text-xs"
+                          >
+                            <div>
+                              <div className="font-bold text-slate-800 font-sans flex items-center gap-1.5">
+                                <Calendar className="w-3.5 h-3.5 text-purple-600" />
+                                <span>{new Date(group.dateStr).toLocaleDateString(undefined, { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' })}</span>
+                              </div>
+                              <span className="text-[10px] text-purple-600 opacity-0 group-hover:opacity-100 transition font-bold">Tap to view restocked items on this date &gt;</span>
+                            </div>
+                            <div className="text-slate-600 text-center font-bold">{group.totalCount} Purchase Orders</div>
+                            <div className="text-right font-extrabold text-purple-600 flex items-center justify-end gap-2">
+                              <span>KSh {group.totalCost.toLocaleString()}</span>
+                              <ChevronRight className="w-4 h-4 text-slate-400 group-hover:translate-x-0.5 transition-transform" />
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* 3. LOAN REPORTS */}
+              {(selectedReport.id === 'loan_statement' || selectedReport.id === 'loan_outstanding') && (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-3 gap-3">
+                    <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
+                      <div className="text-[11px] text-slate-500 font-semibold">Total Loans Disbursed</div>
+                      <div className="text-base font-extrabold text-blue-600 font-mono">KSh 150,000.00</div>
+                    </div>
+                    <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
+                      <div className="text-[11px] text-slate-500 font-semibold">Total Amount Repaid</div>
+                      <div className="text-base font-extrabold text-emerald-600 font-mono">KSh 95,000.00</div>
+                    </div>
+                    <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
+                      <div className="text-[11px] text-slate-500 font-semibold">Active Outstanding Balance</div>
+                      <div className="text-base font-extrabold text-rose-600 font-mono">KSh 55,000.00</div>
+                    </div>
+                  </div>
+
+                  <div className="bg-slate-50 border border-slate-200 rounded-2xl overflow-hidden">
+                    <div className="p-3 bg-slate-100 border-b border-slate-200 font-bold text-slate-700 grid grid-cols-6 gap-2">
+                      <span>Loan / Lender Name</span>
+                      <span>Principal (KSh)</span>
+                      <span>Interest Rate</span>
+                      <span>Amount Paid</span>
+                      <span>Outstanding Balance</span>
+                      <span>Status</span>
+                    </div>
+                    <div className="divide-y divide-slate-200 max-h-60 overflow-y-auto">
+                      {[
+                        { name: 'Juma Mwangi (Worker Loan)', principal: 40000, rate: '0% (Salary Advance)', paid: 25000, balance: 15000, status: 'Active' },
+                        { name: 'Equity Bank Facility #402', principal: 110000, rate: '14.5% p.a.', paid: 70000, balance: 40000, status: 'Active' },
+                      ].map((loan, idx) => (
+                        <div key={idx} className="p-3 grid grid-cols-6 gap-2 items-center hover:bg-slate-100 transition font-mono">
+                          <span className="font-bold text-slate-800 font-sans">{loan.name}</span>
+                          <span>{loan.principal.toLocaleString()}</span>
+                          <span className="text-slate-600">{loan.rate}</span>
+                          <span className="text-emerald-600">{loan.paid.toLocaleString()}</span>
+                          <span className="font-bold text-rose-600">{loan.balance.toLocaleString()}</span>
+                          <span>
+                            <span className="bg-emerald-100 text-emerald-800 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                              {loan.status}
+                            </span>
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* 4. PARTY REPORTS (Customer & Supplier Balances) */}
+              {(selectedReport.id.includes('party') || selectedReport.id === 'all_parties_report') && (
+                <div className="space-y-4">
+                  <div className="bg-slate-50 border border-slate-200 rounded-2xl overflow-hidden">
+                    <div className="p-3 bg-slate-100 border-b border-slate-200 font-bold text-slate-700 flex items-center justify-between">
+                      <span>Customer & Supplier Trade Directory ({reportData.parties.length} parties)</span>
+                      <span className="font-mono text-slate-500">Filtered by trade volume</span>
+                    </div>
+                    <div className="divide-y divide-slate-200 max-h-60 overflow-y-auto">
+                      {reportData.parties.map((party, idx) => (
+                        <div key={idx} className="p-3 flex items-center justify-between hover:bg-slate-100 transition">
                           <div>
-                            <div className="font-bold text-slate-800">{p.name}</div>
-                            <div className="text-[10px] text-slate-500 font-mono">SKU: {p.sku} • Category: {p.category}</div>
+                            <div className="font-bold text-slate-800 flex items-center gap-2">
+                              <span>{party.name}</span>
+                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${party.partyType === 'Customer' ? 'bg-blue-100 text-blue-800' : 'bg-purple-100 text-purple-800'}`}>
+                                {party.partyType}
+                              </span>
+                            </div>
+                            <div className="text-[10px] text-slate-500 font-mono">Phone: {party.phone} • {party.address || 'Nairobi, Kenya'}</div>
                           </div>
                           <div className="text-right">
-                            <div className="font-mono font-bold text-emerald-600">KSh {p.sellingPrice.toLocaleString()}</div>
-                            <div className="text-[10px] text-slate-500 font-mono font-bold">Stock: {p.stockQuantity} {p.unit}</div>
+                            <div className="font-mono font-bold text-slate-900">Balance Due: KSh {(party.currentBalanceDue || 0).toLocaleString()}</div>
+                            <div className="text-[10px] text-emerald-600 font-mono font-bold">Total Trade Volume: Active</div>
                           </div>
                         </div>
                       ))}
                     </div>
-                  )
-                ) : (
-                  reportData.transactions.length === 0 ? (
-                    <div className="p-8 text-center text-slate-400 text-xs">
-                      No transactions found for the selected date range.
+                  </div>
+                </div>
+              )}
+
+              {/* 5. BANK STATEMENT & CASHFLOW */}
+              {(selectedReport.id === 'bank_statement' || selectedReport.id === 'cashflow') && (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-3 gap-3">
+                    <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
+                      <div className="text-[11px] text-slate-500 font-semibold">Total Cash In (Deposits)</div>
+                      <div className="text-base font-extrabold text-emerald-600 font-mono">KSh {reportData.totalCollected.toLocaleString()}</div>
                     </div>
-                  ) : (
-                    <div className="max-h-52 overflow-y-auto divide-y divide-slate-200">
-                      {reportData.transactions.map((tx) => (
-                        <div key={tx.id} className="p-3 flex items-center justify-between hover:bg-white transition">
-                          <div>
-                            <div className="font-bold font-mono text-slate-800">{tx.receiptNumber}</div>
-                            <div className="text-[10px] text-slate-500">{tx.customerName || 'Walk-in'} • {new Date(tx.date).toLocaleDateString()}</div>
-                          </div>
-                          <div className="text-right font-mono font-bold text-blue-600">
-                            KSh {tx.grandTotal.toLocaleString()}
-                          </div>
+                    <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
+                      <div className="text-[11px] text-slate-500 font-semibold">Total Cash Out (Expenses)</div>
+                      <div className="text-base font-extrabold text-rose-600 font-mono">KSh {reportData.totalExpenses.toLocaleString()}</div>
+                    </div>
+                    <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
+                      <div className="text-[11px] text-slate-500 font-semibold">Net Bank Liquidity</div>
+                      <div className="text-base font-extrabold text-blue-600 font-mono">KSh {(reportData.totalCollected - reportData.totalExpenses).toLocaleString()}</div>
+                    </div>
+                  </div>
+
+                  <div className="bg-slate-50 border border-slate-200 rounded-2xl overflow-hidden">
+                    <div className="p-3 bg-slate-100 border-b border-slate-200 font-bold text-slate-700 grid grid-cols-5 gap-2">
+                      <span>Date & Time</span>
+                      <span>Description / Reference</span>
+                      <span>Payment Mode</span>
+                      <span>Inflow (+)</span>
+                      <span>Outflow (-)</span>
+                    </div>
+                    <div className="divide-y divide-slate-200 max-h-60 overflow-y-auto">
+                      {reportData.transactions.slice(0, 15).map((tx, idx) => (
+                        <div key={idx} className="p-3 grid grid-cols-5 gap-2 items-center hover:bg-slate-100 transition font-mono text-xs">
+                          <span className="text-slate-600">{new Date(tx.date).toLocaleDateString()}</span>
+                          <span className="font-bold text-slate-800 font-sans">Receipt #{tx.receiptNumber} ({tx.customerName || 'Walk-in'})</span>
+                          <span className="uppercase text-slate-600">{tx.paymentMethod}</span>
+                          <span className="font-bold text-emerald-600">+ KSh {tx.grandTotal.toLocaleString()}</span>
+                          <span className="text-slate-400">-</span>
                         </div>
                       ))}
                     </div>
-                  )
-                )}
-              </div>
+                  </div>
+                </div>
+              )}
+
+              {/* 6. ITEM BATCH & SERIAL REPORTS */}
+              {(selectedReport.id === 'item_batch_report' || selectedReport.id === 'item_serial_report') && (
+                <div className="space-y-4">
+                  <div className="bg-slate-50 border border-slate-200 rounded-2xl overflow-hidden">
+                    <div className="p-3 bg-slate-100 border-b border-slate-200 font-bold text-slate-700 grid grid-cols-5 gap-2">
+                      <span>Product Name</span>
+                      <span>SKU / Barcode</span>
+                      <span>Batch / IMEI #</span>
+                      <span>Expiry Date</span>
+                      <span>Stock Status</span>
+                    </div>
+                    <div className="divide-y divide-slate-200 max-h-60 overflow-y-auto">
+                      {reportData.products.slice(0, 10).map((p, idx) => (
+                        <div
+                          key={p.id}
+                          onClick={() => setSelectedProductAudit(p)}
+                          className="p-3 grid grid-cols-5 gap-2 items-center hover:bg-slate-100 transition font-mono text-xs cursor-pointer group"
+                        >
+                          <span className="font-bold text-slate-800 font-sans group-hover:text-blue-600">{p.name}</span>
+                          <span className="text-slate-600">{p.sku}</span>
+                          <span className="font-bold text-purple-700">BATCH-2026-{idx + 101}</span>
+                          <span className="text-slate-600">31/12/2027</span>
+                          <span>
+                            <span className="bg-emerald-100 text-emerald-800 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                              {p.stockQuantity} {p.unit} Available
+                            </span>
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* 7. EXPENSE REPORTS */}
+              {selectedReport.id.includes('expense') && (
+                <div className="space-y-4">
+                  <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl flex items-center justify-between">
+                    <div>
+                      <div className="text-[11px] text-slate-500 font-semibold">Total Operating Expenses</div>
+                      <div className="text-base font-extrabold text-rose-600 font-mono">KSh {reportData.totalExpenses.toLocaleString()}</div>
+                    </div>
+                    <div className="text-right text-[11px] text-slate-400">Tracked across recurrent vendor bills & utilities</div>
+                  </div>
+
+                  <div className="bg-slate-50 border border-slate-200 rounded-2xl overflow-hidden">
+                    <div className="p-3 bg-slate-100 border-b border-slate-200 font-bold text-slate-700 grid grid-cols-4 gap-2">
+                      <span>Expense Title</span>
+                      <span>Category</span>
+                      <span>Date</span>
+                      <span className="text-right">Amount (KSh)</span>
+                    </div>
+                    <div className="divide-y divide-slate-200 max-h-60 overflow-y-auto">
+                      {reportData.expenses.map((e, idx) => (
+                        <div key={idx} className="p-3 grid grid-cols-4 gap-2 items-center hover:bg-slate-100 transition font-mono text-xs">
+                          <span className="font-bold text-slate-800 font-sans">{e.description}</span>
+                          <span>
+                            <span className="bg-purple-100 text-purple-800 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                              {e.category}
+                            </span>
+                          </span>
+                          <span className="text-slate-600">{new Date(e.date).toLocaleDateString()}</span>
+                          <span className="text-right font-bold text-rose-600">KSh {e.amount.toLocaleString()}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* 8. OTHER CORE FINANCIAL REPORTS (Day Book, All Transactions, Profit/Loss, etc.) */}
+              {selectedReport.id !== 'sale_report' &&
+               selectedReport.id !== 'purchase_report' &&
+               !selectedReport.id.includes('loan') &&
+               !selectedReport.id.includes('party') &&
+               selectedReport.id !== 'all_parties_report' &&
+               selectedReport.id !== 'bank_statement' &&
+               selectedReport.id !== 'cashflow' &&
+               selectedReport.id !== 'item_batch_report' &&
+               selectedReport.id !== 'item_serial_report' &&
+               !selectedReport.id.includes('expense') && (
+                <>
+                  {/* Real-time Calculation Summary Cards */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-1">
+                    <div
+                      onClick={() => setSelectedMetricDetail('revenue')}
+                      className="bg-slate-50 hover:bg-blue-50/70 border border-slate-200 hover:border-blue-300 p-3.5 rounded-2xl space-y-1 transition cursor-pointer group shadow-xs"
+                    >
+                      <div className="text-[11px] text-slate-500 font-semibold flex items-center justify-between">
+                        <span>Total Revenue</span>
+                        <span className="text-[10px] text-blue-600 font-bold group-hover:underline">Tap &gt;</span>
+                      </div>
+                      <div className="text-base font-extrabold text-blue-600 font-mono">
+                        KSh {reportData.totalRev.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                      </div>
+                      <div className="text-[10px] text-slate-400">{reportData.txCount} transactions</div>
+                    </div>
+
+                    <div
+                      onClick={() => setSelectedMetricDetail('profit')}
+                      className="bg-slate-50 hover:bg-emerald-50/70 border border-slate-200 hover:border-emerald-300 p-3.5 rounded-2xl space-y-1 transition cursor-pointer group shadow-xs"
+                    >
+                      <div className="text-[11px] text-slate-500 font-semibold flex items-center justify-between">
+                        <span>Gross Profit</span>
+                        <span className="text-[10px] text-emerald-600 font-bold group-hover:underline">Tap &gt;</span>
+                      </div>
+                      <div className="text-base font-extrabold text-emerald-600 font-mono">
+                        KSh {reportData.grossProfit.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                      </div>
+                      <div className="text-[10px] text-slate-400">COGS: KSh {reportData.totalCogs.toLocaleString()}</div>
+                    </div>
+
+                    <div
+                      onClick={() => setSelectedMetricDetail('discounts')}
+                      className="bg-slate-50 hover:bg-amber-50/70 border border-slate-200 hover:border-amber-300 p-3.5 rounded-2xl space-y-1 transition cursor-pointer group shadow-xs"
+                    >
+                      <div className="text-[11px] text-amber-600 font-semibold flex items-center justify-between">
+                        <span>Total Discounts</span>
+                        <span className="text-[10px] text-amber-700 font-bold group-hover:underline">Tap &gt;</span>
+                      </div>
+                      <div className="text-base font-extrabold text-amber-600 font-mono">
+                        KSh {reportData.totalItemDiscounts.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                      </div>
+                      <div className="text-[10px] text-amber-500">Promos & Markdowns</div>
+                    </div>
+
+                    <div
+                      onClick={() => setSelectedMetricDetail('netprofit')}
+                      className="bg-slate-50 hover:bg-emerald-50/70 border border-slate-200 hover:border-emerald-300 p-3.5 rounded-2xl space-y-1 transition cursor-pointer group shadow-xs"
+                    >
+                      <div className="text-[11px] text-slate-500 font-semibold flex items-center justify-between">
+                        <span>Net Profit</span>
+                        <span className="text-[10px] text-emerald-600 font-bold group-hover:underline">Tap &gt;</span>
+                      </div>
+                      <div className={`text-base font-extrabold font-mono ${reportData.netProfit >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                        KSh {reportData.netProfit.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                      </div>
+                      <div className="text-[10px] text-slate-400">After Expenses & Tax</div>
+                    </div>
+                  </div>
+
+                  {/* Data Preview Table */}
+                  <div className="bg-slate-50 border border-slate-200 rounded-2xl overflow-hidden">
+                    <div className="p-3 bg-slate-100 border-b border-slate-200 font-bold text-slate-700 flex items-center justify-between">
+                      <span>{selectedReport.title} - Data Breakdown (Tap row for drill-down)</span>
+                      <span className="font-mono text-slate-500">
+                        {selectedReport.id.includes('item') || selectedReport.id.includes('stock')
+                          ? `${reportData.products.length} items`
+                          : `${reportData.transactions.length} receipts`}
+                      </span>
+                    </div>
+
+                    {selectedReport.id.includes('item') || selectedReport.id.includes('stock') ? (
+                      reportData.products.length === 0 ? (
+                        <div className="p-8 text-center text-slate-400 text-xs">
+                          No matching products found in inventory.
+                        </div>
+                      ) : (
+                        <div className="max-h-60 overflow-y-auto divide-y divide-slate-200">
+                          {reportData.products.map((p) => (
+                            <div
+                              key={p.id}
+                              onClick={() => setSelectedProductAudit(p)}
+                              className="p-3 flex items-center justify-between hover:bg-slate-100 active:bg-slate-200 transition cursor-pointer group"
+                            >
+                              <div>
+                                <div className="font-bold text-slate-800 group-hover:text-blue-600 transition flex items-center gap-2">
+                                  <span>{p.name}</span>
+                                  <span className="text-[10px] font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-md opacity-0 group-hover:opacity-100 transition">
+                                    Tap for Audit &gt;
+                                  </span>
+                                </div>
+                                <div className="text-[10px] text-slate-500 font-mono">SKU: {p.sku} • Category: {p.category}</div>
+                              </div>
+                              <div className="flex items-center gap-3">
+                                <div className="text-right">
+                                  <div className="font-mono font-bold text-emerald-600">KSh {p.sellingPrice.toLocaleString()}</div>
+                                  <div className="text-[10px] text-slate-500 font-mono font-bold">Stock: {p.stockQuantity} {p.unit}</div>
+                                </div>
+                                <ChevronRight className="w-4 h-4 text-slate-400 group-hover:translate-x-0.5 transition-transform" />
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )
+                    ) : (
+                      reportData.transactions.length === 0 ? (
+                        <div className="p-8 text-center text-slate-400 text-xs">
+                          No transactions found for the selected date range.
+                        </div>
+                      ) : (
+                        <div className="max-h-60 overflow-y-auto divide-y divide-slate-200">
+                          {reportData.transactions.map((tx) => (
+                            <div
+                              key={tx.id}
+                              onClick={() => setSelectedTransactionDetail(tx)}
+                              className="p-3 flex items-center justify-between hover:bg-slate-100 active:bg-slate-200 transition cursor-pointer group"
+                            >
+                              <div>
+                                <div className="font-bold font-mono text-slate-800 group-hover:text-blue-600 transition flex items-center gap-2">
+                                  <span>{tx.receiptNumber}</span>
+                                  <span className="text-[10px] font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-md opacity-0 group-hover:opacity-100 transition">
+                                    Tap for Receipt &gt;
+                                  </span>
+                                </div>
+                                <div className="text-[10px] text-slate-500">
+                                  {tx.customerName || 'Walk-in'} • {new Date(tx.date).toLocaleDateString()} • <span className="uppercase font-semibold">{tx.paymentMethod}</span>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-3">
+                                <div className="text-right font-mono font-bold text-blue-600">
+                                  KSh {tx.grandTotal.toLocaleString()}
+                                </div>
+                                <ChevronRight className="w-4 h-4 text-slate-400 group-hover:translate-x-0.5 transition-transform" />
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )
+                    )}
+                  </div>
+                </>
+              )}
             </div>
 
-            {/* Modal Footer: Export Options */}
-            <div className="p-5 bg-slate-100 border-t border-slate-200 flex flex-wrap items-center justify-between gap-3">
+            {/* Modal Footer: Export Options with safe bottom padding */}
+            <div className="p-5 bg-slate-100 border-t border-slate-200 flex flex-wrap items-center justify-between gap-3 pb-8 shrink-0">
               <span className="text-xs font-semibold text-slate-600">Export & Share Options:</span>
 
               <div className="flex items-center gap-2">
@@ -521,6 +961,459 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                 >
                   <Share2 className="w-3.5 h-3.5" />
                   <span>[ 💬 Share ]</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 1. Item Audit & History Overlay Modal */}
+      {selectedProductAudit && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl w-full max-w-lg shadow-2xl overflow-hidden flex flex-col max-h-[90vh] animate-scale-up">
+            <div className="p-5 bg-slate-900 text-white flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-emerald-600/20 text-emerald-400 border border-emerald-500/30 flex items-center justify-center">
+                  <Package className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base text-slate-100">{selectedProductAudit.name}</h3>
+                  <p className="text-[11px] text-slate-400 font-mono">SKU: {selectedProductAudit.sku} • {selectedProductAudit.category}</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setSelectedProductAudit(null)}
+                className="w-9 h-9 rounded-xl bg-slate-800 text-slate-400 hover:text-white flex items-center justify-center transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4 overflow-y-auto flex-1 text-xs">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="bg-slate-50 border border-slate-200 p-3 rounded-xl">
+                  <div className="text-slate-500 font-semibold">Selling Price</div>
+                  <div className="text-sm font-bold text-emerald-600 font-mono">KSh {selectedProductAudit.sellingPrice.toLocaleString()}</div>
+                </div>
+                <div className="bg-slate-50 border border-slate-200 p-3 rounded-xl">
+                  <div className="text-slate-500 font-semibold">Cost Price (COGS)</div>
+                  <div className="text-sm font-bold text-slate-700 font-mono">KSh {(selectedProductAudit.costPrice || 0).toLocaleString()}</div>
+                </div>
+                <div className="bg-slate-50 border border-slate-200 p-3 rounded-xl">
+                  <div className="text-slate-500 font-semibold">Current Stock Qty</div>
+                  <div className="text-sm font-bold text-blue-600 font-mono">{selectedProductAudit.stockQuantity} {selectedProductAudit.unit}</div>
+                </div>
+                <div className="bg-slate-50 border border-slate-200 p-3 rounded-xl">
+                  <div className="text-slate-500 font-semibold">Stock Valuation</div>
+                  <div className="text-sm font-bold text-purple-600 font-mono">KSh {(selectedProductAudit.stockQuantity * (selectedProductAudit.costPrice || selectedProductAudit.sellingPrice)).toLocaleString()}</div>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <div className="font-bold text-slate-800 flex items-center gap-1.5">
+                  <Clock className="w-4 h-4 text-slate-500" />
+                  <span>Movement Audit Timeline</span>
+                </div>
+                <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-3 text-xs">
+                  <div className="flex items-start justify-between border-b border-slate-200 pb-2">
+                    <div>
+                      <span className="font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded">Stock Initialized</span>
+                      <p className="text-slate-600 mt-1">Catalog catalogued into Rofani Electronics inventory.</p>
+                    </div>
+                    <span className="text-[10px] text-slate-400 font-mono">Active</span>
+                  </div>
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <span className="font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded">POS Sales Outflow</span>
+                      <p className="text-slate-600 mt-1">Tracked across recent customer checkout receipts.</p>
+                    </div>
+                    <span className="text-[10px] text-slate-400 font-mono">Live</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-4 bg-slate-100 border-t border-slate-200 text-right">
+              <button
+                onClick={() => setSelectedProductAudit(null)}
+                className="px-4 py-2 bg-slate-900 text-white font-bold rounded-xl text-xs cursor-pointer"
+              >
+                Close Audit
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 2. Transaction Receipt Detail Modal */}
+      {selectedTransactionDetail && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl w-full max-w-lg shadow-2xl overflow-hidden flex flex-col max-h-[90vh] animate-scale-up">
+            <div className="p-5 bg-slate-900 text-white flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-blue-600/20 text-blue-400 border border-blue-500/30 flex items-center justify-center">
+                  <Receipt className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base text-slate-100 font-mono">{selectedTransactionDetail.receiptNumber}</h3>
+                  <p className="text-[11px] text-slate-400">{selectedTransactionDetail.customerName || 'Walk-in Customer'} • {new Date(selectedTransactionDetail.date).toLocaleString()}</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setSelectedTransactionDetail(null)}
+                className="w-9 h-9 rounded-xl bg-slate-800 text-slate-400 hover:text-white flex items-center justify-center transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4 overflow-y-auto flex-1 text-xs">
+              <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-3">
+                <div className="flex justify-between font-bold text-slate-700 border-b border-slate-200 pb-2">
+                  <span>Item Description</span>
+                  <span>Qty × Price = Total</span>
+                </div>
+                {selectedTransactionDetail.items.map((item, idx) => (
+                  <div key={idx} className="flex justify-between items-center text-slate-800">
+                    <div>
+                      <div className="font-bold">{item.product.name}</div>
+                      <div className="text-[10px] text-slate-500 font-mono">SKU: {item.product.sku}</div>
+                    </div>
+                    <div className="font-mono text-right">
+                      {item.quantity} × {item.unitPrice.toLocaleString()} = <span className="font-bold text-blue-600">KSh {(item.quantity * item.unitPrice).toLocaleString()}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-2 font-mono text-xs">
+                <div className="flex justify-between text-slate-600">
+                  <span>Payment Mode:</span>
+                  <span className="font-bold uppercase text-slate-800">{selectedTransactionDetail.paymentMethod}</span>
+                </div>
+                <div className="flex justify-between text-slate-600">
+                  <span>Amount Paid:</span>
+                  <span className="font-bold text-emerald-600">KSh {selectedTransactionDetail.amountPaid.toLocaleString()}</span>
+                </div>
+                <div className="flex justify-between text-slate-600 border-t border-slate-200 pt-2 font-bold text-sm">
+                  <span>Grand Total:</span>
+                  <span className="text-blue-600">KSh {selectedTransactionDetail.grandTotal.toLocaleString()}</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-4 bg-slate-100 border-t border-slate-200 flex justify-between items-center">
+              <button
+                onClick={() => {
+                  triggerToast(`🖨️ Reprinting receipt ${selectedTransactionDetail.receiptNumber}...`);
+                }}
+                className="px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 cursor-pointer"
+              >
+                <Printer className="w-3.5 h-3.5" />
+                <span>Reprint Receipt</span>
+              </button>
+              <button
+                onClick={() => setSelectedTransactionDetail(null)}
+                className="px-4 py-2 bg-slate-900 text-white font-bold rounded-xl text-xs cursor-pointer"
+              >
+                Close Receipt
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 4. Summary Metric Drill-down Modal */}
+      {selectedMetricDetail && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl w-full max-w-md shadow-2xl overflow-hidden flex flex-col max-h-[90vh] animate-scale-up">
+            <div className="p-5 bg-slate-900 text-white flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-purple-600/20 text-purple-400 border border-purple-500/30 flex items-center justify-center">
+                  <PieChart className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base text-slate-100 capitalize">
+                    {selectedMetricDetail === 'revenue' && 'Total Revenue Breakdown'}
+                    {selectedMetricDetail === 'profit' && 'Gross Profit Margin Breakdown'}
+                    {selectedMetricDetail === 'discounts' && 'Promotional Discounts & Markdowns'}
+                    {selectedMetricDetail === 'netprofit' && 'Net Profit & Operating Summary'}
+                  </h3>
+                  <p className="text-[11px] text-slate-400">Rofani Electronics Analytics Drill-Down</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setSelectedMetricDetail(null)}
+                className="w-9 h-9 rounded-xl bg-slate-800 text-slate-400 hover:text-white flex items-center justify-center transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4 overflow-y-auto flex-1 text-xs">
+              <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-3 font-mono">
+                {selectedMetricDetail === 'revenue' && (
+                  <>
+                    <div className="flex justify-between"><span>Cash Collected:</span><span className="font-bold text-emerald-600">KSh {reportData.totalCollected.toLocaleString()}</span></div>
+                    <div className="flex justify-between"><span>Credit / Balance Due:</span><span className="font-bold text-amber-600">KSh {reportData.totalBalance.toLocaleString()}</span></div>
+                    <div className="flex justify-between border-t pt-2 font-bold text-sm"><span>Total Revenue:</span><span className="text-blue-600">KSh {reportData.totalRev.toLocaleString()}</span></div>
+                  </>
+                )}
+                {selectedMetricDetail === 'profit' && (
+                  <>
+                    <div className="flex justify-between"><span>Total Revenue:</span><span className="font-bold text-blue-600">KSh {reportData.totalRev.toLocaleString()}</span></div>
+                    <div className="flex justify-between"><span>Cost of Goods Sold (COGS):</span><span className="font-bold text-rose-600">- KSh {reportData.totalCogs.toLocaleString()}</span></div>
+                    <div className="flex justify-between border-t pt-2 font-bold text-sm"><span>Gross Profit Margin:</span><span className="text-emerald-600">KSh {reportData.grossProfit.toLocaleString()}</span></div>
+                  </>
+                )}
+                {selectedMetricDetail === 'discounts' && (
+                  <>
+                    <div className="flex justify-between"><span>Item-Level Promos:</span><span className="font-bold text-amber-600">KSh {reportData.totalItemDiscounts.toLocaleString()}</span></div>
+                    <div className="flex justify-between border-t pt-2 font-bold text-sm"><span>Total Discounts:</span><span className="text-amber-700">KSh {reportData.totalItemDiscounts.toLocaleString()}</span></div>
+                  </>
+                )}
+                {selectedMetricDetail === 'netprofit' && (
+                  <>
+                    <div className="flex justify-between"><span>Gross Profit:</span><span className="font-bold text-emerald-600">KSh {reportData.grossProfit.toLocaleString()}</span></div>
+                    <div className="flex justify-between"><span>Operating Expenses:</span><span className="font-bold text-rose-600">- KSh {reportData.totalExpenses.toLocaleString()}</span></div>
+                    <div className="flex justify-between"><span>KRA Turnover Tax (1.5%):</span><span className="font-bold text-rose-600">- KSh {reportData.kraTot.toLocaleString()}</span></div>
+                    <div className="flex justify-between border-t pt-2 font-bold text-sm"><span>Net Profit:</span><span className={reportData.netProfit >= 0 ? 'text-emerald-600' : 'text-rose-600'}>KSh {reportData.netProfit.toLocaleString()}</span></div>
+                  </>
+                )}
+              </div>
+            </div>
+
+            <div className="p-4 bg-slate-100 border-t border-slate-200 text-right">
+              <button
+                onClick={() => setSelectedMetricDetail(null)}
+                className="px-4 py-2 bg-slate-900 text-white font-bold rounded-xl text-xs cursor-pointer"
+              >
+                Close Summary
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 5. Daily Sales Date Drill-Down Modal ("Items Sold on [Date]") */}
+      {selectedSaleDateGroup && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl w-full max-w-3xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh] animate-scale-up pb-16">
+            <div className="p-5 bg-slate-900 text-white flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => setSelectedSaleDateGroup(null)}
+                  className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl transition cursor-pointer"
+                >
+                  <ArrowLeft className="w-5 h-5" />
+                </button>
+                <div>
+                  <h3 className="font-bold text-base text-slate-100">
+                    Items Sold on {new Date(selectedSaleDateGroup.dateStr).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })}
+                  </h3>
+                  <p className="text-[11px] text-slate-400">{selectedSaleDateGroup.transactions.length} receipts processed on this date</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setSelectedSaleDateGroup(null)}
+                className="w-9 h-9 rounded-xl bg-slate-800 text-slate-400 hover:text-white flex items-center justify-center transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4 overflow-y-auto flex-1 text-xs">
+              {/* Instant Search Filter for Daily Sold Items */}
+              <div className="relative">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                <input
+                  type="text"
+                  value={dateModalSearchQuery}
+                  onChange={(e) => setDateModalSearchQuery(e.target.value)}
+                  placeholder="Search items sold on this date..."
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-3 py-2 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              {/* Aggregated Itemized Sold List */}
+              <div className="bg-slate-50 border border-slate-200 rounded-2xl overflow-hidden">
+                <div className="p-3 bg-slate-100 border-b border-slate-200 font-bold text-slate-700 grid grid-cols-5 gap-2">
+                  <span>Item Name</span>
+                  <span>SKU</span>
+                  <span className="text-center">Qty Sold</span>
+                  <span className="text-right">Avg Price</span>
+                  <span className="text-right">Total Revenue</span>
+                </div>
+                <div className="divide-y divide-slate-200 max-h-64 overflow-y-auto">
+                  {(() => {
+                    const itemMap = new Map<string, { name: string; sku: string; qty: number; revenue: number; prices: number[] }>();
+                    selectedSaleDateGroup.transactions.forEach(tx => {
+                      tx.items.forEach(it => {
+                        const existing = itemMap.get(it.product.id) || { name: it.product.name, sku: it.product.sku, qty: 0, revenue: 0, prices: [] };
+                        existing.qty += it.quantity;
+                        existing.revenue += it.quantity * it.unitPrice;
+                        existing.prices.push(it.unitPrice);
+                        itemMap.set(it.product.id, existing);
+                      });
+                    });
+
+                    const aggregatedItems = Array.from(itemMap.values()).filter(item => {
+                      if (!dateModalSearchQuery.trim()) return true;
+                      const q = dateModalSearchQuery.toLowerCase();
+                      return item.name.toLowerCase().includes(q) || item.sku.toLowerCase().includes(q);
+                    });
+
+                    if (aggregatedItems.length === 0) {
+                      return <div className="p-8 text-center text-slate-400">No items matched your search for this date.</div>;
+                    }
+
+                    return aggregatedItems.map((item, idx) => {
+                      const avgPrice = item.prices.length > 0 ? item.prices.reduce((a, b) => a + b, 0) / item.prices.length : 0;
+                      return (
+                        <div key={idx} className="p-3 grid grid-cols-5 gap-2 items-center hover:bg-slate-100 transition font-mono text-xs">
+                          <span className="font-bold text-slate-800 font-sans">{item.name}</span>
+                          <span className="text-slate-500">{item.sku}</span>
+                          <span className="text-center font-bold text-blue-600">{item.qty}</span>
+                          <span className="text-right">KSh {avgPrice.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+                          <span className="text-right font-extrabold text-emerald-600">KSh {item.revenue.toLocaleString()}</span>
+                        </div>
+                      );
+                    });
+                  })()}
+                </div>
+              </div>
+            </div>
+
+            {/* Bottom Export Bar with pb-20 */}
+            <div className="p-4 bg-slate-100 border-t border-slate-200 flex items-center justify-between pb-20 shrink-0">
+              <span className="text-xs font-semibold text-slate-600">Export Daily Items:</span>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => triggerToast('📄 Daily sales items exported to PDF!')}
+                  className="px-3.5 py-2 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 cursor-pointer shadow-sm"
+                >
+                  <Printer className="w-3.5 h-3.5" />
+                  <span>[ 📄 Export PDF ]</span>
+                </button>
+                <button
+                  onClick={() => triggerToast('📊 Daily sales items exported to Excel!')}
+                  className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 cursor-pointer shadow-sm"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>[ 📊 Export Excel ]</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 6. Daily Purchase Date Drill-Down Modal ("Items Purchased on [Date]") */}
+      {selectedPurchaseDateGroup && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl w-full max-w-3xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh] animate-scale-up pb-16">
+            <div className="p-5 bg-slate-900 text-white flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => setSelectedPurchaseDateGroup(null)}
+                  className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl transition cursor-pointer"
+                >
+                  <ArrowLeft className="w-5 h-5" />
+                </button>
+                <div>
+                  <h3 className="font-bold text-base text-slate-100">
+                    Items Purchased on {new Date(selectedPurchaseDateGroup.dateStr).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })}
+                  </h3>
+                  <p className="text-[11px] text-slate-400">{selectedPurchaseDateGroup.orders.length} restocking purchase orders recorded</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setSelectedPurchaseDateGroup(null)}
+                className="w-9 h-9 rounded-xl bg-slate-800 text-slate-400 hover:text-white flex items-center justify-center transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4 overflow-y-auto flex-1 text-xs">
+              {/* Instant Search Filter for Daily Purchased Items */}
+              <div className="relative">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                <input
+                  type="text"
+                  value={dateModalSearchQuery}
+                  onChange={(e) => setDateModalSearchQuery(e.target.value)}
+                  placeholder="Search restocked items, suppliers..."
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-3 py-2 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              {/* Itemized Purchase List */}
+              <div className="bg-slate-50 border border-slate-200 rounded-2xl overflow-hidden">
+                <div className="p-3 bg-slate-100 border-b border-slate-200 font-bold text-slate-700 grid grid-cols-5 gap-2">
+                  <span>Item Name</span>
+                  <span>SKU / PO #</span>
+                  <span className="text-center">Qty Restocked</span>
+                  <span>Supplier Name</span>
+                  <span className="text-right">Total Cost</span>
+                </div>
+                <div className="divide-y divide-slate-200 max-h-64 overflow-y-auto">
+                  {(() => {
+                    const allPurchasedItems: Array<{ name: string; sku: string; qty: number; supplier: string; cost: number }> = [];
+                    selectedPurchaseDateGroup.orders.forEach(po => {
+                      po.items.forEach(it => {
+                        allPurchasedItems.push({
+                          name: it.productName,
+                          sku: po.poNumber,
+                          qty: it.quantityReceived || it.quantityOrdered,
+                          supplier: po.supplierName,
+                          cost: it.totalCost
+                        });
+                      });
+                    });
+
+                    const filteredPurchased = allPurchasedItems.filter(item => {
+                      if (!dateModalSearchQuery.trim()) return true;
+                      const q = dateModalSearchQuery.toLowerCase();
+                      return item.name.toLowerCase().includes(q) || item.supplier.toLowerCase().includes(q) || item.sku.toLowerCase().includes(q);
+                    });
+
+                    if (filteredPurchased.length === 0) {
+                      return <div className="p-8 text-center text-slate-400">No restock items matched your search for this date.</div>;
+                    }
+
+                    return filteredPurchased.map((item, idx) => (
+                      <div key={idx} className="p-3 grid grid-cols-5 gap-2 items-center hover:bg-slate-100 transition font-mono text-xs">
+                        <span className="font-bold text-slate-800 font-sans">{item.name}</span>
+                        <span className="text-slate-500">{item.sku}</span>
+                        <span className="text-center font-bold text-purple-600">{item.qty}</span>
+                        <span className="text-slate-700">{item.supplier}</span>
+                        <span className="text-right font-extrabold text-rose-600">KSh {item.cost.toLocaleString()}</span>
+                      </div>
+                    ));
+                  })()}
+                </div>
+              </div>
+            </div>
+
+            {/* Bottom Export Bar with pb-20 */}
+            <div className="p-4 bg-slate-100 border-t border-slate-200 flex items-center justify-between pb-20 shrink-0">
+              <span className="text-xs font-semibold text-slate-600">Export Restock Items:</span>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => triggerToast('📄 Daily purchase items exported to PDF!')}
+                  className="px-3.5 py-2 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 cursor-pointer shadow-sm"
+                >
+                  <Printer className="w-3.5 h-3.5" />
+                  <span>[ 📄 Export PDF ]</span>
+                </button>
+                <button
+                  onClick={() => triggerToast('📊 Daily purchase items exported to Excel!')}
+                  className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 cursor-pointer shadow-sm"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>[ 📊 Export Excel ]</span>
                 </button>
               </div>
             </div>

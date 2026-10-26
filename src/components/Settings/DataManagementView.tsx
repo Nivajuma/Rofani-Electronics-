@@ -49,6 +49,9 @@ interface DataManagementViewProps {
   expenses: Expense[];
   attendanceRecords: AttendanceRecord[];
   allUsers: User[];
+  onAddUser?: (newUser: User) => void;
+  onUpdateUser?: (updatedUser: User) => void;
+  onDeleteUser?: (userId: string) => void;
   stores?: StoreLocation[];
   onOpenStoreManager?: () => void;
   onImportData: (data: any) => void;

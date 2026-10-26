@@ -168,7 +168,7 @@ export const ItemSettingsView: React.FC<ItemSettingsViewProps> = ({ onBack }) =>
   );
 
   return (
-    <div className="min-h-screen bg-[#F1F5F9] text-slate-900 pb-16 font-sans">
+    <div className="min-h-screen bg-slate-950 text-slate-100 pb-16 font-sans">
       {/* Header */}
       <div className="sticky top-0 z-30 bg-slate-900 text-white shadow-md px-4 py-3.5 flex items-center justify-between gap-3">
         <div className="flex items-center gap-3">
@@ -208,23 +208,23 @@ export const ItemSettingsView: React.FC<ItemSettingsViewProps> = ({ onBack }) =>
       {/* Clean List with Info Badges */}
       <div className="max-w-2xl mx-auto px-4 py-6 space-y-3">
         {filteredItems.length === 0 ? (
-          <div className="bg-white rounded-2xl p-12 text-center text-slate-500 shadow-sm border border-slate-200 text-xs">
+          <div className="bg-slate-900 rounded-2xl p-12 text-center text-slate-400 shadow-sm border border-slate-800 text-xs">
             No item settings found matching "{searchQuery}".
           </div>
         ) : (
           filteredItems.map((item) => (
             <div
               key={item.key}
-              className="bg-white rounded-2xl p-4 shadow-sm border border-slate-200/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:border-slate-300 transition"
+              className="bg-slate-900 rounded-2xl p-4 shadow-sm border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:border-slate-700 transition"
             >
               <div className="space-y-1 flex-1 pr-2">
                 <div className="flex items-center gap-2">
-                  <span className="font-bold text-sm text-slate-800">{item.label}</span>
-                  <div title={item.description} className="cursor-pointer text-slate-400 hover:text-blue-600 transition">
+                  <span className="font-bold text-sm text-slate-100">{item.label}</span>
+                  <div title={item.description} className="cursor-pointer text-slate-400 hover:text-blue-400 transition">
                     <Info className="w-4 h-4" />
                   </div>
                 </div>
-                <p className="text-xs text-slate-500 leading-relaxed">{item.description}</p>
+                <p className="text-xs text-slate-400 leading-relaxed">{item.description}</p>
               </div>
 
               {/* Controls */}
@@ -237,7 +237,7 @@ export const ItemSettingsView: React.FC<ItemSettingsViewProps> = ({ onBack }) =>
                       onChange={(e) => updateSetting(item.key, e.target.checked as any)}
                       className="sr-only peer"
                     />
-                    <div className="w-11 h-6 bg-slate-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                    <div className="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
                   </label>
                 )}
 
@@ -245,7 +245,7 @@ export const ItemSettingsView: React.FC<ItemSettingsViewProps> = ({ onBack }) =>
                   <select
                     value={String(item.value)}
                     onChange={(e) => updateSetting(item.key, e.target.value as any)}
-                    className="bg-slate-50 border border-slate-300 text-slate-800 font-semibold text-xs rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="bg-slate-950 border border-slate-700 text-slate-100 font-semibold text-xs rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
                     {item.options?.map((opt) => (
                       <option key={opt} value={opt}>
@@ -256,23 +256,23 @@ export const ItemSettingsView: React.FC<ItemSettingsViewProps> = ({ onBack }) =>
                 )}
 
                 {item.type === 'stepper' && (
-                  <div className="flex items-center gap-2 bg-slate-100 border border-slate-300 rounded-xl px-2 py-1">
+                  <div className="flex items-center gap-2 bg-slate-950 border border-slate-700 rounded-xl px-2 py-1">
                     <button
                       onClick={() =>
                         updateSetting(item.key, Math.max(0, Number(item.value) - 1) as any)
                       }
-                      className="w-7 h-7 rounded-lg bg-white text-slate-700 font-bold shadow-xs hover:bg-slate-50 flex items-center justify-center cursor-pointer"
+                      className="w-7 h-7 rounded-lg bg-slate-800 text-slate-200 font-bold shadow-xs hover:bg-slate-700 flex items-center justify-center cursor-pointer"
                     >
                       -
                     </button>
-                    <span className="w-6 text-center font-mono font-bold text-slate-800 text-sm">
+                    <span className="w-6 text-center font-mono font-bold text-slate-100 text-sm">
                       {String(item.value)}
                     </span>
                     <button
                       onClick={() =>
                         updateSetting(item.key, Math.min(6, Number(item.value) + 1) as any)
                       }
-                      className="w-7 h-7 rounded-lg bg-white text-slate-700 font-bold shadow-xs hover:bg-slate-50 flex items-center justify-center cursor-pointer"
+                      className="w-7 h-7 rounded-lg bg-slate-800 text-slate-200 font-bold shadow-xs hover:bg-slate-700 flex items-center justify-center cursor-pointer"
                     >
                       +
                     </button>

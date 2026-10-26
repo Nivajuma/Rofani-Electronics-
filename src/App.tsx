@@ -2436,6 +2436,9 @@ export default function App() {
           expenses={expenses}
           attendanceRecords={attendanceRecords}
           allUsers={allUsers}
+          onAddUser={handleAddUser}
+          onUpdateUser={handleUpdateUser}
+          onDeleteUser={handleDeleteUser}
           onImportData={handleImportData}
           onResetSampleData={handleResetData}
           onClearTransactions={handleClearTransactions}

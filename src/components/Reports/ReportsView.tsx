@@ -320,7 +320,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   };
 
   return (
-    <div className="min-h-screen bg-[#F1F5F9] text-slate-900 pb-28 font-sans">
+    <div className="min-h-screen bg-slate-950 text-slate-100 pb-28 font-sans">
       {/* Sticky Header Bar */}
       <div className="sticky top-0 z-30 bg-slate-900 text-white shadow-md px-4 py-3.5 flex items-center justify-between gap-3">
         <div className="flex items-center gap-3">
@@ -362,17 +362,17 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
       {/* Main Content: Grouped Cards */}
       <div className="max-w-4xl mx-auto px-4 py-6 space-y-6 mb-12">
         {filteredGroups.length === 0 ? (
-          <div className="bg-white rounded-2xl p-12 text-center text-slate-500 shadow-sm border border-slate-200 text-xs">
+          <div className="bg-slate-900 rounded-2xl p-12 text-center text-slate-400 shadow-sm border border-slate-800 text-xs">
             No reports found matching "{searchQuery}".
           </div>
         ) : (
           filteredGroups.map((group, groupIdx) => (
             <div key={groupIdx} className="space-y-2.5">
-              <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider px-1">
+              <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider px-1">
                 {group.categoryTitle}
               </h3>
 
-              <div className="bg-white rounded-2xl shadow-sm border border-slate-200/80 overflow-hidden divide-y divide-slate-100">
+              <div className="bg-slate-900 rounded-2xl shadow-sm border border-slate-800 overflow-hidden divide-y divide-slate-800">
                 {group.reports.map((report) => (
                   <button
                     key={report.id}
@@ -380,28 +380,28 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                       setSelectedReport(report);
                       setModalSearchQuery('');
                     }}
-                    className="w-full text-left p-4 flex items-center justify-between hover:bg-slate-50 active:bg-slate-100 transition group cursor-pointer"
+                    className="w-full text-left p-4 flex items-center justify-between hover:bg-slate-800/80 active:bg-slate-800 transition group cursor-pointer"
                   >
                     <div className="space-y-0.5 pr-4">
                       <div className="flex items-center gap-2">
-                        <span className="font-bold text-sm text-slate-800 group-hover:text-blue-600 transition">
+                        <span className="font-bold text-sm text-slate-100 group-hover:text-blue-400 transition">
                           {report.title}
                         </span>
                         {report.isPremium && (
-                          <span className="bg-amber-100 border border-amber-300 text-amber-800 text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 shadow-xs">
+                          <span className="bg-amber-950/80 border border-amber-600/50 text-amber-300 text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 shadow-xs">
                             👑 Premium
                           </span>
                         )}
-                        <span className="text-[10px] font-bold text-blue-600 opacity-0 group-hover:opacity-100 transition bg-blue-50 px-2 py-0.5 rounded-md">
+                        <span className="text-[10px] font-bold text-blue-400 opacity-0 group-hover:opacity-100 transition bg-blue-950/80 px-2 py-0.5 rounded-md">
                           Tap to View Specialized View &gt;
                         </span>
                       </div>
-                      <p className="text-xs text-slate-500 leading-relaxed line-clamp-1">
+                      <p className="text-xs text-slate-400 leading-relaxed line-clamp-1">
                         {report.description}
                       </p>
                     </div>
 
-                    <div className="w-7 h-7 rounded-lg bg-slate-100 text-slate-400 flex items-center justify-center group-hover:bg-blue-600 group-hover:text-white transition shrink-0">
+                    <div className="w-7 h-7 rounded-lg bg-slate-800 text-slate-400 flex items-center justify-center group-hover:bg-blue-600 group-hover:text-white transition shrink-0">
                       <ChevronRight className="w-4 h-4" />
                     </div>
                   </button>
@@ -505,27 +505,27 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             {selectedReport.id === 'sale_report' && (
               <div className="w-full space-y-4">
                 <div className="grid grid-cols-3 gap-3">
-                  <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
-                    <div className="text-[11px] text-slate-500 font-semibold">Total Revenue</div>
-                    <div className="text-base font-extrabold text-blue-600 font-mono">KSh {reportData.totalRev.toLocaleString()}</div>
+                  <div className="bg-slate-900 border border-slate-800 p-3.5 rounded-2xl">
+                    <div className="text-[11px] text-slate-400 font-semibold">Total Revenue</div>
+                    <div className="text-base font-extrabold text-blue-400 font-mono">KSh {reportData.totalRev.toLocaleString()}</div>
                   </div>
-                  <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
-                    <div className="text-[11px] text-slate-500 font-semibold">Transactions Count</div>
-                    <div className="text-base font-extrabold text-slate-800 font-mono">{reportData.txCount} Receipts</div>
+                  <div className="bg-slate-900 border border-slate-800 p-3.5 rounded-2xl">
+                    <div className="text-[11px] text-slate-400 font-semibold">Transactions Count</div>
+                    <div className="text-base font-extrabold text-slate-100 font-mono">{reportData.txCount} Receipts</div>
                   </div>
-                  <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
-                    <div className="text-[11px] text-slate-500 font-semibold">Gross Profit</div>
-                    <div className="text-base font-extrabold text-emerald-600 font-mono">KSh {reportData.grossProfit.toLocaleString()}</div>
+                  <div className="bg-slate-900 border border-slate-800 p-3.5 rounded-2xl">
+                    <div className="text-[11px] text-slate-400 font-semibold">Gross Profit</div>
+                    <div className="text-base font-extrabold text-emerald-400 font-mono">KSh {reportData.grossProfit.toLocaleString()}</div>
                   </div>
                 </div>
 
-                <div className="w-full bg-slate-50 border border-slate-200 rounded-2xl overflow-hidden">
-                  <div className="p-3 bg-slate-100 border-b border-slate-200 font-bold text-slate-700 flex items-center justify-between">
-                    <span>Daily Sales Summary (Tap any date for itemized drill-down)</span>
-                    <span className="font-mono text-slate-500">{reportData.salesByDate.length} Days Recorded</span>
+                <div className="w-full bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
+                  <div className="p-3 bg-slate-900/90 border-b border-slate-800 font-bold text-slate-200 flex items-center justify-between">
+                    <span>Daily Sales & Revenue Summary (Tap any date for itemized drill-down)</span>
+                    <span className="font-mono text-slate-400">{reportData.salesByDate.length} Days Recorded</span>
                   </div>
                   <div className="w-full overflow-x-auto">
-                    <div className="w-full divide-y divide-slate-200 max-h-80 overflow-y-auto min-w-[500px]">
+                    <div className="w-full divide-y divide-slate-800 max-h-80 overflow-y-auto min-w-[500px]">
                       {reportData.salesByDate.length === 0 ? (
                         <div className="p-8 text-center text-slate-400 text-xs">No sales recorded for this date range.</div>
                       ) : (
@@ -533,19 +533,19 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                           <div
                             key={idx}
                             onClick={() => setSelectedSaleDateGroup({ dateStr: group.dateStr, transactions: group.transactions })}
-                            className="p-3.5 grid grid-cols-3 items-center hover:bg-blue-50/70 active:bg-blue-100 transition cursor-pointer group font-mono text-xs w-full"
+                            className="p-3.5 grid grid-cols-3 items-center hover:bg-slate-800/80 active:bg-slate-800 transition cursor-pointer group font-mono text-xs w-full"
                           >
                             <div>
-                              <div className="font-bold text-slate-800 font-sans flex items-center gap-1.5">
-                                <Calendar className="w-3.5 h-3.5 text-blue-600" />
+                              <div className="font-bold text-slate-100 font-sans flex items-center gap-1.5">
+                                <Calendar className="w-3.5 h-3.5 text-blue-400" />
                                 <span>{new Date(group.dateStr).toLocaleDateString(undefined, { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' })}</span>
                               </div>
-                              <span className="text-[10px] text-blue-600 opacity-0 group-hover:opacity-100 transition font-bold">Tap to view items sold on this date &gt;</span>
+                              <span className="text-[10px] text-blue-400 opacity-0 group-hover:opacity-100 transition font-bold">Tap to view items sold on this date &gt;</span>
                             </div>
-                            <div className="text-slate-600 text-center font-bold">{group.totalCount} Transactions</div>
-                            <div className="text-right font-extrabold text-blue-600 flex items-center justify-end gap-2">
+                            <div className="text-slate-300 text-center font-bold">{group.totalCount} Transactions</div>
+                            <div className="text-right font-extrabold text-blue-400 flex items-center justify-end gap-2">
                               <span>KSh {group.totalRev.toLocaleString()}</span>
-                              <ChevronRight className="w-4 h-4 text-slate-400 group-hover:translate-x-0.5 transition-transform" />
+                              <ChevronRight className="w-4 h-4 text-slate-500 group-hover:translate-x-0.5 transition-transform" />
                             </div>
                           </div>
                         ))
@@ -560,27 +560,27 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             {selectedReport.id === 'purchase_report' && (
               <div className="w-full space-y-4">
                 <div className="grid grid-cols-2 gap-3">
-                  <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
-                    <div className="text-[11px] text-slate-500 font-semibold">Total Purchases Cost</div>
-                    <div className="text-base font-extrabold text-purple-600 font-mono">
+                  <div className="bg-slate-900 border border-slate-800 p-3.5 rounded-2xl">
+                    <div className="text-[11px] text-slate-400 font-semibold">Total Purchases Cost</div>
+                    <div className="text-base font-extrabold text-purple-400 font-mono">
                       KSh {reportData.purchasesByDate.reduce((s, p) => s + p.totalCost, 0).toLocaleString()}
                     </div>
                   </div>
-                  <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
-                    <div className="text-[11px] text-slate-500 font-semibold">Restock Orders</div>
-                    <div className="text-base font-extrabold text-slate-800 font-mono">
+                  <div className="bg-slate-900 border border-slate-800 p-3.5 rounded-2xl">
+                    <div className="text-[11px] text-slate-400 font-semibold">Restock Orders</div>
+                    <div className="text-base font-extrabold text-slate-100 font-mono">
                       {reportData.purchasesByDate.reduce((s, p) => s + p.totalCount, 0)} Orders
                     </div>
                   </div>
                 </div>
 
-                <div className="w-full bg-slate-50 border border-slate-200 rounded-2xl overflow-hidden">
-                  <div className="p-3 bg-slate-100 border-b border-slate-200 font-bold text-slate-700 flex items-center justify-between">
+                <div className="w-full bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
+                  <div className="p-3 bg-slate-900/90 border-b border-slate-800 font-bold text-slate-200 flex items-center justify-between">
                     <span>Daily Purchase Orders Summary (Tap any date for itemized drill-down)</span>
-                    <span className="font-mono text-slate-500">{reportData.purchasesByDate.length} Restock Days</span>
+                    <span className="font-mono text-slate-400">{reportData.purchasesByDate.length} Restock Days</span>
                   </div>
                   <div className="w-full overflow-x-auto">
-                    <div className="w-full divide-y divide-slate-200 max-h-80 overflow-y-auto min-w-[500px]">
+                    <div className="w-full divide-y divide-slate-800 max-h-80 overflow-y-auto min-w-[500px]">
                       {reportData.purchasesByDate.length === 0 ? (
                         <div className="p-8 text-center text-slate-400 text-xs">No purchase orders found.</div>
                       ) : (
@@ -588,19 +588,19 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                           <div
                             key={idx}
                             onClick={() => setSelectedPurchaseDateGroup({ dateStr: group.dateStr, orders: group.orders })}
-                            className="p-3.5 grid grid-cols-3 items-center hover:bg-purple-50/70 active:bg-purple-100 transition cursor-pointer group font-mono text-xs w-full"
+                            className="p-3.5 grid grid-cols-3 items-center hover:bg-slate-800/80 active:bg-slate-800 transition cursor-pointer group font-mono text-xs w-full"
                           >
                             <div>
-                              <div className="font-bold text-slate-800 font-sans flex items-center gap-1.5">
-                                <Calendar className="w-3.5 h-3.5 text-purple-600" />
+                              <div className="font-bold text-slate-100 font-sans flex items-center gap-1.5">
+                                <Calendar className="w-3.5 h-3.5 text-purple-400" />
                                 <span>{new Date(group.dateStr).toLocaleDateString(undefined, { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' })}</span>
                               </div>
-                              <span className="text-[10px] text-purple-600 opacity-0 group-hover:opacity-100 transition font-bold">Tap to view restocked items on this date &gt;</span>
+                              <span className="text-[10px] text-purple-400 opacity-0 group-hover:opacity-100 transition font-bold">Tap to view restocked items on this date &gt;</span>
                             </div>
-                            <div className="text-slate-600 text-center font-bold">{group.totalCount} Purchase Orders</div>
-                            <div className="text-right font-extrabold text-purple-600 flex items-center justify-end gap-2">
+                            <div className="text-slate-300 text-center font-bold">{group.totalCount} Purchase Orders</div>
+                            <div className="text-right font-extrabold text-purple-400 flex items-center justify-end gap-2">
                               <span>KSh {group.totalCost.toLocaleString()}</span>
-                              <ChevronRight className="w-4 h-4 text-slate-400 group-hover:translate-x-0.5 transition-transform" />
+                              <ChevronRight className="w-4 h-4 text-slate-500 group-hover:translate-x-0.5 transition-transform" />
                             </div>
                           </div>
                         ))
@@ -1058,26 +1058,26 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
           </div>
 
           {/* Sticky Bottom Export Bar */}
-          <div className="sticky bottom-0 w-full bg-white border-t border-slate-200 p-3.5 flex items-center justify-between z-20 pb-8 shadow-lg shrink-0">
+          <div className="sticky bottom-0 left-0 right-0 w-full bg-white border-t border-slate-200 px-3 pt-3 pb-8 z-40 shadow-lg shrink-0 flex flex-col gap-2">
             <span className="text-xs font-semibold text-slate-600">Export & Share Options:</span>
-            <div className="flex items-center gap-2">
+            <div className="grid grid-cols-3 gap-2 w-full">
               <button
                 onClick={handleExportPDF}
-                className="px-3.5 py-2.5 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-sm transition cursor-pointer active:scale-95"
+                className="flex items-center justify-center gap-1.5 py-2.5 px-2 rounded-xl text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 shadow-sm active:scale-95 transition-all cursor-pointer"
               >
                 <Printer className="w-3.5 h-3.5" />
-                <span>[ 📄 Export PDF ]</span>
+                <span>[ 📄 PDF ]</span>
               </button>
               <button
                 onClick={handleExportCSV}
-                className="px-3.5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-sm transition cursor-pointer active:scale-95"
+                className="flex items-center justify-center gap-1.5 py-2.5 px-2 rounded-xl text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 shadow-sm active:scale-95 transition-all cursor-pointer"
               >
                 <Download className="w-3.5 h-3.5" />
-                <span>[ 📊 Export Excel ]</span>
+                <span>[ 📊 Excel ]</span>
               </button>
               <button
                 onClick={handleShareWhatsApp}
-                className="px-3.5 py-2.5 bg-sky-600 hover:bg-sky-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-sm transition cursor-pointer active:scale-95"
+                className="flex items-center justify-center gap-1.5 py-2.5 px-2 rounded-xl text-xs font-bold text-white bg-sky-600 hover:bg-sky-700 shadow-sm active:scale-95 transition-all cursor-pointer"
               >
                 <Share2 className="w-3.5 h-3.5" />
                 <span>[ 💬 Share ]</span>
@@ -1394,116 +1394,137 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
       )}
 
       {/* 5. Daily Sales Date Drill-Down Modal ("Items Sold on [Date]") (100% Full-Screen) */}
-      {selectedSaleDateGroup && (
-        <div className="fixed inset-0 w-full h-full min-h-screen z-[60] bg-white flex flex-col m-0 p-0 rounded-none overflow-hidden animate-fade-in">
-          <div className="w-full sticky top-0 bg-slate-900 text-white px-4 py-3.5 z-10 flex items-center justify-between shadow-md shrink-0">
-            <div className="flex items-center gap-3">
-              <button
-                onClick={() => setSelectedSaleDateGroup(null)}
-                className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl transition cursor-pointer"
-              >
-                <ArrowLeft className="w-5 h-5" />
-              </button>
-              <div>
-                <h3 className="font-bold text-base text-slate-100">
-                  Items Sold on {new Date(selectedSaleDateGroup.dateStr).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })}
-                </h3>
-                <p className="text-[11px] text-slate-400">{selectedSaleDateGroup.transactions.length} receipts processed on this date</p>
-              </div>
-            </div>
-            <button
-              onClick={() => setSelectedSaleDateGroup(null)}
-              className="w-9 h-9 rounded-xl bg-slate-800 text-slate-400 hover:text-white flex items-center justify-center transition cursor-pointer"
-            >
-              <X className="w-5 h-5" />
-            </button>
-          </div>
-
-          <div className="w-full flex-1 px-4 sm:px-6 py-4 space-y-4 overflow-y-auto text-xs pb-24">
-            {/* Instant Search Filter for Daily Sold Items */}
-            <div className="relative w-full">
-              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
-              <input
-                type="text"
-                value={dateModalSearchQuery}
-                onChange={(e) => setDateModalSearchQuery(e.target.value)}
-                placeholder="Search items sold on this date..."
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-3 py-2 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            </div>
-
-            {/* Aggregated Itemized Sold List */}
-            <div className="w-full bg-slate-50 border border-slate-200 rounded-2xl overflow-hidden">
-              <div className="p-3 bg-slate-100 border-b border-slate-200 font-bold text-slate-700 grid grid-cols-5 gap-2 min-w-[700px]">
-                <span>Item Name</span>
-                <span>SKU</span>
-                <span className="text-center">Qty Sold</span>
-                <span className="text-right">Avg Price</span>
-                <span className="text-right">Total Revenue</span>
-              </div>
-              <div className="w-full overflow-x-auto">
-                <div className="w-full divide-y divide-slate-200 max-h-80 overflow-y-auto min-w-[700px]">
-                  {(() => {
-                    const itemMap = new Map<string, { name: string; sku: string; qty: number; revenue: number; prices: number[] }>();
-                    selectedSaleDateGroup.transactions.forEach(tx => {
-                      tx.items.forEach(it => {
-                        const existing = itemMap.get(it.product.id) || { name: it.product.name, sku: it.product.sku, qty: 0, revenue: 0, prices: [] };
-                        existing.qty += it.quantity;
-                        existing.revenue += it.quantity * it.unitPrice;
-                        existing.prices.push(it.unitPrice);
-                        itemMap.set(it.product.id, existing);
-                      });
-                    });
-
-                    const aggregatedItems = Array.from(itemMap.values()).filter(item => {
-                      if (!dateModalSearchQuery.trim()) return true;
-                      const q = dateModalSearchQuery.toLowerCase();
-                      return item.name.toLowerCase().includes(q) || item.sku.toLowerCase().includes(q);
-                    });
-
-                    if (aggregatedItems.length === 0) {
-                      return <div className="p-8 text-center text-slate-400">No items matched your search for this date.</div>;
-                    }
-
-                    return aggregatedItems.map((item, idx) => {
-                      const avgPrice = item.prices.length > 0 ? item.prices.reduce((a, b) => a + b, 0) / item.prices.length : 0;
-                      return (
-                        <div key={idx} className="p-3 grid grid-cols-5 gap-2 items-center hover:bg-slate-100 transition font-mono text-xs w-full">
-                          <span className="font-bold text-slate-800 font-sans">{item.name}</span>
-                          <span className="text-slate-500">{item.sku}</span>
-                          <span className="text-center font-bold text-blue-600">{item.qty}</span>
-                          <span className="text-right">KSh {avgPrice.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
-                          <span className="text-right font-extrabold text-emerald-600">KSh {item.revenue.toLocaleString()}</span>
-                        </div>
-                      );
-                    });
-                  })()}
+      {selectedSaleDateGroup && (() => {
+        const totalDateRevenue = selectedSaleDateGroup.transactions.reduce((sum, tx) => sum + tx.grandTotal, 0);
+        return (
+          <div className="fixed inset-0 w-full h-full min-h-screen z-[60] bg-slate-950 text-slate-100 flex flex-col m-0 p-0 rounded-none overflow-hidden animate-fade-in">
+            <div className="w-full sticky top-0 bg-slate-900 text-white px-4 py-3.5 z-10 flex items-center justify-between shadow-md shrink-0">
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => setSelectedSaleDateGroup(null)}
+                  className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl transition cursor-pointer"
+                >
+                  <ArrowLeft className="w-5 h-5" />
+                </button>
+                <div>
+                  <h3 className="font-bold text-base text-slate-100">
+                    Items Sold on {new Date(selectedSaleDateGroup.dateStr).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })}
+                  </h3>
+                  <p className="text-[11px] text-slate-400">{selectedSaleDateGroup.transactions.length} receipts processed on this date</p>
                 </div>
               </div>
+              <button
+                onClick={() => setSelectedSaleDateGroup(null)}
+                className="w-9 h-9 rounded-xl bg-slate-800 text-slate-400 hover:text-white flex items-center justify-center transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
             </div>
-          </div>
 
-          <div className="sticky bottom-0 w-full bg-white border-t border-slate-200 p-3.5 flex items-center justify-between z-20 pb-8 shadow-lg shrink-0">
-            <span className="text-xs font-semibold text-slate-600">Export Daily Items:</span>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => triggerToast('📄 Daily sales items exported to PDF!')}
-                className="px-3.5 py-2.5 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 cursor-pointer shadow-sm"
-              >
-                <Printer className="w-3.5 h-3.5" />
-                <span>[ 📄 Export PDF ]</span>
-              </button>
-              <button
-                onClick={() => triggerToast('📊 Daily sales items exported to Excel!')}
-                className="px-3.5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 cursor-pointer shadow-sm"
-              >
-                <Download className="w-3.5 h-3.5" />
-                <span>[ 📊 Export Excel ]</span>
-              </button>
+            <div className="w-full flex-1 px-4 sm:px-6 py-4 space-y-4 overflow-y-auto text-xs pb-28">
+              {/* Instant Search Filter for Daily Sold Items */}
+              <div className="relative w-full">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                <input
+                  type="text"
+                  value={dateModalSearchQuery}
+                  onChange={(e) => setDateModalSearchQuery(e.target.value)}
+                  placeholder="Search items sold on this date..."
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl pl-9 pr-3 py-2 text-xs text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              {/* Aggregated Itemized Sold List */}
+              <div className="w-full bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
+                <div className="p-3 bg-slate-900/90 border-b border-slate-800 font-bold text-slate-200 grid grid-cols-5 gap-2 min-w-[700px]">
+                  <span>Item Name</span>
+                  <span>SKU</span>
+                  <span className="text-center">Qty Sold</span>
+                  <span className="text-right">Avg Price</span>
+                  <span className="text-right">Total Revenue</span>
+                </div>
+                <div className="w-full overflow-x-auto">
+                  <div className="w-full divide-y divide-slate-800 max-h-80 overflow-y-auto min-w-[700px]">
+                    {(() => {
+                      const itemMap = new Map<string, { name: string; sku: string; qty: number; revenue: number; prices: number[] }>();
+                      selectedSaleDateGroup.transactions.forEach(tx => {
+                        tx.items.forEach(it => {
+                          const existing = itemMap.get(it.product.id) || { name: it.product.name, sku: it.product.sku, qty: 0, revenue: 0, prices: [] };
+                          existing.qty += it.quantity;
+                          existing.revenue += it.quantity * it.unitPrice;
+                          existing.prices.push(it.unitPrice);
+                          itemMap.set(it.product.id, existing);
+                        });
+                      });
+
+                      const aggregatedItems = Array.from(itemMap.values()).filter(item => {
+                        if (!dateModalSearchQuery.trim()) return true;
+                        const q = dateModalSearchQuery.toLowerCase();
+                        return item.name.toLowerCase().includes(q) || item.sku.toLowerCase().includes(q);
+                      });
+
+                      if (aggregatedItems.length === 0) {
+                        return <div className="p-8 text-center text-slate-400">No items matched your search for this date.</div>;
+                      }
+
+                      return aggregatedItems.map((item, idx) => {
+                        const avgPrice = item.prices.length > 0 ? item.prices.reduce((a, b) => a + b, 0) / item.prices.length : 0;
+                        return (
+                          <div key={idx} className="p-3 grid grid-cols-5 gap-2 items-center hover:bg-slate-800/80 transition font-mono text-xs w-full">
+                            <span className="font-bold text-slate-100 font-sans">{item.name}</span>
+                            <span className="text-slate-400">{item.sku}</span>
+                            <span className="text-center font-bold text-blue-400">{item.qty}</span>
+                            <span className="text-right text-slate-300">KSh {avgPrice.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+                            <span className="text-right font-extrabold text-emerald-400">KSh {item.revenue.toLocaleString()}</span>
+                          </div>
+                        );
+                      });
+                    })()}
+                  </div>
+                </div>
+              </div>
+
+              {/* Total Sales Money Summary Banner */}
+              <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl flex items-center justify-between shadow-sm">
+                <span className="font-bold text-slate-200">Total Sales for this Date:</span>
+                <span className="font-extrabold text-blue-400 font-mono text-base">KSh {totalDateRevenue.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+              </div>
+            </div>
+
+            {/* Sticky Bottom Export Bar with 3 Buttons */}
+            <div className="sticky bottom-0 left-0 right-0 w-full bg-slate-900 border-t border-slate-800 px-3 pt-3 pb-8 z-40 shadow-lg shrink-0 flex flex-col gap-2">
+              <span className="text-xs font-semibold text-slate-400">Export & Share Options:</span>
+              <div className="grid grid-cols-3 gap-2 w-full">
+                <button
+                  onClick={() => triggerToast('📄 Daily sales items exported to PDF!')}
+                  className="flex items-center justify-center gap-1.5 py-2.5 px-2 rounded-xl text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 shadow-sm active:scale-95 transition-all cursor-pointer"
+                >
+                  <Printer className="w-3.5 h-3.5" />
+                  <span>[ 📄 PDF ]</span>
+                </button>
+                <button
+                  onClick={() => triggerToast('📊 Daily sales items exported to Excel!')}
+                  className="flex items-center justify-center gap-1.5 py-2.5 px-2 rounded-xl text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 shadow-sm active:scale-95 transition-all cursor-pointer"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>[ 📊 Excel ]</span>
+                </button>
+                <button
+                  onClick={() => {
+                    const text = encodeURIComponent(`📊 Rofani Electronics - Sales on ${selectedSaleDateGroup.dateStr}\nTotal Sales: KSh ${totalDateRevenue.toLocaleString()}\nTransactions: ${selectedSaleDateGroup.transactions.length}`);
+                    window.open(`https://wa.me/?text=${text}`, '_blank');
+                    triggerToast('💬 Daily sales share prompt opened!');
+                  }}
+                  className="flex items-center justify-center gap-1.5 py-2.5 px-2 rounded-xl text-xs font-bold text-white bg-sky-600 hover:bg-sky-700 shadow-sm active:scale-95 transition-all cursor-pointer"
+                >
+                  <Share2 className="w-3.5 h-3.5" />
+                  <span>[ 💬 Share ]</span>
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* 6. Daily Purchase Date Drill-Down Modal ("Items Purchased on [Date]") (100% Full-Screen) */}
       {selectedPurchaseDateGroup && (
@@ -1594,22 +1615,22 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             </div>
           </div>
 
-          <div className="sticky bottom-0 w-full bg-white border-t border-slate-200 p-3.5 flex items-center justify-between z-20 pb-8 shadow-lg shrink-0">
+          <div className="sticky bottom-0 left-0 right-0 w-full bg-white border-t border-slate-200 px-3 pt-3 pb-8 z-40 shadow-lg shrink-0 flex flex-col gap-2">
             <span className="text-xs font-semibold text-slate-600">Export Restock Items:</span>
-            <div className="flex items-center gap-2">
+            <div className="grid grid-cols-2 gap-2 w-full">
               <button
                 onClick={() => triggerToast('📄 Daily purchase items exported to PDF!')}
-                className="px-3.5 py-2.5 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-sm transition cursor-pointer active:scale-95"
+                className="flex items-center justify-center gap-1.5 py-2.5 px-2 rounded-xl text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 shadow-sm active:scale-95 transition-all cursor-pointer"
               >
                 <Printer className="w-3.5 h-3.5" />
-                <span>[ 📄 Export PDF ]</span>
+                <span>[ 📄 PDF ]</span>
               </button>
               <button
                 onClick={() => triggerToast('📊 Daily purchase items exported to Excel!')}
-                className="px-3.5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-sm transition cursor-pointer active:scale-95"
+                className="flex items-center justify-center gap-1.5 py-2.5 px-2 rounded-xl text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 shadow-sm active:scale-95 transition-all cursor-pointer"
               >
                 <Download className="w-3.5 h-3.5" />
-                <span>[ 📊 Export Excel ]</span>
+                <span>[ 📊 Excel ]</span>
               </button>
             </div>
           </div>

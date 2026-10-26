@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Settings,
   Search,
@@ -18,7 +18,9 @@ import {
   ShieldCheck,
   Sliders,
   DollarSign,
-  FileText
+  FileText,
+  Sparkles,
+  Trash2
 } from 'lucide-react';
 import { Product, Customer, Supplier, Transaction, Expense, AttendanceRecord, User, StoreLocation } from '../../types';
 import { safeGetJSON, safeSetJSON } from '../../utils/safeStorage';
@@ -35,6 +37,9 @@ interface SettingsDashboardViewProps {
   expenses: Expense[];
   attendanceRecords: AttendanceRecord[];
   allUsers: User[];
+  onAddUser?: (newUser: User) => void;
+  onUpdateUser?: (updatedUser: User) => void;
+  onDeleteUser?: (userId: string) => void;
   stores?: StoreLocation[];
   onOpenStoreManager?: () => void;
   onImportData: (data: any) => void;
@@ -65,14 +70,94 @@ type SettingCategoryKey =
   | 'inventory'
   | 'currency';
 
+export const PERMISSION_CATEGORIES = [
+  {
+    category: '👥 Staff & Business Management',
+    permissions: [
+      'Can manage workers & roles',
+      'Can view staff commissions & performance',
+      'Can modify app general settings',
+      'Can manage store locations & multi-branch transfer'
+    ]
+  },
+  {
+    category: '🛍️ Sales & Checkout Operations',
+    permissions: [
+      'Can make sales',
+      'Can make / manage customers orders',
+      'Can update sales order status',
+      'Can view and manage customers',
+      'Can enable sales commission',
+      'Can give discounts & price overrides',
+      'Can preview receipt',
+      'Can void/cancel ongoing receipt'
+    ]
+  },
+  {
+    category: '📦 Inventory & Stock Controls',
+    permissions: [
+      'Can add stock in',
+      'Can add new products',
+      'Can view items out of stock',
+      'Can count and update stock balance',
+      'Can add bad stock / damage write-offs',
+      'Can generate & print barcodes/QR labels',
+      'Can return stocks',
+      'Can create offers & promotions'
+    ]
+  },
+  {
+    category: '🚚 Suppliers & Purchasing',
+    permissions: [
+      'Can make/manage orders to suppliers',
+      'Can view and manage suppliers/parties',
+      'Can process purchase receipts & supplier bills'
+    ]
+  },
+  {
+    category: '💰 Finance, Expenses & Tax Compliance',
+    permissions: [
+      'Can add expenses',
+      'Can view financial reports & analytics',
+      'Can access loan & bank statements',
+      'Can view profit margins & COGS',
+      'Can perform KRA TOT/VAT tax filings & report export'
+    ]
+  },
+  {
+    category: '⚡ Audit & System Overrides',
+    permissions: [
+      'Can edit daily entries',
+      'Can delete daily entries',
+      'Can backdate entries'
+    ]
+  }
+];
+
+export const ALL_AVAILABLE_PERMISSIONS = PERMISSION_CATEGORIES.flatMap(c => c.permissions);
+
+// Safe Permission Helper Check
+const hasPermission = (permissionsList: any, permId: string): boolean => {
+  if (!Array.isArray(permissionsList)) {
+    if (typeof permissionsList === 'string' && permissionsList.trim() !== '') {
+      return permissionsList === permId;
+    }
+    return false;
+  }
+  return permissionsList.includes(permId);
+};
+
 export const SettingsDashboardView: React.FC<SettingsDashboardViewProps> = ({
   products,
   customers,
   suppliers,
   allUsers,
+  onAddUser,
+  onUpdateUser,
+  onDeleteUser,
   stores = [],
   onOpenStoreManager,
-  displayTheme = 'light',
+  displayTheme = 'dark',
   onChangeDisplayTheme,
   fontScale = 'normal',
   onChangeFontScale,
@@ -90,6 +175,141 @@ export const SettingsDashboardView: React.FC<SettingsDashboardViewProps> = ({
   const triggerNotify = (msg: string) => {
     setSuccessToast(msg);
     setTimeout(() => setSuccessToast(null), 3500);
+  };
+
+  // Staff Users CRUD State synchronized with App allUsers and pos_store_staff_users
+  const staffUsers = useMemo(() => {
+    const rawList = (allUsers && allUsers.length > 0) ? allUsers : (safeGetJSON<any[]>('pos_store_staff_users', null) || [
+      { id: 'u1', name: 'Grace Makasi', phone: '+254 711 223344', role: 'Manager', commissionRate: 5, pin: '1234', permissions: ['Can make sales', 'Can view and manage customers', 'Can give discounts & price overrides'] },
+      { id: 'u2', name: 'Esther Mwangi', phone: '+254 722 334455', role: 'Cashier', commissionRate: 3, pin: '5678', permissions: ['Can make sales', 'Can give discounts & price overrides', 'Can preview receipt'] },
+      { id: 'u3', name: 'Rozy Otieno', phone: '+254 733 445566', role: 'Inventory Staff', commissionRate: 2, pin: '9999', permissions: ['Can add stock in', 'Can view items out of stock', 'Can count and update stock balance'] }
+    ]);
+
+    return rawList.map(worker => ({
+      ...worker,
+      permissions: Array.isArray(worker.permissions)
+        ? worker.permissions
+        : (typeof worker.permissions === 'string' && worker.permissions.trim() !== '')
+          ? [worker.permissions]
+          : worker.role ? [worker.role, 'Can make sales'] : ['Can make sales']
+    }));
+  }, [allUsers]);
+
+  useEffect(() => {
+    safeSetJSON('pos_store_staff_users', staffUsers);
+  }, [staffUsers]);
+
+  // Worker Modal state for Add/Edit
+  const [workerModalOpen, setWorkerModalOpen] = useState(false);
+  const [editingWorkerId, setEditingWorkerId] = useState<string | null>(null);
+  const [workerName, setWorkerName] = useState('');
+  const [workerPhone, setWorkerPhone] = useState('');
+  const [workerRole, setWorkerRole] = useState('Cashier');
+  const [workerCommission, setWorkerCommission] = useState<number>(3);
+  const [workerPin, setWorkerPin] = useState('1234');
+  const [workerPermissions, setWorkerPermissions] = useState<string[]>([]);
+
+  const handleOpenAddWorker = () => {
+    setEditingWorkerId(null);
+    setWorkerName('');
+    setWorkerPhone('');
+    setWorkerRole('Cashier');
+    setWorkerCommission(3);
+    setWorkerPin('1234');
+    setWorkerPermissions(['Can make sales', 'Can give discounts & price overrides', 'Can preview receipt']);
+    setWorkerModalOpen(true);
+  };
+
+  const handleOpenEditWorker = (u: any) => {
+    setEditingWorkerId(u.id);
+    setWorkerName(u.name);
+    setWorkerPhone(u.phone || '');
+    setWorkerRole(u.role || 'Cashier');
+    setWorkerCommission(u.commissionRate ?? 3);
+    setWorkerPin(u.pin || '1234');
+    
+    // Array Defensive Normalization
+    const safePermissions = Array.isArray(u?.permissions)
+      ? u.permissions
+      : (typeof u?.permissions === 'string' && u.permissions.trim() !== '')
+        ? [u.permissions]
+        : ['Can make sales', 'Can give discounts & price overrides'];
+    
+    setWorkerPermissions(safePermissions);
+    setWorkerModalOpen(true);
+  };
+
+  const handleTogglePermission = (perm: string) => {
+    setWorkerPermissions(prev => {
+      const currentList = Array.isArray(prev) ? prev : [];
+      return currentList.includes(perm) ? currentList.filter(p => p !== perm) : [...currentList, perm];
+    });
+  };
+
+  const handleAssignAllRoles = () => {
+    setWorkerPermissions([...ALL_AVAILABLE_PERMISSIONS]);
+    triggerNotify('✨ All granular roles & permissions assigned!');
+  };
+
+  const handleClearAllRoles = () => {
+    setWorkerPermissions([]);
+    triggerNotify('🧹 All permissions cleared.');
+  };
+
+  const handleSaveWorker = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!workerName.trim()) return;
+
+    const sanitizedPerms = Array.isArray(workerPermissions) ? workerPermissions : [];
+
+    if (editingWorkerId) {
+      const existing = staffUsers.find(u => u.id === editingWorkerId);
+      const updatedUser: User = {
+        ...(existing || {}),
+        id: editingWorkerId,
+        name: workerName.trim(),
+        phone: workerPhone.trim(),
+        role: workerRole as any,
+        roles: [workerRole as any],
+        commissionRate: workerCommission,
+        pin: workerPin,
+        permissions: sanitizedPerms as any,
+        status: existing?.status || 'active'
+      };
+      if (onUpdateUser) {
+        onUpdateUser(updatedUser);
+      }
+      triggerNotify(`Staff member "${workerName}" updated successfully!`);
+    } else {
+      const newUser: User = {
+        id: `staff-${Date.now()}`,
+        name: workerName.trim(),
+        phone: workerPhone.trim(),
+        role: workerRole as any,
+        roles: [workerRole as any],
+        assignedRoles: [workerRole as any],
+        commissionRate: workerCommission,
+        pin: workerPin,
+        status: 'active',
+        permissions: sanitizedPerms as any,
+        email: `${workerName.toLowerCase().replace(/[^a-z0-9]/g, '.')}@rofani.co.ke`,
+        hireDate: new Date().toISOString().slice(0, 10),
+      };
+      if (onAddUser) {
+        onAddUser(newUser);
+      }
+      triggerNotify(`New staff member "${workerName}" added successfully!`);
+    }
+    setWorkerModalOpen(false);
+  };
+
+  const handleDeleteWorker = (id: string, name: string) => {
+    if (window.confirm(`Are you sure you want to remove worker "${name}"?`)) {
+      if (onDeleteUser) {
+        onDeleteUser(id);
+      }
+      triggerNotify(`Worker "${name}" removed successfully.`);
+    }
   };
 
   // Persistent settings states
@@ -225,8 +445,8 @@ export const SettingsDashboardView: React.FC<SettingsDashboardViewProps> = ({
       icon: Users,
       color: 'text-sky-400 bg-sky-500/10 border-sky-500/30',
       title: 'User Management',
-      description: 'Add/edit cashiers, set roles (Admin vs Cashier), assign commission percentages.',
-      keywords: ['user', 'cashier', 'admin', 'role', 'commission', 'staff']
+      description: 'Add/edit cashiers, set roles, assign granular categorized permissions & PINs.',
+      keywords: ['user', 'cashier', 'admin', 'role', 'commission', 'staff', 'permissions']
     },
     {
       id: 'reminders' as SettingCategoryKey,
@@ -273,7 +493,7 @@ export const SettingsDashboardView: React.FC<SettingsDashboardViewProps> = ({
   });
 
   return (
-    <div className="p-4 sm:p-6 space-y-6 max-w-7xl mx-auto">
+    <div className="p-4 sm:p-6 space-y-6 max-w-7xl mx-auto bg-slate-950 text-slate-100 min-h-screen">
       {/* Top Executive Header */}
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 text-white flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-xl">
         <div className="flex items-center gap-3">
@@ -310,7 +530,7 @@ export const SettingsDashboardView: React.FC<SettingsDashboardViewProps> = ({
       )}
 
       {/* Settings Menu List */}
-      <div className="bg-slate-900/90 border border-slate-800 rounded-2xl shadow-xl overflow-hidden divide-y divide-slate-800/80">
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl shadow-xl overflow-hidden divide-y divide-slate-800/80">
         {filteredItems.length === 0 ? (
           <div className="p-12 text-center text-slate-400 text-xs">
             No setting options matched "{searchQuery}". Try a different keyword.
@@ -349,13 +569,13 @@ export const SettingsDashboardView: React.FC<SettingsDashboardViewProps> = ({
       </div>
 
       {activeSubPanel === 'inventory' && (
-        <div className="fixed inset-0 z-50 bg-[#F1F5F9] overflow-y-auto">
+        <div className="fixed inset-0 z-50 bg-slate-950 overflow-y-auto">
           <ItemSettingsView onBack={() => setActiveSubPanel(null)} />
         </div>
       )}
 
       {activeSubPanel === 'general' && (
-        <div className="fixed inset-0 z-50 bg-[#F1F5F9] overflow-y-auto">
+        <div className="fixed inset-0 z-50 bg-slate-950 overflow-y-auto">
           <GeneralSettingsView
             onBack={() => setActiveSubPanel(null)}
             onOpenStoreManager={onOpenStoreManager}
@@ -364,7 +584,7 @@ export const SettingsDashboardView: React.FC<SettingsDashboardViewProps> = ({
       )}
 
       {activeSubPanel === 'print_tax' && (
-        <div className="fixed inset-0 z-50 bg-[#F1F5F9] overflow-y-auto">
+        <div className="fixed inset-0 z-50 bg-slate-950 overflow-y-auto">
           <PrintAndTaxSettingsView onBack={() => setActiveSubPanel(null)} />
         </div>
       )}
@@ -382,7 +602,7 @@ export const SettingsDashboardView: React.FC<SettingsDashboardViewProps> = ({
                 <div>
                   <h3 className="font-bold text-base text-slate-100 capitalize">
                     {(activeSubPanel as string) === 'transaction' && '💱 Transaction & POS Settings'}
-                    {(activeSubPanel as string) === 'users' && '👥 User Management & Roles'}
+                    {(activeSubPanel as string) === 'users' && '👥 User Management & Granular Permissions'}
                     {(activeSubPanel as string) === 'reminders' && '🔔 Reminders & Low Stock Alerts'}
                     {(activeSubPanel as string) === 'party' && '🤝 Party & Customer Management'}
                     {(activeSubPanel as string) === 'currency' && '🪙 Multi-Currency & Formatting'}
@@ -452,24 +672,79 @@ export const SettingsDashboardView: React.FC<SettingsDashboardViewProps> = ({
 
               {activeSubPanel === 'users' && (
                 <div className="space-y-4">
-                  <div className="p-3 bg-slate-950/60 border border-slate-800 rounded-xl">
-                    <div className="font-bold text-slate-100 mb-1">Active Cashiers & Staff ({allUsers.length})</div>
-                    <p className="text-[11px] text-slate-400">
-                      Manage staff roles (Admin vs Cashier) and sales commission rates in the Attendance & Staff Management tab.
-                    </p>
+                  <div className="flex items-center justify-between bg-slate-950/80 border border-slate-800 p-3.5 rounded-2xl">
+                    <div>
+                      <div className="font-bold text-slate-100 text-sm">Staff & Cashier Directory ({staffUsers.length})</div>
+                      <p className="text-[11px] text-slate-400">Manage worker roles and granular permission chips.</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleOpenAddWorker}
+                      className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white font-extrabold rounded-xl text-xs flex items-center gap-1.5 shadow-md shadow-blue-600/30 transition cursor-pointer shrink-0"
+                    >
+                      <span>+ Add New Worker</span>
+                    </button>
                   </div>
-                  <div className="space-y-2 max-h-48 overflow-y-auto">
-                    {allUsers.map((u) => (
-                      <div key={u.id} className="flex items-center justify-between p-2.5 bg-slate-950 border border-slate-800 rounded-xl">
-                        <div>
-                          <div className="font-bold text-slate-200">{u.name}</div>
-                          <div className="text-[10px] text-slate-400">{u.role} • {u.phone || 'No phone'}</div>
+
+                  <div className="space-y-2.5 max-h-72 overflow-y-auto pr-1">
+                    {staffUsers.length === 0 ? (
+                      <div className="p-8 text-center text-slate-400 text-xs">No workers configured yet. Click "+ Add New Worker" to create one.</div>
+                    ) : (
+                      staffUsers.map((u) => (
+                        <div key={u.id} className="p-3.5 bg-slate-950 border border-slate-800 rounded-2xl space-y-2 hover:border-slate-700 transition">
+                          <div className="flex items-center justify-between gap-3">
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <span className="font-bold text-slate-100 text-sm">{u.name}</span>
+                                <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full ${
+                                  u.role === 'Admin' ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40' :
+                                  u.role === 'Manager' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40' :
+                                  'bg-sky-500/20 text-sky-300 border border-sky-500/40'
+                                }`}>
+                                  {u.role || 'Cashier'}
+                                </span>
+                              </div>
+                              <div className="text-[11px] text-slate-400 font-mono flex items-center gap-3 mt-1">
+                                <span>📞 {u.phone || 'No phone'}</span>
+                                <span>💰 Comm: {u.commissionRate ?? 3}%</span>
+                                <span>🔑 PIN: {u.pin || '1234'}</span>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => handleOpenEditWorker(u)}
+                                className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold rounded-xl text-xs flex items-center gap-1 transition cursor-pointer"
+                              >
+                                <span>✏️ Edit</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteWorker(u.id, u.name)}
+                                className="px-2.5 py-1.5 bg-rose-950/80 hover:bg-rose-900 text-rose-200 font-bold rounded-xl text-xs flex items-center gap-1 transition cursor-pointer border border-rose-800/60"
+                              >
+                                <span>🗑️ Remove</span>
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Active Permission Badges with Safe Normalization */}
+                          {Array.isArray(u.permissions) && u.permissions.length > 0 && (
+                            <div className="flex flex-wrap gap-1 pt-2 border-t border-slate-800">
+                              {u.permissions.map((p: any, pIdx: number) => {
+                                const pStr = typeof p === 'string' ? p : String(p);
+                                return (
+                                  <span key={pIdx} className="text-[9px] bg-blue-950/80 text-blue-300 border border-blue-500/30 px-2 py-0.5 rounded-md font-medium">
+                                    {pStr}
+                                  </span>
+                                );
+                              })}
+                            </div>
+                          )}
                         </div>
-                        <span className="text-[10px] bg-sky-500/20 text-sky-300 border border-sky-500/40 px-2.5 py-1 rounded-full font-mono font-bold">
-                          Commission: {u.commissionRate ?? 2}%
-                        </span>
-                      </div>
-                    ))}
+                      ))
+                    )}
                   </div>
                 </div>
               )}
@@ -562,23 +837,197 @@ export const SettingsDashboardView: React.FC<SettingsDashboardViewProps> = ({
               <button
                 type="button"
                 onClick={() => setActiveSubPanel(null)}
-                className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl text-xs transition"
+                className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl text-xs transition cursor-pointer"
               >
-                Cancel
+                Close
               </button>
 
+              {activeSubPanel !== 'users' && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    triggerNotify('Settings updated and saved successfully!');
+                    setActiveSubPanel(null);
+                  }}
+                  className="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 active:scale-95 text-white font-extrabold rounded-xl text-xs flex items-center gap-2 shadow-lg shadow-blue-600/30 transition cursor-pointer"
+                >
+                  <Save className="w-4 h-4" />
+                  <span>Save Changes</span>
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Add / Edit Worker Modal with Categorized Granular Permission Chips */}
+      {workerModalOpen && (
+        <div className="fixed inset-0 z-[60] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-2xl shadow-2xl overflow-hidden flex flex-col text-slate-100 max-h-[92vh] animate-scale-up">
+            <div className="p-5 bg-slate-950 text-white flex items-center justify-between border-b border-slate-800 shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-blue-600/20 text-blue-400 border border-blue-500/30 flex items-center justify-center">
+                  <Users className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base text-slate-100">{editingWorkerId ? 'Edit Worker Profile & Permissions' : 'Add New Worker & Permissions'}</h3>
+                  <p className="text-[11px] text-slate-400">Configure role permissions, commission, PIN & categorized capability chips</p>
+                </div>
+              </div>
               <button
                 type="button"
-                onClick={() => {
-                  triggerNotify('Settings updated and saved successfully!');
-                  setActiveSubPanel(null);
-                }}
-                className="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 active:scale-95 text-white font-extrabold rounded-xl text-xs flex items-center gap-2 shadow-lg shadow-blue-600/30 transition cursor-pointer"
+                onClick={() => setWorkerModalOpen(false)}
+                className="w-9 h-9 rounded-xl bg-slate-800 text-slate-400 hover:text-white flex items-center justify-center transition cursor-pointer"
               >
-                <Save className="w-4 h-4" />
-                <span>Save Changes</span>
+                <X className="w-5 h-5" />
               </button>
             </div>
+
+            <form onSubmit={handleSaveWorker} className="p-6 space-y-4 text-xs overflow-y-auto flex-1">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-semibold text-slate-300 mb-1">Worker Full Name *</label>
+                  <input
+                    type="text"
+                    required
+                    value={workerName}
+                    onChange={(e) => setWorkerName(e.target.value)}
+                    placeholder="E.g. Grace Makasi"
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-slate-300 mb-1">Phone Number</label>
+                  <input
+                    type="text"
+                    value={workerPhone}
+                    onChange={(e) => setWorkerPhone(e.target.value)}
+                    placeholder="E.g. +254 711 223344"
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium font-mono"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className="block font-semibold text-slate-300 mb-1">Role / Permission</label>
+                  <select
+                    value={workerRole}
+                    onChange={(e) => setWorkerRole(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2.5 text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium"
+                  >
+                    <option value="Admin">Admin</option>
+                    <option value="Manager">Manager</option>
+                    <option value="Cashier">Cashier</option>
+                    <option value="Inventory Staff">Inventory Staff</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-slate-300 mb-1">Commission Rate (%)</label>
+                  <input
+                    type="number"
+                    step="0.5"
+                    min="0"
+                    max="100"
+                    value={workerCommission}
+                    onChange={(e) => setWorkerCommission(parseFloat(e.target.value) || 0)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2.5 text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono font-bold"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-slate-300 mb-1">Access PIN (4-Digit)</label>
+                  <input
+                    type="password"
+                    maxLength={6}
+                    value={workerPin}
+                    onChange={(e) => setWorkerPin(e.target.value.replace(/\D/g, ''))}
+                    placeholder="1234"
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2.5 text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono font-bold tracking-widest text-center"
+                  />
+                </div>
+              </div>
+
+              {/* Categorized Permission Chips & Checkboxes Grid */}
+              <div className="space-y-3 pt-2 border-t border-slate-800">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <label className="font-bold text-slate-200 text-sm">Granular Permission Chips & Capabilities</label>
+                    <p className="text-[11px] text-slate-400">Select specific operations categorized by functional area.</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleAssignAllRoles}
+                      className="px-3 py-1.5 bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 border border-blue-500/40 rounded-xl text-xs font-bold flex items-center gap-1 transition cursor-pointer"
+                    >
+                      <Sparkles className="w-3.5 h-3.5 text-blue-400" />
+                      <span>✨ Assign All Roles</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleClearAllRoles}
+                      className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold flex items-center gap-1 transition cursor-pointer"
+                    >
+                      <Trash2 className="w-3.5 h-3.5 text-slate-400" />
+                      <span>Clear All</span>
+                    </button>
+                  </div>
+                </div>
+
+                <div className="space-y-4 max-h-64 overflow-y-auto pr-1 bg-slate-950 border border-slate-800 rounded-2xl p-3.5">
+                  {PERMISSION_CATEGORIES.map((catGroup, cIdx) => (
+                    <div key={cIdx} className="space-y-2">
+                      <div className="text-xs font-extrabold text-blue-400 tracking-wider uppercase border-b border-slate-800 pb-1">
+                        {catGroup.category}
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        {catGroup.permissions.map((perm) => {
+                          const isChecked = hasPermission(workerPermissions, perm);
+                          return (
+                            <label
+                              key={perm}
+                              onClick={() => handleTogglePermission(perm)}
+                              className={`flex items-center gap-2.5 p-2.5 rounded-xl border transition cursor-pointer select-none ${
+                                isChecked
+                                  ? 'bg-blue-950/50 border-blue-600/60 text-blue-200 font-bold shadow-xs'
+                                  : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700'
+                              }`}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={isChecked}
+                                onChange={() => {}}
+                                className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 bg-slate-950 border-slate-700 shrink-0"
+                              />
+                              <span className="text-xs leading-snug">{perm}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setWorkerModalOpen(false)}
+                  className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl transition cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-extrabold rounded-xl shadow-md transition cursor-pointer"
+                >
+                  {editingWorkerId ? 'Save Changes' : 'Create Worker'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

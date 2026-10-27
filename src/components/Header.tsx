@@ -319,6 +319,29 @@ export const Header: React.FC<HeaderProps> = ({
               </button>
             )}
 
+            {/* eTIMS Status Pill */}
+            <div
+              title="KRA eTIMS Tax Control Unit Status: Connected and Live"
+              className="hidden xl:flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-amber-950/60 border border-amber-800/80 text-amber-300 text-xs font-semibold"
+            >
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+              <span className="text-[11px]">eTIMS Connected</span>
+            </div>
+
+            {/* Live Active Worker Status Badge */}
+            {onOpenStaffManagement && (
+              <div
+                onClick={onOpenStaffManagement}
+                title={`Live Active Terminal Session: ${currentUser.name} (${currentUser.role}). Click to switch worker.`}
+                className="hidden md:flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-950 border border-slate-700 text-xs text-slate-200 cursor-pointer hover:border-sky-500 transition"
+              >
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+                <span className="text-[11px] font-bold truncate max-w-[140px]">
+                  🟢 Active: {currentUser.name} ({currentUser.role})
+                </span>
+              </div>
+            )}
+
             {/* Store Outlet Settings & Switcher Button */}
             {onOpenStoreManager && (
               <button

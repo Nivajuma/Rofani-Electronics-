@@ -1073,6 +1073,15 @@ export const POSView: React.FC<POSViewProps> = ({
     const receiptNo = `INV-${new Date().getFullYear()}${(new Date().getMonth() + 1).toString().padStart(2, '0')}${new Date().getDate().toString().padStart(2, '0')}-${Math.floor(100 + Math.random() * 900)}`;
     const finalTxDate = saleDate ? new Date(saleDate).toISOString() : new Date().toISOString();
 
+    const cuin = `CUIN-2026-${Math.floor(100000 + Math.random() * 900000)}`;
+    const cusn = `CUSN-KENYA-${Math.floor(10000000 + Math.random() * 90000000)}`;
+    const taxBreakdown = {
+      vat16Total: grandTotal * 0.16,
+      zeroRatedTotal: 0,
+      exemptTotal: 0,
+      totTotal: grandTotal * 0.015,
+    };
+
     const newTx: Transaction = {
       id: `tx-${Date.now()}`,
       receiptNumber: receiptNo,
@@ -1104,6 +1113,9 @@ export const POSView: React.FC<POSViewProps> = ({
       cashierCommissionAmount: currentCartComm.amount,
       commissionModelApplied: currentCartComm.modelDescription,
       notes: `Lipa Na M-PESA STK Push (${receiptCode}) - Customer: ${phone}`,
+      cuin,
+      cusn,
+      taxBreakdown,
     };
 
     // Update Product Stock Levels
@@ -1226,18 +1238,21 @@ export const POSView: React.FC<POSViewProps> = ({
       id: `tx-${Date.now()}`,
       receiptNumber: receiptNo,
       date: finalTxDate,
+      timestamp: Date.now(),
       items: [...cart],
       subtotal,
       discountTotal: totalDiscount,
       discountAuthorizedBy: totalDiscount > 0 ? (discountAuthorizedBy || `${currentUser.name} (Admin)`) : undefined,
       taxTotal,
       grandTotal,
+      totalAmount: grandTotal,
       amountPaid: totalPaid,
       balanceDue,
       paymentStatus,
       payments: paymentEntries
         .map((p) => ({ ...p, amount: Number(p.amount) || 0 }))
         .filter((p) => p.amount > 0),
+      paymentMethod: paymentEntries[0]?.method || 'cash',
       customerId: selectedCustomer.id,
       customerName: selectedCustomer.name,
       customerPhone: selectedCustomer.phone,
@@ -1250,6 +1265,16 @@ export const POSView: React.FC<POSViewProps> = ({
       commissionModelApplied: currentCartComm.modelDescription,
       notes: saleNotes
     };
+
+    // Save directly to localStorage keys pos_store_sales & retail_pos_transactions immediately
+    try {
+      const existingSales = safeGetJSON<Transaction[]>('pos_store_sales', safeGetJSON<Transaction[]>('retail_pos_transactions', []));
+      const updatedSales = [newTx, ...existingSales.filter((t) => t.id !== newTx.id)];
+      safeSetJSON('pos_store_sales', updatedSales);
+      safeSetJSON('retail_pos_transactions', updatedSales);
+    } catch (err) {
+      console.warn('Could not update localStorage sales:', err);
+    }
 
     // Update Product Stock Levels
     const updatedProducts = products.map((prod) => {

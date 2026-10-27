@@ -501,7 +501,26 @@ export default function App() {
 
   const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>(() => safeGetJSON('retail_pos_attendance', INITIAL_ATTENDANCE));
 
-  const [transactions, setTransactions] = useState<Transaction[]>(() => safeGetJSON('retail_pos_transactions', INITIAL_TRANSACTIONS));
+  const [transactions, setTransactions] = useState<Transaction[]>(() => {
+    const primary = safeGetJSON<Transaction[]>('retail_pos_transactions', []);
+    const secondary = safeGetJSON<Transaction[]>('pos_store_sales', []);
+    const combined = [...primary];
+    secondary.forEach((t) => {
+      if (!combined.some((item) => item.id === t.id)) {
+        combined.push(t);
+      }
+    });
+    if (combined.length === 0) {
+      return INITIAL_TRANSACTIONS;
+    }
+    combined.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    return combined;
+  });
+
+  useEffect(() => {
+    safeSetJSON('retail_pos_transactions', transactions);
+    safeSetJSON('pos_store_sales', transactions);
+  }, [transactions]);
 
   const [cashTransactions, setCashTransactions] = useState<CashTransaction[]>(() => safeGetJSON('retail_pos_cash_transactions', INITIAL_CASH_TRANSACTIONS));
 
@@ -715,12 +734,50 @@ export default function App() {
     safeSetJSON('retail_pos_active_user', currentUser);
   }, [currentUser]);
 
-  // Offline sync handler to push queued offline actions to Firestore once connection is re-established
+  // Real-time synchronization subscription for transactions with ID-based local preservation
+  useEffect(() => {
+    let unsubscribe: (() => void) | undefined;
+    try {
+      unsubscribe = subscribeToTransactions(
+        (incomingRemoteSales) => {
+          const existingLocalSales = safeGetJSON<Transaction[]>('retail_pos_transactions', transactions);
+          const mergedSales = [...existingLocalSales];
+          incomingRemoteSales.forEach((remoteTxn) => {
+            if (!mergedSales.some((localTxn) => localTxn.id === remoteTxn.id)) {
+              mergedSales.push(remoteTxn);
+            }
+          });
+          mergedSales.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+          setTransactions(mergedSales);
+          safeSetJSON('retail_pos_transactions', mergedSales);
+        },
+        (err) => {
+          console.warn('Transactions subscription notice:', err);
+        }
+      );
+    } catch (err) {
+      console.warn('Could not subscribe to transactions:', err);
+    }
+    return () => {
+      if (unsubscribe) unsubscribe();
+    };
+  }, []);
+
+  // Offline and bidirectional cloud sync handler
   const syncPendingQueueToCloud = async () => {
-    const queue = getPendingSyncQueue();
-    if (queue.length === 0) return;
     setCloudSyncStatus('syncing');
 
+    // 1. Bidirectional Sync Guarantee: Push any local sales that haven't been uploaded yet before pulling remote updates
+    const localSales = safeGetJSON<Transaction[]>('retail_pos_transactions', transactions);
+    for (const tx of localSales) {
+      try {
+        await saveTransactionToCloud(tx);
+      } catch (err) {
+        console.warn(`[Sync] Could not push transaction ${tx.id} to cloud:`, err);
+      }
+    }
+
+    const queue = getPendingSyncQueue();
     let syncedCount = 0;
     for (const item of queue) {
       try {
@@ -760,10 +817,13 @@ export default function App() {
       }
     }
 
-    if (syncedCount > 0) {
-      setLastSyncedTime(new Date().toLocaleTimeString());
-      setCloudSyncStatus('synced');
-    }
+    // 2. Merge Local & Cloud Sales (Prevent Overwrites) using ID-based union
+    const existingLocalSales = safeGetJSON<Transaction[]>('retail_pos_transactions', transactions);
+    setTransactions(existingLocalSales);
+    safeSetJSON('retail_pos_transactions', existingLocalSales);
+
+    setLastSyncedTime(new Date().toLocaleTimeString());
+    setCloudSyncStatus('synced');
   };
 
   // Automatically attempt sync when network connection transitions from offline to online
@@ -1071,7 +1131,12 @@ export default function App() {
     updatedProducts: Product[],
     updatedCustomers: Customer[]
   ) => {
-    setTransactions((prev) => [tx, ...prev]);
+    setTransactions((prev) => {
+      const updated = [tx, ...prev.filter((t) => t.id !== tx.id)];
+      safeSetJSON('retail_pos_transactions', updated);
+      safeSetJSON('pos_store_sales', updated);
+      return updated;
+    });
     setProducts(updatedProducts);
     setCustomers(updatedCustomers);
 

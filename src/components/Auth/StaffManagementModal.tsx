@@ -939,6 +939,12 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
                               <span>{u.department}</span>
                             </div>
                           )}
+                          <div className="flex items-center gap-1.5 mt-1">
+                            <span className={`w-2 h-2 rounded-full ${isInactive ? 'bg-slate-500' : isCurrent ? 'bg-emerald-400 animate-pulse' : 'bg-emerald-500'}`} />
+                            <span className="text-[10px] font-bold text-emerald-300">
+                              {isCurrent ? '🟢 Online / Logged In (Clocked In at 08:30 AM)' : isInactive ? '⚪ Offline / Not Clocked In' : '🟢 Online / Shift Active'}
+                            </span>
+                          </div>
                         </div>
                       </div>
 

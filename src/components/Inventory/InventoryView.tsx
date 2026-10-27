@@ -3701,6 +3701,35 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                   </select>
                 </div>
 
+                {/* KRA eTIMS Tax Classification Selector */}
+                <div className="sm:col-span-2 bg-slate-950/80 border border-slate-800 p-3.5 rounded-2xl space-y-2">
+                  <label className="block text-xs font-bold text-slate-300 flex items-center gap-1.5">
+                    <Percent className="w-3.5 h-3.5 text-amber-400" />
+                    <span>KRA eTIMS Tax Classification</span>
+                  </label>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    {[
+                      { id: 'Standard VAT (16%)', label: '[ A ] Standard VAT (16%)' },
+                      { id: 'Zero-Rated (0%)', label: '[ B ] Zero-Rated (0%)' },
+                      { id: 'Exempt', label: '[ C ] Exempt' },
+                      { id: 'Turnover Tax / Non-VAT', label: '[ E ] Turnover Tax / Non-VAT' },
+                    ].map((taxOpt) => (
+                      <button
+                        key={taxOpt.id}
+                        type="button"
+                        onClick={() => setEditingProduct({ ...editingProduct, kraTaxType: taxOpt.id as any })}
+                        className={`p-2.5 rounded-xl border text-left text-xs transition cursor-pointer ${
+                          (editingProduct.kraTaxType || 'Standard VAT (16%)') === taxOpt.id
+                            ? 'bg-amber-950/80 text-amber-200 border-amber-500 font-bold shadow-sm'
+                            : 'bg-slate-900 text-slate-300 border-slate-800 hover:bg-slate-800'
+                        }`}
+                      >
+                        {taxOpt.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
                 {/* Supplier */}
                 <div>
                   <div className="flex items-center justify-between mb-1">

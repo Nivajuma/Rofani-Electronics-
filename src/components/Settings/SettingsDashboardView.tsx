@@ -690,11 +690,15 @@ export const SettingsDashboardView: React.FC<SettingsDashboardViewProps> = ({
                     {staffUsers.length === 0 ? (
                       <div className="p-8 text-center text-slate-400 text-xs">No workers configured yet. Click "+ Add New Worker" to create one.</div>
                     ) : (
-                      staffUsers.map((u) => (
+                      staffUsers.map((u) => {
+                        const currentActiveUser = safeGetJSON<any>('pos_active_cashier', safeGetJSON<any>('pos_current_session', safeGetJSON<any>('retail_pos_active_user', null)));
+                        const isOnlineActive = currentActiveUser && (currentActiveUser.id === u.id || currentActiveUser.name?.toLowerCase() === u.name?.toLowerCase());
+
+                        return (
                         <div key={u.id} className="p-3.5 bg-slate-950 border border-slate-800 rounded-2xl space-y-2 hover:border-slate-700 transition">
                           <div className="flex items-center justify-between gap-3">
                             <div>
-                              <div className="flex items-center gap-2">
+                              <div className="flex items-center gap-2 flex-wrap">
                                 <span className="font-bold text-slate-100 text-sm">{u.name}</span>
                                 <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full ${
                                   u.role === 'Admin' ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40' :
@@ -703,6 +707,19 @@ export const SettingsDashboardView: React.FC<SettingsDashboardViewProps> = ({
                                 }`}>
                                   {u.role || 'Cashier'}
                                 </span>
+
+                                {/* Live Presence Badge */}
+                                {isOnlineActive ? (
+                                  <span className="inline-flex items-center gap-1 text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-2.5 py-0.5 rounded-full font-bold">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                                    Online / Logged In ({currentActiveUser?.shiftStatus || 'Clocked In at 08:30 AM'})
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1 text-[10px] bg-slate-800 text-slate-400 border border-slate-700 px-2.5 py-0.5 rounded-full font-medium">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-slate-500" />
+                                    Offline / Not Clocked In
+                                  </span>
+                                )}
                               </div>
                               <div className="text-[11px] text-slate-400 font-mono flex items-center gap-3 mt-1">
                                 <span>📞 {u.phone || 'No phone'}</span>
@@ -743,8 +760,9 @@ export const SettingsDashboardView: React.FC<SettingsDashboardViewProps> = ({
                             </div>
                           )}
                         </div>
-                      ))
-                    )}
+                      );
+                    })
+                  )}
                   </div>
                 </div>
               )}

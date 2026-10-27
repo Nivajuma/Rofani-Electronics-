@@ -113,6 +113,8 @@ export interface PaymentBreakdown {
   reference?: string; // Cheque #, M-Pesa Code, UPI Ref, etc.
 }
 
+export type KraTaxClassification = 'Standard VAT (16%)' | 'Zero-Rated (0%)' | 'Exempt' | 'Turnover Tax / Non-VAT';
+
 export interface Product {
   id: string;
   name: string;
@@ -134,6 +136,7 @@ export interface Product {
   supplierName: string;
   imageUrl?: string;
   storeStock?: Record<string, number>; // Mapping from store location ID to stock quantity
+  kraTaxType?: KraTaxClassification;
   createdAt: string;
   updatedAt: string;
 }
@@ -223,6 +226,7 @@ export interface Transaction {
   id: string;
   receiptNumber: string;
   date: string; // ISO string
+  timestamp?: number;
   items: CartItem[];
   subtotal: number;
   discountTotal: number;
@@ -230,6 +234,7 @@ export interface Transaction {
   taxTotal: number;
   grandTotal: number;
   total?: number; // Alias for backward compatibility
+  totalAmount?: number;
   paymentMethod?: string; // Alias for single payment method summary
   amountPaid: number;
   balanceDue: number;
@@ -249,6 +254,14 @@ export interface Transaction {
   storeName?: string;
   sourceType?: 'POS' | 'Online Store';
   notes?: string;
+  cuin?: string;
+  cusn?: string;
+  taxBreakdown?: {
+    vat16Total: number;
+    zeroRatedTotal: number;
+    exemptTotal: number;
+    totTotal: number;
+  };
 }
 
 export interface StaffCommissionPayout {

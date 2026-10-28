@@ -174,7 +174,7 @@ import {
   saveAuditLogToCloud,
 } from './lib/cloudSync';
 import { testFirestoreConnection, isQuotaExceededError, FIREBASE_UPGRADE_URL } from './lib/firebase';
-import { safeGetJSON, safeSetJSON } from './utils/safeStorage';
+import { safeGetJSON, safeSetJSON, checkAndRunRollingSalesArchive } from './utils/safeStorage';
 import {
   getAllProductImagesFromIndexedDB,
   saveProductImageToIndexedDB,
@@ -309,34 +309,51 @@ export default function App() {
     window.open(window.location.href, '_blank');
   };
 
-  // Role, Worker Users & PIN Security State
-  const [allUsers, setAllUsers] = useState<User[]>(() => {
-    const rawUsers = safeGetJSON<User[]>('retail_pos_users', INITIAL_USERS);
-    // Ensure all workers have their roles[] array populated
-    const migrated = rawUsers.map((u) => {
-      const userRoles = getUserRoles(u);
-      return {
-        ...u,
-        roles: u.roles && u.roles.length > 0 ? Array.from(new Set([...u.roles, ...userRoles])) : userRoles,
-      };
-    });
+  // Role, Worker Users & PIN Security State with safe lazy initialization & immediate localStorage sync
+  const [allUsers, setAllUsersState] = useState<User[]>(() => {
+    try {
+      const primary = localStorage.getItem('retail_pos_users');
+      const secondary = localStorage.getItem('pos_store_staff_users');
+      const saved = primary || secondary;
+      const rawUsers = saved ? JSON.parse(saved) : INITIAL_USERS;
+      const migrated = rawUsers.map((u: any) => {
+        const userRoles = getUserRoles(u);
+        return {
+          ...u,
+          roles: u.roles && u.roles.length > 0 ? Array.from(new Set([...u.roles, ...userRoles])) : userRoles,
+        };
+      });
 
-    // Safeguard: Ensure at least one worker has the Admin role so store owner is NEVER locked out!
-    const hasAdmin = migrated.some((u) => hasRole(u, 'Admin'));
-    if (!hasAdmin && migrated.length > 0) {
-      const adminCandidateIdx = migrated.findIndex((u) => u.id === 'usr-1');
-      const targetIdx = adminCandidateIdx >= 0 ? adminCandidateIdx : 0;
-      migrated[targetIdx] = {
-        ...migrated[targetIdx],
-        role: 'Admin',
-        roles: Array.from(new Set([...(migrated[targetIdx].roles || []), 'Admin' as Role])),
-        pin: migrated[targetIdx].pin || '1234',
-        permissions: { ...DEFAULT_ROLE_WORKER_PERMISSIONS['Admin'] },
-      };
-      safeSetJSON('retail_pos_users', migrated);
+      const hasAdmin = migrated.some((u: any) => hasRole(u, 'Admin'));
+      if (!hasAdmin && migrated.length > 0) {
+        const adminCandidateIdx = migrated.findIndex((u: any) => u.id === 'usr-1');
+        const targetIdx = adminCandidateIdx >= 0 ? adminCandidateIdx : 0;
+        migrated[targetIdx] = {
+          ...migrated[targetIdx],
+          role: 'Admin',
+          roles: Array.from(new Set([...(migrated[targetIdx].roles || []), 'Admin' as Role])),
+          pin: migrated[targetIdx].pin || '1234',
+          permissions: { ...DEFAULT_ROLE_WORKER_PERMISSIONS['Admin'] },
+        };
+        try {
+          localStorage.setItem('retail_pos_users', JSON.stringify(migrated));
+          localStorage.setItem('pos_store_staff_users', JSON.stringify(migrated));
+        } catch {}
+      }
+      return migrated;
+    } catch (e) {
+      return INITIAL_USERS;
     }
-    return migrated;
   });
+
+  const setAllUsers = (newVal: User[] | ((prev: User[]) => User[])) => {
+    setAllUsersState((prev) => {
+      const next = typeof newVal === 'function' ? newVal(prev) : newVal;
+      safeSetJSON('retail_pos_users', next);
+      safeSetJSON('pos_store_staff_users', next);
+      return next;
+    });
+  };
 
   const [currentUser, setCurrentUser] = useState<User>(() => {
     const rawCurrent = safeGetJSON<User>('retail_pos_active_user', INITIAL_USERS[0]);
@@ -411,8 +428,23 @@ export default function App() {
   const [showQuotaBanner, setShowQuotaBanner] = useState<boolean>(true);
   const [lastSyncedTime, setLastSyncedTime] = useState<string | null>(null);
 
-  // Application Persistent Collections State with localStorage sync
-  const [products, setProducts] = useState<Product[]>(() => safeGetJSON('retail_pos_products', INITIAL_PRODUCTS));
+  // Application Persistent Collections State with safe lazy initialization & immediate localStorage sync
+  const [products, setProductsState] = useState<Product[]>(() => {
+    try {
+      const saved = localStorage.getItem('retail_pos_products');
+      return saved ? JSON.parse(saved) : INITIAL_PRODUCTS;
+    } catch (e) {
+      return INITIAL_PRODUCTS;
+    }
+  });
+
+  const setProducts = (newVal: Product[] | ((prev: Product[]) => Product[])) => {
+    setProductsState((prev) => {
+      const next = typeof newVal === 'function' ? newVal(prev) : newVal;
+      safeSetJSON('retail_pos_products', next);
+      return next;
+    });
+  };
 
   // Automatically restore and hydrate high-resolution product photos from persistent IndexedDB
   useEffect(() => {
@@ -497,30 +529,110 @@ export default function App() {
 
   const [suppliers, setSuppliers] = useState<Supplier[]>(() => safeGetJSON('retail_pos_suppliers', INITIAL_SUPPLIERS));
 
-  const [expenses, setExpenses] = useState<Expense[]>(() => safeGetJSON('retail_pos_expenses', INITIAL_EXPENSES));
+  const [expenses, setExpensesState] = useState<Expense[]>(() => {
+    try {
+      const saved = localStorage.getItem('retail_pos_expenses');
+      return saved ? JSON.parse(saved) : INITIAL_EXPENSES;
+    } catch (e) {
+      return INITIAL_EXPENSES;
+    }
+  });
+
+  const setExpenses = (newVal: Expense[] | ((prev: Expense[]) => Expense[])) => {
+    setExpensesState((prev) => {
+      const next = typeof newVal === 'function' ? newVal(prev) : newVal;
+      safeSetJSON('retail_pos_expenses', next);
+      return next;
+    });
+  };
 
   const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>(() => safeGetJSON('retail_pos_attendance', INITIAL_ATTENDANCE));
 
-  const [transactions, setTransactions] = useState<Transaction[]>(() => {
-    const primary = safeGetJSON<Transaction[]>('retail_pos_transactions', []);
-    const secondary = safeGetJSON<Transaction[]>('pos_store_sales', []);
-    const combined = [...primary];
-    secondary.forEach((t) => {
-      if (!combined.some((item) => item.id === t.id)) {
-        combined.push(t);
+  const [transactions, setTransactionsState] = useState<Transaction[]>(() => {
+    try {
+      const primary = localStorage.getItem('retail_pos_transactions');
+      const secondary = localStorage.getItem('pos_store_sales');
+      const primaryParsed = primary ? JSON.parse(primary) : [];
+      const secondaryParsed = secondary ? JSON.parse(secondary) : [];
+      const combined = [...primaryParsed];
+      secondaryParsed.forEach((t: any) => {
+        if (!combined.some((item) => item.id === t.id)) {
+          combined.push(t);
+        }
+      });
+      if (combined.length === 0) {
+        return INITIAL_TRANSACTIONS;
       }
-    });
-    if (combined.length === 0) {
+      combined.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      return checkAndRunRollingSalesArchive(combined);
+    } catch (e) {
       return INITIAL_TRANSACTIONS;
     }
-    combined.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-    return combined;
   });
 
+  const setTransactions = (newVal: Transaction[] | ((prev: Transaction[]) => Transaction[])) => {
+    setTransactionsState((prev) => {
+      const next = typeof newVal === 'function' ? newVal(prev) : newVal;
+      const archivedChecked = checkAndRunRollingSalesArchive(next);
+      safeSetJSON('retail_pos_transactions', archivedChecked);
+      safeSetJSON('pos_store_sales', archivedChecked);
+      return archivedChecked;
+    });
+  };
+
   useEffect(() => {
-    safeSetJSON('retail_pos_transactions', transactions);
-    safeSetJSON('pos_store_sales', transactions);
+    const archivedChecked = checkAndRunRollingSalesArchive(transactions);
+    safeSetJSON('retail_pos_transactions', archivedChecked);
+    safeSetJSON('pos_store_sales', archivedChecked);
   }, [transactions]);
+
+  // Visibility Change & App Resume Re-Hydration Listener
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        try {
+          const freshSales = localStorage.getItem('retail_pos_transactions') || localStorage.getItem('pos_store_sales');
+          if (freshSales) {
+            const parsed = JSON.parse(freshSales);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              setTransactionsState(parsed);
+            }
+          }
+
+          const freshProducts = localStorage.getItem('retail_pos_products');
+          if (freshProducts) {
+            const parsed = JSON.parse(freshProducts);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              setProductsState(parsed);
+            }
+          }
+
+          const freshUsers = localStorage.getItem('retail_pos_users') || localStorage.getItem('pos_store_staff_users');
+          if (freshUsers) {
+            const parsed = JSON.parse(freshUsers);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              setAllUsersState(parsed);
+            }
+          }
+
+          const freshExpenses = localStorage.getItem('retail_pos_expenses');
+          if (freshExpenses) {
+            const parsed = JSON.parse(freshExpenses);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              setExpensesState(parsed);
+            }
+          }
+        } catch (e) {
+          console.error('Storage quota or error on visibility wake:', e);
+        }
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, []);
 
   const [cashTransactions, setCashTransactions] = useState<CashTransaction[]>(() => safeGetJSON('retail_pos_cash_transactions', INITIAL_CASH_TRANSACTIONS));
 
@@ -733,6 +845,47 @@ export default function App() {
   useEffect(() => {
     safeSetJSON('retail_pos_active_user', currentUser);
   }, [currentUser]);
+
+  // Automatic Background Backup & Event-Driven Snapshots (beforeunload, pagehide, visibilitychange)
+  useEffect(() => {
+    const handleBackupSnapshot = () => {
+      try {
+        const backupPayload = {
+          timestamp: Date.now(),
+          sales: transactions,
+          staff: allUsers,
+          products: products,
+          expenses: expenses,
+          settings: {
+            activeStoreId,
+            requirePinOnStartup,
+            masterPin,
+            ownerRecoveryEmail,
+          }
+        };
+        localStorage.setItem('rofani_pos_auto_backup', JSON.stringify(backupPayload));
+        localStorage.setItem('rofani_pos_last_snapshot', JSON.stringify(backupPayload));
+      } catch (err) {
+        console.warn('Could not save auto-backup snapshot:', err);
+      }
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        handleBackupSnapshot();
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBackupSnapshot);
+    window.addEventListener('pagehide', handleBackupSnapshot);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      window.removeEventListener('beforeunload', handleBackupSnapshot);
+      window.removeEventListener('pagehide', handleBackupSnapshot);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [transactions, allUsers, products, expenses, activeStoreId, requirePinOnStartup, masterPin, ownerRecoveryEmail]);
 
   // Real-time synchronization subscription for transactions with ID-based local preservation
   useEffect(() => {
@@ -2162,6 +2315,16 @@ export default function App() {
     if (imported.attendanceRecords) setAttendanceRecords(imported.attendanceRecords);
   };
 
+  const handleUpdateTransaction = (updatedTx: Transaction, updatedProducts: Product[]) => {
+    setTransactions((prev) => {
+      const next = prev.map((t) => (t.id === updatedTx.id ? { ...updatedTx, editedAt: new Date().toISOString() } : t));
+      safeSetJSON('retail_pos_transactions', next);
+      safeSetJSON('pos_store_sales', next);
+      return next;
+    });
+    setProducts(updatedProducts);
+  };
+
   const handleClearTransactions = () => {
     const userRoles = getUserRoles(currentUser);
     const qualifyingRoles = getQualifyingRolesForAction(currentUser, 'CLEAR_TRANSACTIONS');
@@ -2449,6 +2612,7 @@ export default function App() {
           suppliers={suppliers}
           expenses={expenses}
           auditLogs={auditLogs}
+          onUpdateTransaction={handleUpdateTransaction}
         />
       )}
 

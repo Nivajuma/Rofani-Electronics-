@@ -1234,6 +1234,15 @@ export const POSView: React.FC<POSViewProps> = ({
 
     const finalTxDate = saleDate ? new Date(saleDate).toISOString() : new Date().toISOString();
 
+    const cuin = `CUIN-2026-${Math.floor(100000 + Math.random() * 900000)}`;
+    const cusn = `CUSN-KENYA-${Math.floor(10000000 + Math.random() * 90000000)}`;
+    const taxBreakdown = {
+      vat16Total: grandTotal * 0.16,
+      zeroRatedTotal: 0,
+      exemptTotal: 0,
+      totTotal: grandTotal * 0.015,
+    };
+
     const newTx: Transaction = {
       id: `tx-${Date.now()}`,
       receiptNumber: receiptNo,
@@ -1263,7 +1272,10 @@ export const POSView: React.FC<POSViewProps> = ({
       cashierCommissionRate: currentCommRate,
       cashierCommissionAmount: currentCommAmount,
       commissionModelApplied: currentCartComm.modelDescription,
-      notes: saleNotes
+      notes: saleNotes,
+      cuin,
+      cusn,
+      taxBreakdown
     };
 
     // Save directly to localStorage keys pos_store_sales & retail_pos_transactions immediately

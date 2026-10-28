@@ -279,3 +279,86 @@ export function usePersistedState<T>(
 
   return [state, setState];
 }
+
+/**
+ * Rolling Sales Archive (Old Data Management):
+ * If the sales history array exceeds 5,000 transactions, automatically archive transactions
+ * older than 90 days into an archive key or compressed format,
+ * keeping active localStorage lean and fast.
+ */
+export function checkAndRunRollingSalesArchive(transactions: any[]): any[] {
+  if (!Array.isArray(transactions) || transactions.length <= 5000) {
+    return transactions;
+  }
+
+  const now = Date.now();
+  const ninetyDaysMs = 90 * 24 * 60 * 60 * 1000;
+  const cutoffTime = now - ninetyDaysMs;
+
+  const activeTransactions: any[] = [];
+  const archiveTransactions: any[] = [];
+
+  transactions.forEach((tx) => {
+    const txTime = new Date(tx.date || tx.timestamp || 0).getTime();
+    if (txTime && txTime < cutoffTime) {
+      archiveTransactions.push(tx);
+    } else {
+      activeTransactions.push(tx);
+    }
+  });
+
+  if (archiveTransactions.length > 0) {
+    try {
+      const existingArchive = safeGetJSON<any[]>('pos_store_sales_archive', []);
+      const combinedArchive = [...archiveTransactions, ...existingArchive];
+      localStorage.setItem('pos_store_sales_archive', JSON.stringify(combinedArchive));
+    } catch (err) {
+      console.warn('[SafeStorage] Could not write sales archive:', err);
+    }
+  }
+
+  if (activeTransactions.length > 5000) {
+    activeTransactions.sort((a, b) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime());
+    return activeTransactions.slice(0, 5000);
+  }
+
+  return activeTransactions;
+}
+
+/**
+ * Storage Usage Indicator helper:
+ * Calculates total bytes used in localStorage, percentage of typical 5MB limit, and breakdown per key.
+ */
+export function getLocalStorageUsageStats(): {
+  totalBytes: number;
+  usedKb: number;
+  percentUsed: number;
+  breakdown: Array<{ key: string; sizeKb: number }>;
+} {
+  if (typeof window === 'undefined' || !window.localStorage) {
+    return { totalBytes: 0, usedKb: 0, percentUsed: 0, breakdown: [] };
+  }
+
+  let totalBytes = 0;
+  const breakdown: Array<{ key: string; sizeKb: number }> = [];
+  const maxQuotaBytes = 5 * 1024 * 1024; // 5 MB typical localStorage quota
+
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (key) {
+      try {
+        const val = localStorage.getItem(key) || '';
+        const byteSize = (key.length + val.length) * 2;
+        totalBytes += byteSize;
+        breakdown.push({ key, sizeKb: Math.round(byteSize / 1024) });
+      } catch {}
+    }
+  }
+
+  breakdown.sort((a, b) => b.sizeKb - a.sizeKb);
+
+  const usedKb = Math.round(totalBytes / 1024);
+  const percentUsed = Math.min(100, Math.round((totalBytes / maxQuotaBytes) * 1000) / 10);
+
+  return { totalBytes, usedKb, percentUsed, breakdown };
+}

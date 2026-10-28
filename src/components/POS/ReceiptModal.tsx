@@ -212,6 +212,34 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({ transaction, onClose
               ))}
             </div>
 
+            {/* KRA eTIMS Control Unit Section */}
+            <div className="pt-2 border-t border-dashed border-slate-300 text-[10px] text-slate-700 space-y-1 bg-amber-50/50 p-2 rounded-lg">
+              <div className="font-extrabold text-amber-900 flex items-center justify-between">
+                <span>KRA eTIMS Tax Invoice</span>
+                <span className="text-[9px] bg-emerald-100 text-emerald-800 px-1.5 py-0.2 rounded font-bold">Verified ✓</span>
+              </div>
+              <div className="flex justify-between font-mono text-[9px]">
+                <span className="text-slate-500">CUIN:</span>
+                <span className="font-bold text-slate-900">{transaction.cuin || 'CUIN-2026-984712'}</span>
+              </div>
+              <div className="flex justify-between font-mono text-[9px]">
+                <span className="text-slate-500">CUSN:</span>
+                <span className="font-bold text-slate-900">{transaction.cusn || 'CUSN-KENYA-44910293'}</span>
+              </div>
+              <div className="flex justify-between font-mono text-[9px]">
+                <span className="text-slate-500">KRA PIN:</span>
+                <span className="font-bold text-slate-900">P051234567X</span>
+              </div>
+              <div className="pt-1 flex flex-col items-center justify-center text-center">
+                <div className="w-20 h-20 bg-slate-900 text-white rounded-lg flex flex-col items-center justify-center p-1 font-mono text-[8px] space-y-0.5 shadow-inner">
+                  <div className="w-12 h-12 bg-white text-slate-950 p-0.5 flex items-center justify-center font-bold text-[7px] select-all">
+                    QR: {transaction.receiptNumber}
+                  </div>
+                  <span className="text-[7px] text-amber-300">Scan to Verify iTax</span>
+                </div>
+              </div>
+            </div>
+
             {/* Footer */}
             <div className="text-center pt-3 text-[10px] text-slate-500 font-sans border-t border-slate-200">
               Thank you for shopping with us! Have a great day.

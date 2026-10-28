@@ -38,7 +38,7 @@ import { detectDuplicateProducts, deduplicateProducts } from '../../utils/dedupl
 import { DataSnapshotModal } from './DataSnapshotModal';
 import { CameraPermissionsCard } from './CameraPermissionsCard';
 import { SettingsDashboardView } from './SettingsDashboardView';
-import { safeGetJSON, safeSetJSON } from '../../utils/safeStorage';
+import { safeGetJSON, safeSetJSON, getLocalStorageUsageStats } from '../../utils/safeStorage';
 
 interface DataManagementViewProps {
   products: Product[];
@@ -353,6 +353,49 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
           <span>{successMessage}</span>
         </div>
       )}
+
+      {/* Storage Health & Usage Indicator Card */}
+      {(() => {
+        const stats = getLocalStorageUsageStats();
+        return (
+          <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2">
+                <HardDrive className="w-5 h-5 text-blue-600" />
+                <h3 className="font-bold text-sm text-slate-800">Local Storage Health & Space Utilization</h3>
+              </div>
+              <span className="text-xs font-mono font-bold bg-blue-50 text-blue-700 px-3 py-1 rounded-full border border-blue-200">
+                {stats.usedKb} KB used ({stats.percentUsed}% of ~5MB limit)
+              </span>
+            </div>
+
+            <div className="space-y-2">
+              <div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden border border-slate-200">
+                <div
+                  className={`h-full transition-all duration-500 rounded-full ${
+                    stats.percentUsed > 80 ? 'bg-rose-500' : stats.percentUsed > 50 ? 'bg-amber-500' : 'bg-emerald-500'
+                  }`}
+                  style={{ width: `${Math.max(3, stats.percentUsed)}%` }}
+                />
+              </div>
+              <div className="flex justify-between text-[11px] text-slate-500 font-mono">
+                <span>0 KB</span>
+                <span>Rolling Sales Archive Active (Max 5,000 txs)</span>
+                <span>~5,000 KB (5 MB)</span>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5 pt-2">
+              {stats.breakdown.slice(0, 4).map((item) => (
+                <div key={item.key} className="bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-1">
+                  <div className="text-[10px] font-mono text-slate-400 truncate" title={item.key}>{item.key}</div>
+                  <div className="text-xs font-bold text-slate-800 font-mono">{item.sizeKb} KB</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Real-Time Cloud Synchronization & Worker Phone Sharing Highlight Card */}
       <div className="bg-gradient-to-r from-sky-900/90 via-blue-900/90 to-indigo-900/90 border border-sky-500/40 rounded-2xl p-5 text-white shadow-lg flex flex-col md:flex-row items-start md:items-center justify-between gap-4">

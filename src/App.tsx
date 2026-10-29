@@ -586,9 +586,9 @@ export default function App() {
     safeSetJSON('pos_store_sales', archivedChecked);
   }, [transactions]);
 
-  // Visibility Change & App Resume Re-Hydration Listener
+  // Aggressive Post-Sleep Rehydration Effect (focus and visibilitychange)
   useEffect(() => {
-    const handleVisibilityChange = () => {
+    const handleFocusAndVisibility = () => {
       if (document.visibilityState === 'visible') {
         try {
           const freshSales = localStorage.getItem('retail_pos_transactions') || localStorage.getItem('pos_store_sales');
@@ -631,14 +631,16 @@ export default function App() {
             }
           }
         } catch (e) {
-          console.error('Storage quota or error on visibility wake:', e);
+          console.error('Storage quota or error on focus/wake:', e);
         }
       }
     };
 
-    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('focus', handleFocusAndVisibility);
+    document.addEventListener('visibilitychange', handleFocusAndVisibility);
     return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', handleFocusAndVisibility);
+      document.removeEventListener('visibilitychange', handleFocusAndVisibility);
     };
   }, []);
 

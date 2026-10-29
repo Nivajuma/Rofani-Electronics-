@@ -622,6 +622,14 @@ export default function App() {
               setExpensesState(parsed);
             }
           }
+
+          const freshPurchases = localStorage.getItem('retail_pos_purchase_orders');
+          if (freshPurchases) {
+            const parsed = JSON.parse(freshPurchases);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              setPurchaseOrdersState(parsed);
+            }
+          }
         } catch (e) {
           console.error('Storage quota or error on visibility wake:', e);
         }
@@ -638,11 +646,26 @@ export default function App() {
 
   const [restockRecords, setRestockRecords] = useState<RestockRecord[]>(() => safeGetJSON('retail_pos_restock_records', INITIAL_RESTOCK_RECORDS));
 
-  const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>(() => safeGetJSON('retail_pos_purchase_orders', INITIAL_PURCHASE_ORDERS));
+  const [purchaseOrders, setPurchaseOrdersState] = useState<PurchaseOrder[]>(() => {
+    try {
+      const saved = localStorage.getItem('retail_pos_purchase_orders');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch (e) {
+      console.error('Error loading purchases:', e);
+    }
+    return INITIAL_PURCHASE_ORDERS;
+  });
 
-  useEffect(() => {
-    safeSetJSON('retail_pos_purchase_orders', purchaseOrders);
-  }, [purchaseOrders]);
+  const setPurchaseOrders = (newVal: PurchaseOrder[] | ((prev: PurchaseOrder[]) => PurchaseOrder[])) => {
+    setPurchaseOrdersState((prev) => {
+      const next = typeof newVal === 'function' ? newVal(prev) : newVal;
+      safeSetJSON('retail_pos_purchase_orders', next);
+      return next;
+    });
+  };
 
   const [commissionPayouts, setCommissionPayouts] = useState<StaffCommissionPayout[]>(() => safeGetJSON('retail_pos_commission_payouts', INITIAL_COMMISSION_PAYOUTS));
 

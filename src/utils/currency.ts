@@ -113,5 +113,24 @@ export const parseKSh = (val: string | number | undefined | null): number => {
   if (typeof val === 'number') return isNaN(val) ? 0 : val;
   const cleaned = val.replace(/[^0-9.-]/g, '');
   const parsed = parseFloat(cleaned);
-  return isNaN(parsed) ? 0 : parsed;
+  return isNaN(parsed) ? 0 : Number(parsed.toFixed(2));
+};
+
+/**
+ * Cleans integer inputs (e.g. quantity, stock counts, order quantities)
+ * by stripping unwanted leading zeros (e.g. "056" -> 56, "07" -> 7).
+ */
+export const cleanIntegerInput = (val: string | number | undefined | null): number => {
+  if (val === undefined || val === null || val === '') return 0;
+  const parsed = parseInt(String(val).replace(/[^0-9]/g, ''), 10);
+  return isNaN(parsed) || parsed < 0 ? 0 : parsed;
+};
+
+/**
+ * Cleans decimal and monetary inputs by parsing floats safely and rounding to 2 decimal places.
+ */
+export const cleanDecimalInput = (val: string | number | undefined | null): number => {
+  if (val === undefined || val === null || val === '') return 0;
+  const parsed = parseFloat(String(val).replace(/[^0-9.-]/g, ''));
+  return isNaN(parsed) ? 0 : Number(parsed.toFixed(2));
 };

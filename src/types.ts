@@ -262,6 +262,7 @@ export interface Transaction {
     exemptTotal: number;
     totTotal: number;
   };
+  editedAt?: string;
 }
 
 export interface StaffCommissionPayout {

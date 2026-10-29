@@ -58,6 +58,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   purchaseOrders = [],
   auditLogs = [],
   onBack,
+  onUpdateTransaction,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedReport, setSelectedReport] = useState<ReportItem | null>(null);
@@ -123,7 +124,9 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
       return {
         product: { ...item.product, stockQuantity: prod ? prod.stockQuantity : item.product.stockQuantity },
         quantity: item.quantity,
-        unitPrice: item.unitPrice
+        unitPrice: item.unitPrice,
+        discount: 0,
+        total: item.quantity * item.unitPrice
       };
     });
 

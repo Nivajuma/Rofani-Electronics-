@@ -39,6 +39,7 @@ import { DataSnapshotModal } from './DataSnapshotModal';
 import { CameraPermissionsCard } from './CameraPermissionsCard';
 import { SettingsDashboardView } from './SettingsDashboardView';
 import { safeGetJSON, safeSetJSON, getLocalStorageUsageStats } from '../../utils/safeStorage';
+import { bulkUploadProductsToCloud, bulkUploadUsersToCloud, saveTransactionToCloud, saveCustomerToCloud, saveSupplierToCloud, saveExpenseToCloud } from '../../lib/cloudSync';
 
 interface DataManagementViewProps {
   products: Product[];
@@ -108,6 +109,31 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
 }) => {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [isCloudSyncing, setIsCloudSyncing] = useState(false);
+
+  const handleUploadLocalDataToCloud = async () => {
+    setIsCloudSyncing(true);
+    try {
+      const prodCount = await bulkUploadProductsToCloud(products);
+      if (allUsers && allUsers.length > 0) {
+        await bulkUploadUsersToCloud(allUsers);
+      }
+      for (const t of transactions.slice(0, 100)) {
+        await saveTransactionToCloud(t);
+      }
+      for (const c of customers.slice(0, 100)) {
+        await saveCustomerToCloud(c);
+      }
+      for (const e of expenses.slice(0, 50)) {
+        await saveExpenseToCloud(e);
+      }
+      triggerNotify(`Successfully uploaded ${prodCount} products & local data to live Firestore database!`);
+    } catch (err) {
+      setErrorMessage('Failed to sync local data to cloud. Check network or storage rules.');
+    } finally {
+      setIsCloudSyncing(false);
+    }
+  };
 
   // Store Master PIN edit state
   const [inputMasterPin, setInputMasterPin] = useState(masterPin);
@@ -427,6 +453,31 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
             <span>Open Sync & Share Hub</span>
           </button>
         )}
+      </div>
+
+      {/* One-Tap Migration Tool ("Sync Local Data to Cloud") */}
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 text-white shadow-xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+        <div className="flex items-center gap-3.5">
+          <div className="w-12 h-12 bg-sky-500/20 text-sky-400 rounded-xl flex items-center justify-center border border-sky-400/30 shrink-0">
+            <Upload className="w-6 h-6" />
+          </div>
+          <div>
+            <h3 className="font-bold text-sm text-slate-100">Upload Local Data to Cloud Firestore</h3>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Instantly push all {products.length} products, sales, and customers from local storage into the live Firestore database collections in a batch write.
+            </p>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          onClick={handleUploadLocalDataToCloud}
+          disabled={isCloudSyncing}
+          className="px-4 py-2.5 bg-sky-500 hover:bg-sky-400 active:scale-95 text-slate-950 font-bold rounded-xl text-xs flex items-center gap-2 shadow-md transition shrink-0 disabled:opacity-50 cursor-pointer"
+        >
+          <Upload className={`w-4 h-4 ${isCloudSyncing ? 'animate-spin' : ''}`} />
+          <span>{isCloudSyncing ? 'Uploading to Cloud...' : 'Sync Local Data to Cloud'}</span>
+        </button>
       </div>
 
       {errorMessage && (

@@ -9,7 +9,20 @@ import {
   Firestore
 } from 'firebase/firestore';
 import { getAuth, Auth } from 'firebase/auth';
-import firebaseConfig from '../../firebase-applet-config.json';
+import rawConfig from '../../firebase-applet-config.json';
+
+// Support Vercel environment variables (VITE_FIREBASE_*) with safe fallback to firebase-applet-config.json
+const env = (import.meta as any)?.env || {};
+export const firebaseConfig = {
+  apiKey: (env.VITE_FIREBASE_API_KEY as string) || rawConfig.apiKey,
+  authDomain: (env.VITE_FIREBASE_AUTH_DOMAIN as string) || rawConfig.authDomain,
+  projectId: (env.VITE_FIREBASE_PROJECT_ID as string) || rawConfig.projectId,
+  storageBucket: (env.VITE_FIREBASE_STORAGE_BUCKET as string) || rawConfig.storageBucket,
+  messagingSenderId: (env.VITE_FIREBASE_MESSAGING_SENDER_ID as string) || rawConfig.messagingSenderId,
+  appId: (env.VITE_FIREBASE_APP_ID as string) || rawConfig.appId,
+  firestoreDatabaseId: (env.VITE_FIREBASE_DATABASE_ID as string) || rawConfig.firestoreDatabaseId,
+  measurementId: rawConfig.measurementId || '',
+};
 
 // Silence Firestore internal network retry / backend timeout logs in restricted sandbox environments
 try {

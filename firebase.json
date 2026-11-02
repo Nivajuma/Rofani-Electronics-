@@ -1,0 +1,6 @@
+{
+  "firestore": {
+    "database": "ai-studio-retailstockmanag-35779e9e-08d0-4311-8158-8be055847014",
+    "rules": "firestore.rules"
+  }
+}

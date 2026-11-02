@@ -19,14 +19,7 @@ const SYNC_EVENT = 'retail_pos_sync_queue_changed';
 const SIMULATED_OFFLINE_KEY = 'retail_pos_simulated_offline';
 const NETWORK_STATUS_EVENT = 'retail_pos_network_status_changed';
 
-let _simulatedOffline: boolean = (() => {
-  if (typeof window === 'undefined') return false;
-  try {
-    return localStorage.getItem(SIMULATED_OFFLINE_KEY) === 'true';
-  } catch {
-    return false;
-  }
-})();
+let _simulatedOffline: boolean = false;
 
 /**
  * Check if the app is currently online (factoring in real browser connectivity and optional simulation)

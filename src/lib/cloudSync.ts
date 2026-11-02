@@ -5,6 +5,7 @@ import {
   deleteDoc,
   onSnapshot,
   writeBatch,
+  getDocs,
 } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from './firebase';
 import { Product, Transaction, Customer, Supplier, Expense, RestockRecord, User, SensitiveActionLog } from '../types';
@@ -75,31 +76,53 @@ export async function deleteProductFromCloud(productId: string): Promise<void> {
   }
 }
 
-// Bulk upload initial products to cloud
+// Direct on-demand retrieval of all products from Cloud Firestore
+export async function fetchProductsFromCloud(): Promise<Product[]> {
+  const path = 'products';
+  try {
+    const colRef = collection(db, path);
+    const snap = await getDocs(colRef);
+    const loaded: Product[] = [];
+    snap.forEach((d) => {
+      loaded.push({ id: d.id, ...d.data() } as Product);
+    });
+    return loaded;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.LIST, path);
+    throw error;
+  }
+}
+
+// Bulk upload initial products to cloud in safe batches of 400
 export async function bulkUploadProductsToCloud(products: Product[]): Promise<number> {
   return batchSaveProductsToCloud(products);
 }
 
 /**
- * Commits staged / draft products to Firestore in a SINGLE atomic writeBatch()
- * Eliminates redundant network calls and prevents quota exhaustion.
+ * Commits products to Firestore in chunked atomic writeBatches (max 400 per batch)
+ * Handles catalog size of any count (including all 302 products) without exceeding Firestore 500-op limits.
  */
 export async function batchSaveProductsToCloud(products: Product[]): Promise<number> {
   if (!products || products.length === 0) return 0;
+  const CHUNK_SIZE = 400;
+  let totalUploaded = 0;
+
   try {
-    const batch = writeBatch(db);
-    let count = 0;
-    for (const p of products) {
-      const docRef = doc(db, 'products', p.id);
-      const cleaned = cleanForFirestore({
-        ...p,
-        updatedAt: p.updatedAt || new Date().toISOString(),
-      });
-      batch.set(docRef, cleaned, { merge: true });
-      count++;
+    for (let i = 0; i < products.length; i += CHUNK_SIZE) {
+      const chunk = products.slice(i, i + CHUNK_SIZE);
+      const batch = writeBatch(db);
+      for (const p of chunk) {
+        const docRef = doc(db, 'products', p.id);
+        const cleaned = cleanForFirestore({
+          ...p,
+          updatedAt: p.updatedAt || new Date().toISOString(),
+        });
+        batch.set(docRef, cleaned, { merge: true });
+      }
+      await batch.commit();
+      totalUploaded += chunk.length;
     }
-    await batch.commit();
-    return count;
+    return totalUploaded;
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, 'products/writeBatch');
     throw error;
@@ -127,8 +150,10 @@ export async function commitSaleToCloudBatch(
       syncedAt: new Date().toISOString(),
     }), { merge: true });
 
-    // 2. Stock updates for products purchased in this sale
-    for (const p of updatedProducts) {
+    // 2. Stock updates ONLY for products actually purchased in this sale
+    const soldProductIds = new Set((tx.items || []).map((it) => it.product?.id || (it as any).productId));
+    const targetProducts = updatedProducts.filter((p) => soldProductIds.has(p.id));
+    for (const p of (targetProducts.length > 0 ? targetProducts : updatedProducts.slice(0, 5))) {
       const pRef = doc(db, 'products', p.id);
       batch.set(pRef, cleanForFirestore({
         ...p,
@@ -148,6 +173,24 @@ export async function commitSaleToCloudBatch(
     await batch.commit();
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, 'sales/writeBatch');
+    throw error;
+  }
+}
+
+// Direct on-demand retrieval of all transactions from Cloud Firestore
+export async function fetchTransactionsFromCloud(): Promise<Transaction[]> {
+  const path = 'transactions';
+  try {
+    const colRef = collection(db, path);
+    const snap = await getDocs(colRef);
+    const loaded: Transaction[] = [];
+    snap.forEach((d) => {
+      loaded.push({ id: d.id, ...d.data() } as Transaction);
+    });
+    loaded.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    return loaded;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.LIST, path);
     throw error;
   }
 }

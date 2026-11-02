@@ -1,0 +1,3744 @@
+import React, { useState, useEffect } from 'react';
+import {
+  ShoppingBag,
+  Package,
+  ClipboardList,
+  DollarSign,
+  UserCheck,
+  FileText,
+  Search,
+  Scan,
+  AlertCircle,
+  AlertTriangle,
+  Bell,
+  MessageSquare,
+  Share2,
+  ShieldCheck,
+  ShieldAlert,
+  RotateCcw,
+  ChevronDown,
+  Database,
+  Settings,
+  PanelLeft,
+  PanelLeftClose,
+  Maximize2,
+  Minimize2,
+  ExternalLink,
+  Landmark,
+  Lock,
+  KeyRound,
+  Sparkles,
+  Users,
+  Smartphone,
+  Monitor,
+  Globe,
+  Building2,
+  Tag,
+  Plus,
+  Cloud,
+  RefreshCw,
+  Menu,
+  X,
+  Printer,
+  Barcode,
+  QrCode,
+  Truck
+} from 'lucide-react';
+import {
+  Product,
+  Customer,
+  Supplier,
+  PaymentMethod,
+  Expense,
+  AttendanceRecord,
+  Transaction,
+  User,
+  Role,
+  StockCountAudit,
+  CashTransaction,
+  RestockRecord,
+  StaffCommissionPayout,
+  StoreLocation,
+  OfferDeal,
+  OnlineOrder,
+  StockTransferRecord,
+  WorkerLoan,
+  WorkerLoanRepayment,
+  FinancingFacility,
+  FacilityRepayment,
+  BarcodeScanLog,
+  SensitiveActionLog,
+  SensitiveActionType,
+  PurchaseOrder
+} from './types';
+import {
+  INITIAL_USERS,
+  INITIAL_CATEGORIES,
+  INITIAL_SUPPLIERS,
+  INITIAL_CUSTOMERS,
+  INITIAL_PRODUCTS,
+  INITIAL_EXPENSES,
+  INITIAL_ATTENDANCE,
+  INITIAL_TRANSACTIONS,
+  INITIAL_CASH_TRANSACTIONS,
+  INITIAL_FINANCING_FACILITIES,
+  INITIAL_RESTOCK_RECORDS,
+  INITIAL_COMMISSION_PAYOUTS,
+  INITIAL_WORKER_LOANS,
+  INITIAL_STORES,
+  INITIAL_OFFERS,
+  INITIAL_ONLINE_ORDERS,
+  INITIAL_STOCK_TRANSFERS,
+  INITIAL_BARCODE_SCAN_LOGS,
+  INITIAL_PURCHASE_ORDERS
+} from './data/initialData';
+import { POSView } from './components/POS/POSView';
+import { InventoryView } from './components/Inventory/InventoryView';
+import { PurchasingView } from './components/Inventory/PurchasingView';
+import { PhysicalStockCountView } from './components/Inventory/PhysicalStockCountView';
+import { ExpensesView } from './components/Expenses/ExpensesView';
+import { CashManagementView } from './components/Finance/CashManagementView';
+import { AttendanceView } from './components/Attendance/AttendanceView';
+import { ReportsView } from './components/Reports/ReportsView';
+import { AuditLogsView } from './components/Reports/AuditLogsView';
+import { DataManagementView } from './components/Settings/DataManagementView';
+import { FloatingToolWidget } from './components/Tools/FloatingToolWidget';
+import { PinLoginModal } from './components/Auth/PinLoginModal';
+import { StaffManagementModal } from './components/Auth/StaffManagementModal';
+import { RoleAuthorizationModal, RoleAuthorizationRequest } from './components/Auth/RoleAuthorizationModal';
+import { InstallPwaModal } from './components/InstallPwaModal';
+import { PhoneDeviceFrame } from './components/PhoneDeviceFrame';
+import { ItemHistoryModal } from './components/Inventory/ItemHistoryModal';
+import { StoreManagerModal } from './components/Store/StoreManagerModal';
+import { OnlineStorefrontView } from './components/OnlineStore/OnlineStorefrontView';
+import { OnlineOrdersManagerView } from './components/OnlineStore/OnlineOrdersManagerView';
+import { CustomersSuppliersView } from './components/Contacts/CustomersSuppliersView';
+import { AIAssistantModal } from './components/AI/AIAssistantModal';
+import { AIAssistantWidget } from './components/AI/AIAssistantWidget';
+import { CloudSyncModal } from './components/CloudSync/CloudSyncModal';
+import { PrintBarcodesUtilityModal } from './components/Inventory/PrintBarcodesUtilityModal';
+import { ItemAuditMiniPage } from './components/Inventory/ItemAuditMiniPage';
+import { StockAlertNotificationModal } from './components/Inventory/StockAlertNotificationModal';
+import { CameraStartupPrompt } from './components/Common/CameraStartupPrompt';
+import { AppMenuView } from './components/Common/AppMenuView';
+import { formatKSh } from './utils/currency';
+import {
+  TabKey,
+  hasTabPermission,
+  hasRole,
+  getUserRoles,
+  setWorkerRoles,
+  canManageStaff,
+  canViewGrossProfit,
+  canManageSettings,
+  getRoleBadgeStyle,
+  ROLE_CONFIGURATIONS,
+  DEFAULT_ROLE_WORKER_PERMISSIONS,
+} from './utils/permissions';
+import {
+  loadAuditLogsFromStorage,
+  saveAuditLogsToStorage,
+  buildSensitiveActionLog,
+  getQualifyingRolesForAction,
+  computeProductDiff,
+} from './utils/auditLogger';
+import { AccessRestrictedView } from './components/Auth/AccessRestrictedView';
+import {
+  subscribeToProducts,
+  saveProductToCloud,
+  deleteProductFromCloud,
+  bulkUploadProductsToCloud,
+  batchSaveProductsToCloud,
+  subscribeToTransactions,
+  saveTransactionToCloud,
+  commitSaleToCloudBatch,
+  subscribeToCustomers,
+  saveCustomerToCloud,
+  deleteCustomerFromCloud,
+  subscribeToSuppliers,
+  saveSupplierToCloud,
+  deleteSupplierFromCloud,
+  subscribeToExpenses,
+  saveExpenseToCloud,
+  deleteExpenseFromCloud,
+  subscribeToRestockRecords,
+  saveRestockRecordToCloud,
+  subscribeToStoreSecurity,
+  saveStoreSecurityToCloud,
+  StoreSecurityConfig,
+  subscribeToUsers,
+  saveUserToCloud,
+  deleteUserFromCloud,
+  bulkUploadUsersToCloud,
+  subscribeToAuditLogs,
+  saveAuditLogToCloud,
+} from './lib/cloudSync';
+import { testFirestoreConnection, isQuotaExceededError, FIREBASE_UPGRADE_URL } from './lib/firebase';
+import { safeGetJSON, safeSetJSON, checkAndRunRollingSalesArchive } from './utils/safeStorage';
+import {
+  getAllProductImagesFromIndexedDB,
+  saveProductImageToIndexedDB,
+  deleteProductImageFromIndexedDB,
+} from './utils/imageStorage';
+import { OfflineSyncBanner } from './components/Network/OfflineSyncBanner';
+import { NetworkStatusBadge } from './components/Network/NetworkStatusBadge';
+import {
+  getIsOnline,
+  addPendingSyncItem,
+  getPendingSyncQueue,
+  removePendingSyncItem,
+} from './utils/offlineSync';
+
+export default function App() {
+  // Navigation & Display Layout State
+  const VALID_TABS = [
+    'pos',
+    'inventory',
+    'purchasing',
+    'stocktake',
+    'contacts',
+    'cashmanagement',
+    'expenses',
+    'attendance',
+    'reports',
+    'onlinestore',
+    'onlineorders',
+    'settings',
+    'auditlogs',
+    'menu',
+  ] as const;
+
+  type AppTab = (typeof VALID_TABS)[number];
+
+  const [activeTab, setActiveTab] = useState<AppTab>(() =>
+    safeGetJSON<AppTab>('retail_pos_active_tab', 'pos', (val) => VALID_TABS.includes(val))
+  );
+
+  useEffect(() => {
+    safeSetJSON('retail_pos_active_tab', activeTab);
+  }, [activeTab]);
+
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(() =>
+    safeGetJSON<boolean>('retail_pos_sidebar_collapsed', false, (val) => typeof val === 'boolean')
+  );
+
+  useEffect(() => {
+    safeSetJSON('retail_pos_sidebar_collapsed', isSidebarCollapsed);
+  }, [isSidebarCollapsed]);
+
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  const [displayTheme, setDisplayTheme] = useState<'light' | 'dark' | 'contrast'>(() =>
+    safeGetJSON<'light' | 'dark' | 'contrast'>('retail_pos_display_theme', 'light', (val) =>
+      ['light', 'dark', 'contrast'].includes(val)
+    )
+  );
+
+  useEffect(() => {
+    safeSetJSON('retail_pos_display_theme', displayTheme);
+  }, [displayTheme]);
+
+  const [fontScale, setFontScale] = useState<'normal' | 'large'>(() =>
+    safeGetJSON<'normal' | 'large'>('retail_pos_font_scale', 'normal', (val) =>
+      ['normal', 'large'].includes(val)
+    )
+  );
+
+  useEffect(() => {
+    safeSetJSON('retail_pos_font_scale', fontScale);
+  }, [fontScale]);
+
+  // Format Switcher State (Computer / Desktop vs Mobile Phone Frame)
+  const [deviceFormat, setDeviceFormat] = useState<'computer' | 'phone'>(() => {
+    const saved = safeGetJSON('retail_pos_device_format', null, (val) => val === 'computer' || val === 'phone');
+    if (saved === 'computer' || saved === 'phone') return saved;
+    if (typeof window !== 'undefined' && window.innerWidth < 768) {
+      return 'phone';
+    }
+    return 'computer';
+  });
+
+  useEffect(() => {
+    safeSetJSON('retail_pos_device_format', deviceFormat);
+  }, [deviceFormat]);
+
+  const [phoneOrientation, setPhoneOrientation] = useState<'portrait' | 'landscape'>(() =>
+    safeGetJSON<'portrait' | 'landscape'>('retail_pos_phone_orientation', 'portrait', (val) =>
+      ['portrait', 'landscape'].includes(val)
+    )
+  );
+
+  useEffect(() => {
+    safeSetJSON('retail_pos_phone_orientation', phoneOrientation);
+  }, [phoneOrientation]);
+
+  const [phoneModel, setPhoneModel] = useState<'iphone15pro' | 'galaxyS24' | 'pixel8'>(() =>
+    safeGetJSON<'iphone15pro' | 'galaxyS24' | 'pixel8'>('retail_pos_phone_model', 'iphone15pro', (val) =>
+      ['iphone15pro', 'galaxyS24', 'pixel8'].includes(val)
+    )
+  );
+
+  useEffect(() => {
+    safeSetJSON('retail_pos_phone_model', phoneModel);
+  }, [phoneModel]);
+
+  const [inventoryLowStockOnly, setInventoryLowStockOnly] = useState<boolean>(() =>
+    safeGetJSON<boolean>('retail_pos_low_stock_only', false, (val) => typeof val === 'boolean')
+  );
+
+  useEffect(() => {
+    safeSetJSON('retail_pos_low_stock_only', inventoryLowStockOnly);
+  }, [inventoryLowStockOnly]);
+
+  const toggleFullscreen = () => {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen().catch(() => {});
+      setIsFullscreen(true);
+    } else {
+      if (document.exitFullscreen) {
+        document.exitFullscreen();
+      }
+      setIsFullscreen(false);
+    }
+  };
+
+  const openInNewTab = () => {
+    window.open(window.location.href, '_blank');
+  };
+
+  const [allUsers, setAllUsersState] = useState<User[]>(() => {
+    try {
+      const primary = localStorage.getItem('retail_pos_users');
+      const secondary = localStorage.getItem('pos_store_staff_users');
+      const saved = primary || secondary;
+      const rawUsers = saved ? JSON.parse(saved) : INITIAL_USERS;
+      const migrated = rawUsers.map((u: any) => {
+        const userRoles = getUserRoles(u);
+        return {
+          ...u,
+          roles: u.roles && u.roles.length > 0 ? Array.from(new Set([...u.roles, ...userRoles])) : userRoles,
+        };
+      });
+
+      const hasAdmin = migrated.some((u: any) => hasRole(u, 'Admin'));
+      if (!hasAdmin && migrated.length > 0) {
+        const adminCandidateIdx = migrated.findIndex((u: any) => u.id === 'usr-1');
+        const targetIdx = adminCandidateIdx >= 0 ? adminCandidateIdx : 0;
+        migrated[targetIdx] = {
+          ...migrated[targetIdx],
+          role: 'Admin',
+          roles: Array.from(new Set([...(migrated[targetIdx].roles || []), 'Admin' as Role])),
+          pin: migrated[targetIdx].pin || '1234',
+          permissions: { ...DEFAULT_ROLE_WORKER_PERMISSIONS['Admin'] },
+        };
+        try {
+          localStorage.setItem('retail_pos_users', JSON.stringify(migrated));
+          localStorage.setItem('pos_store_staff_users', JSON.stringify(migrated));
+        } catch {}
+      }
+      return migrated;
+    } catch (e) {
+      return INITIAL_USERS;
+    }
+  });
+
+  const setAllUsers = (newVal: User[] | ((prev: User[]) => User[])) => {
+    setAllUsersState((prev) => {
+      const next = typeof newVal === 'function' ? newVal(prev) : newVal;
+      safeSetJSON('retail_pos_users', next);
+      safeSetJSON('pos_store_staff_users', next);
+      return next;
+    });
+  };
+
+  const [currentUser, setCurrentUser] = useState<User>(() => {
+    const rawCurrent = safeGetJSON<User>('retail_pos_active_user', INITIAL_USERS[0]);
+    const userRoles = getUserRoles(rawCurrent);
+    return {
+      ...rawCurrent,
+      roles: rawCurrent.roles && rawCurrent.roles.length > 0 ? Array.from(new Set([...rawCurrent.roles, ...userRoles])) : userRoles,
+    };
+  });
+
+  const [requirePinOnStartup, setRequirePinOnStartup] = useState<boolean>(() =>
+    safeGetJSON('retail_pos_require_pin_startup', true)
+  );
+  const [masterPin, setMasterPin] = useState<string>(() =>
+    safeGetJSON('retail_pos_master_pin', '1234')
+  );
+  const [ownerRecoveryEmail, setOwnerRecoveryEmail] = useState<string>(() =>
+    safeGetJSON('retail_pos_recovery_email', 'NivaJuma@gmail.com')
+  );
+  const [emergencyRecoveryKey, setEmergencyRecoveryKey] = useState<string>(() =>
+    safeGetJSON('retail_pos_emergency_key', 'ROFANI-RESET-2026')
+  );
+
+  const [showRoleSwitcher, setShowRoleSwitcher] = useState(false);
+  const [isTerminalLocked, setIsTerminalLocked] = useState<boolean>(() =>
+    safeGetJSON<boolean>('retail_pos_terminal_locked', safeGetJSON('retail_pos_require_pin_startup', true), (val) => typeof val === 'boolean')
+  );
+
+  useEffect(() => {
+    safeSetJSON('retail_pos_terminal_locked', isTerminalLocked);
+  }, [isTerminalLocked]);
+
+  const [pinModalTargetUser, setPinModalTargetUser] = useState<User | null>(null);
+  const [temporarilyUnlockedTabs, setTemporarilyUnlockedTabs] = useState<Set<TabKey>>(() => {
+    const saved = safeGetJSON<string[]>('retail_pos_unlocked_tabs', [], (val) => Array.isArray(val));
+    return new Set(saved as TabKey[]);
+  });
+
+  useEffect(() => {
+    safeSetJSON('retail_pos_unlocked_tabs', Array.from(temporarilyUnlockedTabs));
+  }, [temporarilyUnlockedTabs]);
+
+  const [showStaffModal, setShowStaffModal] = useState<boolean>(() =>
+    safeGetJSON<boolean>('retail_pos_show_staff_modal', false, (val) => typeof val === 'boolean')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_show_staff_modal', showStaffModal);
+  }, [showStaffModal]);
+
+  const [showInstallModal, setShowInstallModal] = useState(false);
+
+  const [showCloudSyncModal, setShowCloudSyncModal] = useState<boolean>(() =>
+    safeGetJSON<boolean>('retail_pos_show_cloud_sync_modal', false, (val) => typeof val === 'boolean')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_show_cloud_sync_modal', showCloudSyncModal);
+  }, [showCloudSyncModal]);
+
+  const [showPrintBarcodesModal, setShowPrintBarcodesModal] = useState<boolean>(() =>
+    safeGetJSON<boolean>('retail_pos_show_print_modal', false, (val) => typeof val === 'boolean')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_show_print_modal', showPrintBarcodesModal);
+  }, [showPrintBarcodesModal]);
+
+  const [cloudSyncStatus, setCloudSyncStatus] = useState<'synced' | 'syncing' | 'offline' | 'error' | 'quota_exceeded'>('syncing');
+  const [isCloudQuotaExceeded, setIsCloudQuotaExceeded] = useState<boolean>(false);
+  const [showQuotaBanner, setShowQuotaBanner] = useState<boolean>(true);
+  const [lastSyncedTime, setLastSyncedTime] = useState<string | null>(null);
+
+  const [products, setProductsState] = useState<Product[]>(() => {
+    try {
+      const saved = localStorage.getItem('retail_pos_products');
+      return saved ? JSON.parse(saved) : INITIAL_PRODUCTS;
+    } catch (e) {
+      return INITIAL_PRODUCTS;
+    }
+  });
+
+  const setProducts = (newVal: Product[] | ((prev: Product[]) => Product[])) => {
+    setProductsState((prev) => {
+      const next = typeof newVal === 'function' ? newVal(prev) : newVal;
+      safeSetJSON('retail_pos_products', next);
+      return next;
+    });
+  };
+
+  useEffect(() => {
+    let isMounted = true;
+    getAllProductImagesFromIndexedDB()
+      .then((imageMap) => {
+        if (!isMounted || !imageMap || Object.keys(imageMap).length === 0) return;
+
+        setProducts((currentProducts) => {
+          let hasNewImages = false;
+          const merged = currentProducts.map((p) => {
+            const storedImage = imageMap[p.id];
+            if (storedImage && (!p.imageUrl || p.imageUrl.trim() === '')) {
+              hasNewImages = true;
+              return { ...p, imageUrl: storedImage };
+            }
+            return p;
+          });
+          return hasNewImages ? merged : currentProducts;
+        });
+      })
+      .catch((err) => {
+        console.warn('Could not hydrate images from IndexedDB:', err);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  const [categories, setCategories] = useState(() => safeGetJSON('retail_pos_categories_v2', INITIAL_CATEGORIES));
+
+  useEffect(() => {
+    safeSetJSON('retail_pos_categories_v2', categories);
+  }, [categories]);
+
+  useEffect(() => {
+    if (!products || products.length === 0) return;
+
+    setCategories((prevCategories: any[]) => {
+      let updated = [...(prevCategories || [])];
+      let hasChanges = false;
+
+      products.forEach((p) => {
+        const catName = p.category ? p.category.trim() : '';
+        const subName = p.subcategory ? p.subcategory.trim() : '';
+        if (!catName) return;
+
+        const catIndex = updated.findIndex(
+          (c) => c.name.toLowerCase() === catName.toLowerCase()
+        );
+
+        if (catIndex === -1) {
+          updated.push({
+            id: `cat-auto-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+            name: catName,
+            subcategories: subName ? [subName] : ['General'],
+          });
+          hasChanges = true;
+        } else {
+          if (subName && subName !== 'General') {
+            const existingCat = updated[catIndex];
+            const subs: string[] = existingCat.subcategories || ['General'];
+            const hasSub = subs.some((s) => s.toLowerCase() === subName.toLowerCase());
+            if (!hasSub) {
+              updated[catIndex] = {
+                ...existingCat,
+                subcategories: [...subs, subName],
+              };
+              hasChanges = true;
+            }
+          }
+        }
+      });
+
+      return hasChanges ? updated : prevCategories;
+    });
+  }, [products]);
+
+  const [customers, setCustomers] = useState<Customer[]>(() => safeGetJSON('retail_pos_customers', INITIAL_CUSTOMERS));
+  const [suppliers, setSuppliers] = useState<Supplier[]>(() => safeGetJSON('retail_pos_suppliers', INITIAL_SUPPLIERS));
+
+  const [expenses, setExpensesState] = useState<Expense[]>(() => {
+    try {
+      const saved = localStorage.getItem('retail_pos_expenses');
+      return saved ? JSON.parse(saved) : INITIAL_EXPENSES;
+    } catch (e) {
+      return INITIAL_EXPENSES;
+    }
+  });
+
+  const setExpenses = (newVal: Expense[] | ((prev: Expense[]) => Expense[])) => {
+    setExpensesState((prev) => {
+      const next = typeof newVal === 'function' ? newVal(prev) : newVal;
+      safeSetJSON('retail_pos_expenses', next);
+      return next;
+    });
+  };
+
+  const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>(() => safeGetJSON('retail_pos_attendance', INITIAL_ATTENDANCE));
+
+  const [transactions, setTransactionsState] = useState<Transaction[]>(() => {
+    try {
+      const primary = localStorage.getItem('retail_pos_transactions');
+      const secondary = localStorage.getItem('pos_store_sales');
+      const primaryParsed = primary ? JSON.parse(primary) : [];
+      const secondaryParsed = secondary ? JSON.parse(secondary) : [];
+      const combined = [...primaryParsed];
+      secondaryParsed.forEach((t: any) => {
+        if (!combined.some((item) => item.id === t.id)) {
+          combined.push(t);
+        }
+      });
+      if (combined.length === 0) {
+        return INITIAL_TRANSACTIONS;
+      }
+      combined.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      return checkAndRunRollingSalesArchive(combined);
+    } catch (e) {
+      return INITIAL_TRANSACTIONS;
+    }
+  });
+
+  const setTransactions = (newVal: Transaction[] | ((prev: Transaction[]) => Transaction[])) => {
+    setTransactionsState((prev) => {
+      const next = typeof newVal === 'function' ? newVal(prev) : newVal;
+      const archivedChecked = checkAndRunRollingSalesArchive(next);
+      safeSetJSON('retail_pos_transactions', archivedChecked);
+      safeSetJSON('pos_store_sales', archivedChecked);
+      return archivedChecked;
+    });
+  };
+
+  useEffect(() => {
+    const archivedChecked = checkAndRunRollingSalesArchive(transactions);
+    safeSetJSON('retail_pos_transactions', archivedChecked);
+    safeSetJSON('pos_store_sales', archivedChecked);
+  }, [transactions]);
+
+  useEffect(() => {
+    const handleFocusAndVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        try {
+          const freshSales = localStorage.getItem('retail_pos_transactions') || localStorage.getItem('pos_store_sales');
+          if (freshSales) {
+            const parsed = JSON.parse(freshSales);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              setTransactionsState(parsed);
+            }
+          }
+
+          const freshProducts = localStorage.getItem('retail_pos_products');
+          if (freshProducts) {
+            const parsed = JSON.parse(freshProducts);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              setProductsState(parsed);
+            }
+          }
+
+          const freshUsers = localStorage.getItem('retail_pos_users') || localStorage.getItem('pos_store_staff_users');
+          if (freshUsers) {
+            const parsed = JSON.parse(freshUsers);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              setAllUsersState(parsed);
+            }
+          }
+
+          const freshExpenses = localStorage.getItem('retail_pos_expenses');
+          if (freshExpenses) {
+            const parsed = JSON.parse(freshExpenses);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              setExpensesState(parsed);
+            }
+          }
+
+          const freshPurchases = localStorage.getItem('retail_pos_purchase_orders');
+          if (freshPurchases) {
+            const parsed = JSON.parse(freshPurchases);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              setPurchaseOrdersState(parsed);
+            }
+          }
+        } catch (e) {
+          console.error('Storage quota or error on focus/wake:', e);
+        }
+      }
+    };
+
+    window.addEventListener('focus', handleFocusAndVisibility);
+    document.addEventListener('visibilitychange', handleFocusAndVisibility);
+    return () => {
+      window.removeEventListener('focus', handleFocusAndVisibility);
+      document.removeEventListener('visibilitychange', handleFocusAndVisibility);
+    };
+  }, []);
+
+  const [cashTransactions, setCashTransactions] = useState<CashTransaction[]>(() => safeGetJSON('retail_pos_cash_transactions', INITIAL_CASH_TRANSACTIONS));
+  const [restockRecords, setRestockRecords] = useState<RestockRecord[]>(() => safeGetJSON('retail_pos_restock_records', INITIAL_RESTOCK_RECORDS));
+
+  const [purchaseOrders, setPurchaseOrdersState] = useState<PurchaseOrder[]>(() => {
+    try {
+      const saved = localStorage.getItem('retail_pos_purchase_orders');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch (e) {
+      console.error('Error loading purchases:', e);
+    }
+    return INITIAL_PURCHASE_ORDERS;
+  });
+
+  const setPurchaseOrders = (newVal: PurchaseOrder[] | ((prev: PurchaseOrder[]) => PurchaseOrder[])) => {
+    setPurchaseOrdersState((prev) => {
+      const next = typeof newVal === 'function' ? newVal(prev) : newVal;
+      safeSetJSON('retail_pos_purchase_orders', next);
+      return next;
+    });
+  };
+
+  const [commissionPayouts, setCommissionPayouts] = useState<StaffCommissionPayout[]>(() => safeGetJSON('retail_pos_commission_payouts', INITIAL_COMMISSION_PAYOUTS));
+  const [workerLoans, setWorkerLoans] = useState<WorkerLoan[]>(() => safeGetJSON('retail_pos_worker_loans', INITIAL_WORKER_LOANS));
+
+  useEffect(() => {
+    safeSetJSON('retail_pos_worker_loans', workerLoans);
+  }, [workerLoans]);
+
+  const [financingFacilities, setFinancingFacilities] = useState<FinancingFacility[]>(() => safeGetJSON('retail_pos_financing_facilities', INITIAL_FINANCING_FACILITIES));
+
+  useEffect(() => {
+    safeSetJSON('retail_pos_financing_facilities', financingFacilities);
+  }, [financingFacilities]);
+
+  const [stores, setStores] = useState<StoreLocation[]>(() => {
+    const saved = safeGetJSON<StoreLocation[] | null>('retail_pos_stores', null);
+    if (!saved || !Array.isArray(saved) || saved.length === 0) {
+      return INITIAL_STORES;
+    }
+    const hasLegacyBranches = saved.some(
+      (s) => s.id === 'store-westlands' || s.id === 'store-mombasa' || s.name.toLowerCase().includes('flagship')
+    );
+    if (hasLegacyBranches) {
+      const main = saved.find((s) => s.id === 'store-main') || INITIAL_STORES[0];
+      const singleStore: StoreLocation = {
+        ...main,
+        id: 'store-main',
+        name: 'Rofani Electronics',
+        isMainBranch: true,
+        active: true
+      };
+      safeSetJSON('retail_pos_stores', [singleStore]);
+      return [singleStore];
+    }
+    return saved.map((s) => {
+      if (s.name.toLowerCase().includes('flagship') || s.name === 'Main Store') {
+        return { ...s, name: 'Rofani Electronics' };
+      }
+      return s;
+    });
+  });
+
+  const [activeStoreId, setActiveStoreId] = useState<string>(() => {
+    try {
+      const saved = localStorage.getItem('retail_pos_active_store_id');
+      return saved && saved !== 'all' ? saved : 'store-main';
+    } catch {
+      return 'store-main';
+    }
+  });
+
+  const [offers, setOffers] = useState<OfferDeal[]>(() => safeGetJSON('retail_pos_offers', INITIAL_OFFERS));
+  const [onlineOrders, setOnlineOrders] = useState<OnlineOrder[]>(() => safeGetJSON('retail_pos_online_orders', INITIAL_ONLINE_ORDERS));
+  const [stockTransfers, setStockTransfers] = useState<StockTransferRecord[]>(() => safeGetJSON('retail_pos_stock_transfers', INITIAL_STOCK_TRANSFERS));
+
+  const [showStoreManagerModal, setShowStoreManagerModal] = useState<boolean>(() =>
+    safeGetJSON<boolean>('retail_pos_show_store_modal', false, (val) => typeof val === 'boolean')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_show_store_modal', showStoreManagerModal);
+  }, [showStoreManagerModal]);
+
+  const [showStockAlertModal, setShowStockAlertModal] = useState<boolean>(false);
+
+  const [showAiAssistantModal, setShowAiAssistantModal] = useState<boolean>(() =>
+    safeGetJSON<boolean>('retail_pos_show_ai_modal', false, (val) => typeof val === 'boolean')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_show_ai_modal', showAiAssistantModal);
+  }, [showAiAssistantModal]);
+
+  const [newSaleTrigger, setNewSaleTrigger] = useState(0);
+
+  const handleGlobalNewSale = () => {
+    setActiveTab('pos');
+    setIsMobileMenuOpen(false);
+    setNewSaleTrigger((prev) => prev + 1);
+  };
+
+  useEffect(() => {
+    setIsMobileMenuOpen(false);
+  }, [activeTab]);
+
+  const [selectedHistoryProduct, setSelectedHistoryProduct] = useState<Product | null>(() =>
+    safeGetJSON<Product | null>('retail_pos_history_product', null, (val) => Boolean(val && val.id))
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_history_product', selectedHistoryProduct);
+  }, [selectedHistoryProduct]);
+
+  const [showHistoryModal, setShowHistoryModal] = useState<boolean>(() =>
+    safeGetJSON<boolean>('retail_pos_show_history_modal', false, (val) => typeof val === 'boolean')
+  );
+  useEffect(() => {
+    safeSetJSON('retail_pos_show_history_modal', showHistoryModal);
+  }, [showHistoryModal]);
+
+  const [auditUrlProduct, setAuditUrlProduct] = useState<Product | null>(null);
+
+  useEffect(() => {
+    const handleUrlAudit = () => {
+      try {
+        if (typeof window === 'undefined') return;
+        const searchParams = new URLSearchParams(window.location.search);
+        const auditId = searchParams.get('itemAudit');
+        if (auditId && products.length > 0) {
+          const match = products.find(
+            (p) =>
+              p.id === auditId ||
+              p.sku.toLowerCase() === auditId.toLowerCase() ||
+              p.barcode === auditId
+          );
+          if (match) {
+            setAuditUrlProduct(match);
+          }
+        }
+      } catch (err) {
+        console.warn('Error reading itemAudit URL param:', err);
+      }
+    };
+
+    handleUrlAudit();
+    window.addEventListener('popstate', handleUrlAudit);
+    return () => window.removeEventListener('popstate', handleUrlAudit);
+  }, [products]);
+
+  useEffect(() => {
+    safeSetJSON('retail_pos_stores', stores);
+  }, [stores]);
+
+  useEffect(() => {
+    safeSetJSON('retail_pos_active_store_id', activeStoreId);
+  }, [activeStoreId]);
+
+  useEffect(() => {
+    safeSetJSON('retail_pos_offers', offers);
+  }, [offers]);
+
+  useEffect(() => {
+    safeSetJSON('retail_pos_online_orders', onlineOrders);
+  }, [onlineOrders]);
+
+  useEffect(() => {
+    safeSetJSON('retail_pos_stock_transfers', stockTransfers);
+  }, [stockTransfers]);
+
+  useEffect(() => {
+    safeSetJSON('retail_pos_products', products);
+  }, [products]);
+
+  useEffect(() => {
+    safeSetJSON('retail_pos_commission_payouts', commissionPayouts);
+  }, [commissionPayouts]);
+
+  useEffect(() => {
+    safeSetJSON('retail_pos_restock_records', restockRecords);
+  }, [restockRecords]);
+
+  useEffect(() => {
+    safeSetJSON('retail_pos_customers', customers);
+  }, [customers]);
+
+  useEffect(() => {
+    safeSetJSON('retail_pos_expenses', expenses);
+  }, [expenses]);
+
+  useEffect(() => {
+    safeSetJSON('retail_pos_attendance', attendanceRecords);
+  }, [attendanceRecords]);
+
+  useEffect(() => {
+    safeSetJSON('retail_pos_transactions', transactions);
+  }, [transactions]);
+
+  useEffect(() => {
+    safeSetJSON('retail_pos_suppliers', suppliers);
+  }, [suppliers]);
+
+  useEffect(() => {
+    safeSetJSON('retail_pos_cash_transactions', cashTransactions);
+  }, [cashTransactions]);
+
+  useEffect(() => {
+    safeSetJSON('retail_pos_users', allUsers);
+  }, [allUsers]);
+
+  useEffect(() => {
+    safeSetJSON('retail_pos_active_user', currentUser);
+  }, [currentUser]);
+
+  useEffect(() => {
+    const handleBackupSnapshot = () => {
+      try {
+        const backupPayload = {
+          timestamp: Date.now(),
+          sales: transactions,
+          staff: allUsers,
+          products: products,
+          expenses: expenses,
+          settings: {
+            activeStoreId,
+            requirePinOnStartup,
+            masterPin,
+            ownerRecoveryEmail,
+          }
+        };
+        localStorage.setItem('rofani_pos_auto_backup', JSON.stringify(backupPayload));
+        localStorage.setItem('rofani_pos_last_snapshot', JSON.stringify(backupPayload));
+      } catch (err) {
+        console.warn('Could not save auto-backup snapshot:', err);
+      }
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        handleBackupSnapshot();
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBackupSnapshot);
+    window.addEventListener('pagehide', handleBackupSnapshot);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      window.removeEventListener('beforeunload', handleBackupSnapshot);
+      window.removeEventListener('pagehide', handleBackupSnapshot);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [transactions, allUsers, products, expenses, activeStoreId, requirePinOnStartup, masterPin, ownerRecoveryEmail]);
+
+  useEffect(() => {
+    let unsubscribe: (() => void) | undefined;
+    try {
+      unsubscribe = subscribeToTransactions(
+        (incomingRemoteSales) => {
+          const existingLocalSales = safeGetJSON<Transaction[]>('retail_pos_transactions', transactions);
+          const mergedSales = [...existingLocalSales];
+          incomingRemoteSales.forEach((remoteTxn) => {
+            if (!mergedSales.some((localTxn) => localTxn.id === remoteTxn.id)) {
+              mergedSales.push(remoteTxn);
+            }
+          });
+          mergedSales.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+          setTransactions(mergedSales);
+          safeSetJSON('retail_pos_transactions', mergedSales);
+        },
+        (err) => {
+          console.warn('Transactions subscription notice:', err);
+        }
+      );
+    } catch (err) {
+      console.warn('Could not subscribe to transactions:', err);
+    }
+    return () => {
+      if (unsubscribe) unsubscribe();
+    };
+  }, []);
+
+  const syncPendingQueueToCloud = async () => {
+    setCloudSyncStatus('syncing');
+
+    const localSales = safeGetJSON<Transaction[]>('retail_pos_transactions', transactions);
+    for (const tx of localSales) {
+      try {
+        await saveTransactionToCloud(tx);
+      } catch (err) {
+        console.warn(`[Sync] Could not push transaction ${tx.id} to cloud:`, err);
+      }
+    }
+
+    const queue = getPendingSyncQueue();
+    let syncedCount = 0;
+    for (const item of queue) {
+      try {
+        if (item.type === 'sale') {
+          await saveTransactionToCloud(item.data);
+        } else if (item.type === 'product') {
+          await saveProductToCloud(item.data);
+        } else if (item.type === 'customer') {
+          if (item.data?._deleted) {
+            await deleteCustomerFromCloud(item.data.id);
+          } else {
+            await saveCustomerToCloud(item.data);
+          }
+        } else if (item.type === 'supplier') {
+          if (item.data?._deleted) {
+            await deleteSupplierFromCloud(item.data.id);
+          } else {
+            await saveSupplierToCloud(item.data);
+          }
+        } else if (item.type === 'expense') {
+          await saveExpenseToCloud(item.data);
+        } else if (item.type === 'restock') {
+          await saveRestockRecordToCloud(item.data);
+        } else if (item.type === 'user') {
+          await saveUserToCloud(item.data);
+        }
+        removePendingSyncItem(item.id);
+        syncedCount++;
+      } catch (err) {
+        if (isQuotaExceededError(err)) {
+          setIsCloudQuotaExceeded(true);
+          setCloudSyncStatus('quota_exceeded');
+        } else {
+          console.warn(`[Sync Queue] Offline action ${item.id} waiting for stable connection:`, err);
+        }
+        break;
+      }
+    }
+
+    const existingLocalSales = safeGetJSON<Transaction[]>('retail_pos_transactions', transactions);
+    setTransactions(existingLocalSales);
+    safeSetJSON('retail_pos_transactions', existingLocalSales);
+
+    setLastSyncedTime(new Date().toLocaleTimeString());
+    setCloudSyncStatus('synced');
+  };
+
+  useEffect(() => {
+    const handleReconnected = () => {
+      syncPendingQueueToCloud();
+    };
+
+    window.addEventListener('online', handleReconnected);
+    return () => {
+      window.removeEventListener('online', handleReconnected);
+    };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+
+    testFirestoreConnection().then((connected) => {
+      if (!active) return;
+      if (connected) {
+        setCloudSyncStatus('synced');
+        setLastSyncedTime(new Date().toLocaleTimeString());
+      } else {
+        setCloudSyncStatus('offline');
+      }
+    }).catch(() => {
+      if (!active) return;
+      setCloudSyncStatus('offline');
+    });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const [auditLogs, setAuditLogs] = useState<SensitiveActionLog[]>(() =>
+    loadAuditLogsFromStorage()
+  );
+  const [roleAuthRequest, setRoleAuthRequest] = useState<RoleAuthorizationRequest | null>(null);
+
+  useEffect(() => {
+    saveAuditLogsToStorage(auditLogs);
+  }, [auditLogs]);
+
+  const handleRecordAuditLog = (log: SensitiveActionLog) => {
+    setAuditLogs((prev) => [log, ...prev]);
+    saveAuditLogToCloud(log).catch((err) =>
+      console.warn('Could not sync audit log to cloud:', err)
+    );
+  };
+
+  const [scanLogs, setScanLogs] = useState<BarcodeScanLog[]>(() =>
+    safeGetJSON('retail_pos_barcode_scan_logs', INITIAL_BARCODE_SCAN_LOGS)
+  );
+
+  useEffect(() => {
+    safeSetJSON('retail_pos_barcode_scan_logs', scanLogs);
+  }, [scanLogs]);
+
+  const handleRecordScanLog = (log: BarcodeScanLog) => {
+    setScanLogs((prev) => [log, ...prev].slice(0, 1000));
+  };
+
+  const handleClearScanLogs = () => {
+    setScanLogs([]);
+    safeSetJSON('retail_pos_barcode_scan_logs', []);
+  };
+
+  const handleAddUser = (newUser: User) => {
+    const roles = getUserRoles(newUser);
+    const sanitizedUser: User = {
+      ...newUser,
+      roles: newUser.roles && newUser.roles.length > 0 ? newUser.roles : roles,
+      assignedRoles: newUser.roles && newUser.roles.length > 0 ? newUser.roles : roles,
+    };
+    setAllUsers((prev) => {
+      const updated = [...prev, sanitizedUser];
+      safeSetJSON('retail_pos_users', updated);
+      return updated;
+    });
+    saveUserToCloud(sanitizedUser).catch((err) =>
+      console.warn('Could not save user to cloud:', err)
+    );
+  };
+
+  const handleUpdateUser = (updatedUser: User) => {
+    const roles = getUserRoles(updatedUser);
+    const sanitizedUser: User = {
+      ...updatedUser,
+      roles: updatedUser.roles && updatedUser.roles.length > 0 ? updatedUser.roles : roles,
+    };
+    setAllUsers((prev) => {
+      const updated = prev.map((u) => (u.id === sanitizedUser.id ? sanitizedUser : u));
+      safeSetJSON('retail_pos_users', updated);
+      return updated;
+    });
+    if (currentUser.id === sanitizedUser.id) {
+      setCurrentUser(sanitizedUser);
+      safeSetJSON('retail_pos_active_user', sanitizedUser);
+    }
+    saveUserToCloud(sanitizedUser).catch((err) =>
+      console.warn('Could not update user in cloud:', err)
+    );
+  };
+
+  const handleDeleteUser = (userId: string) => {
+    setAllUsers((prev) => {
+      const remaining = prev.filter((u) => u.id !== userId);
+      safeSetJSON('retail_pos_users', remaining);
+      return remaining;
+    });
+    if (currentUser.id === userId) {
+      const remainingUser = allUsers.find((u) => u.id !== userId);
+      if (remainingUser) {
+        setCurrentUser(remainingUser);
+        safeSetJSON('retail_pos_active_user', remainingUser);
+      }
+    }
+    deleteUserFromCloud(userId).catch((err) =>
+      console.warn('Could not delete user from cloud:', err)
+    );
+  };
+
+  const handleLoginSuccess = (user: User) => {
+    setCurrentUser(user);
+    safeSetJSON('retail_pos_active_user', user);
+    setPinModalTargetUser(null);
+    setIsTerminalLocked(false);
+    setTemporarilyUnlockedTabs(new Set());
+    if (!hasTabPermission(user, activeTab as TabKey)) {
+      if (hasRole(user, 'Inventory Staff') || hasRole(user, 'Stock Ins Role') || hasRole(user, 'Stock Setup Role')) {
+        setActiveTab('inventory');
+      } else if (hasRole(user, 'Expenses Role')) {
+        setActiveTab('expenses');
+      } else {
+        setActiveTab('pos');
+      }
+    }
+  };
+
+  const handleUpdateMasterPin = async (newPin: string) => {
+    setMasterPin(newPin);
+    safeSetJSON('retail_pos_master_pin', newPin);
+    try {
+      await saveStoreSecurityToCloud({
+        requirePinOnStartup,
+        masterPin: newPin,
+        recoveryEmail: ownerRecoveryEmail,
+        emergencyKey: emergencyRecoveryKey,
+      });
+    } catch (err) {
+      console.warn('Could not sync master PIN to cloud:', err);
+    }
+  };
+
+  const handleResetAdminPin = async (newPin: string, targetUserId: string) => {
+    setAllUsers((prev) => {
+      const updated = prev.map((u) => {
+        if (u.id === targetUserId) {
+          const userRoles = Array.from(new Set([...(u.roles || []), 'Admin' as Role]));
+          return {
+            ...u,
+            pin: newPin,
+            role: 'Admin' as Role,
+            roles: userRoles,
+            permissions: { ...DEFAULT_ROLE_WORKER_PERMISSIONS['Admin'] },
+          };
+        }
+        return u;
+      });
+      safeSetJSON('retail_pos_users', updated);
+      return updated;
+    });
+
+    const target = allUsers.find((u) => u.id === targetUserId);
+    if (target) {
+      const updatedUser: User = {
+        ...target,
+        pin: newPin,
+        role: 'Admin',
+        roles: Array.from(new Set([...(target.roles || []), 'Admin' as Role])),
+        permissions: { ...DEFAULT_ROLE_WORKER_PERMISSIONS['Admin'] },
+      };
+      if (currentUser.id === targetUserId) {
+        setCurrentUser(updatedUser);
+        safeSetJSON('retail_pos_active_user', updatedUser);
+      }
+      try {
+        await saveUserToCloud(updatedUser);
+      } catch (err) {
+        console.warn('Could not sync reset admin PIN to cloud:', err);
+      }
+    }
+  };
+
+  const handleToggleRequirePinOnStartup = async (require: boolean) => {
+    setRequirePinOnStartup(require);
+    safeSetJSON('retail_pos_require_pin_startup', require);
+    try {
+      await saveStoreSecurityToCloud({
+        requirePinOnStartup: require,
+        masterPin,
+      });
+    } catch (err) {
+      console.warn('Could not sync security settings to cloud:', err);
+    }
+  };
+
+  const lowStockProducts = products.filter((p) => p.stockQuantity <= p.minStockAlert);
+  const lowStockCount = lowStockProducts.length;
+
+  const todayStr = new Date().toDateString();
+  const todayTransactions = transactions.filter(
+    (tx) => new Date(tx.date).toDateString() === todayStr
+  );
+
+  const todaySales = todayTransactions.reduce((sum, tx) => sum + tx.grandTotal, 0);
+
+  let todayCOGS = 0;
+  todayTransactions.forEach((tx) => {
+    tx.items.forEach((item) => {
+      todayCOGS += (item.product.costPrice || 0) * item.quantity;
+    });
+  });
+
+  const totalGrossSales = transactions.reduce((sum, tx) => sum + tx.grandTotal, 0);
+  let totalCOGS = 0;
+  transactions.forEach((tx) => {
+    tx.items.forEach((item) => {
+      totalCOGS += (item.product.costPrice || 0) * item.quantity;
+    });
+  });
+
+  const grossProfitAmount = totalGrossSales - totalCOGS;
+  const profitMarginPercent = totalGrossSales > 0 ? (grossProfitAmount / totalGrossSales) * 100 : 0;
+
+  const handlePayCommission = (payout: StaffCommissionPayout) => {
+    setCommissionPayouts((prev) => [payout, ...prev]);
+
+    if (payout.paidAmount > 0) {
+      const commExpense: Expense = {
+        id: `exp-comm-${Date.now()}`,
+        date: payout.startDate || (payout.date.length === 10 ? payout.date : new Date().toISOString().slice(0, 10)),
+        category: 'Salaries',
+        description: `Worker Sales Commission: ${payout.employeeName} (${payout.salesCount} sales, base: KSh ${payout.totalSalesAmount.toLocaleString()})`,
+        amount: payout.paidAmount,
+        paymentMethod: payout.paymentMethod === 'salary_addition' ? 'bank_transfer' : ((payout.paymentMethod as any) || 'mpesa'),
+        recordedBy: payout.paidBy || currentUser.name,
+        receiptNo: payout.referenceNo || payout.id,
+        recurringType: 'One-Time',
+        status: 'Paid'
+      };
+      setExpenses((prev) => [commExpense, ...prev]);
+    }
+
+    if (payout.loanDeduction && payout.deductedLoanId && payout.loanDeduction > 0) {
+      const repayment: WorkerLoanRepayment = {
+        id: `rep-comm-${Date.now()}`,
+        loanId: payout.deductedLoanId,
+        amount: payout.loanDeduction,
+        date: new Date().toISOString().slice(0, 10),
+        paymentMethod: 'salary_deduction',
+        referenceNo: payout.referenceNo || payout.id,
+        notes: `Automatic deduction from sales commission payout (${payout.id})`,
+        recordedBy: `${currentUser.name} (${currentUser.role})`
+      };
+      handleRepayWorkerLoan(payout.deductedLoanId, repayment);
+    }
+  };
+
+  const handleUpdateUserCommissionRate = (userId: string, newRate: number) => {
+    setAllUsers((prev) =>
+      prev.map((u) => (u.id === userId ? { ...u, commissionRate: newRate } : u))
+    );
+  };
+
+  const handleUpdateUserCommissionSettings = (userId: string, settings: Partial<User>) => {
+    setAllUsers((prev) =>
+      prev.map((u) => (u.id === userId ? { ...u, ...settings } : u))
+    );
+    if (currentUser.id === userId) {
+      setCurrentUser((prev) => ({ ...prev, ...settings }));
+    }
+  };
+
+  const handleReattributeSale = (txId: string, salesRepId: string, salesRepName: string) => {
+    setTransactions((prev) =>
+      prev.map((tx) => (tx.id === txId ? { ...tx, salesRepId, salesRepName } : tx))
+    );
+  };
+
+  const handleCompleteSale = (
+    tx: Transaction,
+    updatedProducts: Product[],
+    updatedCustomers: Customer[]
+  ) => {
+    setTransactions((prev) => {
+      const updated = [tx, ...prev.filter((t) => t.id !== tx.id)];
+      safeSetJSON('retail_pos_transactions', updated);
+      safeSetJSON('pos_store_sales', updated);
+      return updated;
+    });
+    setProducts(updatedProducts);
+    setCustomers(updatedCustomers);
+
+    const isCurrentlyOffline = !getIsOnline();
+
+    if (isCurrentlyOffline) {
+      addPendingSyncItem({
+        type: 'sale',
+        description: `POS Sale #${tx.receiptNumber} (KSh ${tx.grandTotal.toLocaleString()})`,
+        data: tx,
+      });
+      updatedProducts.forEach((p) => {
+        addPendingSyncItem({
+          type: 'product',
+          description: `Stock Update: ${p.name} (${p.stockQuantity} ${p.unit})`,
+          data: p,
+        });
+      });
+      const customerToUpdate = updatedCustomers.find((c) => c.id === tx.customerId);
+      if (customerToUpdate) {
+        addPendingSyncItem({
+          type: 'customer',
+          description: `Customer Update: ${customerToUpdate.name}`,
+          data: customerToUpdate,
+        });
+      }
+    } else {
+      const customerToUpdate = updatedCustomers.find((c) => c.id === tx.customerId);
+      commitSaleToCloudBatch(tx, updatedProducts, customerToUpdate).catch((err) => {
+        if (isQuotaExceededError(err)) {
+          setIsCloudQuotaExceeded(true);
+          setCloudSyncStatus('quota_exceeded');
+        } else {
+          console.warn('[Sale Cloud Sync Notice] Offline fallback queued:', err);
+        }
+        addPendingSyncItem({
+          type: 'sale',
+          description: `POS Sale #${tx.receiptNumber} (KSh ${tx.grandTotal.toLocaleString()})`,
+          data: tx,
+        });
+        updatedProducts.forEach((p) => {
+          addPendingSyncItem({
+            type: 'product',
+            description: `Stock Update: ${p.name} (${p.stockQuantity} ${p.unit})`,
+            data: p,
+          });
+        });
+        if (customerToUpdate) {
+          addPendingSyncItem({
+            type: 'customer',
+            description: `Customer Update: ${customerToUpdate.name}`,
+            data: customerToUpdate,
+          });
+        }
+      });
+    }
+  };
+
+  const handleAddCustomer = (newCust: Customer) => {
+    setCustomers((prev) => [...prev, newCust]);
+    if (!getIsOnline()) {
+      addPendingSyncItem({
+        type: 'customer',
+        description: `Add Customer: ${newCust.name} (${newCust.phone})`,
+        data: newCust,
+      });
+    } else {
+      saveCustomerToCloud(newCust).catch(() => {
+        addPendingSyncItem({
+          type: 'customer',
+          description: `Add Customer: ${newCust.name} (${newCust.phone})`,
+          data: newCust,
+        });
+      });
+    }
+  };
+
+  const handleSaveCustomer = (cust: Customer) => {
+    setCustomers((prev) => {
+      const idx = prev.findIndex((c) => c.id === cust.id);
+      if (idx > -1) {
+        const copy = [...prev];
+        copy[idx] = cust;
+        return copy;
+      }
+      return [cust, ...prev];
+    });
+    if (!getIsOnline()) {
+      addPendingSyncItem({
+        type: 'customer',
+        description: `Update Customer: ${cust.name} (${cust.phone})`,
+        data: cust,
+      });
+    } else {
+      saveCustomerToCloud(cust).catch(() => {
+        addPendingSyncItem({
+          type: 'customer',
+          description: `Update Customer: ${cust.name} (${cust.phone})`,
+          data: cust,
+        });
+      });
+    }
+  };
+
+  const handleDeleteCustomer = (customerId: string) => {
+    setCustomers((prev) => prev.filter((c) => c.id !== customerId));
+    if (!getIsOnline()) {
+      addPendingSyncItem({
+        type: 'customer',
+        description: `Delete Customer (${customerId})`,
+        data: { id: customerId, _deleted: true },
+      });
+    } else {
+      deleteCustomerFromCloud(customerId).catch(() => {
+        addPendingSyncItem({
+          type: 'customer',
+          description: `Delete Customer (${customerId})`,
+          data: { id: customerId, _deleted: true },
+        });
+      });
+    }
+  };
+
+  const handleSaveSupplier = (sup: Supplier) => {
+    setSuppliers((prev) => {
+      const idx = prev.findIndex((s) => s.id === sup.id);
+      if (idx > -1) {
+        const copy = [...prev];
+        copy[idx] = sup;
+        return copy;
+      }
+      return [...prev, sup];
+    });
+    if (!getIsOnline()) {
+      addPendingSyncItem({
+        type: 'supplier',
+        description: `Supplier: ${sup.name}`,
+        data: sup,
+      });
+    } else {
+      saveSupplierToCloud(sup).catch(() => {
+        addPendingSyncItem({
+          type: 'supplier',
+          description: `Supplier: ${sup.name}`,
+          data: sup,
+        });
+      });
+    }
+  };
+
+  const handleDeleteSupplier = (supplierId: string) => {
+    setSuppliers((prev) => prev.filter((s) => s.id !== supplierId));
+    if (!getIsOnline()) {
+      addPendingSyncItem({
+        type: 'supplier',
+        description: `Delete Supplier (${supplierId})`,
+        data: { id: supplierId, _deleted: true },
+      });
+    } else {
+      deleteSupplierFromCloud(supplierId).catch(() => {
+        addPendingSyncItem({
+          type: 'supplier',
+          description: `Delete Supplier (${supplierId})`,
+          data: { id: supplierId, _deleted: true },
+        });
+      });
+    }
+  };
+
+  const handleRecordCustomerDebtPayment = (
+    customerId: string,
+    amount: number,
+    paymentMethod: PaymentMethod,
+    reference?: string,
+    notes?: string
+  ) => {
+    let customerName = 'Customer';
+    setCustomers((prev) =>
+      prev.map((c) => {
+        if (c.id === customerId) {
+          customerName = c.name;
+          const newBalance = Math.max(0, (c.currentBalanceDue || 0) - amount);
+          return {
+            ...c,
+            currentBalanceDue: newBalance,
+            updatedAt: new Date().toISOString().slice(0, 10),
+          };
+        }
+        return c;
+      })
+    );
+
+    const cashEntry: CashTransaction = {
+      id: `cash-in-${Date.now()}`,
+      type: 'CASH_IN',
+      category: 'Customer Debt Payment',
+      amount,
+      date: new Date().toISOString(),
+      sourceDestination: customerName,
+      referenceNo: reference || `DEBT-REC-${Date.now().toString().slice(-6)}`,
+      paymentMethod: paymentMethod === 'cheque' ? 'cheque' : paymentMethod === 'mpesa' ? 'mpesa' : 'cash',
+      description: `Debt repayment from ${customerName}${notes ? ` - ${notes}` : ''}`,
+      recordedBy: `${currentUser.name} (${currentUser.role})`,
+      status: 'Completed',
+      notes: notes || undefined,
+    };
+    setCashTransactions((prev) => [cashEntry, ...prev]);
+  };
+
+  const handleRecordSupplierPayment = (
+    supplierId: string,
+    amount: number,
+    paymentMethod: PaymentMethod,
+    reference?: string,
+    notes?: string
+  ) => {
+    let supplierName = 'Supplier';
+    setSuppliers((prev) =>
+      prev.map((s) => {
+        if (s.id === supplierId) {
+          supplierName = s.name;
+          const newBalance = Math.max(0, (s.currentBalanceDue || 0) - amount);
+          return {
+            ...s,
+            currentBalanceDue: newBalance,
+            updatedAt: new Date().toISOString().slice(0, 10),
+          };
+        }
+        return s;
+      })
+    );
+
+    const cashEntry: CashTransaction = {
+      id: `cash-out-${Date.now()}`,
+      type: 'CASH_OUT',
+      category: 'Supplier Cash Payment',
+      amount,
+      date: new Date().toISOString(),
+      sourceDestination: supplierName,
+      referenceNo: reference || `SUP-PAY-${Date.now().toString().slice(-6)}`,
+      paymentMethod: paymentMethod === 'cheque' ? 'cheque' : paymentMethod === 'mpesa' ? 'mpesa' : 'cash',
+      description: `Accounts payable settlement to ${supplierName}${notes ? ` - ${notes}` : ''}`,
+      recordedBy: `${currentUser.name} (${currentUser.role})`,
+      status: 'Completed',
+      notes: notes || undefined,
+    };
+    setCashTransactions((prev) => [cashEntry, ...prev]);
+  };
+
+  const handleImportCustomers = (newCustomers: Customer[]) => {
+    setCustomers((prev) => {
+      const existingPhones = new Set(prev.map((c) => c.phone.trim()).filter((p) => p !== 'N/A'));
+      const existingNames = new Set(prev.map((c) => c.name.toLowerCase().trim()));
+      const uniqueNew = newCustomers.filter(
+        (c) =>
+          (c.phone !== 'N/A' && !existingPhones.has(c.phone.trim())) ||
+          (c.phone === 'N/A' && !existingNames.has(c.name.toLowerCase().trim()))
+      );
+      uniqueNew.forEach((c) => saveCustomerToCloud(c).catch(() => {}));
+      return [...prev, ...uniqueNew];
+    });
+  };
+
+  const handleImportSuppliers = (newSuppliers: Supplier[]) => {
+    setSuppliers((prev) => {
+      const existingNames = new Set(prev.map((s) => s.name.toLowerCase().trim()));
+      const uniqueNew = newSuppliers.filter((s) => !existingNames.has(s.name.toLowerCase().trim()));
+      uniqueNew.forEach((s) => saveSupplierToCloud(s).catch(() => {}));
+      return [...prev, ...uniqueNew];
+    });
+  };
+
+  const handleSaveProduct = (prod: Product) => {
+    const existing = products.find((p) => p.id === prod.id);
+
+    const performSave = (authorizingRole?: Role, reason?: string) => {
+      if (prod.imageUrl && prod.imageUrl.trim() !== '') {
+        saveProductImageToIndexedDB(prod.id, prod.imageUrl);
+      }
+      setProducts((prev) => {
+        const idx = prev.findIndex((p) => p.id === prod.id);
+        if (idx > -1) {
+          const copy = [...prev];
+          copy[idx] = prod;
+          return copy;
+        }
+        return [prod, ...prev];
+      });
+
+      if (!getIsOnline()) {
+        addPendingSyncItem({
+          type: 'product',
+          description: `Product: ${prod.name} (${prod.stockQuantity} ${prod.unit})`,
+          data: prod,
+        });
+      } else {
+        saveProductToCloud(prod).catch(() => {
+          addPendingSyncItem({
+            type: 'product',
+            description: `Product: ${prod.name} (${prod.stockQuantity} ${prod.unit})`,
+            data: prod,
+          });
+        });
+      }
+
+      if (existing && authorizingRole) {
+        const diff = computeProductDiff(existing, prod);
+        const diffKeys = Object.keys(diff);
+        const diffSummary = diffKeys.map(
+          (k) => `${k}: ${existing[k as keyof Product]} → ${prod[k as keyof Product]}`
+        );
+
+        const log = buildSensitiveActionLog({
+          actionType: 'MODIFY_INVENTORY',
+          actionTitle: `Modified Product: ${prod.name}`,
+          user: currentUser,
+          authorizingRole,
+          targetId: prod.id,
+          targetName: prod.name,
+          details: {
+            summary: diffSummary.length > 0
+              ? `Updated ${diffSummary.join(', ')} on ${prod.name}`
+              : `Updated catalog attributes for ${prod.name}`,
+            before: existing,
+            after: prod,
+            diff,
+          },
+          reason,
+          severity: 'high',
+        });
+        handleRecordAuditLog(log);
+      }
+    };
+
+    if (existing) {
+      const diff = computeProductDiff(existing, prod);
+      const diffKeys = Object.keys(diff);
+      if (diffKeys.length > 0) {
+        const qualifyingRoles = getQualifyingRolesForAction(currentUser, 'MODIFY_INVENTORY');
+        const userRoles = getUserRoles(currentUser);
+
+        if (qualifyingRoles.length > 1 || userRoles.length > 1) {
+          const diffSummary = diffKeys.map(
+            (k) => `${k}: ${existing[k as keyof Product]} → ${prod[k as keyof Product]}`
+          );
+
+          setRoleAuthRequest({
+            actionType: 'MODIFY_INVENTORY',
+            actionTitle: `Modify Product: ${prod.name}`,
+            targetId: prod.id,
+            targetName: prod.name,
+            qualifyingRoles: qualifyingRoles.length > 0 ? qualifyingRoles : userRoles,
+            user: currentUser,
+            diffSummary,
+            metadata: { before: existing, after: prod },
+            onConfirm: (selectedRole, reason) => {
+              performSave(selectedRole, reason);
+              setRoleAuthRequest(null);
+            },
+            onCancel: () => setRoleAuthRequest(null),
+          });
+          return;
+        } else {
+          const singleRole = qualifyingRoles[0] || userRoles[0] || 'Staff';
+          performSave(singleRole);
+          return;
+        }
+      }
+    }
+
+    performSave();
+  };
+
+  const handleBatchImportProducts = (importedProducts: Product[], replaceExisting: boolean) => {
+    importedProducts.forEach((p) => {
+      if (p.imageUrl && p.imageUrl.trim() !== '') {
+        saveProductImageToIndexedDB(p.id, p.imageUrl);
+      }
+    });
+
+    if (replaceExisting) {
+      setProducts(importedProducts);
+    } else {
+      setProducts((prev) => {
+        const existingBarcodes = new Set(prev.map((p) => p.barcode.toLowerCase()));
+        const existingSkus = new Set(prev.map((p) => p.sku.toLowerCase()));
+
+        const newUnique = importedProducts.filter(
+          (p) => !existingBarcodes.has(p.barcode.toLowerCase()) && !existingSkus.has(p.sku.toLowerCase())
+        );
+        return [...newUnique, ...prev];
+      });
+    }
+
+    bulkUploadProductsToCloud(importedProducts).catch(() => {});
+  };
+
+  const handleDeleteProduct = (productId: string) => {
+    const existing = products.find((p) => p.id === productId);
+    const qualifyingRoles = getQualifyingRolesForAction(currentUser, 'DELETE_PRODUCT');
+    const userRoles = getUserRoles(currentUser);
+
+    const performDelete = (authorizingRole: Role, reason?: string) => {
+      deleteProductImageFromIndexedDB(productId);
+      setProducts((prev) => prev.filter((p) => p.id !== productId));
+      deleteProductFromCloud(productId).catch(() => {});
+
+      const log = buildSensitiveActionLog({
+        actionType: 'DELETE_PRODUCT',
+        actionTitle: `Deleted Product: ${existing?.name || productId}`,
+        user: currentUser,
+        authorizingRole,
+        targetId: productId,
+        targetName: existing?.name || productId,
+        details: {
+          summary: `Permanently removed ${existing?.name || 'product'} (SKU: ${existing?.sku || 'N/A'}, Barcode: ${existing?.barcode || 'N/A'}, Stock: ${existing?.stockQuantity || 0}) from store catalog`,
+          before: existing || {},
+        },
+        reason,
+        severity: 'critical',
+      });
+      handleRecordAuditLog(log);
+    };
+
+    if (qualifyingRoles.length > 1 || userRoles.length > 1) {
+      setRoleAuthRequest({
+        actionType: 'DELETE_PRODUCT',
+        actionTitle: `Delete Product: ${existing?.name || productId}`,
+        targetId: productId,
+        targetName: existing?.name || productId,
+        qualifyingRoles: qualifyingRoles.length > 0 ? qualifyingRoles : userRoles,
+        user: currentUser,
+        diffSummary: existing ? [
+          `SKU: ${existing.sku || 'N/A'}`,
+          `Barcode: ${existing.barcode || 'N/A'}`,
+          `Category: ${existing.category}`,
+          `Selling Price: KSh ${existing.sellingPrice}`,
+          `Stock On Hand: ${existing.stockQuantity} units`,
+        ] : undefined,
+        onConfirm: (selectedRole, reason) => {
+          performDelete(selectedRole, reason);
+          setRoleAuthRequest(null);
+        },
+        onCancel: () => setRoleAuthRequest(null),
+      });
+    } else {
+      const singleRole = qualifyingRoles[0] || userRoles[0] || 'Staff';
+      performDelete(singleRole);
+    }
+  };
+
+  const handleAddRestockRecord = (
+    productId: string,
+    quantityAdded: number,
+    unitCost: number,
+    supplierName: string,
+    batchNo: string,
+    notes: string
+  ) => {
+    const prod = products.find((p) => p.id === productId);
+    if (!prod) return;
+
+    const totalCost = quantityAdded * unitCost;
+
+    const newRestock: RestockRecord = {
+      id: `rst-${Date.now()}`,
+      productId,
+      productName: prod.name,
+      quantityAdded,
+      unitCost,
+      totalCost,
+      supplierName,
+      supplierId: prod.supplierId,
+      date: new Date().toISOString(),
+      receivedBy: `${currentUser.name} (${currentUser.role})`,
+      batchNo: batchNo || `BATCH-${Math.floor(1000 + Math.random() * 9000)}`,
+      notes
+    };
+
+    setRestockRecords((prev) => [newRestock, ...prev]);
+    saveRestockRecordToCloud(newRestock).catch(() => {});
+
+    const updatedProd: Product = {
+      ...prod,
+      stockQuantity: prod.stockQuantity + quantityAdded,
+      costPrice: unitCost,
+      updatedAt: new Date().toISOString().slice(0, 10)
+    };
+
+    setProducts((prev) =>
+      prev.map((p) => (p.id === productId ? updatedProd : p))
+    );
+    saveProductToCloud(updatedProd).catch(() => {});
+
+    const restockExp: Expense = {
+      id: `exp-rst-${Date.now()}`,
+      date: new Date().toISOString().slice(0, 10),
+      category: 'Restock',
+      description: `Restock Order: ${quantityAdded}x ${prod.name} (${supplierName})`,
+      amount: totalCost,
+      paymentMethod: 'mpesa',
+      recordedBy: currentUser.name,
+      receiptNo: batchNo || `RST-${Math.floor(100 + Math.random() * 900)}`,
+      recurringType: 'One-Time',
+      status: 'Paid'
+    };
+    setExpenses((prev) => [restockExp, ...prev]);
+    saveExpenseToCloud(restockExp).catch(() => {});
+  };
+
+  const handleApplyStockAdjustment = (updatedProducts: Product[], audit: StockCountAudit) => {
+    const qualifyingRoles = getQualifyingRolesForAction(currentUser, 'ADJUST_STOCK');
+    const userRoles = getUserRoles(currentUser);
+
+    const performAdjustment = (authorizingRole: Role, reason?: string) => {
+      setProducts(updatedProducts);
+      updatedProducts.forEach((p) => saveProductToCloud(p).catch(() => {}));
+
+      const log = buildSensitiveActionLog({
+        actionType: 'ADJUST_STOCK',
+        actionTitle: `Stock Adjustment: ${audit.items.length} Products Reconciled`,
+        user: currentUser,
+        authorizingRole,
+        details: {
+          summary: `Reconciled shelf inventory count for ${audit.items.length} products (Net Variance: ${audit.totalVarianceCount} units, Total Cost: KSh ${audit.totalVarianceCost.toLocaleString()})`,
+          metadata: {
+            auditId: audit.id,
+            auditDate: audit.auditDate,
+            totalVarianceCount: audit.totalVarianceCount,
+            totalVarianceCost: audit.totalVarianceCost,
+            itemsCount: audit.items.length,
+          },
+        },
+        reason: reason || audit.notes,
+        severity: 'high',
+      });
+      handleRecordAuditLog(log);
+    };
+
+    if (qualifyingRoles.length > 1 || userRoles.length > 1) {
+      setRoleAuthRequest({
+        actionType: 'ADJUST_STOCK',
+        actionTitle: `Physical Stock Count Reconciliation (${audit.items.length} Items)`,
+        targetName: `Stock Count Audit: ${audit.auditDate}`,
+        qualifyingRoles: qualifyingRoles.length > 0 ? qualifyingRoles : userRoles,
+        user: currentUser,
+        diffSummary: [
+          `Items Checked: ${audit.items.length}`,
+          `Total Unit Variance: ${audit.totalVarianceCount}`,
+          `Total Variance Value: KSh ${audit.totalVarianceCost.toLocaleString()}`,
+        ],
+        onConfirm: (selectedRole, reason) => {
+          performAdjustment(selectedRole, reason);
+          setRoleAuthRequest(null);
+        },
+        onCancel: () => setRoleAuthRequest(null),
+      });
+    } else {
+      const singleRole = qualifyingRoles[0] || userRoles[0] || 'Staff';
+      performAdjustment(singleRole);
+    }
+  };
+
+  const handleSingleProductStockAdjust = (productId: string, newQuantity: number, reason: string) => {
+    const targetProduct = products.find((p) => p.id === productId);
+    if (!targetProduct) return;
+    const variance = newQuantity - targetProduct.stockQuantity;
+    const updatedProduct = { ...targetProduct, stockQuantity: newQuantity };
+    const updatedProducts = products.map((p) => (p.id === productId ? updatedProduct : p));
+    setProducts(updatedProducts);
+    saveProductToCloud(updatedProduct).catch(() => {});
+
+    if (auditUrlProduct && auditUrlProduct.id === productId) {
+      setAuditUrlProduct(updatedProduct);
+    }
+
+    const log = buildSensitiveActionLog({
+      actionType: 'ADJUST_STOCK',
+      actionTitle: `Single Item Audit Adjust: ${targetProduct.name}`,
+      user: currentUser,
+      authorizingRole: currentUser.role,
+      details: {
+        summary: `Store manager physical count adjustment for ${targetProduct.name} from ${targetProduct.stockQuantity} to ${newQuantity} ${targetProduct.unit} (Variance: ${variance > 0 ? `+${variance}` : variance})`,
+        metadata: { productId, previousQuantity: targetProduct.stockQuantity, newQuantity, variance },
+      },
+      reason,
+      severity: 'medium',
+    });
+    handleRecordAuditLog(log);
+  };
+
+  const handleAddExpense = (exp: Expense) => {
+    setExpenses((prev) => [exp, ...prev]);
+    if (!getIsOnline()) {
+      addPendingSyncItem({
+        type: 'expense',
+        description: `Expense: ${exp.category} (KSh ${exp.amount.toLocaleString()})`,
+        data: exp,
+      });
+    } else {
+      saveExpenseToCloud(exp).catch(() => {
+        addPendingSyncItem({
+          type: 'expense',
+          description: `Expense: ${exp.category} (KSh ${exp.amount.toLocaleString()})`,
+          data: exp,
+        });
+      });
+    }
+  };
+
+  const handleDeleteExpense = (expId: string) => {
+    const exp = expenses.find((e) => e.id === expId);
+    const qualifyingRoles = getQualifyingRolesForAction(currentUser, 'DELETE_EXPENSE');
+    const userRoles = getUserRoles(currentUser);
+
+    const performDelete = (authorizingRole: Role, reason?: string) => {
+      setExpenses((prev) => prev.filter((e) => e.id !== expId));
+      deleteExpenseFromCloud(expId).catch(() => {});
+
+      const log = buildSensitiveActionLog({
+        actionType: 'DELETE_EXPENSE',
+        actionTitle: `Deleted Expense: ${exp ? exp.category : 'Record'} (${exp ? `KSh ${exp.amount.toLocaleString()}` : ''})`,
+        user: currentUser,
+        authorizingRole,
+        targetId: expId,
+        targetName: exp ? `${exp.category} - ${exp.description || 'Record'}` : expId,
+        details: {
+          summary: `Deleted ${exp?.category || 'expense'} of KSh ${(exp?.amount || 0).toLocaleString()} (${exp?.description || 'No description'})`,
+          before: exp || {},
+        },
+        reason,
+        severity: 'critical',
+      });
+      handleRecordAuditLog(log);
+    };
+
+    if (qualifyingRoles.length > 1 || userRoles.length > 1) {
+      setRoleAuthRequest({
+        actionType: 'DELETE_EXPENSE',
+        actionTitle: `Delete Expense: ${exp ? exp.category : 'Record'} (${exp ? `KSh ${exp.amount.toLocaleString()}` : ''})`,
+        targetId: expId,
+        targetName: exp ? `${exp.category} - ${exp.description || 'Record'}` : expId,
+        qualifyingRoles: qualifyingRoles.length > 0 ? qualifyingRoles : userRoles,
+        user: currentUser,
+        diffSummary: exp ? [
+          `Category: ${exp.category}`,
+          `Amount: KSh ${exp.amount.toLocaleString()}`,
+          `Description: ${exp.description || 'None'}`,
+          `Payment Method: ${exp.paymentMethod}`,
+          `Recorded By: ${exp.recordedBy}`,
+          `Date: ${exp.date}`,
+        ] : undefined,
+        metadata: { expense: exp },
+        onConfirm: (selectedRole, reason) => {
+          performDelete(selectedRole, reason);
+          setRoleAuthRequest(null);
+        },
+        onCancel: () => setRoleAuthRequest(null),
+      });
+    } else {
+      const singleRole = qualifyingRoles[0] || userRoles[0] || 'Staff';
+      performDelete(singleRole);
+    }
+  };
+
+  const handleAddCashTransaction = (tx: CashTransaction) => {
+    setCashTransactions((prev) => [tx, ...prev]);
+  };
+
+  const handleDeleteCashTransaction = (txId: string) => {
+    setCashTransactions((prev) => prev.filter((t) => t.id !== txId));
+  };
+
+  const handleClockIn = (rec: AttendanceRecord) => {
+    setAttendanceRecords((prev) => [rec, ...prev]);
+  };
+
+  const handleClockOut = (recordId: string, clockOutTime: string) => {
+    setAttendanceRecords((prev) =>
+      prev.map((rec) => (rec.id === recordId ? { ...rec, clockOutTime } : rec))
+    );
+  };
+
+  const handleIssueWorkerLoan = (newLoan: WorkerLoan) => {
+    setWorkerLoans((prev) => [newLoan, ...prev]);
+
+    const loanExpense: Expense = {
+      id: `exp-loan-${Date.now()}`,
+      date: newLoan.issueDate,
+      category: 'Salaries',
+      description: `Worker Loan Advance to ${newLoan.workerName} (${newLoan.loanNumber}) - ${newLoan.purpose}`,
+      amount: newLoan.principalAmount,
+      paymentMethod: newLoan.disbursementMethod,
+      recordedBy: newLoan.approvedBy,
+      status: 'Paid',
+      receiptNo: newLoan.disbursementRef || newLoan.loanNumber,
+    };
+    setExpenses((prev) => [loanExpense, ...prev]);
+  };
+
+  const handleRepayWorkerLoan = (loanId: string, repayment: WorkerLoanRepayment) => {
+    setWorkerLoans((prev) =>
+      prev.map((l) => {
+        if (l.id === loanId) {
+          const updatedRepayments = [repayment, ...l.repayments];
+          const newTotalRepaid = l.totalRepaid + repayment.amount;
+          const newBalanceDue = Math.max(0, l.principalAmount - newTotalRepaid);
+          const newStatus = newBalanceDue <= 0 ? 'Fully Repaid' : l.status;
+
+          return {
+            ...l,
+            totalRepaid: newTotalRepaid,
+            balanceDue: newBalanceDue,
+            status: newStatus,
+            repayments: updatedRepayments,
+          };
+        }
+        return l;
+      })
+    );
+
+    if (repayment.paymentMethod === 'cash' || repayment.paymentMethod === 'mpesa') {
+      const cashIn: CashTransaction = {
+        id: `ctx-loan-${Date.now()}`,
+        type: 'CASH_IN',
+        category: 'Other Cash In',
+        amount: repayment.amount,
+        date: repayment.date,
+        sourceDestination: 'Worker Loan Repayment',
+        referenceNo: repayment.referenceNo || loanId,
+        paymentMethod: repayment.paymentMethod === 'cash' ? 'cash' : 'mpesa',
+        description: `Loan repayment received from worker (${repayment.recordedBy})`,
+        recordedBy: repayment.recordedBy,
+        status: 'Completed',
+      };
+      setCashTransactions((prev) => [cashIn, ...prev]);
+    }
+  };
+
+  const handleUpdateWorkerLoanStatus = (loanId: string, status: WorkerLoan['status']) => {
+    setWorkerLoans((prev) =>
+      prev.map((l) => (l.id === loanId ? { ...l, status } : l))
+    );
+  };
+
+  const handleSaveFinancingFacility = (facility: FinancingFacility) => {
+    setFinancingFacilities((prev) => {
+      const exists = prev.some((f) => f.id === facility.id);
+      if (exists) {
+        return prev.map((f) => (f.id === facility.id ? facility : f));
+      }
+      return [facility, ...prev];
+    });
+  };
+
+  const handleDeleteFinancingFacility = (facilityId: string) => {
+    setFinancingFacilities((prev) => prev.filter((f) => f.id !== facilityId));
+  };
+
+  const handleRecordFacilityRepayment = (facilityId: string, repayment: FacilityRepayment, autoLogCashOut: boolean = true) => {
+    setFinancingFacilities((prev) =>
+      prev.map((fac) => {
+        if (fac.id === facilityId) {
+          const currentRepayments = fac.repayments || [];
+          const updatedRepayments = [repayment, ...currentRepayments];
+          const newTotalRepaid = (fac.totalRepaid || 0) + repayment.amount;
+          const newBalanceRemaining = Math.max(0, fac.totalRepayableAmount - newTotalRepaid);
+          const newStatus = newBalanceRemaining <= 0 ? 'Fully Cleared' : fac.status;
+
+          return {
+            ...fac,
+            totalRepaid: newTotalRepaid,
+            balanceRemaining: newBalanceRemaining,
+            status: newStatus,
+            repayments: updatedRepayments,
+          };
+        }
+        return fac;
+      })
+    );
+  };
+
+  const handleDisburseFacilityFunds = (facilityId: string, additionalAmount: number, refNo: string, autoLogCashIn: boolean = true) => {
+    setFinancingFacilities((prev) =>
+      prev.map((fac) => {
+        if (fac.id === facilityId) {
+          const newPrincipal = fac.principalAmount + additionalAmount;
+          const interestCalc = (additionalAmount * (fac.interestRatePercentage || 0)) / 100;
+          const newTotalRepayable = fac.totalRepayableAmount + additionalAmount + interestCalc;
+          const newBalance = Math.max(0, newTotalRepayable - (fac.totalRepaid || 0));
+
+          return {
+            ...fac,
+            principalAmount: newPrincipal,
+            totalRepayableAmount: newTotalRepayable,
+            balanceRemaining: newBalance,
+            status: 'Active',
+          };
+        }
+        return fac;
+      })
+    );
+  };
+
+  const handleAddStore = (newStoreData: Omit<StoreLocation, 'id'>) => {
+    const newStore: StoreLocation = {
+      ...newStoreData,
+      id: `store-${Date.now()}`
+    };
+    setStores((prev) => [...prev, newStore]);
+  };
+
+  const handleUpdateStore = (updatedStore: StoreLocation) => {
+    setStores((prev) => prev.map((s) => (s.id === updatedStore.id ? updatedStore : s)));
+  };
+
+  const handleDeleteStore = (storeId: string) => {
+    setStores((prev) => {
+      const remaining = prev.filter((s) => s.id !== storeId);
+      if (remaining.length === 0) return prev;
+      if (activeStoreId === storeId) {
+        setActiveStoreId(remaining[0].id);
+      }
+      const hasMain = remaining.some((s) => s.isMainBranch);
+      if (!hasMain && remaining[0]) {
+        remaining[0] = { ...remaining[0], isMainBranch: true };
+      }
+      return remaining;
+    });
+  };
+
+  const handleResetDemoStores = () => {
+    setStores(INITIAL_STORES);
+    setActiveStoreId(INITIAL_STORES[0].id);
+  };
+
+  const handlePlaceOnlineOrder = (newOrderData: Omit<OnlineOrder, 'id' | 'createdAt' | 'orderNumber'>) => {
+    const orderNum = `ORD-${Math.floor(1000 + Math.random() * 9000)}`;
+    const newOrder: OnlineOrder = {
+      ...newOrderData,
+      id: `ord-${Date.now()}`,
+      orderNumber: orderNum,
+      createdAt: new Date().toISOString()
+    };
+    setOnlineOrders((prev) => [newOrder, ...prev]);
+  };
+
+  const handleUpdateOrderStatus = (orderId: string, status: OnlineOrder['orderStatus']) => {
+    setOnlineOrders((prev) =>
+      prev.map((o) => {
+        if (o.id === orderId) {
+          return { ...o, orderStatus: status };
+        }
+        return o;
+      })
+    );
+
+    if (status === 'Completed') {
+      const orderObj = onlineOrders.find((o) => o.id === orderId);
+      if (orderObj) {
+        setProducts((prev) =>
+          prev.map((prod) => {
+            const itemInOrder = orderObj.items.find((i) => i.product.id === prod.id);
+            if (itemInOrder) {
+              return {
+                ...prod,
+                stockQuantity: Math.max(0, prod.stockQuantity - itemInOrder.quantity)
+              };
+            }
+            return prod;
+          })
+        );
+
+        const onlineSaleTx: Transaction = {
+          id: `tx-online-${Date.now()}`,
+          receiptNumber: `WEB-${orderObj.orderNumber}`,
+          date: new Date().toISOString(),
+          customerName: orderObj.customerName,
+          customerPhone: orderObj.customerPhone,
+          items: orderObj.items,
+          subtotal: orderObj.subtotal,
+          discountTotal: orderObj.discountAmount,
+          taxTotal: 0,
+          grandTotal: orderObj.grandTotal,
+          amountPaid: orderObj.grandTotal,
+          balanceDue: 0,
+          paymentStatus: 'Paid',
+          payments: [
+            {
+              method: orderObj.paymentMethod === 'mpesa' ? 'mpesa' : orderObj.paymentMethod === 'card' ? 'credit_card' : 'cash',
+              amount: orderObj.grandTotal
+            }
+          ],
+          cashierName: 'Online Web Storefront',
+          cashierId: 'sys-online',
+          storeId: orderObj.storeId,
+          storeName: orderObj.storeName,
+          sourceType: 'Online Store'
+        };
+
+        setTransactions((prev) => [onlineSaleTx, ...prev]);
+      }
+    }
+  };
+
+  const handleAddOffer = (newOfferData: Omit<OfferDeal, 'id'>) => {
+    const newOffer: OfferDeal = {
+      ...newOfferData,
+      id: `offer-${Date.now()}`
+    };
+    setOffers((prev) => [...prev, newOffer]);
+  };
+
+  const handleToggleOffer = (offerId: string) => {
+    setOffers((prev) =>
+      prev.map((o) => (o.id === offerId ? { ...o, active: !o.active } : o))
+    );
+  };
+
+  const handleDeleteOffer = (offerId: string) => {
+    setOffers((prev) => prev.filter((o) => o.id !== offerId));
+  };
+
+  const handleTransferStock = (
+    transferData: Omit<StockTransferRecord, 'id' | 'createdAt' | 'transferNumber'>
+  ) => {
+    const trfNum = `TRF-2026-${Math.floor(100 + Math.random() * 900)}`;
+    const newRecord: StockTransferRecord = {
+      ...transferData,
+      id: `trf-${Date.now()}`,
+      transferNumber: trfNum,
+      createdAt: new Date().toISOString()
+    };
+
+    setStockTransfers((prev) => [newRecord, ...prev]);
+
+    if (newRecord.status === 'Completed') {
+      setProducts((prev) =>
+        prev.map((p) => {
+          if (p.id === newRecord.productId) {
+            const currentStoreStock = p.storeStock || {};
+            const sourceQty = currentStoreStock[newRecord.sourceStoreId] ?? p.stockQuantity;
+            const targetQty = currentStoreStock[newRecord.targetStoreId] ?? 0;
+
+            return {
+              ...p,
+              storeStock: {
+                ...currentStoreStock,
+                [newRecord.sourceStoreId]: Math.max(0, sourceQty - newRecord.quantity),
+                [newRecord.targetStoreId]: targetQty + newRecord.quantity
+              }
+            };
+          }
+          return p;
+        })
+      );
+    }
+  };
+
+  const handleUpdateTransferStatus = (transferId: string, status: StockTransferRecord['status']) => {
+    setStockTransfers((prev) =>
+      prev.map((trf) => {
+        if (trf.id === transferId) {
+          if (status === 'Completed' && trf.status !== 'Completed') {
+            setProducts((prevProd) =>
+              prevProd.map((p) => {
+                if (p.id === trf.productId) {
+                  const currentStoreStock = p.storeStock || {};
+                  const sourceQty = currentStoreStock[trf.sourceStoreId] ?? p.stockQuantity;
+                  const targetQty = currentStoreStock[trf.targetStoreId] ?? 0;
+
+                  return {
+                    ...p,
+                    storeStock: {
+                      ...currentStoreStock,
+                      [trf.sourceStoreId]: Math.max(0, sourceQty - trf.quantity),
+                      [trf.targetStoreId]: targetQty + trf.quantity
+                    }
+                  };
+                }
+                return p;
+              })
+            );
+          }
+          return { ...trf, status };
+        }
+        return trf;
+      })
+    );
+  };
+
+  const handleResetData = () => {
+    localStorage.clear();
+    setProducts(INITIAL_PRODUCTS);
+    setCustomers(INITIAL_CUSTOMERS);
+    setSuppliers(INITIAL_SUPPLIERS);
+    setExpenses(INITIAL_EXPENSES);
+    setAttendanceRecords(INITIAL_ATTENDANCE);
+    setTransactions(INITIAL_TRANSACTIONS);
+    setCashTransactions(INITIAL_CASH_TRANSACTIONS);
+  };
+
+  const handleImportData = (imported: any) => {
+    if (imported.products) setProducts(imported.products);
+    if (imported.customers) setCustomers(imported.customers);
+    if (imported.suppliers) setSuppliers(imported.suppliers);
+    if (imported.expenses) setExpenses(imported.expenses);
+    if (imported.transactions) setTransactions(imported.transactions);
+    if (imported.attendanceRecords) setAttendanceRecords(imported.attendanceRecords);
+  };
+
+  const handleUpdateTransaction = (updatedTx: Transaction, updatedProducts: Product[]) => {
+    setTransactions((prev) => {
+      const next = prev.map((t) => (t.id === updatedTx.id ? { ...updatedTx, editedAt: new Date().toISOString() } : t));
+      safeSetJSON('retail_pos_transactions', next);
+      safeSetJSON('pos_store_sales', next);
+      return next;
+    });
+    setProducts(updatedProducts);
+  };
+
+  const handleClearTransactions = () => {
+    const userRoles = getUserRoles(currentUser);
+    const qualifyingRoles = getQualifyingRolesForAction(currentUser, 'CLEAR_TRANSACTIONS');
+
+    const performClear = (authorizingRole: Role, reason?: string) => {
+      const count = transactions.length;
+      setTransactions([]);
+      const log = buildSensitiveActionLog({
+        actionType: 'CLEAR_TRANSACTIONS',
+        actionTitle: `Purged Sales History (${count} Receipts)`,
+        user: currentUser,
+        authorizingRole,
+        details: {
+          summary: `Purged ${count} sales receipts from store register history`,
+        },
+        reason,
+        severity: 'critical',
+      });
+      handleRecordAuditLog(log);
+    };
+
+    if (userRoles.length > 1) {
+      setRoleAuthRequest({
+        actionType: 'CLEAR_TRANSACTIONS',
+        actionTitle: `Purge All Sales Transactions (${transactions.length} Receipts)`,
+        qualifyingRoles: qualifyingRoles.length > 0 ? qualifyingRoles : userRoles,
+        user: currentUser,
+        diffSummary: [`Total Receipts to Purge: ${transactions.length}`],
+        onConfirm: (selectedRole, reason) => {
+          performClear(selectedRole, reason);
+          setRoleAuthRequest(null);
+        },
+        onCancel: () => setRoleAuthRequest(null),
+      });
+    } else {
+      performClear(userRoles[0] || 'Admin');
+    }
+  };
+
+  const handleClearExpenses = () => {
+    const userRoles = getUserRoles(currentUser);
+    const qualifyingRoles = getQualifyingRolesForAction(currentUser, 'CLEAR_EXPENSES');
+
+    const performClear = (authorizingRole: Role, reason?: string) => {
+      const count = expenses.length;
+      setExpenses([]);
+      const log = buildSensitiveActionLog({
+        actionType: 'CLEAR_EXPENSES',
+        actionTitle: `Purged All Expense History (${count} Records)`,
+        user: currentUser,
+        authorizingRole,
+        details: {
+          summary: `Purged ${count} historical store expense records and overhead schedules`,
+        },
+        reason,
+        severity: 'critical',
+      });
+      handleRecordAuditLog(log);
+    };
+
+    if (userRoles.length > 1) {
+      setRoleAuthRequest({
+        actionType: 'CLEAR_EXPENSES',
+        actionTitle: `Purge All Expense Logs (${expenses.length} Records)`,
+        qualifyingRoles: qualifyingRoles.length > 0 ? qualifyingRoles : userRoles,
+        user: currentUser,
+        diffSummary: [`Total Records to Purge: ${expenses.length}`],
+        onConfirm: (selectedRole, reason) => {
+          performClear(selectedRole, reason);
+          setRoleAuthRequest(null);
+        },
+        onCancel: () => setRoleAuthRequest(null),
+      });
+    } else {
+      performClear(userRoles[0] || 'Admin');
+    }
+  };
+
+  const getUserInitials = (name: string) => {
+    const parts = name.split(' ');
+    if (parts.length >= 2) return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
+    return name.substring(0, 2).toUpperCase();
+  };
+
+  const themeContainerClass =
+    displayTheme === 'dark'
+      ? 'bg-slate-950 text-slate-100'
+      : displayTheme === 'contrast'
+      ? 'bg-black text-amber-300'
+      : 'bg-slate-50 text-slate-900';
+
+  const fontScaleClass = fontScale === 'large' ? 'text-base' : 'text-sm';
+
+  const renderActiveTabContent = () => {
+    const isTabPermitted =
+      hasTabPermission(currentUser, activeTab as TabKey) ||
+      temporarilyUnlockedTabs.has(activeTab as TabKey);
+
+    if (!isTabPermitted) {
+      return (
+        <AccessRestrictedView
+          currentTab={activeTab as TabKey}
+          currentUser={currentUser}
+          allUsers={allUsers}
+          onNavigateToAllowedTab={(tab) => {
+            setActiveTab(tab);
+            if (tab !== 'inventory') setInventoryLowStockOnly(false);
+          }}
+          onTemporaryUnlock={(_authorizedBy) => {
+            setTemporarilyUnlockedTabs((prev) => new Set([...prev, activeTab as TabKey]));
+          }}
+          onSwitchUser={(authorizedUser) => {
+            setCurrentUser(authorizedUser);
+            setPinModalTargetUser(null);
+            setIsTerminalLocked(false);
+            setTemporarilyUnlockedTabs(new Set());
+          }}
+        />
+      );
+    }
+
+    return (
+      <>
+        {activeTab === 'pos' && (
+        <POSView
+          products={products}
+          categories={categories}
+          customers={customers}
+          currentUser={currentUser}
+          allUsers={allUsers}
+          transactions={transactions}
+          onCompleteSale={handleCompleteSale}
+          onAddCustomer={handleAddCustomer}
+          onRecordScanLog={handleRecordScanLog}
+          newSaleTrigger={newSaleTrigger}
+          onSaveProduct={handleSaveProduct}
+          onBatchImportProducts={handleBatchImportProducts}
+        />
+      )}
+
+      {activeTab === 'inventory' && (
+        <InventoryView
+          products={products}
+          categories={categories}
+          suppliers={suppliers}
+          transactions={transactions}
+          onSaveProduct={handleSaveProduct}
+          onDeleteProduct={handleDeleteProduct}
+          onBatchImportProducts={handleBatchImportProducts}
+          onAddSupplier={handleSaveSupplier}
+          initialShowLowStockOnly={inventoryLowStockOnly}
+          onViewProductHistory={(prod) => {
+            setSelectedHistoryProduct(prod);
+            setShowHistoryModal(true);
+          }}
+          onOpenStoreManagerModal={() => setShowStoreManagerModal(true)}
+          currentUser={currentUser}
+          allUsers={allUsers}
+          scanLogs={scanLogs}
+          onRecordScanLog={handleRecordScanLog}
+          onClearScanLogs={handleClearScanLogs}
+          storeName={stores.find((s) => s.id === activeStoreId)?.name || 'Rofani Electronics'}
+          onOpenAiAssistantWithPrompt={(_prompt) => {
+            setShowAiAssistantModal(true);
+          }}
+          restockRecords={restockRecords}
+          onAddRestock={handleAddRestockRecord}
+          onAdjustStockQuantity={handleSingleProductStockAdjust}
+          onOpenItemAuditMiniPage={(prod) => {
+            setAuditUrlProduct(prod);
+            try {
+              const url = new URL(window.location.href);
+              url.searchParams.set('itemAudit', prod.id);
+              window.history.pushState({}, '', url.toString());
+            } catch {}
+          }}
+        />
+      )}
+
+      {activeTab === 'purchasing' && (
+        <PurchasingView
+          purchaseOrders={purchaseOrders}
+          setPurchaseOrders={setPurchaseOrders}
+          suppliers={suppliers}
+          setSuppliers={setSuppliers}
+          products={products}
+          setProducts={setProducts}
+          currentUser={currentUser}
+        />
+      )}
+
+      {activeTab === 'stocktake' && (
+        <PhysicalStockCountView
+          products={products}
+          onApplyStockAdjustment={handleApplyStockAdjustment}
+        />
+      )}
+
+      {activeTab === 'contacts' && (
+        <CustomersSuppliersView
+          customers={customers}
+          suppliers={suppliers}
+          transactions={transactions}
+          cashTransactions={cashTransactions}
+          products={products}
+          currentUser={currentUser}
+          offers={offers}
+          onSaveCustomer={handleSaveCustomer}
+          onDeleteCustomer={handleDeleteCustomer}
+          onSaveSupplier={handleSaveSupplier}
+          onDeleteSupplier={handleDeleteSupplier}
+          onRecordCustomerDebtPayment={handleRecordCustomerDebtPayment}
+          onRecordSupplierPayment={handleRecordSupplierPayment}
+          onImportCustomers={handleImportCustomers}
+          onImportSuppliers={handleImportSuppliers}
+          onNavigateToRestock={(_supplierName) => {
+            setActiveTab('inventory');
+          }}
+        />
+      )}
+
+      {activeTab === 'cashmanagement' && (
+        <CashManagementView
+          cashTransactions={cashTransactions}
+          financingFacilities={financingFacilities}
+          currentUser={currentUser}
+          products={products}
+          customers={customers}
+          suppliers={suppliers}
+          transactions={transactions}
+          expenses={expenses}
+          onAddCashTransaction={handleAddCashTransaction}
+          onDeleteCashTransaction={handleDeleteCashTransaction}
+          onSaveSupplier={handleSaveSupplier}
+          onRecordSupplierPayment={handleRecordSupplierPayment}
+          onSaveFinancingFacility={handleSaveFinancingFacility}
+          onDeleteFinancingFacility={handleDeleteFinancingFacility}
+          onRecordFacilityRepayment={handleRecordFacilityRepayment}
+          onDisburseFacilityFunds={handleDisburseFacilityFunds}
+        />
+      )}
+
+      {activeTab === 'expenses' && (
+        <ExpensesView
+          expenses={expenses}
+          currentUser={currentUser}
+          onAddExpense={handleAddExpense}
+          onDeleteExpense={handleDeleteExpense}
+          onBatchUpdateExpenses={setExpenses}
+          onOpenAuditLogs={() => setActiveTab('auditlogs')}
+        />
+      )}
+
+      {activeTab === 'attendance' && (
+        <AttendanceView
+          attendanceRecords={attendanceRecords}
+          allUsers={allUsers}
+          currentUser={currentUser}
+          transactions={transactions}
+          commissionPayouts={commissionPayouts}
+          workerLoans={workerLoans}
+          onClockIn={handleClockIn}
+          onClockOut={handleClockOut}
+          onPayCommission={handlePayCommission}
+          onUpdateUserCommissionRate={handleUpdateUserCommissionRate}
+          onUpdateUserCommissionSettings={handleUpdateUserCommissionSettings}
+          onReattributeSale={handleReattributeSale}
+          onIssueLoan={handleIssueWorkerLoan}
+          onRepayLoan={handleRepayWorkerLoan}
+          onUpdateLoanStatus={handleUpdateWorkerLoanStatus}
+          onAddUser={handleAddUser}
+          onUpdateUser={handleUpdateUser}
+          onDeleteUser={handleDeleteUser}
+          onOpenStaffModal={() => setShowStaffModal(true)}
+        />
+      )}
+
+      {activeTab === 'reports' && (
+        <ReportsView
+          transactions={transactions}
+          products={products}
+          customers={customers}
+          suppliers={suppliers}
+          expenses={expenses}
+          auditLogs={auditLogs}
+          onUpdateTransaction={handleUpdateTransaction}
+        />
+      )}
+
+      {activeTab === 'auditlogs' && (
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+          <AuditLogsView
+            logs={auditLogs}
+            onClose={() => setActiveTab('reports')}
+          />
+        </div>
+      )}
+
+      {activeTab === 'onlinestore' && (
+        <OnlineStorefrontView
+          products={products}
+          offers={offers}
+          stores={stores}
+          onPlaceOrder={handlePlaceOnlineOrder}
+          activeStore={stores.find((s) => s.id === activeStoreId) || stores[0]}
+        />
+      )}
+
+      {activeTab === 'onlineorders' && (
+        <OnlineOrdersManagerView
+          orders={onlineOrders}
+          offers={offers}
+          stores={stores}
+          customers={customers}
+          products={products}
+          activeStore={stores.find((s) => s.id === activeStoreId) || stores[0]}
+          onUpdateOrderStatus={handleUpdateOrderStatus}
+          onAddOffer={handleAddOffer}
+          onToggleOffer={handleToggleOffer}
+          onDeleteOffer={handleDeleteOffer}
+          onUpdateStoreWhatsApp={(storeId, whatsappNum) => {
+            setStores((prev) =>
+              prev.map((s) => (s.id === storeId ? { ...s, whatsappPhone: whatsappNum } : s))
+            );
+          }}
+        />
+      )}
+
+      {activeTab === 'settings' && (
+        <DataManagementView
+          products={products}
+          categories={categories}
+          customers={customers}
+          suppliers={suppliers}
+          transactions={transactions}
+          expenses={expenses}
+          attendanceRecords={attendanceRecords}
+          allUsers={allUsers}
+          onAddUser={handleAddUser}
+          onUpdateUser={handleUpdateUser}
+          onDeleteUser={handleDeleteUser}
+          onImportData={handleImportData}
+          onResetSampleData={handleResetData}
+          onClearTransactions={handleClearTransactions}
+          onClearExpenses={handleClearExpenses}
+          displayTheme={displayTheme}
+          onChangeDisplayTheme={setDisplayTheme}
+          fontScale={fontScale}
+          onChangeFontScale={setFontScale}
+          isSidebarCollapsed={isSidebarCollapsed}
+          onToggleSidebar={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+          onOpenCloudSync={() => setShowCloudSyncModal(true)}
+          deviceFormat={deviceFormat}
+          onChangeDeviceFormat={setDeviceFormat}
+          requirePinOnStartup={requirePinOnStartup}
+          onToggleRequirePinOnStartup={handleToggleRequirePinOnStartup}
+          masterPin={masterPin}
+          onUpdateMasterPin={handleUpdateMasterPin}
+          onLockNow={() => setIsTerminalLocked(true)}
+          onOpenAuditLogs={() => setActiveTab('auditlogs')}
+          stores={stores}
+          onOpenStoreManager={() => setShowStoreManagerModal(true)}
+        />
+      )}
+
+      {activeTab === 'menu' && (
+        <AppMenuView
+          onSelectTab={(tab) => setActiveTab(tab as any)}
+          onOpenCloudSync={() => setShowCloudSyncModal(true)}
+          onOpenStoreManager={() => setShowStoreManagerModal(true)}
+          onOpenInstallModal={() => setShowInstallModal(true)}
+          onSwitchToComputer={() => setDeviceFormat('computer')}
+          lowStockCount={lowStockCount}
+          storeName={stores.find((s) => s.id === activeStoreId)?.name || 'ROFANI ELECTRONICS'}
+        />
+      )}
+    </>
+    );
+  };
+
+  if (deviceFormat === 'phone') {
+    return (
+      <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
+        <PhoneDeviceFrame
+          activeTab={activeTab}
+          onSelectTab={(tab) => {
+            setActiveTab(tab);
+            if (tab !== 'inventory') setInventoryLowStockOnly(false);
+          }}
+          onSelectStockAlertFilter={() => setInventoryLowStockOnly(true)}
+          phoneOrientation={phoneOrientation}
+          phoneModel={phoneModel}
+          onToggleOrientation={() =>
+            setPhoneOrientation((prev) => (prev === 'portrait' ? 'landscape' : 'portrait'))
+          }
+          onChangeModel={(model) => setPhoneModel(model)}
+          onSwitchToComputer={() => setDeviceFormat('computer')}
+          currentUser={currentUser}
+          todaySales={todaySales}
+          lowStockCount={lowStockCount}
+          onLockTerminal={() => setIsTerminalLocked(true)}
+          onOpenStaffModal={() => setShowStaffModal(true)}
+          onNewSale={handleGlobalNewSale}
+          onOpenCloudSync={() => setShowCloudSyncModal(true)}
+          cloudSyncStatus={cloudSyncStatus}
+          onTriggerSync={syncPendingQueueToCloud}
+        >
+          {renderActiveTabContent()}
+        </PhoneDeviceFrame>
+
+        <CloudSyncModal
+          isOpen={showCloudSyncModal}
+          onClose={() => setShowCloudSyncModal(false)}
+          products={products}
+          allUsers={allUsers}
+          cloudSyncStatus={cloudSyncStatus}
+          lastSyncedTime={lastSyncedTime}
+          isQuotaExceeded={isCloudQuotaExceeded}
+          onSyncCatalogComplete={() => {
+            setCloudSyncStatus('synced');
+            setLastSyncedTime(new Date().toLocaleTimeString());
+          }}
+          masterPin={masterPin}
+          requirePinOnStartup={requirePinOnStartup}
+          onLockNow={() => setIsTerminalLocked(true)}
+          recoveryEmail={ownerRecoveryEmail}
+          emergencyKey={emergencyRecoveryKey}
+        />
+
+        <PinLoginModal
+          isOpen={isTerminalLocked}
+          users={allUsers}
+          currentUser={null}
+          initialTargetUser={pinModalTargetUser}
+          onLoginSuccess={handleLoginSuccess}
+          onClose={() => {
+            setPinModalTargetUser(null);
+            if (!requirePinOnStartup) {
+              setIsTerminalLocked(false);
+            }
+          }}
+          isMandatory={requirePinOnStartup}
+          masterPin={masterPin}
+          storeName={stores.find((s) => s.id === activeStoreId)?.name || 'ROFANI POS'}
+          recoveryEmail={ownerRecoveryEmail}
+          emergencyKey={emergencyRecoveryKey}
+          onResetAdminPin={handleResetAdminPin}
+          onResetMasterPin={handleUpdateMasterPin}
+        />
+
+        <StaffManagementModal
+          isOpen={showStaffModal}
+          onClose={() => setShowStaffModal(false)}
+          users={allUsers}
+          currentUser={currentUser}
+          onAddUser={handleAddUser}
+          onUpdateUser={handleUpdateUser}
+          onDeleteUser={handleDeleteUser}
+        />
+
+        <InstallPwaModal
+          isOpen={showInstallModal}
+          onClose={() => setShowInstallModal(false)}
+        />
+
+        <RoleAuthorizationModal request={roleAuthRequest} />
+        <CameraStartupPrompt />
+      </div>
+    );
+  }
+
+  return (
+    <div className={`flex h-screen w-full overflow-hidden font-sans ${themeContainerClass} ${fontScaleClass}`}>
+      {isMobileMenuOpen && (
+        <div
+          className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 lg:hidden cursor-pointer"
+          onClick={() => setIsMobileMenuOpen(false)}
+        />
+      )}
+
+      <nav
+        className={`bg-slate-900 flex flex-col border-r border-slate-800 text-slate-300 shrink-0 transition-all duration-300 z-50 ${
+          isSidebarCollapsed ? 'lg:w-16' : 'lg:w-64'
+        } ${
+          isMobileMenuOpen
+            ? 'fixed inset-y-0 left-0 w-72 shadow-2xl flex'
+            : 'hidden lg:flex'
+        }`}
+      >
+        <div className="p-4 border-b border-slate-800 flex items-center justify-between">
+          {(!isSidebarCollapsed || isMobileMenuOpen) && (
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-9 h-9 bg-blue-600 rounded-lg flex items-center justify-center font-extrabold text-white shadow-lg shadow-blue-600/30 shrink-0">
+                R
+              </div>
+              <div className="truncate">
+                <span className="text-sm font-extrabold text-white tracking-wider block leading-tight">
+                  ROFANI
+                </span>
+                <span className="text-[10px] text-slate-400 font-mono block truncate">ELECTRONICS & BOUTIQUE</span>
+              </div>
+            </div>
+          )}
+
+          <div className="flex items-center gap-1.5 ml-auto">
+            <button
+              onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+              title={isSidebarCollapsed ? "Expand Sidebar" : "Collapse Sidebar for Full View"}
+              className="hidden lg:flex p-2 rounded-xl bg-slate-800/80 hover:bg-slate-800 text-slate-300 hover:text-white transition cursor-pointer"
+            >
+              {isSidebarCollapsed ? <PanelLeft className="w-5 h-5 text-sky-400" /> : <PanelLeftClose className="w-5 h-5 text-slate-400" />}
+            </button>
+            <button
+              onClick={() => setIsMobileMenuOpen(false)}
+              title="Close Menu"
+              className="lg:hidden p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+        </div>
+
+        <div className="px-2 pt-3 pb-1 border-b border-slate-800/80">
+          {isSidebarCollapsed ? (
+            <div className="flex flex-col gap-1.5">
+              <button
+                id="btn-sidebar-new-sale"
+                onClick={handleGlobalNewSale}
+                title="Create New POS Sale"
+                className="w-full bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 active:scale-95 text-white font-extrabold rounded-xl shadow-md shadow-emerald-600/25 transition flex items-center justify-center p-2.5"
+              >
+                <Plus className="w-4 h-4 shrink-0" />
+              </button>
+              <button
+                id="btn-sidebar-print-barcodes"
+                onClick={() => setShowPrintBarcodesModal(true)}
+                title="Print QR Codes Utility"
+                className="w-full bg-slate-800/90 hover:bg-slate-700 active:scale-95 text-sky-400 hover:text-white font-bold rounded-xl border border-slate-700/80 hover:border-sky-500/50 shadow-sm transition flex items-center justify-center p-2.5 cursor-pointer"
+              >
+                <QrCode className="w-4 h-4 shrink-0" />
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-1.5">
+              <button
+                id="btn-sidebar-new-sale"
+                onClick={handleGlobalNewSale}
+                title="Create New POS Sale"
+                className="flex-1 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 active:scale-95 text-white font-extrabold rounded-xl shadow-md shadow-emerald-600/25 transition flex items-center justify-center gap-1.5 py-2.5 px-2 text-xs truncate cursor-pointer"
+              >
+                <Plus className="w-4 h-4 shrink-0" />
+                <span className="truncate">+ New Sale</span>
+              </button>
+              <button
+                id="btn-sidebar-print-barcodes"
+                onClick={() => setShowPrintBarcodesModal(true)}
+                title="Print QR Codes Utility"
+                className="bg-slate-800/90 hover:bg-slate-700 active:scale-95 text-sky-300 hover:text-white font-bold rounded-xl border border-slate-700/80 hover:border-sky-500/60 shadow-sm transition flex items-center gap-1.5 py-2.5 px-2.5 text-xs shrink-0 cursor-pointer"
+              >
+                <QrCode className="w-3.5 h-3.5 shrink-0 text-sky-400" />
+                <span className="font-semibold">Print QR Labels</span>
+              </button>
+            </div>
+          )}
+        </div>
+
+        <div className="flex-1 py-3 px-2 space-y-1.5 text-xs font-semibold overflow-y-auto">
+          <button
+            onClick={() => setActiveTab('pos')}
+            title="Point of Sale (POS)"
+            className={`w-full flex items-center ${isSidebarCollapsed ? 'justify-center px-2' : 'justify-between px-3'} py-2.5 rounded-lg transition ${
+              activeTab === 'pos'
+                ? 'bg-blue-600 text-white shadow-md'
+                : 'hover:bg-slate-800 text-slate-300'
+            }`}
+          >
+            <div className="flex items-center gap-3">
+              <ShoppingBag className="w-4 h-4 opacity-90 shrink-0" />
+              {!isSidebarCollapsed && <span>Point of Sale</span>}
+            </div>
+            {!isSidebarCollapsed && (
+              <span className="text-[10px] bg-slate-800/80 px-1.5 py-0.5 rounded font-mono text-slate-300">
+                POS
+              </span>
+            )}
+          </button>
+
+          <button
+            onClick={() => {
+              setActiveTab('inventory');
+              setInventoryLowStockOnly(false);
+            }}
+            title="Inventory Control & Stock"
+            className={`w-full flex items-center ${isSidebarCollapsed ? 'justify-center px-2' : 'justify-between px-3'} py-2.5 rounded-lg transition ${
+              activeTab === 'inventory'
+                ? 'bg-blue-600 text-white shadow-md'
+                : 'hover:bg-slate-800 text-slate-300'
+            }`}
+          >
+            <div className="flex items-center gap-3">
+              <Package className="w-4 h-4 opacity-90 shrink-0" />
+              {!isSidebarCollapsed && <span>Inventory Control</span>}
+            </div>
+            {lowStockCount > 0 && (
+              <span
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setActiveTab('inventory');
+                  setInventoryLowStockOnly(true);
+                }}
+                className="bg-rose-500 hover:bg-rose-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full cursor-pointer shadow-sm"
+                title="Click to view only low stock / alerted items"
+              >
+                {lowStockCount}
+              </span>
+            )}
+          </button>
+
+          <button
+            onClick={() => setActiveTab('purchasing')}
+            title="Purchase Orders & Supplier Inventory Receiving"
+            className={`w-full flex items-center ${isSidebarCollapsed ? 'justify-center px-2' : 'justify-between px-3'} py-2.5 rounded-lg transition ${
+              activeTab === 'purchasing'
+                ? 'bg-blue-600 text-white shadow-md'
+                : 'hover:bg-slate-800 text-slate-300'
+            }`}
+          >
+            <div className="flex items-center gap-3">
+              <Truck className="w-4 h-4 opacity-90 shrink-0 text-emerald-400" />
+              {!isSidebarCollapsed && <span>Purchasing & POs</span>}
+            </div>
+            {!isSidebarCollapsed && purchaseOrders.filter((p) => p.status === 'Pending').length > 0 && (
+              <span className="text-[10px] bg-amber-500 text-slate-950 font-bold px-1.5 py-0.5 rounded-full font-mono">
+                {purchaseOrders.filter((p) => p.status === 'Pending').length}
+              </span>
+            )}
+          </button>
+
+          <button
+            onClick={() => setActiveTab('stocktake')}
+            title="Physical Stock Take Audit"
+            className={`w-full flex items-center ${isSidebarCollapsed ? 'justify-center px-2' : 'justify-between px-3'} py-2.5 rounded-lg transition ${
+              activeTab === 'stocktake'
+                ? 'bg-blue-600 text-white shadow-md'
+                : 'hover:bg-slate-800 text-slate-300'
+            }`}
+          >
+            <div className="flex items-center gap-3">
+              <ClipboardList className="w-4 h-4 opacity-90 shrink-0" />
+              {!isSidebarCollapsed && <span>Physical Audit</span>}
+            </div>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('contacts')}
+            title="Customers & Suppliers Management"
+            className={`w-full flex items-center ${isSidebarCollapsed ? 'justify-center px-2' : 'justify-between px-3'} py-2.5 rounded-lg transition ${
+              activeTab === 'contacts'
+                ? 'bg-sky-600 text-white shadow-md'
+                : 'hover:bg-slate-800 text-slate-300'
+            }`}
+          >
+            <div className="flex items-center gap-3">
+              <Users className="w-4 h-4 opacity-90 shrink-0 text-sky-400" />
+              {!isSidebarCollapsed && <span>Contacts & CRM</span>}
+            </div>
+            {!isSidebarCollapsed && (
+              <div className="flex items-center gap-1">
+                {customers.filter((c) => (c.currentBalanceDue || 0) > 0).length > 0 && (
+                  <span className="text-[10px] bg-rose-500 text-white px-1.5 py-0.5 rounded-full font-bold font-mono">
+                    {customers.filter((c) => (c.currentBalanceDue || 0) > 0).length}
+                  </span>
+                )}
+                <span className="text-[10px] bg-sky-950/80 text-sky-300 border border-sky-800/80 px-1.5 py-0.5 rounded font-mono">
+                  CRM
+                </span>
+              </div>
+            )}
+          </button>
+
+          <button
+            onClick={() => setActiveTab('cashmanagement')}
+            title="Cash In & Cash Out Ledger"
+            className={`w-full flex items-center ${isSidebarCollapsed ? 'justify-center px-2' : 'justify-between px-3'} py-2.5 rounded-lg transition ${
+              activeTab === 'cashmanagement'
+                ? 'bg-emerald-600 text-white shadow-md'
+                : 'hover:bg-slate-800 text-slate-300'
+            }`}
+          >
+            <div className="flex items-center gap-3">
+              <Landmark className="w-4 h-4 opacity-90 shrink-0 text-emerald-400" />
+              {!isSidebarCollapsed && <span>Cash In & Out</span>}
+            </div>
+            {!isSidebarCollapsed && (
+              <span className="text-[10px] bg-emerald-950/80 text-emerald-300 border border-emerald-800/80 px-1.5 py-0.5 rounded font-mono">
+                Vault
+              </span>
+            )}
+          </button>
+
+          <button
+            onClick={() => setActiveTab('expenses')}
+            title="Expense Manager"
+            className={`w-full flex items-center ${isSidebarCollapsed ? 'justify-center px-2' : 'justify-between px-3'} py-2.5 rounded-lg transition ${
+              activeTab === 'expenses'
+                ? 'bg-blue-600 text-white shadow-md'
+                : 'hover:bg-slate-800 text-slate-300'
+            }`}
+          >
+            <div className="flex items-center gap-3">
+              <DollarSign className="w-4 h-4 opacity-90 shrink-0" />
+              {!isSidebarCollapsed && <span>Expense Manager</span>}
+            </div>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('attendance')}
+            title="Staff Attendance & Worker Loans"
+            className={`w-full flex items-center ${isSidebarCollapsed ? 'justify-center px-2' : 'justify-between px-3'} py-2.5 rounded-lg transition ${
+              activeTab === 'attendance'
+                ? 'bg-blue-600 text-white shadow-md'
+                : 'hover:bg-slate-800 text-slate-300'
+            }`}
+          >
+            <div className="flex items-center gap-3">
+              <UserCheck className="w-4 h-4 opacity-90 shrink-0 text-emerald-400" />
+              {!isSidebarCollapsed && <span>Workers & Loans</span>}
+            </div>
+            {!isSidebarCollapsed && (
+              <span className="text-[10px] bg-emerald-950/80 text-emerald-300 border border-emerald-800/80 px-1.5 py-0.5 rounded font-mono font-bold">
+                Loans 💳
+              </span>
+            )}
+          </button>
+
+          <button
+            onClick={() => setActiveTab('reports')}
+            title="Reports & Analytics"
+            className={`w-full flex items-center ${isSidebarCollapsed ? 'justify-center px-2' : 'justify-between px-3'} py-2.5 rounded-lg transition ${
+              activeTab === 'reports'
+                ? 'bg-blue-600 text-white shadow-md'
+                : 'hover:bg-slate-800 text-slate-300'
+            }`}
+          >
+            <div className="flex items-center gap-3">
+              <FileText className="w-4 h-4 opacity-90 shrink-0" />
+              {!isSidebarCollapsed && <span>Reports Central</span>}
+            </div>
+            {!isSidebarCollapsed && (
+              <span className="text-[10px] bg-slate-800/80 px-1.5 py-0.5 rounded font-mono text-slate-300">
+                PDF
+              </span>
+            )}
+          </button>
+
+          <button
+            onClick={() => setActiveTab('auditlogs')}
+            title="Worker Role Authorization Audit Trail"
+            className={`w-full flex items-center ${isSidebarCollapsed ? 'justify-center px-2' : 'justify-between px-3'} py-2.5 rounded-lg transition ${
+              activeTab === 'auditlogs'
+                ? 'bg-purple-600 text-white shadow-md'
+                : 'hover:bg-slate-800 text-slate-300'
+            }`}
+          >
+            <div className="flex items-center gap-3">
+              <ShieldAlert className="w-4 h-4 opacity-90 shrink-0 text-purple-400" />
+              {!isSidebarCollapsed && <span>Audit Trail</span>}
+            </div>
+            {!isSidebarCollapsed && auditLogs.length > 0 && (
+              <span className="text-[10px] bg-purple-950/80 text-purple-300 border border-purple-800/80 px-1.5 py-0.5 rounded font-mono font-bold">
+                {auditLogs.length}
+              </span>
+            )}
+          </button>
+
+          <button
+            onClick={() => setActiveTab('onlinestore')}
+            title="Online Web Storefront"
+            className={`w-full flex items-center ${isSidebarCollapsed ? 'justify-center px-2' : 'justify-between px-3'} py-2.5 rounded-lg transition ${
+              activeTab === 'onlinestore'
+                ? 'bg-sky-600 text-white shadow-md'
+                : 'hover:bg-slate-800 text-slate-300'
+            }`}
+          >
+            <div className="flex items-center gap-3">
+              <Globe className="w-4 h-4 opacity-90 shrink-0 text-sky-400" />
+              {!isSidebarCollapsed && <span>Online E-Store</span>}
+            </div>
+            {!isSidebarCollapsed && (
+              <span className="text-[10px] bg-sky-950/80 text-sky-300 border border-sky-800/80 px-1.5 py-0.5 rounded font-mono">
+                Web
+              </span>
+            )}
+          </button>
+
+          <button
+            onClick={() => setActiveTab('onlineorders')}
+            title="Online Customer Orders & Offers"
+            className={`w-full flex items-center ${isSidebarCollapsed ? 'justify-center px-2' : 'justify-between px-3'} py-2.5 rounded-lg transition ${
+              activeTab === 'onlineorders'
+                ? 'bg-amber-600 text-slate-950 shadow-md font-bold'
+                : 'hover:bg-slate-800 text-slate-300'
+            }`}
+          >
+            <div className="flex items-center gap-3">
+              <Tag className="w-4 h-4 opacity-90 shrink-0 text-amber-400" />
+              {!isSidebarCollapsed && <span>Orders & Deals</span>}
+            </div>
+            {onlineOrders.filter((o) => o.orderStatus === 'Pending').length > 0 && (
+              <span className="bg-amber-500 text-slate-950 text-[10px] font-extrabold px-1.5 py-0.5 rounded-full shadow-sm">
+                {onlineOrders.filter((o) => o.orderStatus === 'Pending').length}
+              </span>
+            )}
+          </button>
+
+          <button
+            onClick={() => setShowStoreManagerModal(true)}
+            title="Manage Multi-Store Branches & Transfers"
+            className={`w-full flex items-center ${isSidebarCollapsed ? 'justify-center px-2' : 'justify-between px-3'} py-2.5 rounded-lg transition hover:bg-slate-800 text-indigo-200 border border-indigo-900/50 bg-indigo-950/30`}
+          >
+            <div className="flex items-center gap-3">
+              <Building2 className="w-4 h-4 opacity-90 shrink-0 text-indigo-400" />
+              {!isSidebarCollapsed && <span className="font-semibold">Multi-Store Outlets</span>}
+            </div>
+            {!isSidebarCollapsed && (
+              <span className="text-[10px] bg-indigo-900/80 text-indigo-200 border border-indigo-700/80 px-1.5 py-0.5 rounded font-mono font-bold">
+                {stores.length} Outlets
+              </span>
+            )}
+          </button>
+
+          <button
+            onClick={() => setActiveTab('settings')}
+            title="Data Management & KRA Settings"
+            className={`w-full flex items-center ${isSidebarCollapsed ? 'justify-center px-2' : 'justify-between px-3'} py-2.5 rounded-lg transition ${
+              activeTab === 'settings'
+                ? 'bg-blue-600 text-white shadow-md'
+                : 'hover:bg-slate-800 text-slate-300'
+            }`}
+          >
+            <div className="flex items-center gap-3">
+              <Database className="w-4 h-4 opacity-90 shrink-0" />
+              {!isSidebarCollapsed && <span>Data & KRA Settings</span>}
+            </div>
+          </button>
+
+          <button
+            onClick={() => setShowCloudSyncModal(true)}
+            title="Real-Time Cloud Synchronization & Multi-Phone Share"
+            className={`w-full flex items-center ${isSidebarCollapsed ? 'justify-center px-2' : 'justify-between px-3'} py-2.5 rounded-lg transition bg-gradient-to-r from-sky-950/80 to-blue-950/80 text-sky-200 border border-sky-800/60 hover:border-sky-500 hover:text-white shadow-sm`}
+          >
+            <div className="flex items-center gap-3">
+              <Cloud className="w-4 h-4 opacity-90 shrink-0 text-sky-400" />
+              {!isSidebarCollapsed && <span>Cloud Sync & Share</span>}
+            </div>
+            {!isSidebarCollapsed && (
+              <span className="text-[9px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-1.5 py-0.5 rounded-full font-mono flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                Live
+              </span>
+            )}
+          </button>
+
+          <button
+            onClick={() => setShowAiAssistantModal(true)}
+            title="ROFANI Worker AI Assistant & Onboarding Co-Pilot"
+            className={`w-full flex items-center ${isSidebarCollapsed ? 'justify-center px-2' : 'justify-between px-3'} py-2.5 rounded-lg transition bg-gradient-to-r from-indigo-950/90 via-purple-950/90 to-sky-950/90 text-indigo-300 border border-indigo-700/60 hover:border-indigo-400 hover:text-white shadow-md`}
+          >
+            <div className="flex items-center gap-3">
+              <Sparkles className="w-4 h-4 shrink-0 text-amber-400 animate-pulse" />
+              {!isSidebarCollapsed && <span className="font-bold">AI Worker Co-Pilot</span>}
+            </div>
+            {!isSidebarCollapsed && (
+              <span className="text-[9px] bg-indigo-500 text-white px-1.5 py-0.5 rounded-full font-extrabold uppercase tracking-wider">
+                24/7 AI
+              </span>
+            )}
+          </button>
+        </div>
+
+        <div className="p-3 border-t border-slate-800 relative">
+          <button
+            onClick={() => setShowRoleSwitcher(!showRoleSwitcher)}
+            className="w-full flex items-center justify-between bg-slate-800/60 hover:bg-slate-800 p-2.5 rounded-xl border border-slate-700/60 transition text-left"
+          >
+            <div className="flex items-center gap-2.5">
+              <div className="w-9 h-9 rounded-full bg-blue-600/30 text-blue-300 flex items-center justify-center text-xs font-bold border border-blue-500/40">
+                {getUserInitials(currentUser.name)}
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs font-semibold text-white truncate">{currentUser.name}</p>
+                <p className="text-[10px] uppercase tracking-wider text-slate-400">
+                  {currentUser.role}
+                </p>
+              </div>
+            </div>
+            <ChevronDown className="w-4 h-4 text-slate-400" />
+          </button>
+
+          {showRoleSwitcher && (
+            <div className="absolute bottom-16 left-3 right-3 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl p-2 space-y-1 text-xs z-50">
+              <div className="px-2 py-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider border-b border-slate-800">
+                Switch Staff Role
+              </div>
+              {allUsers.map((u) => (
+                <button
+                  key={u.id}
+                  onClick={() => {
+                    setShowRoleSwitcher(false);
+                    if (u.id === currentUser.id) return;
+                    setPinModalTargetUser(u);
+                    setIsTerminalLocked(true);
+                  }}
+                  className={`w-full text-left px-2.5 py-1.5 rounded-lg flex items-center justify-between transition ${
+                    u.id === currentUser.id
+                      ? 'bg-blue-600 text-white font-bold'
+                      : 'hover:bg-slate-800 text-slate-300'
+                  }`}
+                >
+                  <span className="truncate">{u.name}</span>
+                  <span className="text-[9px] opacity-80 uppercase">{u.role}</span>
+                </button>
+              ))}
+              <div className="pt-1.5 border-t border-slate-800 space-y-1">
+                <button
+                  onClick={() => {
+                    setShowRoleSwitcher(false);
+                    setShowStaffModal(true);
+                  }}
+                  className="w-full text-left px-2.5 py-1.5 rounded-lg flex items-center gap-1.5 text-sky-300 hover:bg-sky-950/40 transition font-semibold"
+                >
+                  <Users className="w-3.5 h-3.5 text-sky-400" />
+                  <span>Manage Workers & PINs</span>
+                </button>
+
+                <button
+                  onClick={() => {
+                    setShowRoleSwitcher(false);
+                    setPinModalTargetUser(null);
+                    setIsTerminalLocked(true);
+                  }}
+                  className="w-full text-left px-2.5 py-1.5 rounded-lg flex items-center gap-1.5 text-amber-300 hover:bg-amber-950/40 transition font-semibold"
+                >
+                  <Lock className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Lock Terminal (PIN)</span>
+                </button>
+
+                {hasRole(currentUser, 'Admin') && (
+                  <button
+                    onClick={() => {
+                      handleResetData();
+                      setShowRoleSwitcher(false);
+                    }}
+                    className="w-full text-left px-2.5 py-1.5 rounded-lg flex items-center gap-1.5 text-rose-400 hover:bg-rose-950/40 transition"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>Reset Sample Data</span>
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      </nav>
+
+      <main className="flex-1 flex flex-col min-w-0 overflow-hidden">
+        <OfflineSyncBanner onTriggerSync={syncPendingQueueToCloud} />
+
+        {isCloudQuotaExceeded && showQuotaBanner && (
+          <div className="bg-amber-500 text-slate-950 px-4 py-2 text-xs font-semibold flex items-center justify-between shadow-sm z-30 shrink-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="flex items-center gap-1 bg-slate-950 text-amber-300 px-2 py-0.5 rounded text-[11px] font-bold">
+                <AlertTriangle className="w-3.5 h-3.5" /> Quota Notice
+              </span>
+              <span>
+                Firebase daily free read units limit reached. <strong>POS is running safely in Offline Local Storage Mode</strong>.
+              </span>
+              <a
+                href={FIREBASE_UPGRADE_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="underline font-extrabold text-slate-950 hover:text-black ml-1 inline-flex items-center gap-1 cursor-pointer"
+              >
+                <span>Upgrade in Firebase Console</span>
+                <ExternalLink className="w-3 h-3" />
+              </a>
+              <span className="text-slate-950/60 font-normal">|</span>
+              <button
+                onClick={() => setShowCloudSyncModal(true)}
+                className="underline font-bold text-slate-950 hover:text-black cursor-pointer"
+              >
+                View Details
+              </button>
+            </div>
+            <button
+              onClick={() => setShowQuotaBanner(false)}
+              className="text-slate-900 hover:text-black p-1 font-bold text-xs cursor-pointer ml-4"
+              title="Dismiss banner"
+            >
+              ✕
+            </button>
+          </div>
+        )}
+
+        <div className="lg:hidden bg-slate-900 border-b border-slate-800 px-3 py-2 flex items-center justify-between shrink-0 z-20 text-white">
+          <div className="flex items-center gap-2 min-w-0">
+            <button
+              onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+              className="p-2 rounded-xl bg-slate-800 text-slate-300 hover:text-white transition cursor-pointer shrink-0"
+              title="Open Navigation Menu"
+            >
+              <Menu className="w-5 h-5" />
+            </button>
+            <div className="flex items-center gap-1.5 min-w-0">
+              <div className="w-7 h-7 bg-blue-600 rounded-lg flex items-center justify-center font-black text-white text-xs shrink-0 shadow-md">
+                R
+              </div>
+              <div className="min-w-0">
+                <span className="font-black text-xs tracking-wider block leading-none truncate">ROFANI POS</span>
+                <span className="text-[9px] text-slate-400 font-mono block truncate">
+                  {stores.find((s) => s.id === activeStoreId)?.name || 'Rofani Electronics'}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-1.5 shrink-0">
+            <NetworkStatusBadge onClick={() => setShowCloudSyncModal(true)} />
+
+            <button
+              onClick={() => setShowCloudSyncModal(true)}
+              title="Cloud Sync & Multi-Phone Share"
+              className={`px-2.5 py-1.5 rounded-xl border transition flex items-center gap-1.5 text-xs font-bold shadow-sm cursor-pointer ${
+                cloudSyncStatus === 'quota_exceeded'
+                  ? 'bg-amber-950/90 text-amber-200 border-amber-700'
+                  : 'bg-sky-500/20 text-sky-200 border-sky-400/40'
+              }`}
+            >
+              <Cloud className={`w-3.5 h-3.5 ${cloudSyncStatus === 'quota_exceeded' ? 'text-amber-400' : 'text-sky-400'}`} />
+              <span>Sync & Share</span>
+              <span
+                className={`w-1.5 h-1.5 rounded-full ${
+                  cloudSyncStatus === 'quota_exceeded'
+                    ? 'bg-amber-400'
+                    : cloudSyncStatus === 'offline'
+                    ? 'bg-slate-400'
+                    : 'bg-emerald-400 animate-pulse'
+                }`}
+              />
+            </button>
+
+            <button
+              onClick={handleGlobalNewSale}
+              title="Create New POS Sale"
+              className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-black flex items-center gap-1 shadow-sm active:scale-95 cursor-pointer"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Sale</span>
+            </button>
+
+            <button
+              onClick={() => setIsTerminalLocked(true)}
+              className="p-2 bg-slate-800 hover:bg-slate-700 text-amber-300 rounded-xl cursor-pointer"
+              title="Lock Terminal PIN"
+            >
+              <Lock className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+
+        <header className="hidden lg:flex min-h-16 h-auto py-2.5 lg:h-20 bg-white border-b border-slate-200 items-center justify-between px-4 xl:px-8 shrink-0 shadow-sm z-10 gap-3">
+          <div className="flex items-center gap-4 xl:gap-8 min-w-0">
+            <div className="flex flex-col shrink-0">
+              <span className="text-[10px] xl:text-[11px] text-slate-500 uppercase tracking-widest font-bold">
+                Today's Sales
+              </span>
+              <span className="text-lg xl:text-xl font-extrabold text-slate-900 font-mono">
+                {formatKSh(todaySales > 0 ? todaySales : totalGrossSales, { showDecimals: true })}
+              </span>
+            </div>
+
+            {canViewGrossProfit(currentUser) && (
+              <div className="hidden xl:flex flex-col border-l border-slate-200 pl-4 xl:pl-8 shrink-0">
+                <span className="text-[11px] text-slate-500 uppercase tracking-widest font-bold">
+                  Gross Profit Margin
+                </span>
+                <span className="text-xl font-extrabold text-emerald-600 font-mono">
+                  +{profitMarginPercent.toFixed(1)}% ({formatKSh(grossProfitAmount, { showDecimals: true })})
+                </span>
+              </div>
+            )}
+
+            <div className="flex flex-col border-l border-slate-200 pl-4 xl:pl-8 shrink-0">
+              <span className="text-[10px] xl:text-[11px] text-slate-500 uppercase tracking-widest font-bold">
+                Low Stock Alert
+              </span>
+              <button
+                onClick={() => {
+                  setActiveTab('inventory');
+                  setInventoryLowStockOnly(true);
+                }}
+                className={`text-lg xl:text-xl font-extrabold font-mono hover:underline flex items-center gap-1.5 transition text-left cursor-pointer ${
+                  lowStockCount > 0 ? 'text-rose-500 font-black' : 'text-slate-700'
+                }`}
+                title="Click to view only low stock / alerted items in inventory"
+              >
+                <AlertTriangle className={`w-4 h-4 ${lowStockCount > 0 ? 'text-rose-500 animate-pulse' : 'text-slate-400'}`} />
+                <span>{lowStockCount.toString().padStart(2, '0')} Items</span>
+              </button>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end">
+            <NetworkStatusBadge onClick={() => setShowCloudSyncModal(true)} />
+
+            <button
+              onClick={() => setShowStockAlertModal(true)}
+              title="Stock Alert & Daily Email Digest Center"
+              className={`relative px-3 py-2 rounded-xl border transition flex items-center gap-1.5 text-xs font-bold shadow-sm shrink-0 cursor-pointer ${
+                lowStockCount > 0
+                  ? 'bg-amber-50 hover:bg-amber-100 text-amber-950 border-amber-300 animate-pulse'
+                  : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200'
+              }`}
+            >
+              <Bell className={`w-4 h-4 ${lowStockCount > 0 ? 'text-amber-600' : 'text-slate-500'}`} />
+              <span>Stock Alerts</span>
+              {lowStockCount > 0 && (
+                <span className="bg-red-600 text-white text-[10px] font-extrabold px-1.5 py-0.2 rounded-full shadow-sm">
+                  {lowStockCount}
+                </span>
+              )}
+            </button>
+
+            <button
+              id="btn-top-new-sale"
+              onClick={handleGlobalNewSale}
+              title="Quick Start New POS Sale"
+              className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white rounded-xl transition flex items-center gap-1.5 text-xs font-extrabold shadow-md shadow-emerald-600/25 border border-emerald-400/30 shrink-0 cursor-pointer"
+            >
+              <Plus className="w-4 h-4" />
+              <ShoppingBag className="w-3.5 h-3.5" />
+              <span>New Sale</span>
+            </button>
+
+            <button
+              onClick={() => setShowCloudSyncModal(true)}
+              title="Real-Time Cloud Synchronization & Share with Worker Mobile Phones"
+              className={`px-3 py-2 rounded-xl border transition flex items-center gap-1.5 text-xs font-bold shadow-sm shrink-0 cursor-pointer ${
+                cloudSyncStatus === 'quota_exceeded'
+                  ? 'bg-amber-50 hover:bg-amber-100 text-amber-950 border-amber-300'
+                  : 'bg-sky-50 hover:bg-sky-100 text-sky-800 border-sky-200'
+              }`}
+            >
+              <Cloud className={`w-4 h-4 ${cloudSyncStatus === 'quota_exceeded' ? 'text-amber-600' : 'text-sky-600'}`} />
+              <span className="inline">
+                {cloudSyncStatus === 'quota_exceeded' ? 'Cloud Quota' : 'Share & Sync'}
+              </span>
+              <span
+                className={`w-2 h-2 rounded-full shrink-0 ${
+                  cloudSyncStatus === 'quota_exceeded'
+                    ? 'bg-amber-500'
+                    : cloudSyncStatus === 'offline'
+                    ? 'bg-slate-400'
+                    : 'bg-emerald-500 animate-pulse'
+                }`}
+              />
+            </button>
+
+            <button
+              onClick={() => setShowAiAssistantModal(true)}
+              title="Open AI Assistant for New Workers & Onboarding Guidance"
+              className="px-3 py-2 bg-gradient-to-r from-indigo-600 via-purple-600 to-sky-600 hover:from-indigo-500 hover:to-sky-500 text-white rounded-xl transition flex items-center gap-1.5 text-xs font-bold shadow-md shadow-indigo-600/20 border border-white/20 shrink-0 cursor-pointer"
+            >
+              <Sparkles className="w-4 h-4 text-amber-300 animate-pulse" />
+              <span className="hidden xl:inline">AI Co-Pilot</span>
+            </button>
+
+            <button
+              onClick={() => setShowStoreManagerModal(true)}
+              title="Manage & Switch Multi-Store Branches / Outlets"
+              className="p-2 lg:px-2.5 lg:py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-xl border border-indigo-200 transition flex items-center gap-1.5 text-xs font-bold shadow-sm shrink-0 cursor-pointer"
+            >
+              <Building2 className="w-4 h-4 text-indigo-600 shrink-0" />
+              <span className="hidden xl:inline max-w-[120px] truncate">
+                {stores.find((s) => s.id === activeStoreId)?.name || 'Rofani Electronics'}
+              </span>
+            </button>
+
+            <button
+              onClick={() => setShowStaffModal(true)}
+              title="Manage Workers & Terminal PINs"
+              className="p-2 lg:px-2.5 lg:py-2 bg-purple-50 hover:bg-purple-100 text-purple-700 rounded-xl border border-purple-200 transition flex items-center gap-1.5 text-xs font-bold shadow-sm shrink-0 cursor-pointer"
+            >
+              <Users className="w-4 h-4 text-purple-600 shrink-0" />
+              <span className="hidden xl:inline">Workers</span>
+            </button>
+
+            <button
+              onClick={() => setIsTerminalLocked(true)}
+              title="Lock Register / PIN Auth Screen"
+              className="p-2 lg:px-2.5 lg:py-2 bg-amber-50 hover:bg-amber-100 text-amber-800 rounded-xl border border-amber-200 transition flex items-center gap-1.5 text-xs font-bold shadow-sm shrink-0 cursor-pointer"
+            >
+              <Lock className="w-4 h-4 text-amber-600 shrink-0" />
+              <span className="hidden xl:inline">Lock PIN</span>
+            </button>
+
+            <button
+              onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+              title={isSidebarCollapsed ? "Expand Sidebar Menu" : "Collapse Sidebar for Full View"}
+              className="p-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl transition flex items-center gap-1.5 text-xs font-semibold cursor-pointer"
+            >
+              {isSidebarCollapsed ? <PanelLeft className="w-4 h-4 text-blue-600" /> : <PanelLeftClose className="w-4 h-4 text-slate-600" />}
+              <span className="hidden xl:inline">{isSidebarCollapsed ? "Show Menu" : "Full Canvas"}</span>
+            </button>
+
+            <button
+              onClick={toggleFullscreen}
+              title={isFullscreen ? "Exit Fullscreen" : "Enter Fullscreen Mode"}
+              className="p-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl transition"
+            >
+              {isFullscreen ? <Minimize2 className="w-4 h-4 text-blue-600" /> : <Maximize2 className="w-4 h-4" />}
+            </button>
+
+            <button
+              onClick={openInNewTab}
+              title="Open Application in Full New Tab"
+              className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white px-3.5 py-2 rounded-xl text-xs font-bold transition shadow-md shadow-blue-600/20"
+            >
+              <ExternalLink className="w-3.5 h-3.5" />
+              <span>Full View</span>
+            </button>
+
+            <button
+              onClick={() => setShowInstallModal(true)}
+              title="Install App on Android or iPhone Home Screen"
+              className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white px-3.5 py-2 rounded-xl text-xs font-bold transition shadow-md shadow-emerald-600/20"
+            >
+              <Smartphone className="w-3.5 h-3.5" />
+              <span className="hidden md:inline">Install Mobile App</span>
+            </button>
+
+            <div className="flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200 shrink-0">
+              <button
+                onClick={() => setDeviceFormat('computer')}
+                className="px-3 py-1.5 rounded-lg text-xs font-extrabold transition flex items-center gap-1.5 bg-blue-600 text-white shadow-sm"
+              >
+                <Monitor className="w-3.5 h-3.5" />
+                <span className="hidden md:inline">Computer Format</span>
+              </button>
+              <button
+                onClick={() => setDeviceFormat('phone')}
+                className="px-3 py-1.5 rounded-lg text-xs font-extrabold transition flex items-center gap-1.5 text-slate-600 hover:text-slate-900"
+              >
+                <Smartphone className="w-3.5 h-3.5 text-emerald-500" />
+                <span className="hidden md:inline">Mobile Phone Format</span>
+              </button>
+            </div>
+          </div>
+        </header>
+
+        <div className="flex-1 overflow-y-auto bg-slate-50 text-slate-900">
+          {renderActiveTabContent()}
+        </div>
+
+        <footer className="h-12 bg-white border-t border-slate-200 flex items-center px-6 justify-between shrink-0 text-xs font-semibold text-slate-600">
+          <div className="flex items-center gap-5">
+            <button
+              onClick={() => setActiveTab('reports')}
+              className="flex items-center gap-1.5 hover:text-blue-600 transition"
+            >
+              <MessageSquare className="w-3.5 h-3.5 text-blue-500" />
+              <span>SMS Receipt Utility</span>
+            </button>
+            <button
+              onClick={() => setActiveTab('reports')}
+              className="flex items-center gap-1.5 hover:text-emerald-600 transition"
+            >
+              <Share2 className="w-3.5 h-3.5 text-emerald-500" />
+              <span>WhatsApp Share</span>
+            </button>
+          </div>
+
+          <div className="text-[10px] text-slate-400 font-mono tracking-wider">
+            ROFANI POS OS v4.2.0 • TERMINAL: T-09-NY •{' '}
+            <span className="text-emerald-600 font-bold uppercase">Online</span>
+          </div>
+        </footer>
+      </main>
+
+      <FloatingToolWidget onNavigateTab={(tab) => setActiveTab(tab)} />
+
+      <PinLoginModal
+        isOpen={isTerminalLocked}
+        users={allUsers}
+        currentUser={null}
+        initialTargetUser={pinModalTargetUser}
+        onLoginSuccess={handleLoginSuccess}
+        onClose={() => {
+          setPinModalTargetUser(null);
+          if (!requirePinOnStartup) {
+            setIsTerminalLocked(false);
+          }
+        }}
+        isMandatory={requirePinOnStartup}
+        masterPin={masterPin}
+        storeName={stores.find((s) => s.id === activeStoreId)?.name || 'ROFANI POS'}
+        recoveryEmail={ownerRecoveryEmail}
+        emergencyKey={emergencyRecoveryKey}
+        onResetAdminPin={handleResetAdminPin}
+        onResetMasterPin={handleUpdateMasterPin}
+      />
+
+      <StaffManagementModal
+        isOpen={showStaffModal}
+        onClose={() => setShowStaffModal(false)}
+        users={allUsers}
+        currentUser={currentUser}
+        onAddUser={handleAddUser}
+        onUpdateUser={handleUpdateUser}
+        onDeleteUser={handleDeleteUser}
+      />
+
+      <InstallPwaModal
+        isOpen={showInstallModal}
+        onClose={() => setShowInstallModal(false)}
+      />
+
+      <CloudSyncModal
+        isOpen={showCloudSyncModal}
+        onClose={() => setShowCloudSyncModal(false)}
+        products={products}
+        allUsers={allUsers}
+        cloudSyncStatus={cloudSyncStatus}
+        lastSyncedTime={lastSyncedTime}
+        isQuotaExceeded={isCloudQuotaExceeded}
+        onSyncCatalogComplete={() => {
+          setCloudSyncStatus('synced');
+          setLastSyncedTime(new Date().toLocaleTimeString());
+        }}
+        masterPin={masterPin}
+        requirePinOnStartup={requirePinOnStartup}
+        onLockNow={() => setIsTerminalLocked(true)}
+        recoveryEmail={ownerRecoveryEmail}
+        emergencyKey={emergencyRecoveryKey}
+      />
+
+      <StoreManagerModal
+        isOpen={showStoreManagerModal}
+        onClose={() => setShowStoreManagerModal(false)}
+        stores={stores}
+        products={products}
+        stockTransfers={stockTransfers}
+        onAddStore={handleAddStore}
+        onUpdateStore={handleUpdateStore}
+        onDeleteStore={handleDeleteStore}
+        onResetDemoStores={handleResetDemoStores}
+        activeStoreId={activeStoreId}
+        onSelectActiveStore={(id) => {
+          setActiveStoreId(id);
+          setShowStoreManagerModal(false);
+        }}
+        onTransferStock={handleTransferStock}
+        onUpdateTransferStatus={handleUpdateTransferStatus}
+      />
+
+      {selectedHistoryProduct && (
+        <ItemHistoryModal
+          isOpen={showHistoryModal}
+          onClose={() => {
+            setShowHistoryModal(false);
+            setSelectedHistoryProduct(null);
+          }}
+          product={selectedHistoryProduct}
+          restockRecords={restockRecords}
+          transactions={transactions}
+          suppliers={suppliers}
+          currentUser={currentUser}
+          onAddRestock={handleAddRestockRecord}
+        />
+      )}
+
+      <PrintBarcodesUtilityModal
+        isOpen={showPrintBarcodesModal}
+        onClose={() => setShowPrintBarcodesModal(false)}
+        scanLogs={scanLogs}
+        products={products}
+        storeName={stores.find((s) => s.id === activeStoreId)?.name || 'Rofani Electronics'}
+      />
+
+      {auditUrlProduct && (
+        <div className="fixed inset-0 z-[3000] bg-slate-950 overflow-y-auto animate-in fade-in duration-200">
+          <ItemAuditMiniPage
+            product={auditUrlProduct}
+            restockRecords={restockRecords}
+            transactions={transactions}
+            storeName={stores.find((s) => s.id === activeStoreId)?.name || 'Rofani Electronics'}
+            currentUser={currentUser}
+            onBack={() => {
+              setAuditUrlProduct(null);
+              try {
+                const url = new URL(window.location.href);
+                url.searchParams.delete('itemAudit');
+                window.history.replaceState({}, '', url.toString());
+              } catch {}
+            }}
+            onAddRestock={handleAddRestockRecord}
+            onAdjustStockQuantity={handleSingleProductStockAdjust}
+          />
+        </div>
+      )}
+
+      <AIAssistantWidget onOpen={() => setShowAiAssistantModal(true)} />
+
+      <AIAssistantModal
+        isOpen={showAiAssistantModal}
+        onClose={() => setShowAiAssistantModal(false)}
+        activeStoreName={stores.find((s) => s.id === activeStoreId)?.name || 'Rofani Electronics'}
+        workerRole={currentUser.role}
+        activeTab={activeTab}
+        lowStockCount={lowStockCount}
+        totalProductsCount={products.length}
+        totalSalesToday={todaySales > 0 ? todaySales : totalGrossSales}
+        products={products}
+        transactions={transactions}
+        onOpenPredictiveRestock={() => {
+          setActiveTab('inventory');
+        }}
+      />
+      <StockAlertNotificationModal
+        isOpen={showStockAlertModal}
+        onClose={() => setShowStockAlertModal(false)}
+        products={products}
+        onRestockClick={(p) => {
+          setShowStockAlertModal(false);
+          setActiveTab('inventory');
+          setSelectedHistoryProduct(p);
+          setShowHistoryModal(true);
+        }}
+        onViewInventoryProduct={(_p) => {
+          setShowStockAlertModal(false);
+          setActiveTab('inventory');
+          setInventoryLowStockOnly(true);
+        }}
+      />
+      <RoleAuthorizationModal request={roleAuthRequest} />
+      <CameraStartupPrompt />
+    </div>
+  );
+}

@@ -882,10 +882,17 @@ export const PinLoginModal: React.FC<PinLoginModalProps> = ({
                             const isSelected = selectedUser?.id === u.id;
                             const userRoles = getUserRoles(u);
                             return (
-                              <button
+                              <div
                                 key={u.id}
-                                type="button"
+                                role="button"
+                                tabIndex={0}
                                 onClick={() => handleSelectUser(u)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter' || e.key === ' ') {
+                                    e.preventDefault();
+                                    handleSelectUser(u);
+                                  }
+                                }}
                                 className={`w-full text-left p-2 rounded-xl border transition flex items-center justify-between cursor-pointer ${
                                   isSelected
                                     ? 'bg-slate-800 border-sky-500 shadow-md shadow-sky-500/10 text-white ring-1 ring-sky-500'
@@ -941,7 +948,7 @@ export const PinLoginModal: React.FC<PinLoginModalProps> = ({
                                     <ChevronRight className="w-3.5 h-3.5 text-slate-600" />
                                   )}
                                 </div>
-                              </button>
+                              </div>
                             );
                           })
                         )}

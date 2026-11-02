@@ -1,12 +1,12 @@
 {
   "projectId": "rofani-pos",
-  "appId": "1:1059699871684:web:b5260e337",
-  "apiKey": "AIzaSyCqfkqKusjttxhr0sDx5005",
+  "appId": "1:1059699871684:web:94c337b189197af48a1e91",
+  "apiKey": "AIzaSyCqfkqKusjttxhr0sDx50O5Jk9zcFpS6yU",
   "authDomain": "rofani-pos.firebaseapp.com",
   "firestoreDatabaseId": "ai-studio-retailstockmanag-35779e9e-08d0-4311-8158-8be055847014",
   "storageBucket": "rofani-pos.firebasestorage.app",
   "messagingSenderId": "1059699871684",
   "measurementId": "",
-  "oAuthClientId": "",
+  "oAuthClientId": "1059699871684-b98m8j1ln6pil2p90m6eqg1gqmofh7la.apps.googleusercontent.com",
   "recaptchaSiteKey": ""
 }

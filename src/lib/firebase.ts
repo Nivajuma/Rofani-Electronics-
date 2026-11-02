@@ -1,9 +1,9 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import {
   initializeFirestore,
-  memoryLocalCache,
   getFirestore,
   doc,
+  getDoc,
   getDocFromServer,
   setLogLevel,
   Firestore
@@ -22,17 +22,13 @@ try {
 export const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 
 // Initialize Firestore database using memoryLocalCache and long polling.
-// Using memoryLocalCache keeps query caches in memory without writing cross-tab state to localStorage.
-// This prevents WebStorageSharedClientState from allocating client heartbeat keys in window.localStorage,
-// completely eliminating browser QuotaExceededError and Firestore internal assertion crash (ID: b815).
-// experimentalForceLongPolling avoids duplex stream buffering timeouts behind proxies and sandboxed iframes.
+// Initialize Firestore database using standard WebChannel duplex streams
+// ignoreUndefinedProperties ensures Firestore ignores undefined fields without throwing errors
 export const db: Firestore = (() => {
   try {
     return initializeFirestore(
       app,
       {
-        localCache: memoryLocalCache(),
-        experimentalForceLongPolling: true,
         ignoreUndefinedProperties: true,
       },
       firebaseConfig.firestoreDatabaseId
@@ -46,12 +42,12 @@ export const db: Firestore = (() => {
 // Initialize Firebase Auth
 export const auth: Auth = getAuth(app);
 
-// Connection test helper with fast fallback timeout to prevent 10s blocking
+// Connection test helper: verifies live Firestore connectivity against the products collection
 export async function testFirestoreConnection(): Promise<boolean> {
   try {
-    const fetchDoc = getDocFromServer(doc(db, 'test', 'connection'));
+    const fetchDoc = getDoc(doc(db, 'products', 'prod-1'));
     const timeout = new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error('Connection check timeout')), 2500)
+      setTimeout(() => reject(new Error('Connection check timeout')), 8000)
     );
     await Promise.race([fetchDoc, timeout]);
     return true;

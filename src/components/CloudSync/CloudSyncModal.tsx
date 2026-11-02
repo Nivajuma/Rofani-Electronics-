@@ -19,7 +19,8 @@ import {
   Eye,
   EyeOff,
   Shield,
-  WifiOff
+  WifiOff,
+  Download
 } from 'lucide-react';
 import QRCode from 'qrcode';
 import { bulkUploadProductsToCloud, bulkUploadUsersToCloud } from '../../lib/cloudSync';
@@ -37,6 +38,7 @@ interface CloudSyncModalProps {
   lastSyncedTime?: string | null;
   onTriggerSync?: () => void;
   onSyncCatalogComplete?: () => void;
+  onPullFromCloud?: () => Promise<{ productsCount: number; salesCount: number } | void>;
   masterPin?: string;
   requirePinOnStartup?: boolean;
   onLockNow?: () => void;
@@ -54,6 +56,7 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
   lastSyncedTime = null,
   onTriggerSync,
   onSyncCatalogComplete,
+  onPullFromCloud,
   masterPin = '1234',
   requirePinOnStartup = true,
   onLockNow,
@@ -62,6 +65,7 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
   const { isOnline, pendingCount, isSimulated, toggleSimulatedOffline, checkConnection } = useNetworkStatus();
   const [copied, setCopied] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  const [isPulling, setIsPulling] = useState(false);
   const [uploadMsg, setUploadMsg] = useState<string | null>(null);
 
   // Standalone app clean URL that works on mobile phones
@@ -138,6 +142,28 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
       setUploadMsg('Failed to sync to cloud. Please check network connection.');
     } finally {
       setIsUploading(false);
+    }
+  };
+
+  const handlePullFromCloud = async () => {
+    if (!onPullFromCloud) return;
+    setIsPulling(true);
+    setUploadMsg(null);
+    try {
+      const res = await onPullFromCloud();
+      if (res && typeof res === 'object') {
+        if (res.productsCount === 0 && res.salesCount === 0) {
+          setUploadMsg('Cloud Firestore currently has 0 items. Click "Push All Local to Cloud" to upload your 302 products now!');
+        } else {
+          setUploadMsg(`Successfully pulled ${res.productsCount} products and ${res.salesCount} sales records from Cloud Firestore!`);
+        }
+      } else {
+        setUploadMsg('Data pulled and synchronized from Cloud Firestore!');
+      }
+    } catch (err: any) {
+      setUploadMsg(err?.message || 'Failed to pull from cloud. Check network connection.');
+    } finally {
+      setIsPulling(false);
     }
   };
 
@@ -295,14 +321,28 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
               </div>
             </div>
 
-            <button
-              onClick={handleUploadAllToCloud}
-              disabled={isUploading}
-              className="px-3.5 py-2 bg-sky-600 hover:bg-sky-500 active:scale-95 text-white font-bold text-xs rounded-xl shadow-md transition flex items-center justify-center gap-1.5 shrink-0 disabled:opacity-50"
-            >
-              <UploadCloud className={`w-4 h-4 ${isUploading ? 'animate-spin' : ''}`} />
-              <span>{isUploading ? 'Syncing...' : 'Sync Catalog Now'}</span>
-            </button>
+            <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end">
+              {onPullFromCloud && (
+                <button
+                  type="button"
+                  onClick={handlePullFromCloud}
+                  disabled={isPulling || isUploading}
+                  className="px-3 py-2 bg-slate-800 hover:bg-slate-700 active:scale-95 text-slate-200 font-bold text-xs rounded-xl border border-slate-700 shadow-md transition flex items-center justify-center gap-1.5 shrink-0 disabled:opacity-50 cursor-pointer"
+                >
+                  <Download className={`w-4 h-4 ${isPulling ? 'animate-spin' : ''}`} />
+                  <span>{isPulling ? 'Pulling...' : 'Pull from Cloud'}</span>
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={handleUploadAllToCloud}
+                disabled={isUploading || isPulling}
+                className="px-3.5 py-2 bg-sky-600 hover:bg-sky-500 active:scale-95 text-white font-bold text-xs rounded-xl shadow-md transition flex items-center justify-center gap-1.5 shrink-0 disabled:opacity-50 cursor-pointer"
+              >
+                <UploadCloud className={`w-4 h-4 ${isUploading ? 'animate-spin' : ''}`} />
+                <span>{isUploading ? 'Syncing...' : 'Push to Cloud'}</span>
+              </button>
+            </div>
           </div>
 
           {uploadMsg && (

@@ -39,7 +39,16 @@ import { DataSnapshotModal } from './DataSnapshotModal';
 import { CameraPermissionsCard } from './CameraPermissionsCard';
 import { SettingsDashboardView } from './SettingsDashboardView';
 import { safeGetJSON, safeSetJSON, getLocalStorageUsageStats } from '../../utils/safeStorage';
-import { bulkUploadProductsToCloud, bulkUploadUsersToCloud, saveTransactionToCloud, saveCustomerToCloud, saveSupplierToCloud, saveExpenseToCloud } from '../../lib/cloudSync';
+import {
+  bulkUploadProductsToCloud,
+  bulkUploadUsersToCloud,
+  saveTransactionToCloud,
+  saveCustomerToCloud,
+  saveSupplierToCloud,
+  saveExpenseToCloud,
+  fetchProductsFromCloud,
+  fetchTransactionsFromCloud,
+} from '../../lib/cloudSync';
 
 interface DataManagementViewProps {
   products: Product[];
@@ -132,6 +141,29 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
       setErrorMessage('Failed to sync local data to cloud. Check network or storage rules.');
     } finally {
       setIsCloudSyncing(false);
+    }
+  };
+
+  const [isPullingData, setIsPullingData] = useState(false);
+
+  const handlePullDataFromCloud = async () => {
+    setIsPullingData(true);
+    setErrorMessage(null);
+    try {
+      const prods = await fetchProductsFromCloud();
+      const txs = await fetchTransactionsFromCloud();
+      if (prods.length === 0 && txs.length === 0) {
+        setErrorMessage('Cloud database is currently empty (0 items found). Click "Sync Local Data to Cloud" to upload your local inventory catalog first.');
+      } else {
+        triggerNotify(`Retrieved ${prods.length} products and ${txs.length} transactions from Cloud Firestore!`);
+        if (onImportData) {
+          onImportData({ products: prods, transactions: txs });
+        }
+      }
+    } catch (err: any) {
+      setErrorMessage(err?.message || 'Failed to pull data from Cloud Firestore.');
+    } finally {
+      setIsPullingData(false);
     }
   };
 
@@ -469,15 +501,26 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
           </div>
         </div>
 
-        <button
-          type="button"
-          onClick={handleUploadLocalDataToCloud}
-          disabled={isCloudSyncing}
-          className="px-4 py-2.5 bg-sky-500 hover:bg-sky-400 active:scale-95 text-slate-950 font-bold rounded-xl text-xs flex items-center gap-2 shadow-md transition shrink-0 disabled:opacity-50 cursor-pointer"
-        >
-          <Upload className={`w-4 h-4 ${isCloudSyncing ? 'animate-spin' : ''}`} />
-          <span>{isCloudSyncing ? 'Uploading to Cloud...' : 'Sync Local Data to Cloud'}</span>
-        </button>
+        <div className="flex items-center gap-2 shrink-0 flex-wrap">
+          <button
+            type="button"
+            onClick={handlePullDataFromCloud}
+            disabled={isPullingData || isCloudSyncing}
+            className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 active:scale-95 text-slate-100 font-bold rounded-xl text-xs flex items-center gap-2 border border-slate-700 shadow-md transition shrink-0 disabled:opacity-50 cursor-pointer"
+          >
+            <Download className={`w-4 h-4 ${isPullingData ? 'animate-spin' : ''}`} />
+            <span>{isPullingData ? 'Pulling from Cloud...' : 'Pull / Restore from Cloud'}</span>
+          </button>
+          <button
+            type="button"
+            onClick={handleUploadLocalDataToCloud}
+            disabled={isCloudSyncing || isPullingData}
+            className="px-4 py-2.5 bg-sky-500 hover:bg-sky-400 active:scale-95 text-slate-950 font-bold rounded-xl text-xs flex items-center gap-2 shadow-md transition shrink-0 disabled:opacity-50 cursor-pointer"
+          >
+            <Upload className={`w-4 h-4 ${isCloudSyncing ? 'animate-spin' : ''}`} />
+            <span>{isCloudSyncing ? 'Uploading to Cloud...' : 'Sync Local Data to Cloud'}</span>
+          </button>
+        </div>
       </div>
 
       {errorMessage && (

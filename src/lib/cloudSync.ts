@@ -458,6 +458,42 @@ export async function saveStoreSecurityToCloud(config: StoreSecurityConfig): Pro
   }
 }
 
+// ---------------- MPESA TILL & DARAJA CONFIG LIVE SYNC ----------------
+
+export function subscribeToMpesaConfig(
+  onUpdate: (config: any) => void,
+  onError?: (err: any) => void
+) {
+  const docRef = doc(db, 'store_settings', 'mpesa_config');
+  return onSnapshot(
+    docRef,
+    (snapshot) => {
+      if (snapshot.exists()) {
+        onUpdate(snapshot.data());
+      }
+    },
+    (error) => {
+      handleFirestoreError(error, OperationType.GET, 'store_settings/mpesa_config');
+      if (onError) onError(error);
+    }
+  );
+}
+
+export async function saveMpesaConfigToCloud(config: any): Promise<void> {
+  const path = 'store_settings/mpesa_config';
+  try {
+    const docRef = doc(db, 'store_settings', 'mpesa_config');
+    const cleaned = cleanForFirestore({
+      ...config,
+      updatedAt: new Date().toISOString(),
+    });
+    await setDoc(docRef, cleaned, { merge: true });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+    throw error;
+  }
+}
+
 // ---------------- USERS (STAFF & WORKERS) LIVE SYNC ----------------
 
 export function subscribeToUsers(

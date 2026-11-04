@@ -194,7 +194,7 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
   }, [storePhone]);
 
   const [paybillTillNumber, setPaybillTillNumber] = useState(() =>
-    safeGetJSON<string>('retail_pos_store_paybill', '522522 / Till 890123', (val) => typeof val === 'string')
+    safeGetJSON<string>('retail_pos_store_paybill', 'Till 1833804', (val) => typeof val === 'string')
   );
   useEffect(() => {
     safeSetJSON('retail_pos_store_paybill', paybillTillNumber);

@@ -174,7 +174,9 @@ import {
   saveAuditLogToCloud,
   fetchProductsFromCloud,
   fetchTransactionsFromCloud,
+  subscribeToMpesaConfig,
 } from './lib/cloudSync';
+import { loadMpesaConfig, saveMpesaConfig } from './utils/mpesa';
 import { testFirestoreConnection, isQuotaExceededError, FIREBASE_UPGRADE_URL } from './lib/firebase';
 import { safeGetJSON, safeSetJSON, checkAndRunRollingSalesArchive } from './utils/safeStorage';
 import {
@@ -1023,6 +1025,37 @@ export default function App() {
       }).catch((e) => console.warn('Startup products cloud fetch notice:', e));
     } catch (err) {
       console.warn('Could not subscribe to products:', err);
+    }
+    return () => {
+      if (unsubscribe) unsubscribe();
+    };
+  }, []);
+
+  // Real-time synchronization subscription for M-PESA & Daraja store configuration
+  // Automatically propagates keys set on Vercel, mobile, or AI Studio across all devices
+  useEffect(() => {
+    let unsubscribe: (() => void) | undefined;
+    try {
+      unsubscribe = subscribeToMpesaConfig(
+        (remoteConfig) => {
+          if (remoteConfig && typeof remoteConfig === 'object') {
+            const current = loadMpesaConfig();
+            const merged = {
+              ...current,
+              ...remoteConfig,
+              consumerKey: remoteConfig.consumerKey?.trim() || current.consumerKey || '',
+              consumerSecret: remoteConfig.consumerSecret?.trim() || current.consumerSecret || '',
+              passkey: remoteConfig.passkey?.trim() || current.passkey || '',
+              shortcode: remoteConfig.shortcode?.trim() || current.shortcode || '1833804',
+              storeNumber: remoteConfig.storeNumber?.trim() || current.storeNumber || '1365369',
+            };
+            safeSetJSON('rofani_pos_mpesa_config', merged);
+          }
+        },
+        (err) => console.warn('Mpesa config subscription notice:', err)
+      );
+    } catch (err) {
+      console.warn('Could not subscribe to M-Pesa config:', err);
     }
     return () => {
       if (unsubscribe) unsubscribe();

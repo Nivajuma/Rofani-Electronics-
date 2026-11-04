@@ -56,6 +56,7 @@ export const MpesaPromptModal: React.FC<MpesaPromptModalProps> = ({
   const [showConfig, setShowConfig] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [copied, setCopied] = useState(false);
+  const [settingsSavedNotice, setSettingsSavedNotice] = useState(false);
 
   // Prompt state
   const [countdown, setCountdown] = useState(60);
@@ -150,6 +151,12 @@ export const MpesaPromptModal: React.FC<MpesaPromptModalProps> = ({
       return;
     }
 
+    if (config.mode === 'live_daraja' && (!config.consumerKey?.trim() || !config.consumerSecret?.trim())) {
+      setErrorMsg('Safaricom Daraja Consumer Key & Secret are required for Live STK Push. Please paste them in the settings below, or switch to Instant Demo mode.');
+      setShowConfig(true);
+      return;
+    }
+
     setIsProcessing(true);
     try {
       await requestMpesaStkPush(
@@ -210,7 +217,11 @@ export const MpesaPromptModal: React.FC<MpesaPromptModalProps> = ({
   const handleSaveSettings = (e: React.FormEvent) => {
     e.preventDefault();
     saveMpesaConfig(config);
-    setShowConfig(false);
+    setSettingsSavedNotice(true);
+    setTimeout(() => {
+      setSettingsSavedNotice(false);
+      setShowConfig(false);
+    }, 1500);
   };
 
   return (
@@ -301,50 +312,91 @@ export const MpesaPromptModal: React.FC<MpesaPromptModalProps> = ({
                     value={config.shortcode}
                     onChange={(e) => setConfig({ ...config, shortcode: e.target.value })}
                     className="w-full bg-slate-900 border border-slate-700 px-2.5 py-1.5 rounded-lg text-slate-200 font-mono"
-                    placeholder="e.g. 174379"
+                    placeholder="e.g. 1833804"
                   />
                 </div>
                 <div>
-                  <label className="text-slate-400 block mb-1">Execution Mode</label>
-                  <select
-                    value={config.mode}
-                    onChange={(e) => setConfig({ ...config, mode: e.target.value as any })}
-                    className="w-full bg-slate-900 border border-slate-700 px-2.5 py-1.5 rounded-lg text-slate-200 font-semibold text-emerald-400"
-                  >
-                    <option value="instant_demo">⚡ Instant Demo / Auto-Prompt</option>
-                    <option value="live_daraja">🔒 Live Safaricom Daraja API</option>
-                  </select>
+                  <label className="text-slate-400 block mb-1">
+                    Store / HO Shortcode <span className="text-[9px] text-slate-500">(Optional)</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={config.storeNumber || ''}
+                    onChange={(e) => setConfig({ ...config, storeNumber: e.target.value })}
+                    className="w-full bg-slate-900 border border-slate-700 px-2.5 py-1.5 rounded-lg text-slate-200 font-mono"
+                    placeholder="Blank if same as Till"
+                  />
                 </div>
               </div>
 
-              {config.mode === 'live_daraja' && (
-                <div className="space-y-2 pt-2 border-t border-slate-800">
-                  <p className="text-[10px] text-amber-400">
-                    Enter your Safaricom Daraja Portal credentials below for real live STK Push:
-                  </p>
-                  <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="text-slate-400 block mb-1">Execution Mode</label>
+                <select
+                  value={config.mode}
+                  onChange={(e) => setConfig({ ...config, mode: e.target.value as any })}
+                  className="w-full bg-slate-900 border border-slate-700 px-2.5 py-1.5 rounded-lg text-slate-200 font-semibold text-emerald-400"
+                >
+                  <option value="instant_demo">⚡ Instant Demo / Staff Training</option>
+                  <option value="live_daraja">🔒 Live Safaricom Daraja STK Push</option>
+                </select>
+              </div>
+
+              {/* Daraja API Credentials (Always accessible) */}
+              <div className="space-y-2 pt-2 border-t border-slate-800">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold text-slate-300 flex items-center gap-1">
+                    <Lock className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Safaricom Daraja API Credentials (For Real STK Push)</span>
+                  </span>
+                  <select
+                    value={config.environment || 'production'}
+                    onChange={(e) => setConfig({ ...config, environment: e.target.value as any })}
+                    className="bg-slate-900 border border-slate-700 text-slate-300 text-[10px] px-2 py-0.5 rounded"
+                  >
+                    <option value="production">Production (Live)</option>
+                    <option value="sandbox">Sandbox (Test)</option>
+                  </select>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-[10px] text-slate-400 block mb-0.5">Consumer Key</label>
                     <input
                       type="text"
-                      placeholder="Consumer Key"
+                      placeholder="Paste Consumer Key from Daraja"
                       value={config.consumerKey || ''}
-                      onChange={(e) => setConfig({ ...config, consumerKey: e.target.value })}
-                      className="bg-slate-900 border border-slate-800 px-2 py-1 rounded text-[11px] font-mono text-slate-300"
-                    />
-                    <input
-                      type="password"
-                      placeholder="Consumer Secret"
-                      value={config.consumerSecret || ''}
-                      onChange={(e) => setConfig({ ...config, consumerSecret: e.target.value })}
-                      className="bg-slate-900 border border-slate-800 px-2 py-1 rounded text-[11px] font-mono text-slate-300"
+                      onChange={(e) => setConfig({ ...config, consumerKey: e.target.value, mode: e.target.value ? 'live_daraja' : config.mode })}
+                      className="w-full bg-slate-900 border border-slate-800 px-2.5 py-1.5 rounded-lg text-[11px] font-mono text-slate-200 focus:border-emerald-500 focus:outline-none"
                     />
                   </div>
+                  <div>
+                    <label className="text-[10px] text-slate-400 block mb-0.5">Consumer Secret</label>
+                    <input
+                      type="password"
+                      placeholder="Paste Consumer Secret"
+                      value={config.consumerSecret || ''}
+                      onChange={(e) => setConfig({ ...config, consumerSecret: e.target.value, mode: e.target.value ? 'live_daraja' : config.mode })}
+                      className="w-full bg-slate-900 border border-slate-800 px-2.5 py-1.5 rounded-lg text-[11px] font-mono text-slate-200 focus:border-emerald-500 focus:outline-none"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-[10px] text-slate-400 block mb-0.5">Daraja Passkey (Optional for Production Buy Goods)</label>
                   <input
                     type="password"
-                    placeholder="Daraja Passkey"
+                    placeholder="Enter Passkey (or leave default)"
                     value={config.passkey || ''}
                     onChange={(e) => setConfig({ ...config, passkey: e.target.value })}
-                    className="w-full bg-slate-900 border border-slate-800 px-2 py-1 rounded text-[11px] font-mono text-slate-300"
+                    className="w-full bg-slate-900 border border-slate-800 px-2.5 py-1.5 rounded-lg text-[11px] font-mono text-slate-200 focus:border-emerald-500 focus:outline-none"
                   />
+                </div>
+              </div>
+
+              {settingsSavedNotice && (
+                <div className="bg-emerald-950/80 border border-emerald-500/50 text-emerald-300 text-[11px] p-2 rounded-lg flex items-center gap-1.5 font-semibold">
+                  <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                  <span>M-PESA Till & Daraja settings saved and synced across all devices via Cloud Firestore!</span>
                 </div>
               )}
 
@@ -352,15 +404,15 @@ export const MpesaPromptModal: React.FC<MpesaPromptModalProps> = ({
                 <button
                   type="button"
                   onClick={() => setShowConfig(false)}
-                  className="px-3 py-1 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 text-xs"
+                  className="px-3 py-1 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 text-xs cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg text-xs"
+                  className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg text-xs cursor-pointer shadow-sm active:scale-95"
                 >
-                  Save Settings
+                  Save & Sync to Cloud
                 </button>
               </div>
             </form>

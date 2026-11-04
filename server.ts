@@ -849,78 +849,134 @@ Generate high-converting, realistic copy in JSON format with these exact keys:
       const checkoutRequestId = clientReqId || `ws_CO_${Date.now()}_${Math.floor(Math.random() * 100000)}`;
       const merchantRequestId = `REQ_${Date.now()}`;
 
-      // Check if real Daraja environment variables exist for live execution
-      const consumerKey = process.env.MPESA_CONSUMER_KEY;
-      const consumerSecret = process.env.MPESA_CONSUMER_SECRET;
-      const passkey = process.env.MPESA_PASSKEY;
-      const shortcode = process.env.MPESA_SHORTCODE || tillNumber;
+      // Check if real Daraja keys exist (from request body or server environment variables)
+      const consumerKey = req.body.consumerKey || process.env.MPESA_CONSUMER_KEY || process.env.VITE_MPESA_CONSUMER_KEY;
+      const consumerSecret = req.body.consumerSecret || process.env.MPESA_CONSUMER_SECRET || process.env.VITE_MPESA_CONSUMER_SECRET;
+      const passkey = req.body.passkey || process.env.MPESA_PASSKEY || process.env.VITE_MPESA_PASSKEY;
+      const shortcode = req.body.tillNumber || process.env.MPESA_SHORTCODE || process.env.VITE_MPESA_SHORTCODE || tillNumber;
+      const storeNumber = req.body.storeNumber || shortcode;
 
-      if (mode === 'live_daraja' && consumerKey && consumerSecret && passkey) {
+      const environment = req.body.environment || process.env.VITE_MPESA_ENV || 'production';
+
+      if (mode === 'live_daraja') {
+        if (!consumerKey || !consumerSecret) {
+          res.status(400).json({
+            success: false,
+            error: 'Missing Daraja API Credentials. Please enter your Safaricom Consumer Key and Consumer Secret in M-PESA settings.',
+          });
+          return;
+        }
+
         try {
-          // Live Safaricom Daraja STK Push flow
-          const authBuffer = Buffer.from(`${consumerKey}:${consumerSecret}`).toString('base64');
-          const tokenRes = await fetch('https://api.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials', {
+          const isProd = environment === 'production' || (!consumerKey.toLowerCase().includes('sandbox') && !consumerSecret.toLowerCase().includes('sandbox'));
+          const baseUrl = isProd ? 'https://api.safaricom.co.ke' : 'https://sandbox.safaricom.co.ke';
+
+          // 1. Live Safaricom Daraja OAuth Token Request
+          const authBuffer = Buffer.from(`${consumerKey.trim()}:${consumerSecret.trim()}`).toString('base64');
+          const tokenRes = await fetch(`${baseUrl}/oauth/v1/generate?grant_type=client_credentials`, {
             headers: { Authorization: `Basic ${authBuffer}` },
           });
 
-          if (tokenRes.ok) {
-            const tokenData = (await tokenRes.json()) as any;
-            const accessToken = tokenData.access_token;
+          if (!tokenRes.ok) {
+            const tokenErrText = await tokenRes.text();
+            console.error('[Safaricom OAuth Error]:', tokenErrText);
+            res.status(401).json({
+              success: false,
+              error: `Safaricom Daraja Authentication Failed (${tokenRes.status}). Please verify your Consumer Key and Consumer Secret on the Safaricom Daraja Portal.`,
+              details: tokenErrText,
+            });
+            return;
+          }
 
-            const timestamp = new Date()
-              .toISOString()
-              .replace(/[^0-9]/g, '')
-              .slice(0, 14); // YYYYMMDDHHmmss
-            const password = Buffer.from(`${shortcode}${passkey}${timestamp}`).toString('base64');
+          const tokenData = (await tokenRes.json()) as any;
+          const accessToken = tokenData.access_token;
 
-            const stkRes = await fetch('https://api.safaricom.co.ke/mpesa/stkpush/v1/processrequest', {
-              method: 'POST',
-              headers: {
-                Authorization: `Bearer ${accessToken}`,
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify({
-                BusinessShortCode: shortcode,
-                Password: password,
-                Timestamp: timestamp,
-                TransactionType: shortcodeType === 'till' ? 'CustomerBuyGoodsOnline' : 'CustomerPayBillOnline',
-                Amount: Math.round(Number(amount)),
-                PartyA: cleanPhone,
-                PartyB: shortcode,
-                PhoneNumber: cleanPhone,
-                CallBackURL: `https://${req.headers.host || 'localhost:3000'}/api/mpesa/callback`,
-                AccountReference: accountReference,
-                TransactionDesc: transactionDesc,
-              }),
+          // 2. Compute Timestamp & Password
+          const timestamp = new Date()
+            .toISOString()
+            .replace(/[^0-9]/g, '')
+            .slice(0, 14); // YYYYMMDDHHmmss
+
+          const businessShortCode = (shortcodeType === 'till' && storeNumber ? storeNumber : shortcode).trim();
+          const effectivePasskey = passkey ? passkey.trim() : 'bfb279f9aa9bdbcf158e97dd71a467cd2e0c893059b10f78e6b72ada1ed2c919';
+          const password = Buffer.from(`${businessShortCode}${effectivePasskey}${timestamp}`).toString('base64');
+
+          // Callback URL (Safaricom requirement: Must be a public, valid HTTPS URL)
+          let callbackHost = ((req.headers['x-forwarded-host'] || req.headers.host || '') as string).split(',')[0].trim();
+          if (!callbackHost || callbackHost.includes('localhost') || callbackHost.includes('127.0.0.1')) {
+            callbackHost = process.env.APP_URL
+              ? process.env.APP_URL.replace(/^https?:\/\//, '').replace(/\/$/, '')
+              : 'ais-pre-agpwmbkm7pzkfhwvkrsqrv-987405654779.europe-west2.run.app';
+          }
+          const callBackURL = `https://${callbackHost}/api/mpesa/callback`;
+
+          const transactionType = shortcodeType === 'paybill' ? 'CustomerPayBillOnline' : 'CustomerBuyGoodsOnline';
+
+          const stkPayload = {
+            BusinessShortCode: businessShortCode,
+            Password: password,
+            Timestamp: timestamp,
+            TransactionType: transactionType,
+            Amount: Math.round(Number(amount)),
+            PartyA: cleanPhone,
+            PartyB: shortcode.trim(),
+            PhoneNumber: cleanPhone,
+            CallBackURL: callBackURL,
+            AccountReference: (accountReference || 'ROFANI').slice(0, 12),
+            TransactionDesc: (transactionDesc || `Purchase at ${storeName}`).slice(0, 13),
+          };
+
+          const stkRes = await fetch(`${baseUrl}/mpesa/stkpush/v1/processrequest`, {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(stkPayload),
+          });
+
+          const stkData = (await stkRes.json()) as any;
+
+          if (stkRes.ok && stkData.ResponseCode === '0') {
+            mpesaTxStore.set(stkData.CheckoutRequestID || checkoutRequestId, {
+              checkoutRequestId: stkData.CheckoutRequestID || checkoutRequestId,
+              merchantRequestId: stkData.MerchantRequestID || merchantRequestId,
+              phoneNumber: cleanPhone,
+              amount: Number(amount),
+              accountReference,
+              storeName,
+              tillNumber: shortcode,
+              status: 'PENDING',
+              createdAt: new Date().toISOString(),
             });
 
-            const stkData = (await stkRes.json()) as any;
-            if (stkRes.ok && stkData.ResponseCode === '0') {
-              mpesaTxStore.set(stkData.CheckoutRequestID || checkoutRequestId, {
-                checkoutRequestId: stkData.CheckoutRequestID || checkoutRequestId,
-                merchantRequestId: stkData.MerchantRequestID || merchantRequestId,
-                phoneNumber: cleanPhone,
-                amount: Number(amount),
-                accountReference,
-                storeName,
-                tillNumber,
-                status: 'PENDING',
-                createdAt: new Date().toISOString(),
-              });
-
-              res.json({
-                success: true,
-                checkoutRequestId: stkData.CheckoutRequestID,
-                merchantRequestId: stkData.MerchantRequestID,
-                responseCode: stkData.ResponseCode,
-                responseDescription: stkData.ResponseDescription,
-                customerMessage: stkData.CustomerMessage,
-              });
-              return;
-            }
+            res.json({
+              success: true,
+              checkoutRequestId: stkData.CheckoutRequestID,
+              merchantRequestId: stkData.MerchantRequestID,
+              responseCode: stkData.ResponseCode,
+              responseDescription: stkData.ResponseDescription,
+              customerMessage: stkData.CustomerMessage || `Lipa Na M-PESA STK Push prompt sent to ${cleanPhone}.`,
+            });
+            return;
+          } else {
+            console.error('[Safaricom STK Error]:', stkData);
+            res.status(400).json({
+              success: false,
+              error: stkData.errorMessage || stkData.ResponseDescription || 'Safaricom rejected the STK Push request.',
+              responseCode: stkData.ResponseCode,
+              responseDescription: stkData.ResponseDescription,
+              details: stkData,
+            });
+            return;
           }
-        } catch (darajaErr) {
-          console.warn('Live Daraja call failed, using high-fidelity local simulator:', darajaErr);
+        } catch (darajaErr: any) {
+          console.error('Live Daraja call failed:', darajaErr);
+          res.status(500).json({
+            success: false,
+            error: `Failed to communicate with Safaricom Daraja: ${darajaErr.message || darajaErr}`,
+          });
+          return;
         }
       }
 

@@ -1,8 +1,10 @@
 // Safaricom M-PESA Daraja & Express STK Push Utility
 import { safeGetJSON, safeSetJSON } from './safeStorage';
+import { saveMpesaConfigToCloud } from '../lib/cloudSync';
 
 export interface MpesaConfig {
-  shortcode: string; // Till or Paybill number e.g. "174379"
+  shortcode: string; // Till or Paybill number e.g. "1833804"
+  storeNumber?: string; // Store / Head Office Number from Safaricom (if different from Till)
   shortcodeType: 'till' | 'paybill';
   storeDisplayName: string;
   passkey?: string;
@@ -44,24 +46,37 @@ export interface StkStatusResponse {
 
 const STORAGE_KEY = 'rofani_pos_mpesa_config';
 
+const env = (import.meta as any)?.env || {};
+
 export const DEFAULT_MPESA_CONFIG: MpesaConfig = {
-  shortcode: '174379',
-  shortcodeType: 'till',
-  storeDisplayName: 'ROFANI ELECTRONICS & BOUTIQUE',
-  passkey: 'bfb279f9aa9bdbcf158e97dd71a467cd2e0c893059b10f78e6b72ada1ed2c919',
-  consumerKey: '',
-  consumerSecret: '',
-  environment: 'sandbox',
-  mode: 'instant_demo',
+  shortcode: env.VITE_MPESA_SHORTCODE || env.VITE_MPESA_TILL || '1833804',
+  storeNumber: env.VITE_MPESA_STORE_NUMBER || '1365369',
+  shortcodeType: (env.VITE_MPESA_SHORTCODE_TYPE as any) || 'till',
+  storeDisplayName: env.VITE_STORE_NAME || 'ROFANI ELECTRONICS & BOUTIQUE',
+  passkey: env.VITE_MPESA_PASSKEY || env.VITE_DARAJA_PASSKEY || 'bfb279f9aa9bdbcf158e97dd71a467cd2e0c893059b10f78e6b72ada1ed2c919',
+  consumerKey: env.VITE_MPESA_CONSUMER_KEY || env.VITE_DARAJA_CONSUMER_KEY || env.MPESA_CONSUMER_KEY || '',
+  consumerSecret: env.VITE_MPESA_CONSUMER_SECRET || env.VITE_DARAJA_CONSUMER_SECRET || env.MPESA_CONSUMER_SECRET || '',
+  environment: (env.VITE_MPESA_ENV as any) || 'production',
+  mode: (env.VITE_MPESA_MODE as any) || 'live_daraja',
   autoSimulatePinDelaySeconds: 4,
 };
 
 export const loadMpesaConfig = (): MpesaConfig => {
-  return safeGetJSON<MpesaConfig>(STORAGE_KEY, DEFAULT_MPESA_CONFIG);
+  const saved = safeGetJSON<MpesaConfig>(STORAGE_KEY, DEFAULT_MPESA_CONFIG);
+  return {
+    ...saved,
+    consumerKey: saved.consumerKey || DEFAULT_MPESA_CONFIG.consumerKey,
+    consumerSecret: saved.consumerSecret || DEFAULT_MPESA_CONFIG.consumerSecret,
+    passkey: saved.passkey || DEFAULT_MPESA_CONFIG.passkey,
+    shortcode: saved.shortcode || DEFAULT_MPESA_CONFIG.shortcode,
+  };
 };
 
 export const saveMpesaConfig = (config: MpesaConfig): void => {
   safeSetJSON(STORAGE_KEY, config);
+  saveMpesaConfigToCloud(config).catch((err) => {
+    console.warn('[M-PESA Cloud Sync Notice] Could not save config to cloud:', err);
+  });
 };
 
 /**
@@ -164,26 +179,43 @@ export const requestMpesaStkPush = async (
         transactionDesc: request.transactionDesc || `Payment to ${config.storeDisplayName}`,
         storeName: config.storeDisplayName,
         tillNumber: config.shortcode,
+        storeNumber: config.storeNumber || config.shortcode,
         shortcodeType: config.shortcodeType,
+        consumerKey: config.consumerKey,
+        consumerSecret: config.consumerSecret,
+        passkey: config.passkey,
         checkoutRequestId,
         merchantRequestId,
         mode: config.mode,
+        environment: config.environment || 'production',
       }),
     });
 
+    const contentType = res.headers.get('content-type') || '';
     if (res.ok) {
-      const data = await res.json();
-      return {
-        ...data,
-        formattedPhone: displayFormatted,
-      };
+      if (contentType.includes('application/json')) {
+        const data = await res.json();
+        return {
+          ...data,
+          formattedPhone: displayFormatted,
+        };
+      }
+    } else {
+      let errorMsg = `Server error (${res.status})`;
+      if (contentType.includes('application/json')) {
+        const errData = await res.json();
+        errorMsg = errData.error || errData.responseDescription || errData.message || errorMsg;
+      }
+      throw new Error(errorMsg);
     }
-  } catch (err) {
-    // If backend is busy, fall back seamlessly to client-side STK prompt handler
+  } catch (err: any) {
+    if (config.mode === 'live_daraja' || (config.consumerKey && config.consumerSecret)) {
+      throw err;
+    }
     console.warn('Backend STK push call failed, falling back to local simulator:', err);
   }
 
-  // Client-side fallback
+  // Client-side fallback for instant demo mode
   return {
     success: true,
     checkoutRequestId,

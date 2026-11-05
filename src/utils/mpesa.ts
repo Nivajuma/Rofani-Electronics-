@@ -42,6 +42,8 @@ export interface StkStatusResponse {
   transactionDate?: string;
   smsNotification?: string;
   errorMessage?: string;
+  message?: string;
+  resultDesc?: string;
 }
 
 const STORAGE_KEY = 'rofani_pos_mpesa_config';
@@ -231,12 +233,35 @@ export const requestMpesaStkPush = async (
  * Query STK Push status
  */
 export const queryMpesaStkStatus = async (
-  checkoutRequestId: string
+  checkoutRequestId: string,
+  config?: MpesaConfig,
+  amount?: number
 ): Promise<StkStatusResponse | null> => {
+  if (!checkoutRequestId) return null;
+  const currentConfig = config || loadMpesaConfig();
+  const queryParams = new URLSearchParams({
+    checkoutRequestId,
+    consumerKey: currentConfig.consumerKey || '',
+    consumerSecret: currentConfig.consumerSecret || '',
+    passkey: currentConfig.passkey || '',
+    storeNumber: currentConfig.storeNumber || currentConfig.shortcode || '1365369',
+    tillNumber: currentConfig.shortcode || '1833804',
+    shortcodeType: currentConfig.shortcodeType || 'till',
+    environment: currentConfig.environment || 'production',
+    mode: currentConfig.mode || 'live_daraja',
+    amount: amount ? String(amount) : '',
+  });
+
   try {
-    const res = await fetch(`/api/mpesa/query/${checkoutRequestId}`);
+    // Try primary path /api/mpesa/query/:checkoutRequestId with query parameters
+    let res = await fetch(`/api/mpesa/query/${encodeURIComponent(checkoutRequestId)}?${queryParams.toString()}`);
+    if (!res.ok && res.status === 404) {
+      // Fallback for serverless query route
+      res = await fetch(`/api/mpesa/query?${queryParams.toString()}`);
+    }
     if (res.ok) {
-      return await res.json();
+      const data = await res.json();
+      return data;
     }
   } catch (err) {
     console.warn('Query STK status error:', err);

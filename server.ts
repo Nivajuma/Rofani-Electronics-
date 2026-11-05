@@ -799,10 +799,19 @@ Generate high-converting, realistic copy in JSON format with these exact keys:
     accountReference: string;
     storeName: string;
     tillNumber: string;
-    status: 'PENDING' | 'COMPLETED' | 'CANCELLED' | 'FAILED';
+    storeNumber?: string;
+    businessShortCode?: string;
+    passkey?: string;
+    consumerKey?: string;
+    consumerSecret?: string;
+    environment?: 'sandbox' | 'production';
+    mode?: 'instant_demo' | 'live_daraja';
+    status: 'PENDING' | 'COMPLETED' | 'CANCELLED' | 'FAILED' | 'TIMEOUT';
     mpesaReceiptNumber?: string;
     smsNotification?: string;
+    errorMessage?: string;
     createdAt: string;
+    lastQueriedAt?: string;
   }
 
   const mpesaTxStore = new Map<string, MpesaTransactionState>();
@@ -818,6 +827,66 @@ Generate high-converting, realistic copy in JSON format with these exact keys:
     return code;
   };
 
+  // Helper to query Safaricom Daraja STK Push Query API directly
+  const querySafaricomDarajaStatus = async (
+    checkoutRequestId: string,
+    params: {
+      businessShortCode: string;
+      passkey: string;
+      consumerKey: string;
+      consumerSecret: string;
+      environment?: string;
+    }
+  ) => {
+    const isProd =
+      params.environment === 'production' ||
+      (!params.consumerKey.toLowerCase().includes('sandbox') &&
+        !params.consumerSecret.toLowerCase().includes('sandbox'));
+    const baseUrl = isProd ? 'https://api.safaricom.co.ke' : 'https://sandbox.safaricom.co.ke';
+
+    // 1. Get OAuth Access Token
+    const authBuffer = Buffer.from(`${params.consumerKey.trim()}:${params.consumerSecret.trim()}`).toString('base64');
+    const tokenRes = await fetch(`${baseUrl}/oauth/v1/generate?grant_type=client_credentials`, {
+      headers: { Authorization: `Basic ${authBuffer}` },
+    });
+
+    if (!tokenRes.ok) {
+      const errText = await tokenRes.text();
+      throw new Error(`Safaricom OAuth failed (${tokenRes.status}): ${errText}`);
+    }
+
+    const tokenData = (await tokenRes.json()) as any;
+    const accessToken = tokenData.access_token;
+
+    // 2. Compute Timestamp & Password
+    const timestamp = new Date()
+      .toISOString()
+      .replace(/[^0-9]/g, '')
+      .slice(0, 14); // YYYYMMDDHHmmss
+
+    const password = Buffer.from(
+      `${params.businessShortCode.trim()}${params.passkey.trim()}${timestamp}`
+    ).toString('base64');
+
+    // 3. Call Safaricom STK Push Query API
+    const queryRes = await fetch(`${baseUrl}/mpesa/stkpushquery/v1/query`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        BusinessShortCode: params.businessShortCode.trim(),
+        Password: password,
+        Timestamp: timestamp,
+        CheckoutRequestID: checkoutRequestId,
+      }),
+    });
+
+    const queryData = (await queryRes.json()) as any;
+    return queryData;
+  };
+
   // Endpoint 1: Dispatch STK Push Prompt to Customer Phone
   app.post('/api/mpesa/stkpush', async (req, res) => {
     try {
@@ -827,10 +896,10 @@ Generate high-converting, realistic copy in JSON format with these exact keys:
         accountReference = 'POS-SALE',
         transactionDesc = 'Store Purchase',
         storeName = 'ROFANI ELECTRONICS & BOUTIQUE',
-        tillNumber = '174379',
+        tillNumber = '1833804',
         shortcodeType = 'till',
         checkoutRequestId: clientReqId,
-        mode = 'instant_demo',
+        mode = 'live_daraja',
       } = req.body;
 
       if (!phoneNumber || !amount) {
@@ -938,21 +1007,29 @@ Generate high-converting, realistic copy in JSON format with these exact keys:
           const stkData = (await stkRes.json()) as any;
 
           if (stkRes.ok && stkData.ResponseCode === '0') {
-            mpesaTxStore.set(stkData.CheckoutRequestID || checkoutRequestId, {
-              checkoutRequestId: stkData.CheckoutRequestID || checkoutRequestId,
+            const actualCheckoutId = stkData.CheckoutRequestID || checkoutRequestId;
+            mpesaTxStore.set(actualCheckoutId, {
+              checkoutRequestId: actualCheckoutId,
               merchantRequestId: stkData.MerchantRequestID || merchantRequestId,
               phoneNumber: cleanPhone,
               amount: Number(amount),
               accountReference,
               storeName,
               tillNumber: shortcode,
+              storeNumber,
+              businessShortCode,
+              passkey: effectivePasskey,
+              consumerKey,
+              consumerSecret,
+              environment: isProd ? 'production' : 'sandbox',
+              mode: 'live_daraja',
               status: 'PENDING',
               createdAt: new Date().toISOString(),
             });
 
             res.json({
               success: true,
-              checkoutRequestId: stkData.CheckoutRequestID,
+              checkoutRequestId: actualCheckoutId,
               merchantRequestId: stkData.MerchantRequestID,
               responseCode: stkData.ResponseCode,
               responseDescription: stkData.ResponseDescription,
@@ -989,6 +1066,9 @@ Generate high-converting, realistic copy in JSON format with these exact keys:
         accountReference,
         storeName,
         tillNumber,
+        storeNumber,
+        businessShortCode: storeNumber || tillNumber,
+        mode: 'instant_demo',
         status: 'PENDING',
         createdAt: new Date().toISOString(),
       };
@@ -1008,21 +1088,191 @@ Generate high-converting, realistic copy in JSON format with these exact keys:
     }
   });
 
-  // Endpoint 2: Query Transaction Status
-  app.get('/api/mpesa/query/:checkoutRequestId', (req, res) => {
-    const { checkoutRequestId } = req.params;
-    const tx = mpesaTxStore.get(checkoutRequestId);
+  // Handler for querying transaction status (active query via Safaricom STK Push Query API)
+  const handleMpesaStatusQuery = async (req: any, res: any) => {
+    try {
+      const checkoutRequestId = req.params?.checkoutRequestId || req.query?.checkoutRequestId || req.body?.checkoutRequestId;
 
-    if (!tx) {
-      res.json({
-        checkoutRequestId,
-        status: 'PENDING',
-      });
-      return;
+      if (!checkoutRequestId) {
+        res.status(400).json({ error: 'checkoutRequestId is required' });
+        return;
+      }
+
+      let tx = mpesaTxStore.get(checkoutRequestId);
+
+      // If already resolved to a terminal state (COMPLETED / CANCELLED / FAILED), return immediately
+      if (tx && (tx.status === 'COMPLETED' || tx.status === 'CANCELLED' || tx.status === 'FAILED')) {
+        res.json(tx);
+        return;
+      }
+
+      // Gather Daraja credentials from existing record or incoming request
+      const consumerKey =
+        tx?.consumerKey ||
+        req.query?.consumerKey ||
+        req.body?.consumerKey ||
+        process.env.MPESA_CONSUMER_KEY ||
+        process.env.VITE_MPESA_CONSUMER_KEY;
+
+      const consumerSecret =
+        tx?.consumerSecret ||
+        req.query?.consumerSecret ||
+        req.body?.consumerSecret ||
+        process.env.MPESA_CONSUMER_SECRET ||
+        process.env.VITE_MPESA_CONSUMER_SECRET;
+
+      const passkey =
+        tx?.passkey ||
+        req.query?.passkey ||
+        req.body?.passkey ||
+        process.env.MPESA_PASSKEY ||
+        process.env.VITE_MPESA_PASSKEY ||
+        'bfb279f9aa9bdbcf158e97dd71a467cd2e0c893059b10f78e6b72ada1ed2c919';
+
+      const storeNumber =
+        tx?.storeNumber ||
+        req.query?.storeNumber ||
+        req.body?.storeNumber ||
+        '1365369';
+
+      const tillNumber =
+        tx?.tillNumber ||
+        req.query?.tillNumber ||
+        req.body?.tillNumber ||
+        '1833804';
+
+      const businessShortCode = (tx?.businessShortCode || storeNumber || tillNumber || '1365369').trim();
+      const environment = (tx?.environment || req.query?.environment || req.body?.environment || 'production') as string;
+
+      // Active live query against Safaricom Daraja API
+      if (consumerKey && consumerSecret && businessShortCode) {
+        try {
+          const queryResult = await querySafaricomDarajaStatus(checkoutRequestId, {
+            businessShortCode,
+            passkey,
+            consumerKey,
+            consumerSecret,
+            environment,
+          });
+
+          // Safaricom ResultCode 0 / "0" = Payment Successful!
+          const resultCode = String(queryResult?.ResultCode ?? '');
+          const responseCode = String(queryResult?.ResponseCode ?? '');
+
+          if (resultCode === '0' || responseCode === '0' && queryResult?.ResultDesc?.toLowerCase().includes('success')) {
+            const now = new Date();
+            const dateStr = now.toLocaleDateString('en-GB');
+            const timeStr = now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+
+            const receipt = tx?.mpesaReceiptNumber || generateReceiptCode();
+            const amountVal = tx?.amount || Number(req.query?.amount || req.body?.amount || 0);
+            const storeNameVal = tx?.storeName || 'ROFANI ELECTRONICS & BOUTIQUE';
+            const sms =
+              tx?.smsNotification ||
+              `${receipt} Confirmed. Ksh ${amountVal.toLocaleString(undefined, { minimumFractionDigits: 2 })} sent to ${storeNameVal.toUpperCase()} (Till ${tillNumber}) on ${dateStr} at ${timeStr}. New M-PESA balance is Ksh ${(amountVal * 3.2 + 1540).toFixed(2)}. Transaction cost, Ksh 0.00.`;
+
+            if (tx) {
+              tx.status = 'COMPLETED';
+              tx.mpesaReceiptNumber = receipt;
+              tx.smsNotification = sms;
+              tx.lastQueriedAt = now.toISOString();
+            } else {
+              tx = {
+                checkoutRequestId,
+                merchantRequestId: queryResult?.MerchantRequestID || `REQ_${Date.now()}`,
+                phoneNumber: '254700000000',
+                amount: amountVal,
+                accountReference: 'POS-SALE',
+                storeName: storeNameVal,
+                tillNumber,
+                status: 'COMPLETED',
+                mpesaReceiptNumber: receipt,
+                smsNotification: sms,
+                createdAt: now.toISOString(),
+                lastQueriedAt: now.toISOString(),
+              };
+              mpesaTxStore.set(checkoutRequestId, tx);
+            }
+
+            res.json({
+              checkoutRequestId,
+              status: 'COMPLETED',
+              mpesaReceiptNumber: receipt,
+              smsNotification: sms,
+              resultDesc: queryResult?.ResultDesc || 'The service request is processed successfully.',
+              amount: tx.amount,
+              phoneNumber: tx.phoneNumber,
+            });
+            return;
+          }
+
+          // ResultCode 1032 = Request cancelled by user
+          if (resultCode === '1032') {
+            if (tx) tx.status = 'CANCELLED';
+            res.json({
+              checkoutRequestId,
+              status: 'CANCELLED',
+              errorMessage: 'Customer cancelled transaction on phone.',
+              resultDesc: queryResult?.ResultDesc,
+            });
+            return;
+          }
+
+          // ResultCode 1037 = User did not enter PIN (timeout)
+          if (resultCode === '1037') {
+            if (tx) tx.status = 'TIMEOUT';
+            res.json({
+              checkoutRequestId,
+              status: 'TIMEOUT',
+              errorMessage: 'Customer did not enter PIN in time (M-PESA request timed out).',
+              resultDesc: queryResult?.ResultDesc,
+            });
+            return;
+          }
+
+          // ResultCode 1 = Insufficient balance, 2001 = Invalid PIN, etc.
+          if (resultCode && resultCode !== '0') {
+            if (tx) tx.status = 'FAILED';
+            res.json({
+              checkoutRequestId,
+              status: 'FAILED',
+              errorMessage: queryResult?.ResultDesc || 'M-PESA transaction failed.',
+              resultDesc: queryResult?.ResultDesc,
+            });
+            return;
+          }
+
+          // Still in progress / processing (Safaricom returns "The transaction is being processed" or code 500.001.1001)
+          res.json({
+            checkoutRequestId,
+            status: 'PENDING',
+            message: queryResult?.ResponseDescription || queryResult?.errorMessage || 'Waiting for customer PIN entry...',
+          });
+          return;
+        } catch (queryErr: any) {
+          // If query throws (e.g. transient network or "Transaction is being processed"), remain PENDING
+          console.warn('[Safaricom Query Check]:', queryErr.message || queryErr);
+        }
+      }
+
+      // If no Daraja keys or still pending
+      res.json(
+        tx || {
+          checkoutRequestId,
+          status: 'PENDING',
+          message: 'Waiting for payment confirmation...',
+        }
+      );
+    } catch (err: any) {
+      console.error('Error during M-PESA query:', err);
+      res.status(500).json({ error: err.message || 'Internal server error' });
     }
+  };
 
-    res.json(tx);
-  });
+  // Endpoint 2: Query Transaction Status (GET & POST)
+  app.get('/api/mpesa/query/:checkoutRequestId', handleMpesaStatusQuery);
+  app.get('/api/mpesa/query', handleMpesaStatusQuery);
+  app.post('/api/mpesa/query', handleMpesaStatusQuery);
 
   // Endpoint 3: Simulate Customer PIN Entry
   app.post('/api/mpesa/simulate-pin', (req, res) => {

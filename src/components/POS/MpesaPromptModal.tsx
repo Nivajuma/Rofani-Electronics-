@@ -24,6 +24,7 @@ import {
   loadMpesaConfig,
   saveMpesaConfig,
   requestMpesaStkPush,
+  queryMpesaStkStatus,
   MpesaConfig
 } from '../../utils/mpesa';
 
@@ -64,8 +65,12 @@ export const MpesaPromptModal: React.FC<MpesaPromptModalProps> = ({
   const [confirmedSms, setConfirmedSms] = useState('');
   const [simulatedPin, setSimulatedPin] = useState('••••');
   const [isProcessing, setIsProcessing] = useState(false);
+  const [activeCheckoutRequestId, setActiveCheckoutRequestId] = useState('');
+  const [pollStatusText, setPollStatusText] = useState('Listening for customer PIN entry on Safaricom M-PESA...');
+  const [isCheckingStatusNow, setIsCheckingStatusNow] = useState(false);
 
   const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const pollingRef = useRef<NodeJS.Timeout | null>(null);
 
   // Sync phone input when initialPhone changes
   useEffect(() => {
@@ -82,38 +87,107 @@ export const MpesaPromptModal: React.FC<MpesaPromptModalProps> = ({
       setCountdown(60);
       setActiveReceiptCode('');
       setConfirmedSms('');
+      setActiveCheckoutRequestId('');
+      setPollStatusText('Listening for customer PIN entry on Safaricom M-PESA...');
       setConfig(loadMpesaConfig());
       if (initialPhone && initialPhone !== 'N/A') {
         setPhoneInput(initialPhone);
       }
     } else {
       if (timerRef.current) clearInterval(timerRef.current);
+      if (pollingRef.current) clearInterval(pollingRef.current);
     }
   }, [isOpen, initialPhone]);
 
-  // Handle countdown during 'prompting'
+  // Handle countdown and live STK status polling during 'prompting'
   useEffect(() => {
     if (step === 'prompting') {
-      setCountdown(45);
+      setCountdown(55);
       if (timerRef.current) clearInterval(timerRef.current);
+      if (pollingRef.current) clearInterval(pollingRef.current);
 
+      // 1. Countdown timer
       timerRef.current = setInterval(() => {
         setCountdown((prev) => {
           if (prev <= 1) {
             if (timerRef.current) clearInterval(timerRef.current);
+            if (pollingRef.current) clearInterval(pollingRef.current);
+
             // If in demo mode, auto-succeed or timeout
             if (config.mode === 'instant_demo') {
               handleCompleteSuccess();
               return 0;
             } else {
               setStep('failed');
-              setErrorMsg('M-PESA request timed out. The customer did not enter their PIN within 45 seconds.');
+              setErrorMsg('M-PESA request timed out. The customer did not enter their PIN within 55 seconds.');
               return 0;
             }
           }
           return prev - 1;
         });
       }, 1000);
+
+      // 2. Active Safaricom Status Polling
+      const pollSafaricomStatus = async () => {
+        if (!activeCheckoutRequestId) return;
+        try {
+          const res = await queryMpesaStkStatus(activeCheckoutRequestId, config, amount);
+          if (res) {
+            if (res.status === 'COMPLETED') {
+              if (timerRef.current) clearInterval(timerRef.current);
+              if (pollingRef.current) clearInterval(pollingRef.current);
+
+              const receipt = res.mpesaReceiptNumber || generateMpesaReceiptCode();
+              const sms =
+                res.smsNotification ||
+                formatMpesaConfirmationSms(receipt, amount, config.storeDisplayName, config.shortcode);
+
+              setActiveReceiptCode(receipt);
+              setConfirmedSms(sms);
+              setStep('success');
+
+              // Reflect on the POS register immediately
+              const currentPhone = normalizeKenyanPhone(phoneInput).normalized || phoneInput;
+              onPaymentSuccess(receipt, currentPhone, amount, sms);
+              return;
+            }
+
+            if (res.status === 'CANCELLED') {
+              if (timerRef.current) clearInterval(timerRef.current);
+              if (pollingRef.current) clearInterval(pollingRef.current);
+              setStep('failed');
+              setErrorMsg(res.errorMessage || 'Customer cancelled the M-PESA PIN prompt on their phone.');
+              return;
+            }
+
+            if (res.status === 'TIMEOUT') {
+              if (timerRef.current) clearInterval(timerRef.current);
+              if (pollingRef.current) clearInterval(pollingRef.current);
+              setStep('failed');
+              setErrorMsg(res.errorMessage || 'M-PESA prompt timed out on customer phone.');
+              return;
+            }
+
+            if (res.status === 'FAILED') {
+              if (timerRef.current) clearInterval(timerRef.current);
+              if (pollingRef.current) clearInterval(pollingRef.current);
+              setStep('failed');
+              setErrorMsg(res.errorMessage || 'M-PESA transaction failed.');
+              return;
+            }
+
+            if (res.message) {
+              setPollStatusText(res.message);
+            }
+          }
+        } catch (err) {
+          console.warn('[M-PESA Polling Notice]:', err);
+        }
+      };
+
+      // Initial check after 2 seconds, then poll every 2.5 seconds
+      const initialDelay = setTimeout(pollSafaricomStatus, 2000);
+      pollingRef.current = setInterval(pollSafaricomStatus, 2500);
 
       // Auto-simulate completion in demo mode after 4-6 seconds if desired
       let autoSimTimeout: NodeJS.Timeout | null = null;
@@ -125,10 +199,12 @@ export const MpesaPromptModal: React.FC<MpesaPromptModalProps> = ({
 
       return () => {
         if (timerRef.current) clearInterval(timerRef.current);
+        if (pollingRef.current) clearInterval(pollingRef.current);
+        if (initialDelay) clearTimeout(initialDelay);
         if (autoSimTimeout) clearTimeout(autoSimTimeout);
       };
     }
-  }, [step]);
+  }, [step, activeCheckoutRequestId, config, amount, phoneInput]);
 
   if (!isOpen) return null;
 
@@ -159,7 +235,7 @@ export const MpesaPromptModal: React.FC<MpesaPromptModalProps> = ({
 
     setIsProcessing(true);
     try {
-      await requestMpesaStkPush(
+      const stkRes = await requestMpesaStkPush(
         {
           phoneNumber: phoneInfo.normalized,
           amount,
@@ -170,6 +246,10 @@ export const MpesaPromptModal: React.FC<MpesaPromptModalProps> = ({
         config
       );
 
+      if (stkRes?.checkoutRequestId) {
+        setActiveCheckoutRequestId(stkRes.checkoutRequestId);
+      }
+      setPollStatusText(`Waiting for customer to enter PIN on phone (${phoneInfo.displayFormatted})...`);
       setStep('prompting');
     } catch (err: any) {
       setErrorMsg(err.message || 'Failed to dispatch M-PESA STK prompt.');
@@ -178,8 +258,44 @@ export const MpesaPromptModal: React.FC<MpesaPromptModalProps> = ({
     }
   };
 
+  const handleCheckStatusNow = async () => {
+    if (!activeCheckoutRequestId) return;
+    setIsCheckingStatusNow(true);
+    try {
+      const res = await queryMpesaStkStatus(activeCheckoutRequestId, config, amount);
+      if (res?.status === 'COMPLETED') {
+        if (timerRef.current) clearInterval(timerRef.current);
+        if (pollingRef.current) clearInterval(pollingRef.current);
+
+        const receipt = res.mpesaReceiptNumber || generateMpesaReceiptCode();
+        const sms =
+          res.smsNotification ||
+          formatMpesaConfirmationSms(receipt, amount, config.storeDisplayName, config.shortcode);
+
+        setActiveReceiptCode(receipt);
+        setConfirmedSms(sms);
+        setStep('success');
+
+        const currentPhone = phoneInfo.normalized || phoneInput;
+        onPaymentSuccess(receipt, currentPhone, amount, sms);
+      } else if (res?.status === 'CANCELLED') {
+        if (timerRef.current) clearInterval(timerRef.current);
+        if (pollingRef.current) clearInterval(pollingRef.current);
+        setStep('failed');
+        setErrorMsg(res.errorMessage || 'Customer cancelled transaction on phone.');
+      } else if (res?.message) {
+        setPollStatusText(res.message);
+      }
+    } catch (err) {
+      console.warn('Manual status check error:', err);
+    } finally {
+      setIsCheckingStatusNow(false);
+    }
+  };
+
   const handleCompleteSuccess = () => {
     if (timerRef.current) clearInterval(timerRef.current);
+    if (pollingRef.current) clearInterval(pollingRef.current);
 
     const receipt = generateMpesaReceiptCode();
     const sms = formatMpesaConfirmationSms(
@@ -192,6 +308,10 @@ export const MpesaPromptModal: React.FC<MpesaPromptModalProps> = ({
     setActiveReceiptCode(receipt);
     setConfirmedSms(sms);
     setStep('success');
+
+    // Update POS row immediately
+    const currentPhone = phoneInfo.normalized || phoneInput;
+    onPaymentSuccess(receipt, currentPhone, amount, sms);
   };
 
   const handleAcceptAndApply = () => {
@@ -590,6 +710,23 @@ export const MpesaPromptModal: React.FC<MpesaPromptModalProps> = ({
                 <div className="flex items-center justify-center gap-2 text-xs font-mono text-emerald-300 pt-1">
                   <Clock className="w-3.5 h-3.5 text-emerald-400" />
                   <span>Waiting for customer to enter PIN ({countdown}s left)</span>
+                </div>
+
+                {/* Live Polling Status Indicator */}
+                <div className="bg-emerald-950/70 border border-emerald-500/30 rounded-xl px-3 py-1.5 flex items-center justify-between text-[11px] text-emerald-200">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
+                    <span className="truncate max-w-[280px]">{pollStatusText}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleCheckStatusNow}
+                    disabled={isCheckingStatusNow}
+                    className="text-[10px] bg-emerald-900/80 hover:bg-emerald-800 text-emerald-300 px-2 py-0.5 rounded border border-emerald-600/50 flex items-center gap-1 font-mono transition"
+                  >
+                    <RotateCcw className={`w-3 h-3 ${isCheckingStatusNow ? 'animate-spin' : ''}`} />
+                    <span>{isCheckingStatusNow ? 'Checking...' : 'Check Status'}</span>
+                  </button>
                 </div>
               </div>
 

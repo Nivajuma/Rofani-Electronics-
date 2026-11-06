@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { Transaction } from '../../types';
 import { exportReceiptPDF } from '../../utils/pdfGenerator';
-import { X, Printer, Download, Share2, MessageSquare, CheckCircle2, Send, Smartphone } from 'lucide-react';
+import { X, Printer, Download, Share2, MessageSquare, CheckCircle2, Send, Smartphone, QrCode, Receipt } from 'lucide-react';
 import { TransactionSmsModal } from './TransactionSmsModal';
 import { getSmsDeliveryLogs, SmsDeliveryRecord } from '../../utils/smsService';
+import { safeGetJSON, safeSetJSON } from '../../utils/safeStorage';
 
 interface ReceiptModalProps {
   transaction: Transaction;
@@ -11,18 +12,46 @@ interface ReceiptModalProps {
 }
 
 export const ReceiptModal: React.FC<ReceiptModalProps> = ({ transaction, onClose }) => {
+  const [currentTx, setCurrentTx] = useState<Transaction>(transaction);
   const [showSmsModal, setShowSmsModal] = useState(false);
   const [latestSms, setLatestSms] = useState<SmsDeliveryRecord | null>(null);
 
   useEffect(() => {
+    setCurrentTx(transaction);
+  }, [transaction]);
+
+  const isEtims = currentTx.isEtimsRequested === true || (Boolean(currentTx.cuin) && currentTx.isEtimsRequested !== false);
+
+  const handleConvertToEtims = () => {
+    const cuin = `CUIN-2026-${Math.floor(100000 + Math.random() * 900000)}`;
+    const cusn = `CUSN-KENYA-${Math.floor(10000000 + Math.random() * 90000000)}`;
+    const updated = {
+      ...currentTx,
+      isEtimsRequested: true,
+      cuin,
+      cusn,
+    };
+    setCurrentTx(updated);
+
+    try {
+      const sales = safeGetJSON<Transaction[]>('pos_store_sales', []);
+      const updatedList = sales.map((t) => (t.id === currentTx.id ? updated : t));
+      safeSetJSON('pos_store_sales', updatedList);
+      safeSetJSON('retail_pos_transactions', updatedList);
+    } catch (err) {
+      console.warn('Could not update sales:', err);
+    }
+  };
+
+  useEffect(() => {
     const logs = getSmsDeliveryLogs();
     const match = logs.find(
-      (l) => l.transactionId === transaction.id || l.receiptNumber === transaction.receiptNumber
+      (l) => l.transactionId === currentTx.id || l.receiptNumber === currentTx.receiptNumber
     );
     if (match) {
       setLatestSms(match);
     }
-  }, [transaction]);
+  }, [currentTx]);
 
   // Format receipt message string for WhatsApp and SMS sharing
   const formatReceiptText = () => {
@@ -212,33 +241,59 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({ transaction, onClose
               ))}
             </div>
 
-            {/* KRA eTIMS Control Unit Section */}
-            <div className="pt-2 border-t border-dashed border-slate-300 text-[10px] text-slate-700 space-y-1 bg-amber-50/50 p-2 rounded-lg">
-              <div className="font-extrabold text-amber-900 flex items-center justify-between">
-                <span>KRA eTIMS Tax Invoice</span>
-                <span className="text-[9px] bg-emerald-100 text-emerald-800 px-1.5 py-0.2 rounded font-bold">Verified ✓</span>
-              </div>
-              <div className="flex justify-between font-mono text-[9px]">
-                <span className="text-slate-500">CUIN:</span>
-                <span className="font-bold text-slate-900">{transaction.cuin || 'CUIN-2026-984712'}</span>
-              </div>
-              <div className="flex justify-between font-mono text-[9px]">
-                <span className="text-slate-500">CUSN:</span>
-                <span className="font-bold text-slate-900">{transaction.cusn || 'CUSN-KENYA-44910293'}</span>
-              </div>
-              <div className="flex justify-between font-mono text-[9px]">
-                <span className="text-slate-500">KRA PIN:</span>
-                <span className="font-bold text-slate-900">P051234567X</span>
-              </div>
-              <div className="pt-1 flex flex-col items-center justify-center text-center">
-                <div className="w-20 h-20 bg-slate-900 text-white rounded-lg flex flex-col items-center justify-center p-1 font-mono text-[8px] space-y-0.5 shadow-inner">
-                  <div className="w-12 h-12 bg-white text-slate-950 p-0.5 flex items-center justify-center font-bold text-[7px] select-all">
-                    QR: {transaction.receiptNumber}
+            {/* KRA eTIMS vs Standard Retail Receipt Section */}
+            {isEtims ? (
+              <div className="pt-2 border-t border-dashed border-slate-300 text-[10px] text-slate-700 space-y-1 bg-amber-50/50 p-2.5 rounded-lg border border-amber-200">
+                <div className="font-extrabold text-amber-900 flex items-center justify-between">
+                  <span>KRA eTIMS Tax Invoice</span>
+                  <span className="text-[9px] bg-emerald-100 text-emerald-800 px-1.5 py-0.2 rounded font-bold">Verified ✓</span>
+                </div>
+                <div className="flex justify-between font-mono text-[9px]">
+                  <span className="text-slate-500">CUIN:</span>
+                  <span className="font-bold text-slate-900">{currentTx.cuin || 'CUIN-2026-984712'}</span>
+                </div>
+                <div className="flex justify-between font-mono text-[9px]">
+                  <span className="text-slate-500">CUSN:</span>
+                  <span className="font-bold text-slate-900">{currentTx.cusn || 'CUSN-KENYA-44910293'}</span>
+                </div>
+                <div className="flex justify-between font-mono text-[9px]">
+                  <span className="text-slate-500">Store KRA PIN:</span>
+                  <span className="font-bold text-slate-900">P051234567X</span>
+                </div>
+                {currentTx.customerKraPin && (
+                  <div className="flex justify-between font-mono text-[9px]">
+                    <span className="text-slate-500">Buyer KRA PIN:</span>
+                    <span className="font-bold text-amber-900">{currentTx.customerKraPin}</span>
                   </div>
-                  <span className="text-[7px] text-amber-300">Scan to Verify iTax</span>
+                )}
+                <div className="pt-1 flex flex-col items-center justify-center text-center">
+                  <div className="w-20 h-20 bg-slate-900 text-white rounded-lg flex flex-col items-center justify-center p-1 font-mono text-[8px] space-y-0.5 shadow-inner">
+                    <div className="w-12 h-12 bg-white text-slate-950 p-0.5 flex items-center justify-center font-bold text-[7px] select-all">
+                      QR: {currentTx.receiptNumber}
+                    </div>
+                    <span className="text-[7px] text-amber-300">Scan to Verify iTax</span>
+                  </div>
                 </div>
               </div>
-            </div>
+            ) : (
+              <div className="pt-2 border-t border-dashed border-slate-300 text-[10px] text-slate-500 space-y-1.5 bg-slate-50 p-2.5 rounded-lg border border-slate-200">
+                <div className="flex items-center justify-between text-[9px] font-bold text-slate-700">
+                  <span>Standard Retail Cash Receipt</span>
+                  <span className="text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.2 rounded">KRA TOT Inclusive</span>
+                </div>
+                <p className="text-[9px] text-slate-400 leading-tight">
+                  Customer opted for standard receipt. Automatically registered for store monthly KRA Turnover Tax return.
+                </p>
+                <button
+                  type="button"
+                  onClick={handleConvertToEtims}
+                  className="w-full text-center py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 rounded-lg font-bold text-[10px] transition cursor-pointer flex items-center justify-center gap-1.5 shadow-sm active:scale-95"
+                >
+                  <QrCode className="w-3.5 h-3.5 text-amber-700" />
+                  <span>Customer Wants e-TIMS? Convert to KRA e-TIMS Invoice</span>
+                </button>
+              </div>
+            )}
 
             {/* Footer */}
             <div className="text-center pt-3 text-[10px] text-slate-500 font-sans border-t border-slate-200">

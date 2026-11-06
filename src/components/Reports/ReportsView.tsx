@@ -28,6 +28,7 @@ import {
   ShoppingCart
 } from 'lucide-react';
 import { Transaction, Product, Customer, Supplier, Expense, PurchaseOrder } from '../../types';
+import { KraTotComplianceCenter } from './KraTotComplianceCenter';
 
 interface ReportsViewProps {
   transactions: Transaction[];
@@ -170,7 +171,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
         { id: 'cashflow', title: 'Cashflow', description: 'Cash-in and cash-out liquidity movements across POS tills and bank accounts.' },
         { id: 'balance_sheet', title: 'Balance Sheet', description: 'Total store assets (inventory valuation, receivables) vs liabilities.' },
         { id: 'trial_balance', title: 'Trial Balance', description: 'Verification of debit and credit balancing across financial ledgers.' },
-        { id: 'kra_etims_report', title: 'KRA eTIMS Tax Report', description: 'Electronic Tax Invoice Management System tax filing report, CUIN archive, and iTax submission queue manager.' },
+        { id: 'kra_etims_report', title: 'KRA Tax & Monthly Turnover Tax (TOT) Center', description: 'Mandatory Monthly KRA Turnover Tax (TOT) returns, iTax filing exports, PRN payment tracking, and optional e-TIMS invoice manager.' },
       ],
     },
     {
@@ -576,70 +577,16 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
 
             {/* DEDICATED & SPECIALIZED LAYOUTS FOR ALL REPORT TYPES */}
 
-            {/* KRA eTIMS TAX REPORT */}
+            {/* KRA eTIMS & MONTHLY TURNOVER TAX (TOT) CENTER */}
             {selectedReport.id === 'kra_etims_report' && (
-              <div className="w-full space-y-4">
-                <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
-                  <div className="bg-slate-900 border border-slate-800 p-3.5 rounded-2xl">
-                    <div className="text-[11px] text-slate-400 font-semibold">Total Taxable Turnover</div>
-                    <div className="text-base font-extrabold text-amber-400 font-mono">KSh {reportData.totalRev.toLocaleString()}</div>
-                  </div>
-                  <div className="bg-slate-900 border border-slate-800 p-3.5 rounded-2xl">
-                    <div className="text-[11px] text-slate-400 font-semibold">Standard VAT (16%)</div>
-                    <div className="text-base font-extrabold text-sky-400 font-mono">KSh {(reportData.totalRev * 0.16).toLocaleString(undefined, { maximumFractionDigits: 2 })}</div>
-                  </div>
-                  <div className="bg-slate-900 border border-slate-800 p-3.5 rounded-2xl">
-                    <div className="text-[11px] text-slate-400 font-semibold">Turnover Tax (1.5% TOT)</div>
-                    <div className="text-base font-extrabold text-emerald-400 font-mono">KSh {(reportData.totalRev * 0.015).toLocaleString(undefined, { maximumFractionDigits: 2 })}</div>
-                  </div>
-                  <div className="bg-slate-900 border border-slate-800 p-3.5 rounded-2xl flex items-center justify-between">
-                    <div>
-                      <div className="text-[11px] text-slate-400 font-semibold">eTIMS Queue Status</div>
-                      <div className="text-xs font-bold text-emerald-400">🟢 Connected (0 Pending)</div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => triggerToast('All invoices synchronized with KRA eTIMS iTax portal successfully!')}
-                      className="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-white rounded-xl text-xs font-bold transition cursor-pointer"
-                    >
-                      Sync Now
-                    </button>
-                  </div>
-                </div>
-
-                <div className="w-full bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
-                  <div className="p-3 bg-slate-900/90 border-b border-slate-800 font-bold text-slate-200 flex items-center justify-between">
-                    <span>KRA eTIMS Certified Invoices (CUIN Archive for iTax Filing)</span>
-                    <span className="font-mono text-slate-400">{transactions.length} Invoices Certified</span>
-                  </div>
-                  <div className="w-full overflow-x-auto">
-                    <table className="w-full text-left text-xs text-slate-300 min-w-[700px]">
-                      <thead className="bg-slate-950 text-slate-400 font-semibold uppercase border-b border-slate-800">
-                        <tr>
-                          <th className="p-3">Receipt #</th>
-                          <th className="p-3">Date</th>
-                          <th className="p-3">Control Unit Invoice # (CUIN)</th>
-                          <th className="p-3">Control Unit Serial # (CUSN)</th>
-                          <th className="p-3 text-right">Taxable Amount</th>
-                          <th className="p-3 text-right">TOT (1.5%) / VAT</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-800 font-mono text-[11px]">
-                        {transactions.map((tx) => (
-                          <tr key={tx.id} className="hover:bg-slate-800/60 transition">
-                            <td className="p-3 font-bold text-white">{tx.receiptNumber}</td>
-                            <td className="p-3 text-slate-400">{new Date(tx.date).toLocaleDateString()}</td>
-                            <td className="p-3 text-amber-300 font-bold">{tx.cuin || 'CUIN-2026-889123'}</td>
-                            <td className="p-3 text-slate-400">{tx.cusn || 'CUSN-KENYA-90812734'}</td>
-                            <td className="p-3 text-right font-bold text-white">KSh {tx.grandTotal.toLocaleString()}</td>
-                            <td className="p-3 text-right text-emerald-400 font-bold">KSh {(tx.grandTotal * 0.015).toLocaleString(undefined, { maximumFractionDigits: 2 })}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              </div>
+              <KraTotComplianceCenter
+                transactions={transactions}
+                onUpdateTransaction={(updatedTx) => {
+                  if (onUpdateTransaction) {
+                    onUpdateTransaction(updatedTx, products);
+                  }
+                }}
+              />
             )}
 
             {/* 1. SALES REPORT WITH INTERACTIVE DATE DRILL-DOWNS */}

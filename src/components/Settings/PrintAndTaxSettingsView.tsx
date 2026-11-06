@@ -34,6 +34,7 @@ export interface PrintAndTaxSettingsState {
   taxCalculationType: 'inclusive' | 'exclusive';
   kraPinNumber: string;
   showTaxBreakdown: boolean;
+  defaultEtimsPolicy: 'optional_prompt' | 'always' | 'standard_only';
 }
 
 export const PRINT_AND_TAX_SETTINGS_DEFAULT: PrintAndTaxSettingsState = {
@@ -50,6 +51,7 @@ export const PRINT_AND_TAX_SETTINGS_DEFAULT: PrintAndTaxSettingsState = {
   taxCalculationType: 'inclusive',
   kraPinNumber: 'P051234567X',
   showTaxBreakdown: true,
+  defaultEtimsPolicy: 'optional_prompt',
 };
 
 export const PrintAndTaxSettingsView: React.FC<PrintAndTaxSettingsViewProps> = ({ onBack }) => {
@@ -286,14 +288,18 @@ export const PrintAndTaxSettingsView: React.FC<PrintAndTaxSettingsViewProps> = (
 
           <div className="divide-y divide-slate-800">
             {/* Enable KRA Turnover Tax (TOT) */}
-            <div className="p-4 space-y-3">
+            <div className="p-4 space-y-3 bg-amber-950/20 border-l-4 border-amber-500">
               <div className="flex items-center justify-between">
                 <div className="space-y-0.5 pr-4">
                   <div className="font-bold text-slate-100 flex items-center gap-1.5">
-                    <span>Enable KRA Turnover Tax (TOT)</span>
-                    <span title="Kenyan Revenue Authority Turnover Tax rate configuration"><Info className="w-3.5 h-3.5 text-slate-400" /></span>
+                    <span>KRA Monthly Turnover Tax (TOT) Compliance</span>
+                    <span className="text-[10px] bg-amber-500/20 text-amber-300 font-bold px-2 py-0.5 rounded border border-amber-500/40">
+                      Mandatory Month-End Filing
+                    </span>
                   </div>
-                  <div className="text-[11px] text-slate-400">Apply standard KRA turnover tax on retail transactions</div>
+                  <div className="text-[11px] text-slate-300">
+                    KRA requires every registered retail business under TOT to file a monthly return on all gross sales by the 20th of the following month on KRA iTax.
+                  </div>
                 </div>
                 <label className="relative inline-flex items-center cursor-pointer">
                   <input
@@ -308,16 +314,43 @@ export const PrintAndTaxSettingsView: React.FC<PrintAndTaxSettingsViewProps> = (
 
               {settings.enableKraTot && (
                 <div className="flex items-center gap-3 pt-2 pl-2">
-                  <label className="font-semibold text-slate-300">TOT Rate (%):</label>
+                  <label className="font-semibold text-slate-300 text-xs">Standard TOT Rate (%):</label>
                   <input
                     type="number"
                     step="0.1"
                     value={settings.kraTotRate}
                     onChange={(e) => updateSetting('kraTotRate', parseFloat(e.target.value) || 0)}
-                    className="w-24 bg-slate-950 border border-slate-700 rounded-xl px-3 py-1.5 font-bold text-slate-100 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                    className="w-24 bg-slate-950 border border-slate-700 rounded-xl px-3 py-1.5 font-bold text-slate-100 focus:outline-none focus:ring-2 focus:ring-amber-500 text-xs"
                   />
+                  <span className="text-[11px] text-slate-400">
+                    Applied on total monthly gross turnover (default 1.5% - 3.0%)
+                  </span>
                 </div>
               )}
+            </div>
+
+            {/* KRA e-TIMS Customer Policy (Optional per customer) */}
+            <div className="p-4 flex items-center justify-between hover:bg-slate-800/60 transition">
+              <div className="space-y-0.5 flex-1 pr-4">
+                <div className="font-bold text-slate-100 flex items-center gap-1.5">
+                  <span>KRA e-TIMS Receipt Policy</span>
+                  <span className="text-[10px] bg-sky-950 text-sky-300 font-semibold px-2 py-0.5 rounded border border-sky-800">
+                    Customer Preference
+                  </span>
+                </div>
+                <div className="text-[11px] text-slate-400">
+                  Not all walk-in retail customers need fiscal e-TIMS invoices. Choose when to generate CUIN & QR codes.
+                </div>
+              </div>
+              <select
+                value={settings.defaultEtimsPolicy || 'optional_prompt'}
+                onChange={(e) => updateSetting('defaultEtimsPolicy', e.target.value as any)}
+                className="bg-slate-950 border border-slate-700 rounded-xl px-3 py-1.5 text-xs font-semibold text-slate-100 focus:outline-none focus:ring-2 focus:ring-amber-500"
+              >
+                <option value="optional_prompt">⚡ Optional per Customer (Prompt at Checkout)</option>
+                <option value="always">Always Issue e-TIMS (Every Customer)</option>
+                <option value="standard_only">Standard Receipts Only (e-TIMS on demand)</option>
+              </select>
             </div>
 
             {/* Enable VAT */}

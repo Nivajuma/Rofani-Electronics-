@@ -256,6 +256,8 @@ export interface Transaction {
   notes?: string;
   cuin?: string;
   cusn?: string;
+  isEtimsRequested?: boolean; // Customer requested official KRA e-TIMS invoice with CUIN/QR
+  customerKraPin?: string; // Optional buyer KRA PIN
   taxBreakdown?: {
     vat16Total: number;
     zeroRatedTotal: number;

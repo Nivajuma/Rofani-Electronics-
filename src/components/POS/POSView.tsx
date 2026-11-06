@@ -44,7 +44,9 @@ import {
   Flame,
   Clock,
   SlidersHorizontal,
-  Truck
+  Truck,
+  ReceiptText,
+  FileSpreadsheet
 } from 'lucide-react';
 import { Product, CartItem, Customer, PaymentMethod, PaymentBreakdown, Transaction, User as Employee, BarcodeScanLog } from '../../types';
 import { BarcodeScannerModal } from './BarcodeScannerModal';
@@ -52,6 +54,7 @@ import { AiReceiptScannerModal } from './AiReceiptScannerModal';
 import { ReceiptModal } from './ReceiptModal';
 import { MpesaPromptModal } from './MpesaPromptModal';
 import { SmsDeliveryLogsModal } from './SmsDeliveryLogsModal';
+import { KraTotComplianceCenter } from '../Reports/KraTotComplianceCenter';
 import { isAutoSmsEnabled, setAutoSmsEnabled, sendTransactionSummarySms } from '../../utils/smsService';
 import { computeProductsPerformance, ProductPerformanceInfo } from '../../utils/salesPerformance';
 import { hasWorkerPermission } from '../../utils/permissions';
@@ -451,6 +454,18 @@ export const POSView: React.FC<POSViewProps> = ({
   // Automated Transaction Summary SMS State
   const [showSmsLogsModal, setShowSmsLogsModal] = useState(false);
   const [autoSmsSummary, setAutoSmsSummary] = useState(isAutoSmsEnabled());
+
+  // KRA e-TIMS (Optional per Customer) & KRA TOT Compliance States
+  const [isEtimsRequested, setIsEtimsRequested] = useState<boolean>(() => {
+    try {
+      const saved = safeGetJSON<any>('printAndTaxSettings', null);
+      return saved?.defaultEtimsPolicy === 'always';
+    } catch {
+      return false;
+    }
+  });
+  const [customerKraPin, setCustomerKraPin] = useState<string>('');
+  const [showKraTotModal, setShowKraTotModal] = useState(false);
 
   // Add multiple items to cart (e.g. from AI vision scanner)
   const handleAddMultipleToCart = (itemsToAdd: { product: Product; quantity: number }[]) => {
@@ -1073,8 +1088,8 @@ export const POSView: React.FC<POSViewProps> = ({
     const receiptNo = `INV-${new Date().getFullYear()}${(new Date().getMonth() + 1).toString().padStart(2, '0')}${new Date().getDate().toString().padStart(2, '0')}-${Math.floor(100 + Math.random() * 900)}`;
     const finalTxDate = saleDate ? new Date(saleDate).toISOString() : new Date().toISOString();
 
-    const cuin = `CUIN-2026-${Math.floor(100000 + Math.random() * 900000)}`;
-    const cusn = `CUSN-KENYA-${Math.floor(10000000 + Math.random() * 90000000)}`;
+    const cuin = isEtimsRequested ? `CUIN-2026-${Math.floor(100000 + Math.random() * 900000)}` : undefined;
+    const cusn = isEtimsRequested ? `CUSN-KENYA-${Math.floor(10000000 + Math.random() * 90000000)}` : undefined;
     const taxBreakdown = {
       vat16Total: grandTotal * 0.16,
       zeroRatedTotal: 0,
@@ -1113,6 +1128,8 @@ export const POSView: React.FC<POSViewProps> = ({
       cashierCommissionAmount: currentCartComm.amount,
       commissionModelApplied: currentCartComm.modelDescription,
       notes: `Lipa Na M-PESA STK Push (${receiptCode}) - Customer: ${phone}`,
+      isEtimsRequested,
+      customerKraPin: isEtimsRequested && customerKraPin ? customerKraPin.trim() : undefined,
       cuin,
       cusn,
       taxBreakdown,
@@ -1234,8 +1251,8 @@ export const POSView: React.FC<POSViewProps> = ({
 
     const finalTxDate = saleDate ? new Date(saleDate).toISOString() : new Date().toISOString();
 
-    const cuin = `CUIN-2026-${Math.floor(100000 + Math.random() * 900000)}`;
-    const cusn = `CUSN-KENYA-${Math.floor(10000000 + Math.random() * 90000000)}`;
+    const cuin = isEtimsRequested ? `CUIN-2026-${Math.floor(100000 + Math.random() * 900000)}` : undefined;
+    const cusn = isEtimsRequested ? `CUSN-KENYA-${Math.floor(10000000 + Math.random() * 90000000)}` : undefined;
     const taxBreakdown = {
       vat16Total: grandTotal * 0.16,
       zeroRatedTotal: 0,
@@ -1273,6 +1290,8 @@ export const POSView: React.FC<POSViewProps> = ({
       cashierCommissionAmount: currentCommAmount,
       commissionModelApplied: currentCartComm.modelDescription,
       notes: saleNotes,
+      isEtimsRequested,
+      customerKraPin: isEtimsRequested && customerKraPin ? customerKraPin.trim() : undefined,
       cuin,
       cusn,
       taxBreakdown
@@ -1797,9 +1816,19 @@ export const POSView: React.FC<POSViewProps> = ({
             </div>
           )}
 
-          <div className="flex justify-between text-amber-400/90 text-[11px]">
-            <span>KRA Turnover Tax (1.5% TOT):</span>
-            <span>KSh {(grandTotal * 0.015).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+          <div className="flex justify-between items-center text-amber-400/90 text-[11px]">
+            <span className="flex items-center gap-1.5">
+              <span>KRA Turnover Tax (1.5% TOT):</span>
+              <button
+                type="button"
+                onClick={() => setShowKraTotModal(true)}
+                className="text-[10px] text-amber-300 hover:text-white font-bold underline cursor-pointer"
+                title="View KRA Monthly Turnover Tax Return & iTax Filing Status"
+              >
+                Month-End Return ↗
+              </button>
+            </span>
+            <span className="font-mono font-bold">KSh {(grandTotal * 0.015).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
           </div>
 
           <div className="border-t border-slate-800 pt-2 flex items-center justify-between text-white font-sans">
@@ -3302,6 +3331,50 @@ export const POSView: React.FC<POSViewProps> = ({
                     : 'Customer phone required'}
                 </span>
               </div>
+
+              {/* Optional KRA e-TIMS Tax Invoice Toggle */}
+              <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-slate-200">
+                    <input
+                      type="checkbox"
+                      checked={isEtimsRequested}
+                      onChange={(e) => setIsEtimsRequested(e.target.checked)}
+                      className="w-4 h-4 rounded border-slate-700 bg-slate-900 text-amber-500 focus:ring-0"
+                    />
+                    <span className="flex items-center gap-1.5">
+                      <ReceiptText className="w-3.5 h-3.5 text-amber-400" />
+                      <span>Issue Official KRA e-TIMS Tax Invoice</span>
+                    </span>
+                  </label>
+                  <span
+                    className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                      isEtimsRequested
+                        ? 'bg-amber-950/80 text-amber-300 border border-amber-800'
+                        : 'bg-slate-800 text-slate-400'
+                    }`}
+                  >
+                    {isEtimsRequested ? 'e-TIMS Active (CUIN)' : 'Standard Receipt'}
+                  </span>
+                </div>
+
+                {isEtimsRequested ? (
+                  <div className="pt-2 border-t border-slate-800/80 flex items-center gap-2">
+                    <span className="text-[11px] text-slate-400 whitespace-nowrap">Buyer KRA PIN (Optional):</span>
+                    <input
+                      type="text"
+                      placeholder="e.g. A012345678Z (Leave blank for walk-in shopper)"
+                      value={customerKraPin}
+                      onChange={(e) => setCustomerKraPin(e.target.value.toUpperCase())}
+                      className="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1 text-xs text-amber-300 font-mono font-bold focus:outline-none focus:border-amber-500"
+                    />
+                  </div>
+                ) : (
+                  <p className="text-[10px] text-slate-500 pl-6 leading-tight">
+                    Standard retail cash receipt will be printed without fiscal QR code. (Sale is automatically counted toward your mandatory monthly KRA Turnover Tax return).
+                  </p>
+                )}
+              </div>
             </div>
 
             {/* Modal Footer */}
@@ -3719,6 +3792,36 @@ export const POSView: React.FC<POSViewProps> = ({
         isOpen={showSmsLogsModal}
         onClose={() => setShowSmsLogsModal(false)}
       />
+
+      {/* MODAL 7: KRA TURNOVER TAX (TOT) & E-TIMS COMPLIANCE CENTER */}
+      {showKraTotModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6 overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-5xl shadow-2xl p-5 sm:p-6 space-y-4 max-h-[92vh] overflow-y-auto text-slate-100">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2">
+                <span className="w-8 h-8 rounded-xl bg-amber-500/20 text-amber-400 font-bold flex items-center justify-center text-xs">
+                  KRA
+                </span>
+                <h3 className="font-extrabold text-base text-white">
+                  KRA Monthly Turnover Tax (TOT) Compliance Center
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowKraTotModal(false)}
+                className="p-1.5 hover:bg-slate-800 text-slate-400 hover:text-white rounded-xl transition cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <KraTotComplianceCenter
+              transactions={transactions || []}
+              onClose={() => setShowKraTotModal(false)}
+            />
+          </div>
+        </div>
+      )}
 
       {/* SALES REP MODAL */}
       {showRepModal && (

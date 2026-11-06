@@ -281,54 +281,73 @@ export const exportSupplierReportPDF = (suppliers: Supplier[]) => {
 /**
  * 6. Export Monthly KRA Turnover Tax (TOT) Report PDF
  */
-export const exportKRATaxReportPDF = (transactions: Transaction[], monthLabel: string) => {
+export const exportKRATaxReportPDF = (
+  transactions: Transaction[],
+  monthLabel: string,
+  options?: {
+    totRate?: number;
+    kraPin?: string;
+    prnNumber?: string;
+    storeName?: string;
+  }
+) => {
   const doc = new jsPDF();
-  addReportHeader(doc, 'KENYA REVENUE AUTHORITY (KRA) TURNOVER TAX REPORT', `Tax Filing Period: ${monthLabel}`);
+  const rate = options?.totRate ?? 1.5;
+  const pin = options?.kraPin || 'P051234567X';
+  const storeName = options?.storeName || 'ROFANI ELECTRONICS & BOUTIQUE';
+  const prn = options?.prnNumber;
+
+  addReportHeader(doc, 'KENYA REVENUE AUTHORITY (KRA) TURNOVER TAX RETURN', `Tax Filing Period: ${monthLabel}`);
 
   const totalSales = transactions.reduce((sum, tx) => sum + tx.grandTotal, 0);
-  const totalTaxPayable = totalSales * 0.015; // 1.5% KRA Turnover Tax
+  const totalTaxPayable = totalSales * (rate / 100);
 
   const summaryData = [
-    ['Tax Type', 'KRA Turnover Tax (TOT)'],
-    ['Tax Rate', '1.5% on Gross Sales'],
-    ['Filing Period', monthLabel],
-    ['Total Taxable Sales Volume', `KSh ${totalSales.toLocaleString(undefined, { minimumFractionDigits: 2 })}`],
-    ['Total KRA Tax Liability (1.5%)', `KSh ${totalTaxPayable.toLocaleString(undefined, { minimumFractionDigits: 2 })}`]
+    ['Taxpayer Business Name', storeName],
+    ['Taxpayer KRA PIN', pin],
+    ['Tax Type', 'Turnover Tax (TOT) - Section 12D Income Tax Act'],
+    ['Applicable Tax Rate', `${rate}% on Gross Sales Turnover`],
+    ['Tax Return Period', monthLabel],
+    ['Filing & Payment Due Date', `20th of the subsequent month via KRA iTax`],
+    ['Total Gross Sales Turnover', `KSh ${totalSales.toLocaleString(undefined, { minimumFractionDigits: 2 })}`],
+    ['Net KRA Tax Payable', `KSh ${totalTaxPayable.toLocaleString(undefined, { minimumFractionDigits: 2 })}`],
+    ['KRA e-Slip / PRN Status', prn ? `PAID / PRN: ${prn}` : 'PENDING PAYMENT REGISTRATION']
   ];
 
   autoTable(doc, {
     startY: 35,
-    head: [['KRA Tax Compliance Metric', 'Value']],
+    head: [['KRA Turnover Tax Metric', 'Official Filing Value']],
     body: summaryData,
     theme: 'grid',
     headStyles: { fillColor: [180, 83, 9], textColor: [255, 255, 255], fontStyle: 'bold' },
     columnStyles: { 1: { fontStyle: 'bold', halign: 'right' } },
-    styles: { fontSize: 10, cellPadding: 4 }
+    styles: { fontSize: 9.5, cellPadding: 3.5 }
   });
 
   const txRows = transactions.map((tx) => [
     tx.receiptNumber,
     new Date(tx.date).toLocaleDateString(),
     tx.customerName || 'Walk-in',
+    tx.isEtimsRequested ? 'e-TIMS Issued' : 'Standard Slip',
     `KSh ${tx.grandTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}`,
-    `KSh ${(tx.grandTotal * 0.015).toLocaleString(undefined, { minimumFractionDigits: 2 })}`
+    `KSh ${(tx.grandTotal * (rate / 100)).toLocaleString(undefined, { minimumFractionDigits: 2 })}`
   ]);
 
   let nextY = (doc as any).lastAutoTable.finalY + 10;
   doc.setFontSize(11);
   doc.setFont('helvetica', 'bold');
-  doc.text('Itemized Transaction Sales Tax Log', 14, nextY);
+  doc.text('Itemized Transaction Sales & Tax Schedule (All Gross Sales)', 14, nextY);
 
   autoTable(doc, {
     startY: nextY + 4,
-    head: [['Receipt #', 'Date', 'Customer', 'Gross Amount (KSh)', 'KRA Tax 1.5% (KSh)']],
-    body: txRows,
+    head: [['Receipt #', 'Date', 'Customer', 'Invoice Type', 'Gross Sales (KSh)', `TOT Tax (${rate}%)`]],
+    body: txRows.length > 0 ? txRows : [['-', '-', 'No transactions recorded in this tax period', '-', '0.00', '0.00']],
     theme: 'striped',
     headStyles: { fillColor: [15, 23, 42], textColor: [255, 255, 255] },
-    styles: { fontSize: 8, cellPadding: 3 }
+    styles: { fontSize: 8, cellPadding: 2.5 }
   });
 
-  doc.save(`KRA_Turnover_Tax_Report_${monthLabel.replace(/\s+/g, '_')}.pdf`);
+  doc.save(`KRA_Turnover_Tax_Return_${monthLabel.replace(/\s+/g, '_')}.pdf`);
 };
 
 /**

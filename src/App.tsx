@@ -1062,6 +1062,36 @@ export default function App() {
     };
   }, []);
 
+  // Real-time synchronization subscription for users & staff accounts
+  useEffect(() => {
+    let unsubscribe: (() => void) | undefined;
+    try {
+      unsubscribe = subscribeToUsers(
+        (incomingRemoteUsers) => {
+          if (incomingRemoteUsers && incomingRemoteUsers.length > 0) {
+            setAllUsers((prevLocalUsers) => {
+              const merged = [...incomingRemoteUsers];
+              prevLocalUsers.forEach((localUser) => {
+                if (!merged.some((rUser) => rUser.id === localUser.id)) {
+                  merged.push(localUser);
+                }
+              });
+              safeSetJSON('retail_pos_users', merged);
+              safeSetJSON('pos_store_staff_users', merged);
+              return merged;
+            });
+          }
+        },
+        (err) => console.warn('Users cloud subscription notice:', err)
+      );
+    } catch (err) {
+      console.warn('Could not subscribe to users:', err);
+    }
+    return () => {
+      if (unsubscribe) unsubscribe();
+    };
+  }, []);
+
   // Offline and bidirectional cloud sync handler
   const syncPendingQueueToCloud = async () => {
     setCloudSyncStatus('syncing');

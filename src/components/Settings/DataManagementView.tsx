@@ -94,6 +94,9 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
   expenses,
   attendanceRecords,
   allUsers,
+  onAddUser,
+  onUpdateUser,
+  onDeleteUser,
   onImportData,
   onResetSampleData,
   onClearTransactions,
@@ -362,6 +365,9 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
         expenses={expenses}
         attendanceRecords={attendanceRecords}
         allUsers={allUsers}
+        onAddUser={onAddUser}
+        onUpdateUser={onUpdateUser}
+        onDeleteUser={onDeleteUser}
         stores={stores}
         onOpenStoreManager={onOpenStoreManager}
         onImportData={onImportData}

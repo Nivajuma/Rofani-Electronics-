@@ -20,10 +20,13 @@ import {
   DollarSign,
   FileText,
   Sparkles,
-  Trash2
+  Trash2,
+  KeyRound,
+  RefreshCw
 } from 'lucide-react';
-import { Product, Customer, Supplier, Transaction, Expense, AttendanceRecord, User, StoreLocation } from '../../types';
+import { Product, Customer, Supplier, Transaction, Expense, AttendanceRecord, User, StoreLocation, Role, WorkerPermissions } from '../../types';
 import { safeGetJSON, safeSetJSON } from '../../utils/safeStorage';
+import { saveUserToCloud, deleteUserFromCloud } from '../../lib/cloudSync';
 import { ItemSettingsView } from './ItemSettingsView';
 import { GeneralSettingsView } from './GeneralSettingsView';
 import { PrintAndTaxSettingsView } from './PrintAndTaxSettingsView';
@@ -136,6 +139,128 @@ export const PERMISSION_CATEGORIES = [
 
 export const ALL_AVAILABLE_PERMISSIONS = PERMISSION_CATEGORIES.flatMap(c => c.permissions);
 
+export const PERMISSION_LABEL_TO_KEY: Record<string, keyof WorkerPermissions> = {
+  'Can make sales': 'canMakeSales',
+  'Can make / manage customers orders': 'canManageCustomerOrders',
+  'Can update sales order status': 'canUpdateSalesOrderStatus',
+  'Can view and manage customers': 'canViewManageCustomers',
+  'Can enable sales commission': 'canEnableSalesCommission',
+  'Can add stock in': 'canAddStockIn',
+  'Can make/manage orders to suppliers': 'canManageSupplierOrders',
+  'Can view and manage suppliers/parties': 'canViewManageSupplies',
+  'Can add bad stock / damage write-offs': 'canAddBadStock',
+  'Can add new products': 'canAddNewProducts',
+  'Can create offers & promotions': 'canCreateOffers',
+  'Can view items out of stock': 'canViewOutOfStock',
+  'Can count and update stock balance': 'canCountUpdateStockBalance',
+  'Can add expenses': 'canAddExpenses',
+  'Can give discounts & price overrides': 'canGiveDiscounts',
+  'Can edit daily entries': 'canEditDailyEntries',
+  'Can delete daily entries': 'canDeleteDailyEntries',
+  'Can backdate entries': 'canBackdateEntries',
+  'Can return stocks': 'canReturnStocks',
+  'Can generate & print barcodes/QR labels': 'canGenerateBarcode',
+  'Can preview receipt': 'canPreviewReceipt',
+};
+
+// Robust helper to extract active permission strings for any worker
+export const getWorkerPermissionStrings = (u: User): string[] => {
+  const result = new Set<string>();
+
+  // 1. If worker has u.permissions object
+  if (u.permissions && typeof u.permissions === 'object' && !Array.isArray(u.permissions)) {
+    Object.entries(u.permissions).forEach(([k, val]) => {
+      if (val === true) {
+        for (const [lbl, key] of Object.entries(PERMISSION_LABEL_TO_KEY)) {
+          if (key === k) {
+            result.add(lbl);
+          }
+        }
+        if (ALL_AVAILABLE_PERMISSIONS.includes(k)) {
+          result.add(k);
+        }
+      }
+    });
+  }
+
+  // 2. If u.permissions is array of strings
+  if (Array.isArray(u.permissions)) {
+    u.permissions.forEach((p) => {
+      if (typeof p === 'string' && p.trim()) result.add(p);
+    });
+  }
+
+  // 3. Inspect user roles and assigned roles
+  const combinedRoles = [...(u.roles || []), ...(u.assignedRoles || [])];
+  combinedRoles.forEach((r) => {
+    if (typeof r === 'string') {
+      if (ALL_AVAILABLE_PERMISSIONS.includes(r)) {
+        result.add(r);
+      }
+      if (r === 'Admin') {
+        ALL_AVAILABLE_PERMISSIONS.forEach((p) => result.add(p));
+      } else if (r === 'Manager') {
+        [
+          'Can make sales',
+          'Can view and manage customers',
+          'Can give discounts & price overrides',
+          'Can preview receipt',
+          'Can add stock in',
+          'Can view items out of stock',
+          'Can add expenses',
+          'Can view staff commissions & performance'
+        ].forEach((p) => result.add(p));
+      } else if (r === 'Cashier' || r === 'Sales Role') {
+        [
+          'Can make sales',
+          'Can give discounts & price overrides',
+          'Can preview receipt',
+          'Can view and manage customers'
+        ].forEach((p) => result.add(p));
+      } else if (r === 'Inventory Staff' || r === 'Stock Ins Role' || r === 'Stock Setup Role') {
+        [
+          'Can add stock in',
+          'Can add new products',
+          'Can view items out of stock',
+          'Can count and update stock balance',
+          'Can generate & print barcodes/QR labels'
+        ].forEach((p) => result.add(p));
+      }
+    }
+  });
+
+  // 4. Fallback defaults by role if still empty
+  if (result.size === 0) {
+    if (u.role === 'Admin') {
+      ALL_AVAILABLE_PERMISSIONS.forEach((p) => result.add(p));
+    } else if (u.role === 'Manager') {
+      [
+        'Can make sales',
+        'Can view and manage customers',
+        'Can give discounts & price overrides',
+        'Can preview receipt',
+        'Can add stock in',
+        'Can view items out of stock'
+      ].forEach((p) => result.add(p));
+    } else if (u.role === 'Inventory Staff') {
+      [
+        'Can add stock in',
+        'Can add new products',
+        'Can view items out of stock',
+        'Can count and update stock balance'
+      ].forEach((p) => result.add(p));
+    } else {
+      [
+        'Can make sales',
+        'Can give discounts & price overrides',
+        'Can preview receipt'
+      ].forEach((p) => result.add(p));
+    }
+  }
+
+  return Array.from(result);
+};
+
 // Safe Permission Helper Check
 const hasPermission = (permissionsList: any, permId: string): boolean => {
   if (!Array.isArray(permissionsList)) {
@@ -177,37 +302,40 @@ export const SettingsDashboardView: React.FC<SettingsDashboardViewProps> = ({
     setTimeout(() => setSuccessToast(null), 3500);
   };
 
-  // Staff Users CRUD State synchronized with App allUsers and pos_store_staff_users
-  const staffUsers = useMemo(() => {
-    const rawList = (allUsers && allUsers.length > 0) ? allUsers : (safeGetJSON<any[]>('pos_store_staff_users', null) || [
-      { id: 'u1', name: 'Grace Makasi', phone: '+254 711 223344', role: 'Manager', commissionRate: 5, pin: '1234', permissions: ['Can make sales', 'Can view and manage customers', 'Can give discounts & price overrides'] },
-      { id: 'u2', name: 'Esther Mwangi', phone: '+254 722 334455', role: 'Cashier', commissionRate: 3, pin: '5678', permissions: ['Can make sales', 'Can give discounts & price overrides', 'Can preview receipt'] },
-      { id: 'u3', name: 'Rozy Otieno', phone: '+254 733 445566', role: 'Inventory Staff', commissionRate: 2, pin: '9999', permissions: ['Can add stock in', 'Can view items out of stock', 'Can count and update stock balance'] }
-    ]);
-
-    return rawList.map(worker => ({
-      ...worker,
-      permissions: Array.isArray(worker.permissions)
-        ? worker.permissions
-        : (typeof worker.permissions === 'string' && worker.permissions.trim() !== '')
-          ? [worker.permissions]
-          : worker.role ? [worker.role, 'Can make sales'] : ['Can make sales']
-    }));
-  }, [allUsers]);
+  // Staff Users State synchronized with App allUsers and pos_store_staff_users
+  const [localStaffUsers, setLocalStaffUsers] = useState<User[]>(() => {
+    if (allUsers && allUsers.length > 0) return allUsers;
+    const fromStorage = safeGetJSON<User[]>('pos_store_staff_users', null) || safeGetJSON<User[]>('retail_pos_users', null);
+    if (fromStorage && fromStorage.length > 0) return fromStorage;
+    return [
+      { id: 'usr-1', name: 'John Doe (Admin)', role: 'Admin', roles: ['Admin'], email: 'admin@rofani.co.ke', pin: '1234', commissionRate: 5, status: 'active' },
+      { id: 'usr-2', name: 'Sarah Miller (Manager)', role: 'Manager', roles: ['Manager'], email: 'sarah@rofani.co.ke', pin: '2222', commissionRate: 7.5, status: 'active' },
+      { id: 'usr-3', name: 'Alex Johnson (Cashier)', role: 'Cashier', roles: ['Cashier'], email: 'alex@rofani.co.ke', pin: '1111', commissionRate: 5, status: 'active' },
+      { id: 'usr-4', name: 'David Smith (Stock Staff)', role: 'Inventory Staff', roles: ['Inventory Staff'], email: 'david@rofani.co.ke', pin: '3333', commissionRate: 4, status: 'active' }
+    ];
+  });
 
   useEffect(() => {
-    safeSetJSON('pos_store_staff_users', staffUsers);
-  }, [staffUsers]);
+    if (allUsers && allUsers.length > 0) {
+      setLocalStaffUsers(allUsers);
+    }
+  }, [allUsers]);
 
   // Worker Modal state for Add/Edit
   const [workerModalOpen, setWorkerModalOpen] = useState(false);
   const [editingWorkerId, setEditingWorkerId] = useState<string | null>(null);
   const [workerName, setWorkerName] = useState('');
   const [workerPhone, setWorkerPhone] = useState('');
-  const [workerRole, setWorkerRole] = useState('Cashier');
+  const [workerRole, setWorkerRole] = useState<Role>('Cashier');
   const [workerCommission, setWorkerCommission] = useState<number>(3);
   const [workerPin, setWorkerPin] = useState('1234');
   const [workerPermissions, setWorkerPermissions] = useState<string[]>([]);
+
+  const generateRandomPin = () => {
+    const randomPin = Math.floor(1000 + Math.random() * 9000).toString();
+    setWorkerPin(randomPin);
+    triggerNotify(`Generated new 4-digit PIN: ${randomPin}`);
+  };
 
   const handleOpenAddWorker = () => {
     setEditingWorkerId(null);
@@ -215,27 +343,19 @@ export const SettingsDashboardView: React.FC<SettingsDashboardViewProps> = ({
     setWorkerPhone('');
     setWorkerRole('Cashier');
     setWorkerCommission(3);
-    setWorkerPin('1234');
-    setWorkerPermissions(['Can make sales', 'Can give discounts & price overrides', 'Can preview receipt']);
+    setWorkerPin(Math.floor(1000 + Math.random() * 9000).toString());
+    setWorkerPermissions(['Can make sales', 'Can give discounts & price overrides', 'Can preview receipt', 'Can view and manage customers']);
     setWorkerModalOpen(true);
   };
 
-  const handleOpenEditWorker = (u: any) => {
+  const handleOpenEditWorker = (u: User) => {
     setEditingWorkerId(u.id);
     setWorkerName(u.name);
     setWorkerPhone(u.phone || '');
     setWorkerRole(u.role || 'Cashier');
     setWorkerCommission(u.commissionRate ?? 3);
     setWorkerPin(u.pin || '1234');
-    
-    // Array Defensive Normalization
-    const safePermissions = Array.isArray(u?.permissions)
-      ? u.permissions
-      : (typeof u?.permissions === 'string' && u.permissions.trim() !== '')
-        ? [u.permissions]
-        : ['Can make sales', 'Can give discounts & price overrides'];
-    
-    setWorkerPermissions(safePermissions);
+    setWorkerPermissions(getWorkerPermissionStrings(u));
     setWorkerModalOpen(true);
   };
 
@@ -256,58 +376,130 @@ export const SettingsDashboardView: React.FC<SettingsDashboardViewProps> = ({
     triggerNotify('🧹 All permissions cleared.');
   };
 
-  const handleSaveWorker = (e: React.FormEvent) => {
+  const handleSaveWorker = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!workerName.trim()) return;
+    const trimmedName = workerName.trim();
+    if (!trimmedName) return;
 
+    const trimmedPhone = workerPhone.trim();
+    const trimmedPin = workerPin.trim() || '1234';
+    const chosenRole = (workerRole || 'Cashier') as Role;
     const sanitizedPerms = Array.isArray(workerPermissions) ? workerPermissions : [];
 
+    // Build permissions object with boolean keys for maximum compatibility
+    const permissionsObj: Record<string, boolean> = {};
+    sanitizedPerms.forEach((permLabel) => {
+      const key = PERMISSION_LABEL_TO_KEY[permLabel];
+      if (key) {
+        permissionsObj[key] = true;
+      }
+      permissionsObj[permLabel] = true;
+    });
+
+    // Combined roles list
+    const combinedRoles: Role[] = Array.from(new Set([chosenRole, ...(sanitizedPerms as any)]));
+
     if (editingWorkerId) {
-      const existing = staffUsers.find(u => u.id === editingWorkerId);
+      const existing = localStaffUsers.find((u) => u.id === editingWorkerId);
       const updatedUser: User = {
         ...(existing || {}),
         id: editingWorkerId,
-        name: workerName.trim(),
-        phone: workerPhone.trim(),
-        role: workerRole as any,
-        roles: [workerRole as any],
+        name: trimmedName,
+        phone: trimmedPhone || undefined,
+        role: chosenRole,
+        roles: combinedRoles,
+        assignedRoles: combinedRoles as string[],
         commissionRate: workerCommission,
-        pin: workerPin,
-        permissions: sanitizedPerms as any,
-        status: existing?.status || 'active'
+        pin: trimmedPin,
+        permissions: permissionsObj as Partial<WorkerPermissions>,
+        status: existing?.status || 'active',
+        email: existing?.email || `${trimmedName.toLowerCase().replace(/[^a-z0-9]/g, '.')}@rofani.co.ke`,
+        hireDate: existing?.hireDate || new Date().toISOString().slice(0, 10),
       };
+
+      // 1. Update local component state immediately so UI updates right away
+      setLocalStaffUsers((prev) => {
+        const next = prev.map((u) => (u.id === updatedUser.id ? updatedUser : u));
+        safeSetJSON('pos_store_staff_users', next);
+        safeSetJSON('retail_pos_users', next);
+        return next;
+      });
+
+      // 2. Propagate to App parent state
       if (onUpdateUser) {
         onUpdateUser(updatedUser);
       }
-      triggerNotify(`Staff member "${workerName}" updated successfully!`);
+
+      // 3. Direct Cloud Firestore save guarantee
+      try {
+        await saveUserToCloud(updatedUser);
+      } catch (err) {
+        console.warn('Direct cloud save notification:', err);
+      }
+
+      triggerNotify(`Staff member "${trimmedName}" updated successfully!`);
     } else {
+      const newId = `staff-${Date.now()}`;
       const newUser: User = {
-        id: `staff-${Date.now()}`,
-        name: workerName.trim(),
-        phone: workerPhone.trim(),
-        role: workerRole as any,
-        roles: [workerRole as any],
-        assignedRoles: [workerRole as any],
+        id: newId,
+        name: trimmedName,
+        phone: trimmedPhone || undefined,
+        role: chosenRole,
+        roles: combinedRoles,
+        assignedRoles: combinedRoles as string[],
         commissionRate: workerCommission,
-        pin: workerPin,
+        pin: trimmedPin,
         status: 'active',
-        permissions: sanitizedPerms as any,
-        email: `${workerName.toLowerCase().replace(/[^a-z0-9]/g, '.')}@rofani.co.ke`,
+        permissions: permissionsObj as Partial<WorkerPermissions>,
+        email: `${trimmedName.toLowerCase().replace(/[^a-z0-9]/g, '.')}@rofani.co.ke`,
         hireDate: new Date().toISOString().slice(0, 10),
       };
+
+      // 1. Update local component state immediately
+      setLocalStaffUsers((prev) => {
+        const next = [...prev, newUser];
+        safeSetJSON('pos_store_staff_users', next);
+        safeSetJSON('retail_pos_users', next);
+        return next;
+      });
+
+      // 2. Propagate to App parent state
       if (onAddUser) {
         onAddUser(newUser);
       }
-      triggerNotify(`New staff member "${workerName}" added successfully!`);
+
+      // 3. Direct Cloud Firestore save guarantee
+      try {
+        await saveUserToCloud(newUser);
+      } catch (err) {
+        console.warn('Direct cloud save notification:', err);
+      }
+
+      triggerNotify(`New staff member "${trimmedName}" added successfully!`);
     }
+
     setWorkerModalOpen(false);
   };
 
-  const handleDeleteWorker = (id: string, name: string) => {
+  const handleDeleteWorker = async (id: string, name: string) => {
     if (window.confirm(`Are you sure you want to remove worker "${name}"?`)) {
+      setLocalStaffUsers((prev) => {
+        const next = prev.filter((u) => u.id !== id);
+        safeSetJSON('pos_store_staff_users', next);
+        safeSetJSON('retail_pos_users', next);
+        return next;
+      });
+
       if (onDeleteUser) {
         onDeleteUser(id);
       }
+
+      try {
+        await deleteUserFromCloud(id);
+      } catch (err) {
+        console.warn('Direct cloud delete notification:', err);
+      }
+
       triggerNotify(`Worker "${name}" removed successfully.`);
     }
   };
@@ -674,8 +866,8 @@ export const SettingsDashboardView: React.FC<SettingsDashboardViewProps> = ({
                 <div className="space-y-4">
                   <div className="flex items-center justify-between bg-slate-950/80 border border-slate-800 p-3.5 rounded-2xl">
                     <div>
-                      <div className="font-bold text-slate-100 text-sm">Staff & Cashier Directory ({staffUsers.length})</div>
-                      <p className="text-[11px] text-slate-400">Manage worker roles and granular permission chips.</p>
+                      <div className="font-bold text-slate-100 text-sm">Staff & Cashier Directory ({localStaffUsers.length})</div>
+                      <p className="text-[11px] text-slate-400">Manage worker profiles, login PINs, commission rates & granular roles.</p>
                     </div>
                     <button
                       type="button"
@@ -687,12 +879,15 @@ export const SettingsDashboardView: React.FC<SettingsDashboardViewProps> = ({
                   </div>
 
                   <div className="space-y-2.5 max-h-72 overflow-y-auto pr-1">
-                    {staffUsers.length === 0 ? (
+                    {localStaffUsers.length === 0 ? (
                       <div className="p-8 text-center text-slate-400 text-xs">No workers configured yet. Click "+ Add New Worker" to create one.</div>
                     ) : (
-                      staffUsers.map((u) => {
+                      localStaffUsers.map((u) => {
                         const currentActiveUser = safeGetJSON<any>('pos_active_cashier', safeGetJSON<any>('pos_current_session', safeGetJSON<any>('retail_pos_active_user', null)));
                         const isOnlineActive = currentActiveUser && (currentActiveUser.id === u.id || currentActiveUser.name?.toLowerCase() === u.name?.toLowerCase());
+                        const activePerms = getWorkerPermissionStrings(u);
+                        const displayedPerms = activePerms.slice(0, 5);
+                        const extraCount = activePerms.length - displayedPerms.length;
 
                         return (
                         <div key={u.id} className="p-3.5 bg-slate-950 border border-slate-800 rounded-2xl space-y-2 hover:border-slate-700 transition">
@@ -712,7 +907,7 @@ export const SettingsDashboardView: React.FC<SettingsDashboardViewProps> = ({
                                 {isOnlineActive ? (
                                   <span className="inline-flex items-center gap-1 text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-2.5 py-0.5 rounded-full font-bold">
                                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                                    Online / Logged In ({currentActiveUser?.shiftStatus || 'Clocked In at 08:30 AM'})
+                                    Online / Logged In ({currentActiveUser?.shiftStatus || 'Clocked In'})
                                   </span>
                                 ) : (
                                   <span className="inline-flex items-center gap-1 text-[10px] bg-slate-800 text-slate-400 border border-slate-700 px-2.5 py-0.5 rounded-full font-medium">
@@ -721,10 +916,13 @@ export const SettingsDashboardView: React.FC<SettingsDashboardViewProps> = ({
                                   </span>
                                 )}
                               </div>
-                              <div className="text-[11px] text-slate-400 font-mono flex items-center gap-3 mt-1">
+                              <div className="text-[11px] text-slate-400 font-mono flex items-center gap-3 mt-1 flex-wrap">
                                 <span>📞 {u.phone || 'No phone'}</span>
                                 <span>💰 Comm: {u.commissionRate ?? 3}%</span>
-                                <span>🔑 PIN: {u.pin || '1234'}</span>
+                                <span className="text-amber-400 font-bold bg-amber-950/40 border border-amber-800/40 px-2 py-0.5 rounded-md">
+                                  🔑 PIN: {u.pin || '1234'}
+                                </span>
+                                <span className="text-slate-500">✉️ {u.email}</span>
                               </div>
                             </div>
 
@@ -746,17 +944,19 @@ export const SettingsDashboardView: React.FC<SettingsDashboardViewProps> = ({
                             </div>
                           </div>
 
-                          {/* Active Permission Badges with Safe Normalization */}
-                          {Array.isArray(u.permissions) && u.permissions.length > 0 && (
+                          {/* Active Permission Badges */}
+                          {activePerms.length > 0 && (
                             <div className="flex flex-wrap gap-1 pt-2 border-t border-slate-800">
-                              {u.permissions.map((p: any, pIdx: number) => {
-                                const pStr = typeof p === 'string' ? p : String(p);
-                                return (
-                                  <span key={pIdx} className="text-[9px] bg-blue-950/80 text-blue-300 border border-blue-500/30 px-2 py-0.5 rounded-md font-medium">
-                                    {pStr}
-                                  </span>
-                                );
-                              })}
+                              {displayedPerms.map((pStr, pIdx) => (
+                                <span key={pIdx} className="text-[9px] bg-blue-950/80 text-blue-300 border border-blue-500/30 px-2 py-0.5 rounded-md font-medium">
+                                  {pStr}
+                                </span>
+                              ))}
+                              {extraCount > 0 && (
+                                <span className="text-[9px] bg-slate-800 text-slate-400 border border-slate-700 px-2 py-0.5 rounded-md font-semibold">
+                                  +{extraCount} more
+                                </span>
+                              )}
                             </div>
                           )}
                         </div>
@@ -932,10 +1132,16 @@ export const SettingsDashboardView: React.FC<SettingsDashboardViewProps> = ({
                   <label className="block font-semibold text-slate-300 mb-1">Role / Permission</label>
                   <select
                     value={workerRole}
-                    onChange={(e) => setWorkerRole(e.target.value)}
+                    onChange={(e) => {
+                      const newRole = e.target.value as Role;
+                      setWorkerRole(newRole);
+                      if (newRole === 'Admin') {
+                        setWorkerPermissions([...ALL_AVAILABLE_PERMISSIONS]);
+                      }
+                    }}
                     className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2.5 text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium"
                   >
-                    <option value="Admin">Admin</option>
+                    <option value="Admin">Admin (Full Store Control)</option>
                     <option value="Manager">Manager</option>
                     <option value="Cashier">Cashier</option>
                     <option value="Inventory Staff">Inventory Staff</option>
@@ -956,10 +1162,20 @@ export const SettingsDashboardView: React.FC<SettingsDashboardViewProps> = ({
                 </div>
 
                 <div>
-                  <label className="block font-semibold text-slate-300 mb-1">Access PIN (4-Digit)</label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block font-semibold text-slate-300">Access PIN (4-Digit) *</label>
+                    <button
+                      type="button"
+                      onClick={generateRandomPin}
+                      className="text-[10px] text-blue-400 hover:text-blue-300 font-bold flex items-center gap-1 cursor-pointer"
+                    >
+                      <RefreshCw className="w-2.5 h-2.5" /> Randomize
+                    </button>
+                  </div>
                   <input
-                    type="password"
+                    type="text"
                     maxLength={6}
+                    required
                     value={workerPin}
                     onChange={(e) => setWorkerPin(e.target.value.replace(/\D/g, ''))}
                     placeholder="1234"

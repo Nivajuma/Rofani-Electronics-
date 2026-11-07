@@ -531,7 +531,9 @@ export const OnlineOrdersManagerView: React.FC<OnlineOrdersManagerViewProps> = (
                   <input
                     type="number"
                     required
-                    value={newValue}
+                    placeholder="0"
+                    value={newValue === 0 ? '' : newValue}
+                    onFocus={(e) => e.target.select()}
                     onChange={(e) => setNewValue(Number(e.target.value))}
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 font-mono focus:outline-none"
                   />
@@ -541,7 +543,9 @@ export const OnlineOrdersManagerView: React.FC<OnlineOrdersManagerViewProps> = (
                   <label className="text-slate-400 block mb-1">Min Order (KSh)</label>
                   <input
                     type="number"
-                    value={newMinOrder}
+                    placeholder="0"
+                    value={newMinOrder === 0 ? '' : newMinOrder}
+                    onFocus={(e) => e.target.select()}
                     onChange={(e) => setNewMinOrder(Number(e.target.value))}
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 font-mono focus:outline-none"
                   />

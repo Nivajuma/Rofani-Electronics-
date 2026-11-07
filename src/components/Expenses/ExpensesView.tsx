@@ -656,10 +656,11 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
                 <label className="block text-slate-400 mb-1">Amount (KSh) *</label>
                 <input
                   type="number"
-                  step="0.01"
+                  step="1"
                   required
-                  placeholder="0.00"
-                  value={amount}
+                  placeholder="0"
+                  value={amount === '0' || amount === '' ? '' : amount}
+                  onFocus={(e) => e.target.select()}
                   onChange={(e) => setAmount(e.target.value)}
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 font-mono text-sm focus:outline-none"
                 />

@@ -727,7 +727,9 @@ export const PredictiveRestockModal: React.FC<PredictiveRestockModalProps> = ({
                           <input
                             type="number"
                             min="0"
-                            value={qty}
+                            placeholder="0"
+                            value={qty === 0 ? '' : qty}
+                            onFocus={(e) => e.target.select()}
                             onChange={(e) =>
                               handleSetQtyDirect(item.productId, parseInt(e.target.value) || 0)
                             }

@@ -1087,7 +1087,9 @@ export const ItemAuditMiniPage: React.FC<ItemAuditMiniPageProps> = ({
                   type="number"
                   min={1}
                   required
-                  value={restockQty}
+                  placeholder="0"
+                  value={restockQty === '0' ? '' : restockQty}
+                  onFocus={(e) => e.target.select()}
                   onChange={(e) => setRestockQty(e.target.value)}
                   className="w-full bg-slate-950 border border-slate-800 focus:border-emerald-500 rounded-xl px-3 py-2 text-white font-mono font-bold outline-none"
                 />
@@ -1101,9 +1103,11 @@ export const ItemAuditMiniPage: React.FC<ItemAuditMiniPageProps> = ({
                   <input
                     type="number"
                     min={0}
-                    step="0.01"
+                    step="1"
                     required
-                    value={restockCost}
+                    placeholder="0"
+                    value={restockCost === '0' ? '' : restockCost}
+                    onFocus={(e) => e.target.select()}
                     onChange={(e) => setRestockCost(e.target.value)}
                     className="w-full bg-slate-950 border border-slate-800 focus:border-emerald-500 rounded-xl px-3 py-2 text-white font-mono font-bold outline-none"
                   />
@@ -1203,7 +1207,9 @@ export const ItemAuditMiniPage: React.FC<ItemAuditMiniPageProps> = ({
                   type="number"
                   min={0}
                   required
-                  value={newPhysicalCount}
+                  placeholder="0"
+                  value={newPhysicalCount === '0' ? '' : newPhysicalCount}
+                  onFocus={(e) => e.target.select()}
                   onChange={(e) => setNewPhysicalCount(e.target.value)}
                   className="w-full bg-slate-950 border border-slate-800 focus:border-amber-500 rounded-xl px-3 py-2 text-white font-mono font-bold text-base outline-none"
                 />

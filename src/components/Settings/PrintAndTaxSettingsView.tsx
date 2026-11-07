@@ -318,8 +318,10 @@ export const PrintAndTaxSettingsView: React.FC<PrintAndTaxSettingsViewProps> = (
                   <input
                     type="number"
                     step="0.1"
-                    value={settings.kraTotRate}
-                    onChange={(e) => updateSetting('kraTotRate', parseFloat(e.target.value) || 0)}
+                    placeholder="0"
+                    value={settings.kraTotRate === 0 || (settings.kraTotRate as any) === '0' ? '' : settings.kraTotRate}
+                    onFocus={(e) => e.target.select()}
+                    onChange={(e) => updateSetting('kraTotRate', e.target.value === '' ? ('' as any) : parseFloat(e.target.value))}
                     className="w-24 bg-slate-950 border border-slate-700 rounded-xl px-3 py-1.5 font-bold text-slate-100 focus:outline-none focus:ring-2 focus:ring-amber-500 text-xs"
                   />
                   <span className="text-[11px] text-slate-400">
@@ -380,8 +382,10 @@ export const PrintAndTaxSettingsView: React.FC<PrintAndTaxSettingsViewProps> = (
                   <input
                     type="number"
                     step="0.5"
-                    value={settings.vatRate}
-                    onChange={(e) => updateSetting('vatRate', parseFloat(e.target.value) || 0)}
+                    placeholder="0"
+                    value={settings.vatRate === 0 || (settings.vatRate as any) === '0' ? '' : settings.vatRate}
+                    onFocus={(e) => e.target.select()}
+                    onChange={(e) => updateSetting('vatRate', e.target.value === '' ? ('' as any) : parseFloat(e.target.value))}
                     className="w-24 bg-slate-950 border border-slate-700 rounded-xl px-3 py-1.5 font-bold text-slate-100 focus:outline-none focus:ring-2 focus:ring-amber-500"
                   />
                 </div>

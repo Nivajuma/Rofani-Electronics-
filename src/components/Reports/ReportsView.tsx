@@ -1821,9 +1821,11 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                         <input
                           type="number"
                           min={1}
-                          value={item.quantity}
+                          placeholder="0"
+                          value={item.quantity === 0 ? '' : item.quantity}
+                          onFocus={(e) => e.target.select()}
                           onChange={(e) => {
-                            const val = parseInt(e.target.value) || 1;
+                            const val = e.target.value === '' ? ('' as any) : parseInt(e.target.value) || 1;
                             setEditItems(prev => prev.map((it, i) => i === idx ? { ...it, quantity: val } : it));
                           }}
                           className="w-16 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 font-mono font-bold text-center"
@@ -1833,9 +1835,11 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                         <span className="text-[10px] text-slate-500 block font-semibold">Unit Price (KSh)</span>
                         <input
                           type="number"
-                          value={item.unitPrice}
+                          placeholder="0"
+                          value={item.unitPrice === 0 ? '' : item.unitPrice}
+                          onFocus={(e) => e.target.select()}
                           onChange={(e) => {
-                            const val = parseFloat(e.target.value) || 0;
+                            const val = e.target.value === '' ? ('' as any) : parseFloat(e.target.value) || 0;
                             setEditItems(prev => prev.map((it, i) => i === idx ? { ...it, unitPrice: val } : it));
                           }}
                           className="w-28 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 font-mono font-bold"

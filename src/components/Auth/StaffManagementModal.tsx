@@ -1548,9 +1548,18 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
                     min="0"
                     max="100"
                     step="0.5"
-                    required
-                    value={commissionRate}
-                    onChange={(e) => setCommissionRate(parseFloat(e.target.value) || 0)}
+                    placeholder="0"
+                    value={commissionRate === 0 || (commissionRate as any) === '0' || (commissionRate as any) === '' ? '' : commissionRate}
+                    onFocus={(e) => e.target.select()}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setCommissionRate(val === '' ? ('' as any) : parseFloat(val));
+                    }}
+                    onBlur={(e) => {
+                      const val = String(e.target.value).trim();
+                      const num = parseFloat(val);
+                      setCommissionRate(isNaN(num) || num <= 0 ? 0 : Math.min(100, num));
+                    }}
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-amber-300 font-mono font-bold focus:outline-none focus:border-amber-400"
                   />
                 </div>
@@ -1901,9 +1910,18 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
                     min="0"
                     max="100"
                     step="0.5"
-                    required
-                    value={editingUser.commissionRate ?? 5}
-                    onChange={(e) => setEditingUser({ ...editingUser, commissionRate: parseFloat(e.target.value) || 0 })}
+                    placeholder="0"
+                    value={editingUser.commissionRate === 0 || (editingUser.commissionRate as any) === '0' || (editingUser.commissionRate as any) === '' ? '' : (editingUser.commissionRate ?? '')}
+                    onFocus={(e) => e.target.select()}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setEditingUser({ ...editingUser, commissionRate: val === '' ? ('' as any) : parseFloat(val) });
+                    }}
+                    onBlur={(e) => {
+                      const val = String(editingUser.commissionRate ?? '').trim();
+                      const num = parseFloat(val);
+                      setEditingUser({ ...editingUser, commissionRate: isNaN(num) || num <= 0 ? 0 : Math.min(100, num) });
+                    }}
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-amber-300 font-mono font-bold focus:outline-none focus:border-amber-400"
                   />
                 </div>

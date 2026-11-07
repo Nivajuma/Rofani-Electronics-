@@ -474,8 +474,9 @@ export const WorkerLoansView: React.FC<WorkerLoansViewProps> = ({
                   <input
                     type="number"
                     min="1"
-                    placeholder="e.g. 5000"
-                    value={principalAmount}
+                    placeholder="0"
+                    value={principalAmount === 0 ? '' : principalAmount}
+                    onFocus={(e) => e.target.select()}
                     onChange={(e) => setPrincipalAmount(e.target.value ? Number(e.target.value) : '')}
                     className="w-full bg-slate-950 border border-slate-800 text-slate-100 rounded-xl p-2.5 font-mono font-bold"
                     required
@@ -614,8 +615,10 @@ export const WorkerLoansView: React.FC<WorkerLoansViewProps> = ({
                   <input
                     type="number"
                     min="1"
+                    placeholder="0"
                     max={selectedLoanForRepay.balanceDue}
-                    value={repayAmount}
+                    value={repayAmount === 0 ? '' : repayAmount}
+                    onFocus={(e) => e.target.select()}
                     onChange={(e) => setRepayAmount(e.target.value ? Number(e.target.value) : '')}
                     className="w-full bg-slate-950 border border-slate-800 text-slate-100 rounded-xl p-2.5 font-mono font-bold"
                     required

@@ -1476,8 +1476,10 @@ export const StaffCommissionView: React.FC<StaffCommissionViewProps> = ({
                     <input
                       type="number"
                       min="0"
+                      placeholder="0"
                       max={Math.min(payoutModalItem.earnedCommission, payoutModalItem.activeLoan.balanceDue)}
-                      value={deductLoanAmount}
+                      value={deductLoanAmount === 0 ? '' : deductLoanAmount}
+                      onFocus={(e) => e.target.select()}
                       onChange={(e) => setDeductLoanAmount(Number(e.target.value) || 0)}
                       className="w-full bg-slate-900 border border-rose-800/80 rounded-lg px-3 py-1.5 text-rose-200 font-mono font-bold text-xs focus:outline-none"
                     />
@@ -1732,8 +1734,10 @@ export const StaffCommissionView: React.FC<StaffCommissionViewProps> = ({
                     min="0"
                     max="100"
                     step="0.5"
-                    value={planRate}
-                    onChange={(e) => setPlanRate(parseFloat(e.target.value) || 0)}
+                    placeholder="0"
+                    value={planRate === 0 ? '' : planRate}
+                    onFocus={(e) => e.target.select()}
+                    onChange={(e) => setPlanRate(e.target.value === '' ? ('' as any) : parseFloat(e.target.value) || 0)}
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-amber-300 font-mono font-bold focus:outline-none focus:border-indigo-500 text-sm"
                   />
                 </div>
@@ -1748,8 +1752,10 @@ export const StaffCommissionView: React.FC<StaffCommissionViewProps> = ({
                     type="number"
                     min="0"
                     step="10"
-                    value={planFixedAmount}
-                    onChange={(e) => setPlanFixedAmount(Number(e.target.value) || 0)}
+                    placeholder="0"
+                    value={planFixedAmount === 0 ? '' : planFixedAmount}
+                    onFocus={(e) => e.target.select()}
+                    onChange={(e) => setPlanFixedAmount(e.target.value === '' ? ('' as any) : Number(e.target.value) || 0)}
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-emerald-300 font-mono font-bold focus:outline-none focus:border-emerald-500 text-sm"
                   />
                 </div>
@@ -1765,8 +1771,10 @@ export const StaffCommissionView: React.FC<StaffCommissionViewProps> = ({
                     min="0"
                     max="100"
                     step="1"
-                    value={planProfitShare}
-                    onChange={(e) => setPlanProfitShare(Number(e.target.value) || 0)}
+                    placeholder="0"
+                    value={planProfitShare === 0 ? '' : planProfitShare}
+                    onFocus={(e) => e.target.select()}
+                    onChange={(e) => setPlanProfitShare(e.target.value === '' ? ('' as any) : Number(e.target.value) || 0)}
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-indigo-300 font-mono font-bold focus:outline-none focus:border-indigo-500 text-sm"
                   />
                   <p className="text-[10px] text-slate-500 mt-1">
@@ -1817,8 +1825,10 @@ export const StaffCommissionView: React.FC<StaffCommissionViewProps> = ({
                   type="number"
                   min="0"
                   step="1000"
-                  value={planDailyTarget}
-                  onChange={(e) => setPlanDailyTarget(Number(e.target.value) || 0)}
+                  placeholder="0"
+                  value={planDailyTarget === 0 ? '' : planDailyTarget}
+                  onFocus={(e) => e.target.select()}
+                  onChange={(e) => setPlanDailyTarget(e.target.value === '' ? ('' as any) : Number(e.target.value) || 0)}
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-sky-300 font-mono font-bold focus:outline-none focus:border-sky-500 text-sm"
                 />
               </div>

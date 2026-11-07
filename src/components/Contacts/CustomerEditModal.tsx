@@ -672,7 +672,8 @@ export const CustomerEditModal: React.FC<CustomerEditModalProps> = ({
                 type="number"
                 min="0"
                 step="500"
-                value={creditLimit}
+                value={creditLimit === '0' || creditLimit === '' ? '' : creditLimit}
+                onFocus={(e) => e.target.select()}
                 onChange={(e) => setCreditLimit(e.target.value)}
                 placeholder="e.g. 20000 (Leave blank for standard)"
                 className="w-full bg-slate-950 border border-slate-800 focus:border-sky-500 rounded-xl pl-9 pr-3 py-2 text-slate-100 placeholder-slate-500 outline-none font-mono transition"

@@ -1279,10 +1279,11 @@ export const CashManagementView: React.FC<CashManagementViewProps> = ({
                   <label className="block text-slate-300 mb-1">Amount (KSh) *</label>
                   <input
                     type="number"
-                    step="0.01"
+                    step="1"
                     required
-                    placeholder="e.g. 500000"
-                    value={inAmount}
+                    placeholder="0"
+                    value={inAmount === '0' || inAmount === '' ? '' : inAmount}
+                    onFocus={(e) => e.target.select()}
                     onChange={(e) => setInAmount(e.target.value)}
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-emerald-400 font-mono font-bold text-base focus:outline-none focus:border-emerald-500"
                   />
@@ -1467,10 +1468,11 @@ export const CashManagementView: React.FC<CashManagementViewProps> = ({
                   <label className="block text-slate-300 mb-1">Amount (KSh) *</label>
                   <input
                     type="number"
-                    step="0.01"
+                    step="1"
                     required
-                    placeholder="e.g. 24500"
-                    value={outAmount}
+                    placeholder="0"
+                    value={outAmount === '0' || outAmount === '' ? '' : outAmount}
+                    onFocus={(e) => e.target.select()}
                     onChange={(e) => setOutAmount(e.target.value)}
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-rose-400 font-mono font-bold text-base focus:outline-none focus:border-rose-500"
                   />
@@ -1697,10 +1699,11 @@ export const CashManagementView: React.FC<CashManagementViewProps> = ({
                 <label className="block text-slate-300 mb-1">Payment Amount (KSh) *</label>
                 <input
                   type="number"
-                  step="0.01"
+                  step="1"
                   required
-                  placeholder="Enter amount to pay"
-                  value={supplierPayAmount}
+                  placeholder="0"
+                  value={supplierPayAmount === '0' || supplierPayAmount === '' ? '' : supplierPayAmount}
+                  onFocus={(e) => e.target.select()}
                   onChange={(e) => setSupplierPayAmount(e.target.value)}
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-rose-400 font-mono font-bold text-base focus:outline-none focus:border-rose-500"
                 />

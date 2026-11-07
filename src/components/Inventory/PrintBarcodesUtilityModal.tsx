@@ -1691,8 +1691,10 @@ export const PrintBarcodesUtilityModal: React.FC<PrintBarcodesUtilityModalProps>
                                 step="1"
                                 placeholder="0"
                                 value={
-                                  customLabelPrices[item.barcode] !== undefined && customLabelPrices[item.barcode] !== null
+                                  customLabelPrices[item.barcode] !== undefined && customLabelPrices[item.barcode] !== null && customLabelPrices[item.barcode] !== 0 && (customLabelPrices[item.barcode] as any) !== '0'
                                     ? customLabelPrices[item.barcode]
+                                    : customLabelPrices[item.barcode] === 0 || (customLabelPrices[item.barcode] as any) === '0'
+                                    ? ''
                                     : (item.price === 0 ? '' : Math.round(item.price))
                                 }
                                 onFocus={(e) => e.target.select()}
@@ -1877,8 +1879,10 @@ export const PrintBarcodesUtilityModal: React.FC<PrintBarcodesUtilityModalProps>
                             step="1"
                             placeholder="0"
                             value={
-                              customLabelPrices[item.barcode] !== undefined && customLabelPrices[item.barcode] !== null
+                              customLabelPrices[item.barcode] !== undefined && customLabelPrices[item.barcode] !== null && customLabelPrices[item.barcode] !== 0 && (customLabelPrices[item.barcode] as any) !== '0'
                                 ? customLabelPrices[item.barcode]
+                                : customLabelPrices[item.barcode] === 0 || (customLabelPrices[item.barcode] as any) === '0'
+                                ? ''
                                 : (item.price === 0 ? '' : Math.round(item.price))
                             }
                             onFocus={(e) => e.target.select()}
@@ -2019,8 +2023,10 @@ export const PrintBarcodesUtilityModal: React.FC<PrintBarcodesUtilityModalProps>
                               step="1"
                               placeholder="0"
                               value={
-                                customLabelPrices[item.barcode] !== undefined && customLabelPrices[item.barcode] !== null
+                                customLabelPrices[item.barcode] !== undefined && customLabelPrices[item.barcode] !== null && customLabelPrices[item.barcode] !== 0 && (customLabelPrices[item.barcode] as any) !== '0'
                                   ? customLabelPrices[item.barcode]
+                                  : customLabelPrices[item.barcode] === 0 || (customLabelPrices[item.barcode] as any) === '0'
+                                  ? ''
                                   : (item.price === 0 ? '' : Math.round(item.price))
                               }
                               onFocus={(e) => e.target.select()}

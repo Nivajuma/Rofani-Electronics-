@@ -160,7 +160,8 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
   // Start Inline Editing Cell
   const handleCellClick = (p: Product, field: keyof Product) => {
     setEditingCell({ productId: p.id, field });
-    setEditValue(String(p[field] ?? ''));
+    const rawVal = p[field];
+    setEditValue(rawVal === 0 || rawVal === '0' ? '' : String(rawVal ?? ''));
   };
 
   // Save Inline Edit
@@ -782,16 +783,18 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
                       {editingCell?.productId === p.id && editingCell.field === 'costPrice' ? (
                         <input
                           type="number"
-                          step="0.01"
+                          step="1"
                           autoFocus
-                          value={editValue}
+                          placeholder="0"
+                          value={editValue === '0' || editValue === '' ? '' : editValue}
+                          onFocus={(e) => e.target.select()}
                           onChange={(e) => setEditValue(e.target.value)}
                           onBlur={() => handleCellBlur(p)}
                           onKeyDown={(e) => e.key === 'Enter' && handleCellBlur(p)}
                           className="w-full bg-blue-950 border border-blue-500 text-white text-xs px-2 py-0.5 rounded focus:outline-none text-right font-mono"
                         />
                       ) : (
-                        <span>{p.costPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                        <span>{p.costPrice % 1 === 0 ? Math.round(p.costPrice).toLocaleString() : p.costPrice.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</span>
                       )}
                     </td>
 
@@ -803,16 +806,18 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
                       {editingCell?.productId === p.id && editingCell.field === 'sellingPrice' ? (
                         <input
                           type="number"
-                          step="0.01"
+                          step="1"
                           autoFocus
-                          value={editValue}
+                          placeholder="0"
+                          value={editValue === '0' || editValue === '' ? '' : editValue}
+                          onFocus={(e) => e.target.select()}
                           onChange={(e) => setEditValue(e.target.value)}
                           onBlur={() => handleCellBlur(p)}
                           onKeyDown={(e) => e.key === 'Enter' && handleCellBlur(p)}
                           className="w-full bg-blue-950 border border-blue-500 text-white text-xs px-2 py-0.5 rounded focus:outline-none text-right font-mono"
                         />
                       ) : (
-                        <span>{p.sellingPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                        <span>{p.sellingPrice % 1 === 0 ? Math.round(p.sellingPrice).toLocaleString() : p.sellingPrice.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</span>
                       )}
                     </td>
 
@@ -834,8 +839,11 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
                       {editingCell?.productId === p.id && editingCell.field === 'stockQuantity' ? (
                         <input
                           type="number"
+                          step="1"
                           autoFocus
-                          value={editValue}
+                          placeholder="0"
+                          value={editValue === '0' || editValue === '' ? '' : editValue}
+                          onFocus={(e) => e.target.select()}
                           onChange={(e) => setEditValue(e.target.value)}
                           onBlur={() => handleCellBlur(p)}
                           onKeyDown={(e) => e.key === 'Enter' && handleCellBlur(p)}

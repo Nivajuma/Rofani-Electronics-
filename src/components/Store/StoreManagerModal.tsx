@@ -960,7 +960,9 @@ export const StoreManagerModal: React.FC<StoreManagerModalProps> = ({
                         type="number"
                         min="1"
                         required
-                        value={transferQty}
+                        placeholder="0"
+                        value={transferQty === 0 ? '' : transferQty}
+                        onFocus={(e) => e.target.select()}
                         onChange={(e) => setTransferQty(Number(e.target.value))}
                         className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 font-mono focus:outline-none focus:border-indigo-500"
                       />

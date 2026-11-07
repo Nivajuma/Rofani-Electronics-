@@ -154,8 +154,10 @@ export const CustomerDebtPaymentModal: React.FC<CustomerDebtPaymentModalProps> =
               <input
                 type="number"
                 min="1"
-                step="0.01"
-                value={amount}
+                step="1"
+                placeholder="0"
+                value={amount === '0' || amount === '' ? '' : amount}
+                onFocus={(e) => e.target.select()}
                 onChange={(e) => {
                   setAmount(e.target.value);
                   setError('');

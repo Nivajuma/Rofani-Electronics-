@@ -807,7 +807,9 @@ export const PurchasingView: React.FC<PurchasingViewProps> = ({
                             <input
                               type="number"
                               min="1"
-                              value={line.quantityOrdered}
+                              placeholder="0"
+                              value={line.quantityOrdered === 0 ? '' : line.quantityOrdered}
+                              onFocus={(e) => e.target.select()}
                               onChange={(e) =>
                                 handleUpdatePoItemLine(idx, 'quantityOrdered', e.target.value)
                               }
@@ -820,7 +822,9 @@ export const PurchasingView: React.FC<PurchasingViewProps> = ({
                             <input
                               type="number"
                               min="0"
-                              value={line.unitCost}
+                              placeholder="0"
+                              value={line.unitCost === 0 ? '' : line.unitCost}
+                              onFocus={(e) => e.target.select()}
                               onChange={(e) =>
                                 handleUpdatePoItemLine(idx, 'unitCost', e.target.value)
                               }

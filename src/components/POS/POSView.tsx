@@ -1707,7 +1707,8 @@ export const POSView: React.FC<POSViewProps> = ({
                         type="number"
                         min="0"
                         max={itemDiscountMode === 'fixed' ? item.unitPrice : 100}
-                        value={itemDiscountInputVal}
+                        value={itemDiscountInputVal === '0' || itemDiscountInputVal === '' ? '' : itemDiscountInputVal}
+                        onFocus={(e) => e.target.select()}
                         onChange={(e) => setItemDiscountInputVal(e.target.value)}
                         placeholder={itemDiscountMode === 'fixed' ? 'e.g. 50' : 'e.g. 10'}
                         className="w-full bg-slate-950 border border-slate-700 pl-9 pr-2 py-1 rounded-lg text-xs font-mono font-bold text-amber-300 focus:outline-none focus:border-amber-400"
@@ -3209,9 +3210,10 @@ export const POSView: React.FC<POSViewProps> = ({
                         <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 text-[10px]">KSh</span>
                         <input
                           type="number"
-                          step="0.01"
+                          step="1"
                           placeholder="Amount"
-                          value={p.amount ?? ''}
+                          value={p.amount === 0 ? '' : (p.amount ?? '')}
+                          onFocus={(e) => e.target.select()}
                           onChange={(e) => updatePaymentRow(idx, 'amount', e.target.value)}
                           className="w-full bg-slate-900 border border-slate-700 text-slate-200 pl-9 pr-2 py-2 rounded-lg font-mono focus:outline-none focus:border-sky-500 text-xs font-bold"
                         />
@@ -3670,8 +3672,9 @@ export const POSView: React.FC<POSViewProps> = ({
                     type="number"
                     min="1"
                     max={supervisorDiscountMode === 'percentage' ? 100 : itemsSubtotal}
-                    value={tempDiscountVal || ''}
-                    onChange={(e) => setTempDiscountVal(Math.max(0, parseFloat(e.target.value) || 0))}
+                    value={tempDiscountVal === 0 ? '' : (tempDiscountVal || '')}
+                    onFocus={(e) => e.target.select()}
+                    onChange={(e) => setTempDiscountVal(e.target.value === '' ? ('' as any) : Math.max(0, parseFloat(e.target.value) || 0))}
                     placeholder={supervisorDiscountMode === 'fixed' ? 'e.g. 200' : 'e.g. 10'}
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-12 pr-3 py-2 text-xs font-mono font-bold text-amber-300 focus:outline-none focus:border-amber-400"
                   />

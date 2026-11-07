@@ -52,7 +52,8 @@ import {
   QrCode,
   SlidersHorizontal,
   Truck,
-  Calendar
+  Calendar,
+  RotateCcw
 } from 'lucide-react';
 import { Product, Supplier, BarcodeScanLog, User, Transaction, RestockRecord } from '../../types';
 import { generateAutoBarcode, printBarcodeLabels, printBatchBarcodes } from '../../utils/barcode';
@@ -147,6 +148,50 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   useEffect(() => {
     safeSetJSON('retail_pos_inv_search', searchTerm);
   }, [searchTerm]);
+
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const searchDropdownRef = useRef<HTMLDivElement>(null);
+  const [isSearchFocused, setIsSearchFocused] = useState(false);
+  const [showQuickSearchDropdown, setShowQuickSearchDropdown] = useState(false);
+
+  // Keyboard shortcut: Press '/' or 'Ctrl+K' / 'Cmd+K' anywhere to focus the search bar
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (
+        (e.key === '/' || ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k')) &&
+        document.activeElement?.tagName !== 'INPUT' &&
+        document.activeElement?.tagName !== 'TEXTAREA' &&
+        document.activeElement?.tagName !== 'SELECT'
+      ) {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+        searchInputRef.current?.select();
+        setShowQuickSearchDropdown(true);
+      }
+      if (e.key === 'Escape') {
+        setShowQuickSearchDropdown(false);
+        setIsSearchFocused(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  // Click outside listener for quick search dropdown
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (
+        searchDropdownRef.current &&
+        !searchDropdownRef.current.contains(e.target as Node) &&
+        searchInputRef.current &&
+        !searchInputRef.current.contains(e.target as Node)
+      ) {
+        setShowQuickSearchDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   const [selectedCategory, setSelectedCategory] = useState(() =>
     safeGetJSON<string>('retail_pos_inv_category', 'All', (val) => typeof val === 'string')
@@ -1134,57 +1179,186 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   const currentCategoryObj = consolidatedCategories.find((c) => c.name === selectedCategory);
   const availableSubcategories = currentCategoryObj ? currentCategoryObj.subcategories : [];
 
-  // Filtered list
-  const filteredProducts = products.filter((p) => {
-    const matchesSearch =
-      p.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      p.sku.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      p.barcode.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      p.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (p.supplierName && p.supplierName.toLowerCase().includes(searchTerm.toLowerCase()));
+  // Smart Alphanumeric Normalizer (ignores hyphens, slashes, punctuation, extra spaces)
+  const normalizeSearchText = (str: string) => (str || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 
-    const matchesCat = selectedCategory === 'All' || p.category === selectedCategory;
-    const matchesSubCat = selectedSubcategory === 'All' || p.subcategory === selectedSubcategory;
-    const matchesLowStock = !showLowStockOnly || p.stockQuantity <= p.minStockAlert;
-    const matchesOutOfStockPerm = hasWorkerPermission(currentUser, 'canViewOutOfStock') || p.stockQuantity > 0;
+  // Advanced Multi-Token & Attribute Search Matcher with relevance scoring
+  const checkProductSearchMatch = React.useCallback((p: Product, rawQuery: string): { matched: boolean; score: number } => {
+    const trimmed = rawQuery.trim().toLowerCase();
+    if (!trimmed) return { matched: true, score: 0 };
 
-    const matchesSupplier =
-      selectedSupplier === 'All' || (p.supplierName && p.supplierName.trim() === selectedSupplier.trim());
+    const rawBarcode = (p.barcode || '').toLowerCase();
+    const rawSku = (p.sku || '').toLowerCase();
+    const rawName = (p.name || '').toLowerCase();
+    const rawCat = (p.category || '').toLowerCase();
+    const rawSub = (p.subcategory || '').toLowerCase();
+    const rawSize = (p.sizeCapacity || '').toLowerCase();
+    const rawDesc = (p.description || '').toLowerCase();
+    const rawSupplier = (p.supplierName || '').toLowerCase();
 
-    let matchesPrice = true;
-    if (priceRange === 'under_500') matchesPrice = p.sellingPrice < 500;
-    else if (priceRange === '500_2000') matchesPrice = p.sellingPrice >= 500 && p.sellingPrice <= 2000;
-    else if (priceRange === '2000_10000') matchesPrice = p.sellingPrice > 2000 && p.sellingPrice <= 10000;
-    else if (priceRange === 'over_10000') matchesPrice = p.sellingPrice > 10000;
-
-    let matchesAge = true;
-    if (productAge !== 'all' && p.createdAt) {
-      const createdTime = new Date(p.createdAt).getTime();
-      const diffMs = Date.now() - createdTime;
-      const diffDays = diffMs / (1000 * 60 * 60 * 24);
-      if (productAge === 'today') matchesAge = diffDays <= 1;
-      else if (productAge === '7_days') matchesAge = diffDays <= 7;
-      else if (productAge === '30_days') matchesAge = diffDays <= 30;
-      else if (productAge === '90_days') matchesAge = diffDays <= 90;
-      else if (productAge === 'older_90') matchesAge = diffDays > 90;
+    // 1. Exact Barcode or SKU match (Highest priority - instant barcode scanner hit)
+    if (rawBarcode === trimmed || rawSku === trimmed) {
+      return { matched: true, score: 1000 };
+    }
+    if (rawBarcode.startsWith(trimmed) || rawSku.startsWith(trimmed)) {
+      return { matched: true, score: 800 };
     }
 
-    let matchesPerf = true;
-    const perf = performanceMap[p.id];
-    if (performanceFilter === 'high_sales_high_profit') {
-      matchesPerf = perf?.tier === 'high_sales_high_profit';
-    } else if (performanceFilter === 'low_sales') {
-      matchesPerf = perf?.tier === 'low_sales_low_profit' || perf?.tier === 'low_sales_high_profit';
-    } else if (performanceFilter === 'high_sales_low_profit') {
-      matchesPerf = perf?.tier === 'high_sales_low_profit';
-    } else if (performanceFilter === 'low_sales_high_profit') {
-      matchesPerf = perf?.tier === 'low_sales_high_profit';
-    } else if (performanceFilter === 'unranked_no_sales') {
-      matchesPerf = perf?.tier === 'unranked_no_sales';
+    // 2. Exact or prefix Name match
+    if (rawName === trimmed) {
+      return { matched: true, score: 600 };
+    }
+    if (rawName.startsWith(trimmed)) {
+      return { matched: true, score: 500 };
     }
 
-    return matchesSearch && matchesCat && matchesSubCat && matchesLowStock && matchesOutOfStockPerm && matchesSupplier && matchesPrice && matchesAge && matchesPerf;
-  });
+    // 3. Punctuation-agnostic alphanumeric match (e.g. "US001" matches "US-001", "typec" matches "type-c", "256gb" matches "256 gb")
+    const normQuery = normalizeSearchText(trimmed);
+    if (normQuery.length >= 2) {
+      if (normalizeSearchText(rawBarcode).includes(normQuery) || normalizeSearchText(rawSku).includes(normQuery)) {
+        return { matched: true, score: 400 };
+      }
+      if (normalizeSearchText(rawName).includes(normQuery)) {
+        return { matched: true, score: 350 };
+      }
+    }
+
+    // 4. Multi-token search (Every space-separated word token must match in at least one attribute)
+    const tokens = trimmed.split(/\s+/).filter(Boolean);
+    const combinedText = `${rawName} ${rawSku} ${rawBarcode} ${rawCat} ${rawSub} ${rawSize} ${rawDesc} ${rawSupplier}`;
+    const normCombined = normalizeSearchText(combinedText);
+
+    const allTokensMatch = tokens.every((token) => {
+      if (combinedText.includes(token)) return true;
+      const normTok = normalizeSearchText(token);
+      if (normTok.length >= 2 && normCombined.includes(normTok)) return true;
+      // Singular / plural fallback (e.g. "chargers" matches "charger", "trousers" matches "trouser")
+      if (token.endsWith('s') && token.length > 3 && combinedText.includes(token.slice(0, -1))) return true;
+      if (token.endsWith('es') && token.length > 4 && combinedText.includes(token.slice(0, -2))) return true;
+      return false;
+    });
+
+    if (allTokensMatch) {
+      let score = 200;
+      if (rawName.includes(trimmed)) score += 50;
+      if (rawCat.includes(trimmed) || rawSub.includes(trimmed)) score += 30;
+      if (rawSize.includes(trimmed)) score += 40;
+      return { matched: true, score };
+    }
+
+    return { matched: false, score: 0 };
+  }, []);
+
+  // Products matching search across ALL categories (to detect if category filter is hiding items)
+  const globalSearchMatches = React.useMemo(() => {
+    const query = searchTerm.trim();
+    if (!query) return [];
+    return products.filter((p) => {
+      const outOfStockOk = hasWorkerPermission(currentUser, 'canViewOutOfStock') || p.stockQuantity > 0;
+      return outOfStockOk && checkProductSearchMatch(p, query).matched;
+    });
+  }, [products, searchTerm, currentUser, checkProductSearchMatch]);
+
+  // Filtered & Ranked list
+  const filteredProducts = React.useMemo(() => {
+    const scoredList: { product: Product; score: number }[] = [];
+
+    products.forEach((p) => {
+      const searchRes = checkProductSearchMatch(p, searchTerm);
+      if (!searchRes.matched) return;
+
+      const matchesCat = selectedCategory === 'All' || p.category === selectedCategory;
+      const matchesSubCat = selectedSubcategory === 'All' || p.subcategory === selectedSubcategory;
+      const matchesLowStock = !showLowStockOnly || p.stockQuantity <= p.minStockAlert;
+      const matchesOutOfStockPerm = hasWorkerPermission(currentUser, 'canViewOutOfStock') || p.stockQuantity > 0;
+
+      const matchesSupplier =
+        selectedSupplier === 'All' || (p.supplierName && p.supplierName.trim() === selectedSupplier.trim());
+
+      let matchesPrice = true;
+      if (priceRange === 'under_500') matchesPrice = p.sellingPrice < 500;
+      else if (priceRange === '500_2000') matchesPrice = p.sellingPrice >= 500 && p.sellingPrice <= 2000;
+      else if (priceRange === '2000_10000') matchesPrice = p.sellingPrice > 2000 && p.sellingPrice <= 10000;
+      else if (priceRange === 'over_10000') matchesPrice = p.sellingPrice > 10000;
+
+      let matchesAge = true;
+      if (productAge !== 'all' && p.createdAt) {
+        const createdTime = new Date(p.createdAt).getTime();
+        const diffMs = Date.now() - createdTime;
+        const diffDays = diffMs / (1000 * 60 * 60 * 24);
+        if (productAge === 'today') matchesAge = diffDays <= 1;
+        else if (productAge === '7_days') matchesAge = diffDays <= 7;
+        else if (productAge === '30_days') matchesAge = diffDays <= 30;
+        else if (productAge === '90_days') matchesAge = diffDays <= 90;
+        else if (productAge === 'older_90') matchesAge = diffDays > 90;
+      }
+
+      let matchesPerf = true;
+      const perf = performanceMap[p.id];
+      if (performanceFilter === 'high_sales_high_profit') {
+        matchesPerf = perf?.tier === 'high_sales_high_profit';
+      } else if (performanceFilter === 'low_sales') {
+        matchesPerf = perf?.tier === 'low_sales_low_profit' || perf?.tier === 'low_sales_high_profit';
+      } else if (performanceFilter === 'high_sales_low_profit') {
+        matchesPerf = perf?.tier === 'high_sales_low_profit';
+      } else if (performanceFilter === 'low_sales_high_profit') {
+        matchesPerf = perf?.tier === 'low_sales_high_profit';
+      } else if (performanceFilter === 'unranked_no_sales') {
+        matchesPerf = perf?.tier === 'unranked_no_sales';
+      }
+
+      if (
+        matchesCat &&
+        matchesSubCat &&
+        matchesLowStock &&
+        matchesOutOfStockPerm &&
+        matchesSupplier &&
+        matchesPrice &&
+        matchesAge &&
+        matchesPerf
+      ) {
+        scoredList.push({ product: p, score: searchRes.score });
+      }
+    });
+
+    // If active search query, sort by relevance score descending so exact/best matches appear first
+    if (searchTerm.trim()) {
+      scoredList.sort((a, b) => b.score - a.score);
+    }
+
+    return scoredList.map((item) => item.product);
+  }, [
+    products,
+    searchTerm,
+    selectedCategory,
+    selectedSubcategory,
+    showLowStockOnly,
+    currentUser,
+    selectedSupplier,
+    priceRange,
+    productAge,
+    performanceFilter,
+    performanceMap,
+    checkProductSearchMatch,
+  ]);
+
+  // Critical UX Fix: Always reset pagination page to 1 whenever search query or filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, selectedCategory, selectedSubcategory, showLowStockOnly, selectedSupplier, priceRange, productAge, performanceFilter]);
+
+  // 1-Click Reset All Filters & Search
+  const handleResetAllSearchAndFilters = () => {
+    setSearchTerm('');
+    setSelectedCategory('All');
+    setSelectedSubcategory('All');
+    setShowLowStockOnly(false);
+    setSelectedSupplier('All');
+    setPriceRange('all');
+    setProductAge('all');
+    setPerformanceFilter('All');
+    setCurrentPage(1);
+  };
 
   // Grouped products for Grouped Hierarchy View mode
   const groupedProducts = React.useMemo(() => {
@@ -1222,9 +1396,10 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     setCollapsedCategories(allCollapsed);
   };
 
-  // Calculate Pagination Slices
-  const totalPages = itemsPerPage > 0 ? Math.ceil(filteredProducts.length / itemsPerPage) : 1;
-  const startIndex = (currentPage - 1) * itemsPerPage;
+  // Calculate Pagination Slices with safe clamping (prevents empty table bug when search narrows items)
+  const totalPages = itemsPerPage > 0 ? Math.max(1, Math.ceil(filteredProducts.length / itemsPerPage)) : 1;
+  const safeCurrentPage = Math.min(Math.max(1, currentPage), totalPages);
+  const startIndex = (safeCurrentPage - 1) * itemsPerPage;
   const paginatedProducts =
     itemsPerPage > 0 ? filteredProducts.slice(startIndex, startIndex + itemsPerPage) : filteredProducts;
 
@@ -2062,14 +2237,173 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
             <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
               {/* Search */}
               <div className="md:col-span-5 relative">
-                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                 <input
+                  ref={searchInputRef}
                   type="text"
-                  placeholder="Search by Name, SKU, Barcode, Description..."
+                  placeholder="Search by Name, SKU, Barcode, Size, Category... (Press '/')"
                   value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 text-slate-200 text-xs pl-9 pr-4 py-2 rounded-xl focus:outline-none focus:border-sky-500"
+                  onFocus={() => {
+                    setIsSearchFocused(true);
+                    if (searchTerm.trim()) setShowQuickSearchDropdown(true);
+                  }}
+                  onChange={(e) => {
+                    setSearchTerm(e.target.value);
+                    setShowQuickSearchDropdown(true);
+                  }}
+                  className="w-full bg-slate-950 border border-slate-800 text-slate-200 text-xs pl-9 pr-9 py-2 rounded-xl focus:outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500"
                 />
+                {searchTerm ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSearchTerm('');
+                      setShowQuickSearchDropdown(false);
+                      searchInputRef.current?.focus();
+                    }}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white p-1 rounded-full transition cursor-pointer"
+                    title="Clear search query"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                ) : (
+                  <span className="hidden sm:inline-block absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-mono text-slate-500 bg-slate-900 border border-slate-800 px-1.5 py-0.5 rounded pointer-events-none">
+                    /
+                  </span>
+                )}
+
+                {/* Instant Quick-Results Spotlight Dropdown */}
+                {showQuickSearchDropdown && searchTerm.trim().length >= 1 && (
+                  <div
+                    ref={searchDropdownRef}
+                    className="absolute top-full left-0 right-0 mt-2 bg-slate-900 border border-slate-700/80 rounded-2xl shadow-2xl z-50 overflow-hidden backdrop-blur-md"
+                  >
+                    <div className="p-2.5 bg-slate-950 border-b border-slate-800 flex items-center justify-between text-xs">
+                      <div className="flex items-center gap-1.5 font-bold text-slate-200">
+                        <Sparkles className="w-3.5 h-3.5 text-sky-400" />
+                        <span>Instant Search Results ({filteredProducts.length} items found)</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setShowQuickSearchDropdown(false)}
+                        className="text-[11px] text-slate-400 hover:text-white transition cursor-pointer"
+                      >
+                        Close (Esc)
+                      </button>
+                    </div>
+
+                    {filteredProducts.length === 0 ? (
+                      <div className="p-5 text-center text-xs text-slate-400 space-y-2">
+                        <p>No products matching "{searchTerm}" in current filters</p>
+                        {globalSearchMatches.length > 0 && selectedCategory !== 'All' && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedCategory('All');
+                              setSelectedSubcategory('All');
+                              setShowQuickSearchDropdown(false);
+                            }}
+                            className="text-sky-400 hover:text-sky-300 font-bold underline cursor-pointer"
+                          >
+                            Click to view {globalSearchMatches.length} matching items across all categories
+                          </button>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="max-h-72 overflow-y-auto divide-y divide-slate-800/60 p-1">
+                        {filteredProducts.slice(0, 6).map((p) => {
+                          const isOut = p.stockQuantity <= 0;
+                          const isLow = p.stockQuantity <= p.minStockAlert;
+
+                          return (
+                            <div
+                              key={p.id}
+                              className="p-2.5 hover:bg-slate-800/70 rounded-xl transition flex items-center justify-between gap-3 group cursor-pointer"
+                              onClick={() => {
+                                setShowQuickSearchDropdown(false);
+                                if (onViewProductHistory) {
+                                  onViewProductHistory(p);
+                                } else {
+                                  handleOpenEditModal(p);
+                                }
+                              }}
+                            >
+                              <div className="flex items-center gap-2.5 min-w-0">
+                                {p.imageUrl ? (
+                                  <img src={p.imageUrl} alt={p.name} className="w-9 h-9 rounded-lg object-cover bg-slate-950 shrink-0 border border-slate-800" />
+                                ) : (
+                                  <div className="w-9 h-9 rounded-lg bg-slate-950 border border-slate-800 flex items-center justify-center text-slate-500 shrink-0">
+                                    <Package className="w-4 h-4" />
+                                  </div>
+                                )}
+                                <div className="min-w-0">
+                                  <div className="font-bold text-slate-100 text-xs truncate">{p.name}</div>
+                                  <div className="flex items-center gap-2 text-[10px] text-slate-400 font-mono flex-wrap">
+                                    <span>SKU: {p.sku}</span>
+                                    <span>•</span>
+                                    <span className="text-sky-300">{p.category} {p.sizeCapacity ? `(${p.sizeCapacity})` : ''}</span>
+                                    <span>•</span>
+                                    <span>Barcode: {p.barcode}</span>
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="flex items-center gap-3 shrink-0">
+                                <div className="text-right">
+                                  <div className="font-mono font-bold text-xs text-sky-400">
+                                    KSh {p.sellingPrice.toLocaleString()}
+                                  </div>
+                                  <div className="text-[10px] font-mono">
+                                    {isOut ? (
+                                      <span className="text-rose-400 font-bold">0 units (Out)</span>
+                                    ) : isLow ? (
+                                      <span className="text-amber-400 font-bold">{p.stockQuantity} {p.unit} (Low)</span>
+                                    ) : (
+                                      <span className="text-emerald-400 font-bold">{p.stockQuantity} {p.unit}</span>
+                                    )}
+                                  </div>
+                                </div>
+
+                                <div className="flex items-center gap-1 opacity-90 group-hover:opacity-100" onClick={(e) => e.stopPropagation()}>
+                                  {onViewProductHistory && (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setShowQuickSearchDropdown(false);
+                                        onViewProductHistory(p);
+                                      }}
+                                      className="px-2 py-1 bg-slate-800 hover:bg-sky-600 hover:text-white text-slate-300 rounded-lg text-[10px] font-bold transition cursor-pointer"
+                                      title="Audit Item"
+                                    >
+                                      Audit
+                                    </button>
+                                  )}
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setShowQuickSearchDropdown(false);
+                                      handleOpenEditModal(p);
+                                    }}
+                                    className="px-2 py-1 bg-slate-800 hover:bg-amber-600 hover:text-white text-slate-300 rounded-lg text-[10px] font-bold transition cursor-pointer"
+                                    title="Edit Item"
+                                  >
+                                    Edit
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    {filteredProducts.length > 6 && (
+                      <div className="p-2 bg-slate-950 border-t border-slate-800 text-center text-[11px] text-slate-400">
+                        Showing top 6 of <strong>{filteredProducts.length}</strong> items. View all in catalog below.
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Category Dropdown */}
@@ -2311,6 +2645,160 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
             </div>
           </div>
 
+          {/* Cross-Category Search Match Alert Banner */}
+          {searchTerm.trim() !== '' && selectedCategory !== 'All' && (() => {
+            const otherMatchesCount = globalSearchMatches.filter((p) => p.category !== selectedCategory).length;
+            if (otherMatchesCount === 0) return null;
+            return (
+              <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs text-amber-200 shadow-sm animate-in fade-in duration-200">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
+                  <span>
+                    Found <strong>{otherMatchesCount}</strong> matching {otherMatchesCount === 1 ? 'item' : 'items'} in <strong>other categories</strong> outside "{selectedCategory}".
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedCategory('All');
+                    setSelectedSubcategory('All');
+                  }}
+                  className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black rounded-xl text-xs transition cursor-pointer shadow flex items-center gap-1.5 shrink-0"
+                >
+                  <FolderTree className="w-3.5 h-3.5" />
+                  <span>Search Across All Categories ({globalSearchMatches.length} total)</span>
+                </button>
+              </div>
+            );
+          })()}
+
+          {/* Active Search & Filters Pills Bar */}
+          {(searchTerm.trim() !== '' || selectedCategory !== 'All' || selectedSubcategory !== 'All' || showLowStockOnly || selectedSupplier !== 'All' || priceRange !== 'all' || productAge !== 'all' || performanceFilter !== 'All') && (
+            <div className="bg-slate-900/90 border border-slate-800 p-3 rounded-2xl flex flex-wrap items-center justify-between gap-2.5 text-xs shadow-sm">
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="text-[11px] font-bold text-slate-400 mr-1">Active Filters:</span>
+                {searchTerm.trim() !== '' && (
+                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-sky-950 text-sky-300 border border-sky-700/80 font-medium">
+                    <Search className="w-3 h-3 text-sky-400" />
+                    <span>"{searchTerm}"</span>
+                    <button
+                      type="button"
+                      onClick={() => setSearchTerm('')}
+                      className="hover:text-white p-0.5 cursor-pointer"
+                      title="Clear search term"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </span>
+                )}
+                {selectedCategory !== 'All' && (
+                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-800 text-slate-200 border border-slate-700">
+                    <span>Category: {selectedCategory}</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedCategory('All');
+                        setSelectedSubcategory('All');
+                      }}
+                      className="hover:text-white p-0.5 cursor-pointer"
+                      title="Clear category filter"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </span>
+                )}
+                {selectedSubcategory !== 'All' && (
+                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-800 text-slate-200 border border-slate-700">
+                    <span>Sub: {selectedSubcategory}</span>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedSubcategory('All')}
+                      className="hover:text-white p-0.5 cursor-pointer"
+                      title="Clear subcategory filter"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </span>
+                )}
+                {showLowStockOnly && (
+                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-amber-950/80 text-amber-300 border border-amber-700">
+                    <AlertTriangle className="w-3 h-3" />
+                    <span>Low Stock Only</span>
+                    <button
+                      type="button"
+                      onClick={() => setShowLowStockOnly(false)}
+                      className="hover:text-white p-0.5 cursor-pointer"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </span>
+                )}
+                {selectedSupplier !== 'All' && (
+                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-800 text-slate-200 border border-slate-700">
+                    <span>Supplier: {selectedSupplier}</span>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedSupplier('All')}
+                      className="hover:text-white p-0.5 cursor-pointer"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </span>
+                )}
+                {priceRange !== 'all' && (
+                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-800 text-slate-200 border border-slate-700">
+                    <span>Price: {priceRange}</span>
+                    <button
+                      type="button"
+                      onClick={() => setPriceRange('all')}
+                      className="hover:text-white p-0.5 cursor-pointer"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </span>
+                )}
+                {productAge !== 'all' && (
+                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-800 text-slate-200 border border-slate-700">
+                    <span>Age: {productAge}</span>
+                    <button
+                      type="button"
+                      onClick={() => setProductAge('all')}
+                      className="hover:text-white p-0.5 cursor-pointer"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </span>
+                )}
+                {performanceFilter !== 'All' && (
+                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-800 text-slate-200 border border-slate-700">
+                    <span>Tier: {performanceFilter}</span>
+                    <button
+                      type="button"
+                      onClick={() => setPerformanceFilter('All')}
+                      className="hover:text-white p-0.5 cursor-pointer"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </span>
+                )}
+              </div>
+
+              <div className="flex items-center gap-3 ml-auto">
+                <span className="text-[11px] text-slate-400">
+                  Found <strong className="text-white">{filteredProducts.length}</strong> of {products.length} products
+                </span>
+                <button
+                  type="button"
+                  onClick={handleResetAllSearchAndFilters}
+                  className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-sm border border-slate-700"
+                >
+                  <RotateCcw className="w-3.5 h-3.5 text-sky-400" />
+                  <span>Clear All</span>
+                </button>
+              </div>
+            </div>
+          )}
+
       {/* GROUPED CATEGORY & SUBCATEGORY HIERARCHY ACCORDIONS OR STANDARD TABLE */}
       {inventoryViewMode === 'grouped' ? (
         <div className="space-y-6">
@@ -2347,14 +2835,47 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           </div>
 
           {Object.keys(groupedProducts).length === 0 ? (
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-12 text-center text-slate-500 space-y-2">
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-12 text-center text-slate-400 space-y-4">
               <FolderTree className="w-12 h-12 mx-auto text-slate-600 mb-2" />
-              <p className="font-bold text-slate-300 text-sm">No items found matching current search filters</p>
-              <p className="text-xs">Try clearing search terms or selecting "All Categories".</p>
+              <div>
+                <p className="font-extrabold text-slate-200 text-base">
+                  {searchTerm.trim() ? `No items found matching "${searchTerm}"` : 'No items found matching current filters'}
+                </p>
+                <p className="text-xs text-slate-400 mt-1">
+                  Try checking spelling, or searching by SKU, barcode number, capacity/size, or supplier.
+                </p>
+              </div>
+
+              {globalSearchMatches.length > 0 && selectedCategory !== 'All' && (
+                <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl inline-flex flex-col sm:flex-row items-center gap-2 text-xs text-amber-200">
+                  <span>Found <strong>{globalSearchMatches.length}</strong> matching item(s) in other categories!</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedCategory('All');
+                      setSelectedSubcategory('All');
+                    }}
+                    className="px-3 py-1 bg-amber-500 text-slate-950 font-bold rounded-lg hover:bg-amber-400 transition cursor-pointer"
+                  >
+                    Show All Categories ({globalSearchMatches.length})
+                  </button>
+                </div>
+              )}
+
+              <div>
+                <button
+                  type="button"
+                  onClick={handleResetAllSearchAndFilters}
+                  className="px-4 py-2 bg-sky-600 hover:bg-sky-500 text-white rounded-xl text-xs font-bold transition inline-flex items-center gap-2 shadow-lg cursor-pointer"
+                >
+                  <RotateCcw className="w-4 h-4" />
+                  <span>Clear Search & Filters (Show All {products.length} Products)</span>
+                </button>
+              </div>
             </div>
           ) : (
             Object.entries(groupedProducts).map(([categoryName, subCategoryMap]) => {
-              const isCollapsed = collapsedCategories[categoryName];
+              const isCollapsed = searchTerm.trim() ? false : Boolean(collapsedCategories[categoryName]);
               const allCatProducts = Object.values(subCategoryMap).flat();
               const totalCatStock = allCatProducts.reduce((sum, p) => sum + p.stockQuantity, 0);
               const totalCatValue = allCatProducts.reduce((sum, p) => sum + p.sellingPrice * p.stockQuantity, 0);
@@ -2534,10 +3055,10 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                                           {p.barcode}
                                         </td>
                                         <td className="p-2.5 text-right font-mono text-slate-400">
-                                          KSh {p.costPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                                          KSh {p.costPrice % 1 === 0 ? Math.round(p.costPrice).toLocaleString() : p.costPrice.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
                                         </td>
                                         <td className="p-2.5 text-right font-mono font-bold text-sky-400">
-                                          KSh {p.sellingPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                                          KSh {p.sellingPrice % 1 === 0 ? Math.round(p.sellingPrice).toLocaleString() : p.sellingPrice.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
                                         </td>
                                         <td className="p-2.5 text-center font-mono font-bold text-[11px]">
                                           <span className={`px-2 py-0.5 rounded border text-[10px] ${marginInfo.badgeBg} ${marginInfo.badgeText} ${marginInfo.badgeBorder}`}>
@@ -2636,10 +3157,43 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
         /* Visual Product Cards Grid View */
         <div className="space-y-6">
           {paginatedProducts.length === 0 ? (
-            <div className="bg-slate-900 border border-slate-800 rounded-3xl p-12 text-center text-slate-500 space-y-2">
+            <div className="bg-slate-900 border border-slate-800 rounded-3xl p-12 text-center text-slate-400 space-y-4">
               <Package className="w-12 h-12 mx-auto text-slate-600 mb-2" />
-              <p className="font-bold text-slate-300 text-sm">No items found matching current filters</p>
-              <p className="text-xs">Try clearing search terms or selecting another category.</p>
+              <div>
+                <p className="font-extrabold text-slate-200 text-base">
+                  {searchTerm.trim() ? `No items found matching "${searchTerm}"` : 'No items found matching current filters'}
+                </p>
+                <p className="text-xs text-slate-400 mt-1">
+                  Try checking spelling, or searching by SKU, barcode, capacity/size, or supplier.
+                </p>
+              </div>
+
+              {globalSearchMatches.length > 0 && selectedCategory !== 'All' && (
+                <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl inline-flex flex-col sm:flex-row items-center gap-2 text-xs text-amber-200">
+                  <span>Found <strong>{globalSearchMatches.length}</strong> matching item(s) in other categories!</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedCategory('All');
+                      setSelectedSubcategory('All');
+                    }}
+                    className="px-3 py-1 bg-amber-500 text-slate-950 font-bold rounded-lg hover:bg-amber-400 transition cursor-pointer"
+                  >
+                    Show All Categories ({globalSearchMatches.length})
+                  </button>
+                </div>
+              )}
+
+              <div>
+                <button
+                  type="button"
+                  onClick={handleResetAllSearchAndFilters}
+                  className="px-4 py-2 bg-sky-600 hover:bg-sky-500 text-white rounded-xl text-xs font-bold transition inline-flex items-center gap-2 shadow-lg cursor-pointer"
+                >
+                  <RotateCcw className="w-4 h-4" />
+                  <span>Clear Search & Filters (Show All {products.length} Products)</span>
+                </button>
+              </div>
             </div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
@@ -2917,8 +3471,45 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
             <tbody className="divide-y divide-slate-800/60">
               {paginatedProducts.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="p-8 text-center text-slate-500">
-                    No products matching current search filters.
+                  <td colSpan={9} className="p-12 text-center text-slate-400">
+                    <div className="max-w-md mx-auto space-y-3">
+                      <Package className="w-10 h-10 mx-auto text-slate-600" />
+                      <div>
+                        <p className="font-bold text-slate-200 text-sm">
+                          {searchTerm.trim() ? `No items found matching "${searchTerm}"` : 'No products matching current search filters'}
+                        </p>
+                        <p className="text-xs text-slate-500 mt-1">
+                          Try searching with fewer words, or search by SKU, barcode, or size/capacity.
+                        </p>
+                      </div>
+
+                      {globalSearchMatches.length > 0 && selectedCategory !== 'All' && (
+                        <div className="p-2.5 bg-amber-500/10 border border-amber-500/30 rounded-xl text-xs text-amber-200">
+                          <span>Found <strong>{globalSearchMatches.length}</strong> matching item(s) in other categories!</span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedCategory('All');
+                              setSelectedSubcategory('All');
+                            }}
+                            className="ml-2 underline font-bold text-amber-300 hover:text-white cursor-pointer"
+                          >
+                            Switch to All Categories
+                          </button>
+                        </div>
+                      )}
+
+                      <div className="pt-1">
+                        <button
+                          type="button"
+                          onClick={handleResetAllSearchAndFilters}
+                          className="px-3.5 py-1.5 bg-sky-600 hover:bg-sky-500 text-white rounded-xl text-xs font-bold transition inline-flex items-center gap-2 shadow cursor-pointer"
+                        >
+                          <RotateCcw className="w-3.5 h-3.5" />
+                          <span>Clear Search & Filters (Show All {products.length})</span>
+                        </button>
+                      </div>
+                    </div>
                   </td>
                 </tr>
               ) : (
@@ -3031,12 +3622,12 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
 
                       {/* Cost Price */}
                       <td className="p-3.5 text-right font-mono font-medium text-slate-400">
-                        KSh {p.costPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                        KSh {p.costPrice % 1 === 0 ? Math.round(p.costPrice).toLocaleString() : p.costPrice.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
                       </td>
 
                       {/* Selling Price */}
                       <td className="p-3.5 text-right font-mono font-bold text-slate-100 text-sm">
-                        KSh {p.sellingPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                        KSh {p.sellingPrice % 1 === 0 ? Math.round(p.sellingPrice).toLocaleString() : p.sellingPrice.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
                       </td>
 
                       {/* Sales & Profit Tier Badge */}
@@ -3465,13 +4056,18 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                   <label className="block text-slate-300 font-semibold mb-1">Cost Price (KSh)</label>
                   <input
                     type="number"
-                    step="0.01"
-                    placeholder="0.00"
+                    step="1"
+                    placeholder="0"
                     value={
-                      editingProduct.costPrice === null || editingProduct.costPrice === undefined
+                      editingProduct.costPrice === null ||
+                      editingProduct.costPrice === undefined ||
+                      editingProduct.costPrice === 0 ||
+                      (editingProduct.costPrice as any) === '0' ||
+                      (editingProduct.costPrice as any) === ''
                         ? ''
                         : editingProduct.costPrice
                     }
+                    onFocus={(e) => e.target.select()}
                     onChange={(e) => {
                       let val = e.target.value;
                       if (val === '') {
@@ -3479,20 +4075,25 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                         return;
                       }
                       val = val.replace(/^0+(?=\d)/, '');
-                      const costNum = parseFloat(val) || 0;
+                      const costNum = parseFloat(val);
+                      const validCost = isNaN(costNum) ? ('' as any) : costNum;
                       const margin = parseFloat(String(editingProduct.profitMargin)) || 30;
-                      const newSelling = costNum > 0 ? Number((costNum * (1 + margin / 100)).toFixed(2)) : editingProduct.sellingPrice;
+                      const newSelling = typeof validCost === 'number' && validCost > 0
+                        ? Math.round(validCost * (1 + margin / 100))
+                        : editingProduct.sellingPrice;
                       setEditingProduct((prev) => (prev ? { ...prev, costPrice: val as any, sellingPrice: newSelling } : prev));
                     }}
                     onBlur={(e) => {
                       const val = String(e.target.value).trim();
-                      if (val === '') {
+                      if (val === '' || val === '0') {
                         setEditingProduct((prev) => (prev ? { ...prev, costPrice: '' as any } : prev));
                       } else {
                         const parsed = parseFloat(val);
-                        const validCost = isNaN(parsed) ? 0 : Math.max(0, parsed);
+                        const validCost = isNaN(parsed) || parsed === 0 ? ('' as any) : Math.max(0, parsed);
                         const margin = parseFloat(String(editingProduct.profitMargin)) || 30;
-                        const newSelling = validCost > 0 ? Number((validCost * (1 + margin / 100)).toFixed(2)) : editingProduct.sellingPrice;
+                        const newSelling = typeof validCost === 'number' && validCost > 0
+                          ? Math.round(validCost * (1 + margin / 100))
+                          : editingProduct.sellingPrice;
                         setEditingProduct((prev) =>
                           prev ? { ...prev, costPrice: validCost, sellingPrice: newSelling } : prev
                         );
@@ -3517,7 +4118,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                           type="button"
                           onClick={() => {
                             const cost = parseFloat(String(editingProduct.costPrice)) || 0;
-                            const newSelling = cost > 0 ? Number((cost * (1 + m / 100)).toFixed(2)) : (editingProduct.sellingPrice || 0);
+                            const newSelling = cost > 0 ? Math.round(cost * (1 + m / 100)) : (editingProduct.sellingPrice || 0);
                             setEditingProduct((prev) =>
                               prev ? { ...prev, profitMargin: m, sellingPrice: newSelling } : prev
                             );
@@ -3538,18 +4139,23 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                       <label className="text-[11px] font-semibold text-slate-400 block mb-1">Margin Percentage (%)</label>
                       <input
                         type="number"
-                        step="0.1"
+                        step="1"
                         placeholder="30"
                         value={
-                          editingProduct.profitMargin === null || editingProduct.profitMargin === undefined
+                          editingProduct.profitMargin === null ||
+                          editingProduct.profitMargin === undefined ||
+                          editingProduct.profitMargin === 0 ||
+                          (editingProduct.profitMargin as any) === '0' ||
+                          (editingProduct.profitMargin as any) === ''
                             ? ''
                             : editingProduct.profitMargin
                         }
+                        onFocus={(e) => e.target.select()}
                         onChange={(e) => {
                           const val = e.target.value;
                           const marginNum = val === '' ? 0 : parseFloat(val);
                           const cost = parseFloat(String(editingProduct.costPrice)) || 0;
-                          const newSelling = cost > 0 ? Number((cost * (1 + (isNaN(marginNum) ? 0 : marginNum) / 100)).toFixed(2)) : (editingProduct.sellingPrice || 0);
+                          const newSelling = cost > 0 ? Math.round(cost * (1 + (isNaN(marginNum) ? 0 : marginNum) / 100)) : (editingProduct.sellingPrice || 0);
                           setEditingProduct((prev) =>
                             prev ? { ...prev, profitMargin: val === '' ? ('' as any) : marginNum, sellingPrice: newSelling } : prev
                           );
@@ -3572,13 +4178,18 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                   <label className="block text-slate-300 font-semibold mb-1">Selling Price (KSh)</label>
                   <input
                     type="number"
-                    step="0.01"
-                    placeholder="0.00"
+                    step="1"
+                    placeholder="0"
                     value={
-                      editingProduct.sellingPrice === null || editingProduct.sellingPrice === undefined
+                      editingProduct.sellingPrice === null ||
+                      editingProduct.sellingPrice === undefined ||
+                      editingProduct.sellingPrice === 0 ||
+                      (editingProduct.sellingPrice as any) === '0' ||
+                      (editingProduct.sellingPrice as any) === ''
                         ? ''
                         : editingProduct.sellingPrice
                     }
+                    onFocus={(e) => e.target.select()}
                     onChange={(e) => {
                       let val = e.target.value;
                       if (val === '') {
@@ -3588,18 +4199,18 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                       val = val.replace(/^0+(?=\d)/, '');
                       const sellingNum = parseFloat(val) || 0;
                       const cost = parseFloat(String(editingProduct.costPrice)) || 0;
-                      const newMargin = cost > 0 ? Number((((sellingNum - cost) / cost) * 100).toFixed(1)) : (editingProduct.profitMargin || 30);
+                      const newMargin = cost > 0 ? Math.round(((sellingNum - cost) / cost) * 100) : (editingProduct.profitMargin || 30);
                       setEditingProduct((prev) => (prev ? { ...prev, sellingPrice: val as any, profitMargin: newMargin } : prev));
                     }}
                     onBlur={(e) => {
                       const val = String(e.target.value).trim();
-                      if (val === '') {
+                      if (val === '' || val === '0') {
                         setEditingProduct((prev) => (prev ? { ...prev, sellingPrice: '' as any } : prev));
                       } else {
                         const parsed = parseFloat(val);
-                        const validSelling = isNaN(parsed) ? 0 : Math.max(0, parsed);
+                        const validSelling = isNaN(parsed) || parsed === 0 ? ('' as any) : Math.max(0, parsed);
                         const cost = parseFloat(String(editingProduct.costPrice)) || 0;
-                        const newMargin = cost > 0 ? Number((((validSelling - cost) / cost) * 100).toFixed(1)) : (editingProduct.profitMargin || 30);
+                        const newMargin = cost > 0 && typeof validSelling === 'number' ? Math.round(((validSelling - cost) / cost) * 100) : (editingProduct.profitMargin || 30);
                         setEditingProduct((prev) =>
                           prev ? { ...prev, sellingPrice: validSelling, profitMargin: newMargin } : prev
                         );
@@ -3619,13 +4230,19 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                   </div>
                   <input
                     type="number"
+                    step="1"
                     placeholder="0"
                     disabled={!hasWorkerPermission(currentUser, 'canCountUpdateStockBalance')}
                     value={
-                      editingProduct.stockQuantity === null || editingProduct.stockQuantity === undefined
+                      editingProduct.stockQuantity === null ||
+                      editingProduct.stockQuantity === undefined ||
+                      editingProduct.stockQuantity === 0 ||
+                      (editingProduct.stockQuantity as any) === '0' ||
+                      (editingProduct.stockQuantity as any) === ''
                         ? ''
                         : editingProduct.stockQuantity
                     }
+                    onFocus={(e) => e.target.select()}
                     onChange={(e) => {
                       let val = e.target.value;
                       if (val === '') {
@@ -3637,12 +4254,12 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                     }}
                     onBlur={(e) => {
                       const val = String(e.target.value).trim();
-                      if (val === '') {
+                      if (val === '' || val === '0') {
                         setEditingProduct((prev) => (prev ? { ...prev, stockQuantity: '' as any } : prev));
                       } else {
                         const parsed = parseInt(val, 10);
                         setEditingProduct((prev) =>
-                          prev ? { ...prev, stockQuantity: isNaN(parsed) ? ('' as any) : parsed } : prev
+                          prev ? { ...prev, stockQuantity: isNaN(parsed) || parsed === 0 ? ('' as any) : parsed } : prev
                         );
                       }
                     }}
@@ -3655,12 +4272,18 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                   <label className="block text-slate-300 font-semibold mb-1">Min Stock Alert Limit</label>
                   <input
                     type="number"
+                    step="1"
                     placeholder="0"
                     value={
-                      editingProduct.minStockAlert === null || editingProduct.minStockAlert === undefined
+                      editingProduct.minStockAlert === null ||
+                      editingProduct.minStockAlert === undefined ||
+                      editingProduct.minStockAlert === 0 ||
+                      (editingProduct.minStockAlert as any) === '0' ||
+                      (editingProduct.minStockAlert as any) === ''
                         ? ''
                         : editingProduct.minStockAlert
                     }
+                    onFocus={(e) => e.target.select()}
                     onChange={(e) => {
                       let val = e.target.value;
                       if (val === '') {
@@ -3672,12 +4295,12 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                     }}
                     onBlur={(e) => {
                       const val = String(e.target.value).trim();
-                      if (val === '') {
+                      if (val === '' || val === '0') {
                         setEditingProduct((prev) => (prev ? { ...prev, minStockAlert: '' as any } : prev));
                       } else {
                         const parsed = parseInt(val, 10);
                         setEditingProduct((prev) =>
-                          prev ? { ...prev, minStockAlert: isNaN(parsed) ? ('' as any) : Math.max(0, parsed) } : prev
+                          prev ? { ...prev, minStockAlert: isNaN(parsed) || parsed === 0 ? ('' as any) : Math.max(0, parsed) } : prev
                         );
                       }
                     }}
@@ -5126,7 +5749,8 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                   <input
                     type="number"
                     min="1"
-                    value={quickRestockAddAmount}
+                    value={quickRestockAddAmount === '0' || quickRestockAddAmount === '' ? '' : quickRestockAddAmount}
+                    onFocus={(e) => e.target.select()}
                     onChange={(e) => setQuickRestockAddAmount(e.target.value)}
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-8 pr-3 py-2.5 text-sm text-white font-mono focus:outline-none focus:border-emerald-500"
                     placeholder="Enter quantity..."

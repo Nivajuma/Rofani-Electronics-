@@ -287,6 +287,7 @@ export const DenominationReconciliationView: React.FC<DenominationReconciliation
                         min="0"
                         placeholder="0"
                         value={qty === 0 ? '' : qty}
+                        onFocus={(e) => e.target.select()}
                         onChange={(e) => handleCountChange(denom.value, e.target.value)}
                         className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-1.5 text-center text-slate-100 font-mono font-bold text-sm focus:outline-none focus:border-emerald-500"
                       />
@@ -339,6 +340,7 @@ export const DenominationReconciliationView: React.FC<DenominationReconciliation
                         min="0"
                         placeholder="0"
                         value={qty === 0 ? '' : qty}
+                        onFocus={(e) => e.target.select()}
                         onChange={(e) => handleCountChange(denom.value, e.target.value)}
                         className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-1.5 text-center text-slate-100 font-mono font-bold text-sm focus:outline-none focus:border-amber-500"
                       />

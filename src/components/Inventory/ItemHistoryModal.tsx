@@ -307,8 +307,9 @@ export const ItemHistoryModal: React.FC<ItemHistoryModalProps> = ({
                     type="number"
                     min="1"
                     required
-                    placeholder="e.g. 25"
-                    value={quantityAdded}
+                    placeholder="0"
+                    value={quantityAdded === '0' ? '' : quantityAdded}
+                    onFocus={(e) => e.target.select()}
                     onChange={(e) => setQuantityAdded(e.target.value.replace(/^0+(?=\d)/, ''))}
                     className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-slate-100 font-mono text-sm focus:outline-none"
                   />
@@ -318,10 +319,11 @@ export const ItemHistoryModal: React.FC<ItemHistoryModalProps> = ({
                   <label className="block text-slate-400 mb-1">Unit Cost Price (KSh) *</label>
                   <input
                     type="number"
-                    step="0.01"
+                    step="1"
                     required
-                    placeholder="e.g. 2800"
-                    value={unitCost}
+                    placeholder="0"
+                    value={unitCost === '0' ? '' : unitCost}
+                    onFocus={(e) => e.target.select()}
                     onChange={(e) => setUnitCost(e.target.value.replace(/^0+(?=\d)/, ''))}
                     className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-slate-100 font-mono text-sm focus:outline-none"
                   />

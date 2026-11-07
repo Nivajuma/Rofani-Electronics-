@@ -455,7 +455,8 @@ export const FloatingToolWidget: React.FC<FloatingToolWidgetProps> = ({ onNaviga
                       <input
                         type="number"
                         placeholder="Cash tendered (KSh)"
-                        value={calcTotalPaid}
+                        value={calcTotalPaid === '0' ? '' : calcTotalPaid}
+                        onFocus={(e) => e.target.select()}
                         onChange={(e) => setCalcTotalPaid(e.target.value)}
                         className="bg-slate-950 border border-slate-800 text-slate-200 px-3 py-1.5 rounded-lg w-full text-xs focus:outline-none focus:border-sky-500"
                       />
@@ -483,7 +484,9 @@ export const FloatingToolWidget: React.FC<FloatingToolWidgetProps> = ({ onNaviga
                       <label className="text-xs text-slate-400 block mb-1">Amount to Convert</label>
                       <input
                         type="number"
-                        value={currAmount}
+                        placeholder="0"
+                        value={currAmount === '0' ? '' : currAmount}
+                        onFocus={(e) => e.target.select()}
                         onChange={(e) => setCurrAmount(e.target.value)}
                         className="w-full bg-slate-900 border border-slate-700 text-white font-mono text-base px-3 py-2 rounded-lg focus:outline-none focus:border-sky-500"
                       />
@@ -563,7 +566,9 @@ export const FloatingToolWidget: React.FC<FloatingToolWidgetProps> = ({ onNaviga
                       <label className="text-xs text-slate-400 block mb-1">Value</label>
                       <input
                         type="number"
-                        value={unitVal}
+                        placeholder="0"
+                        value={unitVal === '0' ? '' : unitVal}
+                        onFocus={(e) => e.target.select()}
                         onChange={(e) => setUnitVal(e.target.value)}
                         className="w-full bg-slate-900 border border-slate-700 text-white font-mono text-base px-3 py-2 rounded-lg focus:outline-none focus:border-sky-500"
                       />

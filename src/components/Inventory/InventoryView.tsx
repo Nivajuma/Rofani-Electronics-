@@ -459,11 +459,29 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   const [isDragOverPhoto, setIsDragOverPhoto] = useState<boolean>(false);
   const [previewImage, setPreviewImage] = useState<{ url: string; title: string } | null>(null);
 
+  // Helper: Clean client-side product name from file name or retail context
+  const cleanClientFileName = (fileName?: string, hintCategory: string = 'Electronics'): string => {
+    if (!fileName) return `New ${hintCategory} Product`;
+    let raw = fileName.trim().replace(/\.[a-zA-Z0-9]{2,5}$/i, '');
+    raw = raw.replace(/^(Camera_Product|Camera_Snap|CameraSnap)[_\-\s\d]*/i, '');
+    raw = raw.replace(/^(IMG|PXL|PHOTO|Screenshot|PIC|CAM|WP|DSC|DCIM)[_\-\s]+(\d+)*/i, '');
+    raw = raw.replace(/^(IMG|PXL|PHOTO|Screenshot|PIC|CAM|WP|DSC|DCIM)(\d{4,})/i, '');
+    const clean = raw.replace(/[_\-+.]+/g, ' ').replace(/\s+/g, ' ').trim();
+    if (!clean || clean.length < 3 || /^\d+$/.test(clean)) {
+      return `New ${hintCategory} Product`;
+    }
+    return clean
+      .split(' ')
+      .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+      .join(' ');
+  };
+
   // Core Requirement 2: Local Staged Draft Items from Camera/Gallery AI Scans (0 Quota Waste)
   const [draftItems, setDraftItems] = useState<Product[]>(() =>
     safeGetJSON<Product[]>('retail_pos_draft_items', [])
   );
   const [isCommittingDrafts, setIsCommittingDrafts] = useState(false);
+  const [scannedReviewItem, setScannedReviewItem] = useState<Product | null>(null);
 
   useEffect(() => {
     safeSetJSON('retail_pos_draft_items', draftItems);
@@ -473,7 +491,22 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     if (draftItems.length === 0) return;
     setIsCommittingDrafts(true);
     try {
-      const itemsToCommit = [...draftItems];
+      const itemsToCommit = draftItems.map((item) => {
+        let cleanName = (item.name || '').trim();
+        if (!cleanName || /^scanned item$/i.test(cleanName)) {
+          cleanName = `New ${item.category || 'Retail'} Product #${(item.sku || '').slice(-4) || Math.floor(1000 + Math.random() * 9000)}`;
+        }
+        let cleanDesc = (item.description || '').trim();
+        if (!cleanDesc || /^product photo captured/i.test(cleanDesc)) {
+          cleanDesc = `${cleanName} (${item.category || 'Store Item'}). Ready for sale.`;
+        }
+        return {
+          ...item,
+          name: cleanName,
+          description: cleanDesc,
+        };
+      });
+
       if (onBatchImportProducts) {
         onBatchImportProducts(itemsToCommit, false);
       } else {
@@ -481,6 +514,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
         itemsToCommit.forEach((p) => onSaveProduct(p));
       }
       setDraftItems([]);
+      setScannedReviewItem(null);
       setAutoAddSuccessToast(
         `⚡ Successfully saved & synced ${itemsToCommit.length} staged draft item(s) to inventory via single atomic writeBatch! 0 quota wasted.`
       );
@@ -496,6 +530,9 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
 
   const handleRemoveDraftItem = (draftId: string) => {
     setDraftItems((prev) => prev.filter((d) => d.id !== draftId));
+    if (scannedReviewItem?.id === draftId) {
+      setScannedReviewItem(null);
+    }
   };
 
   const duplicateGroups = detectDuplicateProducts(products);
@@ -752,7 +789,8 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
         });
 
         // If user took camera snap inside the Quick AI Scan modal or add flow, run identification
-        handleAiIdentifyProduct(dataUrl);
+        const snapLabel = `Camera_Product_${Date.now()}`;
+        handleAiIdentifyProduct(dataUrl, null, false, snapLabel);
       }
     }
   };
@@ -766,13 +804,19 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   const handleAiIdentifyProduct = async (
     imageDataUrl: string,
     targetProduct?: Partial<Product> | null,
-    isManualInModal: boolean = false
+    isManualInModal: boolean = false,
+    sourceFileName?: string
   ) => {
     if (!imageDataUrl) return;
     setIsAiIdentifying(true);
     setAiIdentifyResult(null);
 
     try {
+      const activeSupplier = suppliers.find((s) => s.id === selectedScanSupplierId) || suppliers[0];
+      const targetSupplierId = isManualInModal && targetProduct?.supplierId ? targetProduct.supplierId : (activeSupplier?.id || '');
+      const targetSupplierName = isManualInModal && targetProduct?.supplierName ? targetProduct.supplierName : (activeSupplier?.name || 'Direct Wholesale');
+      const fallbackName = cleanClientFileName(sourceFileName, categories[0]?.name || 'Electronics');
+
       // Core Requirement 1: Local Cache Matching
       // Send existing product catalog from local React state/IndexedDB as context (ZERO Firestore reads)
       const response = await fetch('/api/ai/identify-product', {
@@ -780,6 +824,8 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           imageBase64: imageDataUrl,
+          fileName: sourceFileName || '',
+          hintCategory: categories[0]?.name || 'Electronics',
           existingProducts: products.map((p) => ({
             id: p.id,
             name: p.name,
@@ -800,21 +846,26 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
       }
 
       const current = targetProduct || editingProduct;
-      const itemName = data?.name && data.name !== 'Scanned Item' ? data.name : (data?.matchedProductName || current?.name || 'Scanned Item');
+      let itemName = data?.name && !/^scanned item$/i.test(data.name.trim()) 
+        ? data.name.trim() 
+        : (data?.matchedProductName || current?.name || fallbackName);
+      
+      if (!itemName || /^scanned item$/i.test(itemName)) {
+        itemName = fallbackName;
+      }
+
       const itemCategory = data?.category || categories[0]?.name || 'Electronics';
       const itemSubcategory = data?.subcategory || categories[0]?.subcategories?.[0] || 'General';
-      const itemPrice = data?.suggestedPriceKSh || 1200;
-      const itemCost = data?.suggestedCostKSh || 800;
-      const itemDescription = data?.description || 'Product photo captured from camera.';
-      const itemSku = data?.suggestedSku || `SKU-${Math.floor(1000 + Math.random() * 9000)}`;
-
-      const activeSupplier = suppliers.find((s) => s.id === selectedScanSupplierId) || suppliers[0];
-      const targetSupplierId = isManualInModal && current?.supplierId ? current.supplierId : (activeSupplier?.id || '');
-      const targetSupplierName = isManualInModal && current?.supplierName ? current.supplierName : (activeSupplier?.name || 'Direct Wholesale');
+      const itemPrice = data?.suggestedPriceKSh || (itemCategory === 'Phones & Accessories' ? 1800 : itemCategory === 'Clothes (Men, Women & Kids Wear)' ? 1600 : 1200);
+      const itemCost = data?.suggestedCostKSh || Math.round(itemPrice * 0.7);
+      const itemDescription = data?.description && !/^product photo captured/i.test(data.description)
+        ? data.description
+        : `${itemName} (${itemCategory} - ${itemSubcategory}). Captured from product photo. Ready for stock entry.`;
+      const itemSku = data?.suggestedSku || `ROF-${Math.floor(1000 + Math.random() * 9000)}`;
 
       if (showAiScanModal && !isManualInModal && !showModal) {
         // Core Requirement 2: Batched / Draft Item Creation
-        // Save new item to local draft state (draftItems) - Do NOT call setDoc/addDoc directly to Firestore on every photo scan!
+        // Save new item to local draft state (draftItems) and set as active review item
         const stagedDraftItem: Product = {
           id: current?.id && !current.id.startsWith('prod-') ? current.id : `prod-draft-${Date.now()}-${Math.floor(100 + Math.random() * 900)}`,
           name: itemName,
@@ -837,9 +888,10 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
         };
 
         setDraftItems((prev) => [stagedDraftItem, ...prev]);
+        setScannedReviewItem(stagedDraftItem);
         setEditingProduct(null);
         setAutoAddSuccessToast(
-          `📦 Staged in local draft: "${stagedDraftItem.name}" (${stagedDraftItem.category}) @ KSh ${stagedDraftItem.sellingPrice.toLocaleString()}. Click "Save & Sync Items" to commit via single batch write.`
+          `✨ Identified: "${stagedDraftItem.name}" (${stagedDraftItem.category}) @ KSh ${stagedDraftItem.sellingPrice.toLocaleString()}. Review name & details below or save.`
         );
         setTimeout(() => setAutoAddSuccessToast(null), 8000);
       } else {
@@ -867,15 +919,15 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
 
           return {
             ...base,
-            name: base.name ? base.name : itemName,
-            category: base.category && base.category !== 'General' ? base.category : itemCategory,
-            subcategory: base.subcategory && base.subcategory !== 'General' ? base.subcategory : itemSubcategory,
-            sellingPrice: base.sellingPrice || itemPrice,
-            costPrice: base.costPrice || itemCost,
-            description: base.description || itemDescription,
-            sku: base.sku || itemSku,
-            supplierId: base.supplierId || targetSupplierId,
-            supplierName: base.supplierName || targetSupplierName,
+            name: itemName,
+            category: itemCategory,
+            subcategory: itemSubcategory,
+            sellingPrice: itemPrice,
+            costPrice: itemCost,
+            description: itemDescription,
+            sku: itemSku,
+            supplierId: targetSupplierId,
+            supplierName: targetSupplierName,
             imageUrl: imageDataUrl,
           };
         });
@@ -888,31 +940,38 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
       const activeSupplier = suppliers.find((s) => s.id === selectedScanSupplierId) || suppliers[0];
       const targetSupplierId = activeSupplier?.id || '';
       const targetSupplierName = activeSupplier?.name || 'Direct Wholesale';
-      setEditingProduct((prev) => {
-        const base = prev || {
-          id: `prod-${Date.now()}`,
-          name: 'Scanned Item',
-          sku: `SKU-${Math.floor(1000 + Math.random() * 9000)}`,
-          barcode: generateAutoBarcode(),
-          category: categories[0]?.name || 'Electronics',
-          subcategory: categories[0]?.subcategories[0] || 'General',
-          sizeCapacity: '',
-          costPrice: 800,
-          sellingPrice: 1200,
-          stockQuantity: 10,
-          minStockAlert: 5,
-          unit: 'pcs',
-          supplierId: targetSupplierId,
-          supplierName: targetSupplierName,
-          description: 'Product photo attached. Please verify and confirm specifications.',
-          createdAt: new Date().toISOString().slice(0, 10),
-          updatedAt: new Date().toISOString().slice(0, 10),
-        };
-        return { ...base, imageUrl: imageDataUrl };
-      });
-      setShowModal(true);
-      setShowAiScanModal(false);
-      setAiIdentifyResult('Photo attached: "Scanned Item". Please verify and confirm details.');
+      const fallbackName = cleanClientFileName(sourceFileName, categories[0]?.name || 'Electronics');
+      
+      const safeProduct: Product = {
+        id: `prod-${Date.now()}`,
+        name: fallbackName,
+        sku: `ROF-${Math.floor(1000 + Math.random() * 9000)}`,
+        barcode: generateAutoBarcode(),
+        category: categories[0]?.name || 'Electronics',
+        subcategory: categories[0]?.subcategories?.[0] || 'General',
+        sizeCapacity: '',
+        costPrice: 800,
+        sellingPrice: 1200,
+        stockQuantity: 10,
+        minStockAlert: 5,
+        unit: 'pcs',
+        supplierId: targetSupplierId,
+        supplierName: targetSupplierName,
+        description: `${fallbackName}. Product photo attached. Please verify and confirm specifications.`,
+        imageUrl: imageDataUrl,
+        createdAt: new Date().toISOString().slice(0, 10),
+        updatedAt: new Date().toISOString().slice(0, 10),
+      };
+
+      if (showAiScanModal && !isManualInModal && !showModal) {
+        setDraftItems((prev) => [safeProduct, ...prev]);
+        setScannedReviewItem(safeProduct);
+      } else {
+        setEditingProduct(safeProduct);
+        setShowModal(true);
+        setShowAiScanModal(false);
+      }
+      setAiIdentifyResult(`Photo attached: "${fallbackName}". Please verify and confirm details.`);
     } finally {
       setIsAiIdentifying(false);
     }
@@ -945,12 +1004,14 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
         throw new Error('Image could not be compressed');
       }
 
+      const initialTitle = cleanClientFileName(file.name, categories[0]?.name || 'Electronics');
+
       // 2. Set the compressed image preview
       setEditingProduct((prev) => {
         const base = prev || {
           id: `prod-${Date.now()}`,
-          name: '',
-          sku: `SKU-${Math.floor(1000 + Math.random() * 9000)}`,
+          name: initialTitle,
+          sku: `ROF-${Math.floor(1000 + Math.random() * 9000)}`,
           barcode: generateAutoBarcode(),
           category: categories[0]?.name || 'Electronics',
           subcategory: categories[0]?.subcategories[0] || 'General',
@@ -966,14 +1027,14 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           createdAt: new Date().toISOString().slice(0, 10),
           updatedAt: new Date().toISOString().slice(0, 10),
         };
-        return { ...base, imageUrl: compressedDataUrl };
+        return { ...base, name: base.name || initialTitle, imageUrl: compressedDataUrl };
       });
 
       setIsUploadingPhoto(false);
 
-      // 3. Run AI identification with the lightweight photo
+      // 3. Run AI identification with the photo and pass the real file name
       if (showAiScanModal || !showModal) {
-        handleAiIdentifyProduct(compressedDataUrl);
+        handleAiIdentifyProduct(compressedDataUrl, null, false, file.name);
       }
     } catch (err) {
       console.error('Error optimizing image file:', err);
@@ -1020,6 +1081,8 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             imageBase64: compressedDataUrl,
+            fileName: file.name,
+            hintCategory: categories[0]?.name || 'Electronics',
             existingProducts: products.map((p) => ({
               id: p.id,
               name: p.name,
@@ -1034,33 +1097,53 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           }),
         });
 
-        if (response.ok) {
-          const data = await response.json();
-          const activeSupplier = suppliers.find((s) => s.id === selectedScanSupplierId) || suppliers[0];
-          const autoProduct: Product = {
-            id: `prod-draft-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-            name: data?.name && data.name !== 'Scanned Item' ? data.name : (data?.matchedProductName || 'Scanned Item'),
-            sku: data?.suggestedSku || `SKU-${Math.floor(1000 + Math.random() * 9000)}`,
-            barcode: generateAutoBarcode(),
-            category: data?.category || categories[0]?.name || 'Electronics',
-            subcategory: data?.subcategory || categories[0]?.subcategories?.[0] || 'General',
-            sizeCapacity: '',
-            description: data?.description || 'Auto-identified from mobile photo gallery.',
-            costPrice: data?.suggestedCostKSh || 1000,
-            sellingPrice: data?.suggestedPriceKSh || 1500,
-            stockQuantity: 10,
-            minStockAlert: 5,
-            unit: 'pcs',
-            supplierId: activeSupplier?.id || '',
-            supplierName: activeSupplier?.name || 'Direct Wholesale',
-            imageUrl: compressedDataUrl,
-            createdAt: new Date().toISOString().slice(0, 10),
-            updatedAt: new Date().toISOString().slice(0, 10),
-          };
+        const activeSupplier = suppliers.find((s) => s.id === selectedScanSupplierId) || suppliers[0];
+        const fallbackName = cleanClientFileName(file.name, categories[0]?.name || 'Electronics');
 
-          // Core Requirement 2: Save to local draft state - DO NOT call setDoc directly to Firestore!
-          newBatchDrafts.push(autoProduct);
+        let data: any = null;
+        if (response.ok) {
+          data = await response.json();
         }
+
+        let finalName = data?.name && !/^scanned item$/i.test(data.name.trim()) 
+          ? data.name.trim() 
+          : (data?.matchedProductName || fallbackName);
+
+        if (!finalName || /^scanned item$/i.test(finalName)) {
+          finalName = fallbackName;
+        }
+
+        const autoCategory = data?.category || categories[0]?.name || 'Electronics';
+        const autoSubcategory = data?.subcategory || categories[0]?.subcategories?.[0] || 'General';
+        const autoPrice = data?.suggestedPriceKSh || (autoCategory === 'Phones & Accessories' ? 1800 : autoCategory === 'Clothes (Men, Women & Kids Wear)' ? 1600 : 1200);
+        const autoCost = data?.suggestedCostKSh || Math.round(autoPrice * 0.7);
+        const autoDesc = data?.description && !/^product photo captured/i.test(data.description)
+          ? data.description
+          : `${finalName} (${autoCategory} - ${autoSubcategory}). Auto-identified from phone photo gallery.`;
+
+        const autoProduct: Product = {
+          id: `prod-draft-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+          name: finalName,
+          sku: data?.suggestedSku || `ROF-${Math.floor(1000 + Math.random() * 9000)}`,
+          barcode: generateAutoBarcode(),
+          category: autoCategory,
+          subcategory: autoSubcategory,
+          sizeCapacity: '',
+          description: autoDesc,
+          costPrice: autoCost,
+          sellingPrice: autoPrice,
+          stockQuantity: 10,
+          minStockAlert: 5,
+          unit: 'pcs',
+          supplierId: activeSupplier?.id || '',
+          supplierName: activeSupplier?.name || 'Direct Wholesale',
+          imageUrl: compressedDataUrl,
+          createdAt: new Date().toISOString().slice(0, 10),
+          updatedAt: new Date().toISOString().slice(0, 10),
+        };
+
+        // Core Requirement 2: Save to local draft state - DO NOT call setDoc directly to Firestore!
+        newBatchDrafts.push(autoProduct);
       } catch (err) {
         console.error('Error processing batch gallery file:', file.name, err);
       }
@@ -1540,8 +1623,20 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
       finalSupplierName = suppliers[0].name;
     }
 
+    const cleanProdName = (editingProduct.name || '').trim();
+    const finalProdName = (!cleanProdName || /^scanned\s*item$/i.test(cleanProdName) || /^unknown\s*product$/i.test(cleanProdName))
+      ? `${finalCat} Item #${editingProduct.sku?.slice(-4) || '101'}`
+      : cleanProdName;
+
+    const cleanProdDesc = (editingProduct.description || '').trim();
+    const finalProdDesc = (!cleanProdDesc || cleanProdDesc.toLowerCase() === finalProdName.toLowerCase())
+      ? `${finalProdName} (${finalCat} - ${finalSub}). Saved to inventory.`
+      : cleanProdDesc;
+
     const prodToSave: Product = {
       ...(editingProduct as Product),
+      name: finalProdName,
+      description: finalProdDesc,
       category: finalCat,
       subcategory: finalSub,
       supplierId: finalSupplierId,
@@ -1551,6 +1646,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
       profitMargin: parseNum(editingProduct.profitMargin, 30),
       stockQuantity: parseIntNum(editingProduct.stockQuantity, 0),
       minStockAlert: parseIntNum(editingProduct.minStockAlert, 0),
+      imageUrl: editingProduct.imageUrl || '',
     };
 
     onSaveProduct(prodToSave);
@@ -1866,39 +1962,82 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
             {draftItems.map((item, idx) => (
               <div
                 key={item.id || idx}
-                className="bg-slate-900/90 border border-slate-800 hover:border-slate-700 rounded-xl p-3 flex items-center gap-3 relative group shadow-sm"
+                className="bg-slate-900/90 border border-slate-800 hover:border-slate-700 rounded-xl p-3 flex items-start gap-3 relative group shadow-sm"
               >
-                <div className="w-12 h-12 rounded-lg bg-slate-950 border border-slate-800 overflow-hidden shrink-0 flex items-center justify-center">
+                <div 
+                  onClick={() => {
+                    if (item.imageUrl) {
+                      setPreviewImage({ url: item.imageUrl, title: item.name });
+                    }
+                  }}
+                  className="w-14 h-14 rounded-lg bg-slate-950 border border-slate-800 overflow-hidden shrink-0 flex items-center justify-center cursor-pointer hover:opacity-80 transition"
+                  title="Click to view photo"
+                >
                   {item.imageUrl ? (
                     <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover" />
                   ) : (
                     <Package className="w-5 h-5 text-slate-600" />
                   )}
                 </div>
-                <div className="flex-1 min-w-0">
-                  <h4 className="text-xs font-bold text-slate-100 truncate" title={item.name}>
-                    {item.name}
-                  </h4>
-                  <div className="text-[10px] text-slate-400 flex items-center gap-1.5 mt-0.5">
+                <div className="flex-1 min-w-0 space-y-1">
+                  <div>
+                    <input
+                      type="text"
+                      value={item.name}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setDraftItems((prev) => prev.map((d) => (d.id === item.id ? { ...d, name: val } : d)));
+                      }}
+                      placeholder="Product / item name..."
+                      className="w-full bg-slate-950 border border-slate-700 focus:border-emerald-500 rounded-lg px-2 py-1 text-xs font-bold text-slate-100 focus:outline-none"
+                      title="Click to edit item name before syncing"
+                    />
+                  </div>
+                  <div className="flex items-center gap-1.5 flex-wrap text-[10px]">
                     <span className="bg-slate-800 px-1.5 py-0.5 rounded text-sky-300 font-mono">
                       {item.category}
                     </span>
-                    <span className="font-extrabold text-emerald-400 font-mono">
-                      KSh {item.sellingPrice.toLocaleString()}
-                    </span>
+                    <div className="flex items-center gap-1">
+                      <span className="text-slate-400 font-mono">KSh</span>
+                      <input
+                        type="number"
+                        value={item.sellingPrice || ''}
+                        onChange={(e) => {
+                          const val = parseFloat(e.target.value) || 0;
+                          setDraftItems((prev) => prev.map((d) => (d.id === item.id ? { ...d, sellingPrice: val } : d)));
+                        }}
+                        className="w-16 bg-slate-950 border border-slate-700 focus:border-emerald-500 rounded px-1.5 py-0.5 font-mono text-emerald-400 font-extrabold focus:outline-none"
+                        title="Click to edit selling price"
+                      />
+                    </div>
                   </div>
-                  <div className="text-[10px] text-slate-400 mt-0.5 font-mono">
-                    Stock: {item.stockQuantity} {item.unit || 'pcs'}
-                  </div>
+                  {item.description && (
+                    <p className="text-[10px] text-slate-400 truncate" title={item.description}>
+                      {item.description}
+                    </p>
+                  )}
                 </div>
-                <button
-                  type="button"
-                  onClick={() => handleRemoveDraftItem(item.id)}
-                  className="p-1 text-slate-500 hover:text-rose-400 hover:bg-slate-800 rounded-lg transition cursor-pointer"
-                  title="Remove this draft item"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
+                <div className="flex flex-col gap-1 items-center shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingProduct(item);
+                      setShowModal(true);
+                    }}
+                    className="p-1 text-slate-400 hover:text-sky-400 hover:bg-slate-800 rounded-lg transition cursor-pointer"
+                    title="Open in full product editor"
+                  >
+                    <Edit2 className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveDraftItem(item.id)}
+                    className="p-1 text-slate-500 hover:text-rose-400 hover:bg-slate-800 rounded-lg transition cursor-pointer"
+                    title="Remove this draft item"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
               </div>
             ))}
           </div>
@@ -5349,6 +5488,195 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                 </p>
               </div>
 
+              {/* Live Identified Item Review & Instant Edit Card */}
+              {scannedReviewItem && (
+                <div className="bg-gradient-to-br from-emerald-950/95 via-slate-900 to-teal-950/90 border-2 border-emerald-500/80 p-4 rounded-2xl space-y-3 shadow-2xl animate-in fade-in">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Sparkles className="w-4 h-4 text-emerald-400 animate-pulse" />
+                      <h4 className="text-xs font-black text-emerald-300 uppercase tracking-wider">
+                        ✨ Product Identified — Review & Confirm Details
+                      </h4>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setScannedReviewItem(null)}
+                      className="text-slate-400 hover:text-white text-xs px-2 py-0.5 rounded-lg hover:bg-slate-800 transition cursor-pointer"
+                    >
+                      Hide Card
+                    </button>
+                  </div>
+
+                  <div className="flex flex-col sm:flex-row gap-3.5 items-start">
+                    {scannedReviewItem.imageUrl && (
+                      <div className="relative group shrink-0 self-center sm:self-start">
+                        <img
+                          src={scannedReviewItem.imageUrl}
+                          alt={scannedReviewItem.name}
+                          className="w-24 h-24 rounded-xl object-cover border-2 border-emerald-500/70 shadow-md"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setPreviewImage({ url: scannedReviewItem.imageUrl!, title: scannedReviewItem.name })}
+                          className="absolute bottom-1 right-1 bg-slate-950/80 hover:bg-slate-900 text-white p-1 rounded-md shadow-sm border border-slate-700"
+                          title="Enlarge"
+                        >
+                          <ZoomIn className="w-3 h-3" />
+                        </button>
+                      </div>
+                    )}
+                    <div className="flex-1 space-y-2.5 w-full min-w-0">
+                      <div>
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="text-[11px] font-black text-white flex items-center gap-1.5">
+                            <span>Item Name</span>
+                            <span className="text-[10px] text-emerald-400 font-normal">(AI / Context detected)</span>
+                          </label>
+                          <span className="text-[10px] text-sky-400 font-mono">
+                            {scannedReviewItem.sku || 'Auto SKU'}
+                          </span>
+                        </div>
+                        <input
+                          type="text"
+                          required
+                          value={scannedReviewItem.name}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setScannedReviewItem((prev) => (prev ? { ...prev, name: val } : prev));
+                            setDraftItems((prev) => prev.map((d) => (d.id === scannedReviewItem.id ? { ...d, name: val } : d)));
+                          }}
+                          placeholder="Type or refine product name..."
+                          className="w-full bg-slate-950 border-2 border-emerald-500 focus:border-emerald-400 rounded-xl px-3 py-2 text-xs text-white font-bold focus:outline-none shadow-sm"
+                        />
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                        <div>
+                          <label className="block text-[10px] font-semibold text-slate-400 mb-0.5">
+                            Category
+                          </label>
+                          <select
+                            value={scannedReviewItem.category}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setScannedReviewItem((prev) => (prev ? { ...prev, category: val } : prev));
+                              setDraftItems((prev) => prev.map((d) => (d.id === scannedReviewItem.id ? { ...d, category: val } : d)));
+                            }}
+                            className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2 py-1.5 text-[11px] text-slate-200 font-medium"
+                          >
+                            {consolidatedCategories.map((c) => (
+                              <option key={c.id || c.name} value={c.name}>{c.name}</option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="block text-[10px] font-semibold text-slate-400 mb-0.5">
+                            Selling Price (KSh)
+                          </label>
+                          <input
+                            type="number"
+                            value={scannedReviewItem.sellingPrice || ''}
+                            onChange={(e) => {
+                              const val = parseFloat(e.target.value) || 0;
+                              setScannedReviewItem((prev) => (prev ? { ...prev, sellingPrice: val } : prev));
+                              setDraftItems((prev) => prev.map((d) => (d.id === scannedReviewItem.id ? { ...d, sellingPrice: val } : d)));
+                            }}
+                            className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2 py-1.5 text-[11px] text-emerald-400 font-bold font-mono"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-[10px] font-semibold text-slate-400 mb-0.5">
+                            Cost Price (KSh)
+                          </label>
+                          <input
+                            type="number"
+                            value={scannedReviewItem.costPrice || ''}
+                            onChange={(e) => {
+                              const val = parseFloat(e.target.value) || 0;
+                              setScannedReviewItem((prev) => (prev ? { ...prev, costPrice: val } : prev));
+                              setDraftItems((prev) => prev.map((d) => (d.id === scannedReviewItem.id ? { ...d, costPrice: val } : d)));
+                            }}
+                            className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2 py-1.5 text-[11px] text-slate-300 font-mono"
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-semibold text-slate-400 mb-0.5">
+                          Description / Specifications
+                        </label>
+                        <input
+                          type="text"
+                          value={scannedReviewItem.description || ''}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setScannedReviewItem((prev) => (prev ? { ...prev, description: val } : prev));
+                            setDraftItems((prev) => prev.map((d) => (d.id === scannedReviewItem.id ? { ...d, description: val } : d)));
+                          }}
+                          placeholder="Features, material, color, size specifications..."
+                          className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-[11px] text-slate-300"
+                        />
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2 pt-1">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setAutoAddSuccessToast(`✓ Verified & staged in drafts: "${scannedReviewItem.name}"`);
+                            setTimeout(() => setAutoAddSuccessToast(null), 4000);
+                            setScannedReviewItem(null);
+                          }}
+                          className="bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-black px-3 py-1.5 rounded-xl text-xs flex items-center gap-1.5 transition cursor-pointer shadow-md"
+                        >
+                          <Check className="w-3.5 h-3.5" /> Stage to Drafts
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const cleanName = (scannedReviewItem.name || '').trim();
+                            const finalName = (!cleanName || /^scanned\s*item$/i.test(cleanName) || /^unknown\s*product$/i.test(cleanName))
+                              ? `${scannedReviewItem.category || 'General'} Item #${scannedReviewItem.sku?.slice(-4) || '101'}`
+                              : cleanName;
+                            const cleanDesc = (scannedReviewItem.description || '').trim();
+                            const finalDesc = (!cleanDesc || cleanDesc.toLowerCase() === finalName.toLowerCase())
+                              ? `${finalName} (${scannedReviewItem.category || 'General'}). Scanned from photo.`
+                              : cleanDesc;
+                            const productToSave: Product = {
+                              ...scannedReviewItem,
+                              name: finalName,
+                              description: finalDesc,
+                              imageUrl: scannedReviewItem.imageUrl || '',
+                            };
+                            onSaveProduct(productToSave);
+                            setDraftItems((prev) => prev.filter((d) => d.id !== scannedReviewItem.id));
+                            setScannedReviewItem(null);
+                            setShowAiScanModal(false);
+                            setAutoAddSuccessToast(`⚡ Saved "${finalName}" directly into catalog!`);
+                            setTimeout(() => setAutoAddSuccessToast(null), 5000);
+                          }}
+                          className="bg-teal-600 hover:bg-teal-500 text-slate-950 font-black px-3 py-1.5 rounded-xl text-xs flex items-center gap-1.5 transition cursor-pointer shadow-md"
+                        >
+                          <Save className="w-3.5 h-3.5" /> Save Direct to Catalog
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingProduct(scannedReviewItem);
+                            setShowModal(true);
+                            setShowAiScanModal(false);
+                          }}
+                          className="bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold px-3 py-1.5 rounded-xl text-xs flex items-center gap-1.5 transition cursor-pointer"
+                        >
+                          <Edit2 className="w-3.5 h-3.5 text-sky-400" /> Full Edit Form...
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* Main Selection Actions */}
               <div className="grid grid-cols-1 gap-2.5">
                 {/* 1. Mobile Phone Gallery Pick (Single) */}
@@ -5507,24 +5835,49 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                   </div>
                   <div className="max-h-40 overflow-y-auto space-y-1.5 pr-1">
                     {draftItems.map((d) => (
-                      <div key={d.id} className="flex items-center justify-between gap-2 p-2 bg-slate-900/90 rounded-xl border border-slate-800 text-xs">
+                      <div
+                        key={d.id}
+                        onClick={() => setScannedReviewItem(d)}
+                        className={`flex items-center justify-between gap-2 p-2 rounded-xl border text-xs cursor-pointer transition ${
+                          scannedReviewItem?.id === d.id
+                            ? 'bg-emerald-950/90 border-emerald-500 shadow-sm'
+                            : 'bg-slate-900/90 border-slate-800 hover:border-slate-700'
+                        }`}
+                        title="Click to review/edit this staged item"
+                      >
                         <div className="flex items-center gap-2 min-w-0">
                           {d.imageUrl && (
                             <img src={d.imageUrl} alt="" className="w-8 h-8 rounded-lg object-cover border border-slate-700 shrink-0" />
                           )}
                           <div className="min-w-0">
                             <p className="font-bold text-slate-100 truncate text-[11px]">{d.name}</p>
-                            <p className="text-[10px] text-slate-400 font-mono">KSh {d.sellingPrice.toLocaleString()} • {d.stockQuantity} pcs</p>
+                            <p className="text-[10px] text-slate-400 font-mono">KSh {d.sellingPrice.toLocaleString()} • {d.category}</p>
                           </div>
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveDraftItem(d.id)}
-                          className="text-slate-500 hover:text-rose-400 p-1 transition cursor-pointer"
-                          title="Remove draft"
-                        >
-                          <X className="w-3.5 h-3.5" />
-                        </button>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setScannedReviewItem(d);
+                            }}
+                            className="text-slate-400 hover:text-emerald-400 p-1 transition cursor-pointer"
+                            title="Review details"
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleRemoveDraftItem(d.id);
+                            }}
+                            className="text-slate-500 hover:text-rose-400 p-1 transition cursor-pointer"
+                            title="Remove draft"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </div>
                     ))}
                   </div>

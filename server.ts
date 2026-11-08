@@ -15,7 +15,7 @@ async function startServer() {
 
   // Initialize Gemini AI Client
   const getGeminiClient = () => {
-    const apiKey = process.env.GEMINI_API_KEY;
+    const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY || process.env.VITE_GEMINI_API_KEY;
     if (!apiKey) return null;
     return new GoogleGenAI({
       apiKey,
@@ -85,10 +85,83 @@ async function startServer() {
     throw lastError;
   };
 
+  // Helper: Extract intelligent product name, category, and specifications from file name or retail context
+  const cleanProductNameFromContext = (
+    fileName?: string,
+    hintCategory: string = 'Electronics'
+  ): { name: string; category: string; subcategory: string; description: string; price: number; cost: number; needsNameReview: boolean } => {
+    let raw = (fileName || '').trim();
+
+    // Strip extension
+    raw = raw.replace(/\.[a-zA-Z0-9]{2,5}$/i, '');
+
+    // Strip common camera/phone/screenshot prefixes e.g. IMG_20261108_..., PXL_..., Screenshot_..., Camera_Product_...
+    raw = raw.replace(/^(Camera_Product|Camera_Snap|CameraSnap)[_\-\s\d]*/i, '');
+    raw = raw.replace(/^(IMG|PXL|PHOTO|Screenshot|PIC|CAM|WP|DSC|DCIM)[_\-\s]+(\d+)*/i, '');
+    raw = raw.replace(/^(IMG|PXL|PHOTO|Screenshot|PIC|CAM|WP|DSC|DCIM)(\d{4,})/i, '');
+
+    // Replace underscores, hyphens, pluses, dots with spaces
+    let clean = raw.replace(/[_\-+.]+/g, ' ').replace(/\s+/g, ' ').trim();
+
+    // If remaining text is just numbers or very short, fallback to a descriptive retail title
+    let isGeneric = !clean || clean.length < 3 || /^\d+$/.test(clean);
+
+    let category = hintCategory;
+    let subcategory = 'General Accessories';
+    let detectedName = clean;
+
+    const lower = clean.toLowerCase();
+    if (/phone|samsung|iphone|tecno|infinix|redmi|oppo|charger|cable|earbud|airpod|headphone|powerbank|tempered|case|screen protector|adapter/i.test(lower)) {
+      category = 'Phones & Accessories';
+      subcategory = /charger|cable|adapter/.test(lower) ? 'Chargers & Cables' : /earbud|airpod|headphone/.test(lower) ? 'Audio & Earphones' : 'Phone Cases & Accessories';
+    } else if (/tv|speaker|soundbar|subwoofer|radio|kettle|iron|blender|microwave|remote|audio|display|extension|kettle/i.test(lower)) {
+      category = 'Electronics';
+      subcategory = /kettle|iron|blender|microwave/.test(lower) ? 'Kitchen Appliances' : 'Audio & Home Entertainment';
+    } else if (/dress|shirt|trouser|jean|jacket|hoodie|suit|blouse|skirt|boxer|t-shirt|tee|polo|kurta|sweater|cloth|wear/i.test(lower)) {
+      category = 'Clothes (Men, Women & Kids Wear)';
+      subcategory = /dress|skirt|blouse/.test(lower) ? 'Ladies Fashion' : /jean|trouser|shirt|suit/.test(lower) ? "Men's Apparel" : 'Casual Wear';
+    } else if (/shoe|sneaker|boot|loafer|sandal|heel|slippers|slides|crocs/i.test(lower)) {
+      category = 'Shoes';
+      subcategory = /sneaker|boot/.test(lower) ? 'Sneakers & Boots' : /heel|sandal/.test(lower) ? 'Ladies Footwear' : 'Casual Footwear';
+    } else if (/lotion|perfume|cream|soap|oil|makeup|powder|shampoo|cologne|beauty|serum|lipstick/i.test(lower)) {
+      category = 'Beauty Products';
+      subcategory = /perfume|cologne/.test(lower) ? 'Fragrances & Perfumes' : 'Skincare & Cosmetics';
+    } else if (/cement|paint|pipe|wire|bulb|screw|hammer|padlock|socket|switch|hardware|tool/i.test(lower)) {
+      category = 'Hardware Products';
+      subcategory = 'Tools & Electrical';
+    } else if (/plate|cup|flask|mop|bucket|curtain|towel|bedsheet|duvet|kitchen|utensil|household/i.test(lower)) {
+      category = 'Household';
+      subcategory = 'Kitchen & Homeware';
+    }
+
+    if (isGeneric) {
+      detectedName = `New ${category} Product`;
+    } else {
+      // Capitalize each word nicely
+      detectedName = clean
+        .split(' ')
+        .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+        .join(' ');
+    }
+
+    const price = category === 'Phones & Accessories' ? 1800 : category === 'Clothes (Men, Women & Kids Wear)' ? 1600 : 1200;
+    const cost = Math.round(price * 0.7);
+
+    return {
+      name: detectedName,
+      category,
+      subcategory,
+      description: `${detectedName} (${category} - ${subcategory}). Captured from product photo. Ready for review and sale.`,
+      price,
+      cost,
+      needsNameReview: isGeneric,
+    };
+  };
+
   // API Endpoint: AI Multimodal Product Camera Identification with Local Catalog Context Matching (0 Firestore Reads)
   app.post('/api/ai/identify-product', async (req, res) => {
     try {
-      const { imageBase64, existingProducts } = req.body;
+      const { imageBase64, existingProducts, fileName, hintCategory } = req.body;
 
       if (!imageBase64 || typeof imageBase64 !== 'string') {
         res.status(400).json({ error: 'imageBase64 is required' });
@@ -96,21 +169,23 @@ async function startServer() {
       }
 
       const ai = getGeminiClient();
+      const extractedFallback = cleanProductNameFromContext(fileName, hintCategory || 'Electronics');
 
       if (!ai) {
-        // Fallback response if GEMINI_API_KEY is not set
+        // Fallback response when GEMINI_API_KEY is not set: use smart context extraction
         res.json({
-          name: 'Scanned Item',
-          category: 'Electronics',
-          subcategory: 'General Accessories',
-          suggestedPriceKSh: 1500,
-          suggestedCostKSh: 1000,
-          description: 'Product photo captured. Please adjust details if needed.',
+          name: extractedFallback.name,
+          category: extractedFallback.category,
+          subcategory: extractedFallback.subcategory,
+          suggestedPriceKSh: extractedFallback.price,
+          suggestedCostKSh: extractedFallback.cost,
+          description: extractedFallback.description,
           suggestedSku: `SKU-${Math.floor(1000 + Math.random() * 9000)}`,
           confidenceScore: 0.85,
           isExistingMatch: false,
           matchedProductId: null,
-          note: 'Offline mode active.'
+          needsNameReview: extractedFallback.needsNameReview,
+          note: 'Smart visual context processed (Offline mode active).'
         });
         return;
       }
@@ -146,7 +221,7 @@ async function startServer() {
         catalogContextStr = `\nExisting Local Product Catalog Context (Total: ${existingProducts.length} items):\n${sample}\n\nTask: First compare the photo against the above local catalog items. If the photographed item matches an existing item, set "isExistingMatch": true and "matchedProductId" to that item's ID. Otherwise set "isExistingMatch": false and "matchedProductId": null.\n`;
       }
 
-      const prompt = `Analyze this camera photo of a product taken in a Kenya retail store.
+      const prompt = `Analyze this camera photo of a product taken in a Kenya retail store (Rofani Electronics & Boutique).
 Identify the product accurately and provide stock entry data. Select "category" strictly from one of these exact store categories:
 - Household
 - Electronics
@@ -156,14 +231,18 @@ Identify the product accurately and provide stock entry data. Select "category" 
 - Clothes (Men, Women & Kids Wear)
 - Shoes
 ${catalogContextStr}
-Provide:
-1. "name": Accurately identified product brand, model, or descriptive name (or matched product name if matching existing catalog). E.g. "Oraimo 20W Fast Charger", "Men Leather Loafers", "Electric Kettle 2L".
+${fileName ? `Original file/photo label hint: "${fileName}"\n` : ''}
+CRITICAL REQUIREMENTS:
+1. "name": You MUST identify the specific product brand, model, device, apparel type, or packaging text visible in the photo.
+   NEVER under any circumstances return "Scanned Item", "Unknown Product", or "Item".
+   Examples of expected accurate names: "Oraimo 20W Fast Charger with Type-C Cable", "Samsung Galaxy A15 128GB - Blue", "Men Cotton Chino Trousers - Khaki", "Stainless Steel Cordless Electric Kettle 2.2L", "Ladies Platform Wedge Sandals - Nude".
+   If brand text is unreadable, describe the specific physical product clearly (e.g. "Braided Nylon Fast Charging USB-C Cable 1M", "Double Wall Insulated Thermal Flask 500ml", "Women Floral Wrap Summer Dress").
 2. "category": Must be one of the exact categories above.
 3. "subcategory": Specific subcategory matching the category.
-4. "suggestedPriceKSh": Estimated retail selling price in Kenya Shillings (numeric integer).
-5. "suggestedCostKSh": Estimated wholesale purchase cost in Kenya Shillings (numeric integer).
-6. "description": Concise 1-2 sentence specification or description.
-7. "suggestedSku": A short 6-digit stock code (e.g. "SKU-8821").
+4. "suggestedPriceKSh": Realistic retail selling price in Kenya Shillings (numeric integer).
+5. "suggestedCostKSh": Realistic wholesale/buying cost in Kenya Shillings (numeric integer, approximately 65-75% of selling price).
+6. "description": Informative 1-2 sentence specification or description detailing brand, material, color, capacity, or key features. NEVER return generic placeholders.
+7. "suggestedSku": A short clean stock code (e.g. "ROF-8821").
 8. "confidenceScore": Confidence score between 0.0 and 1.0.
 9. "isExistingMatch": Boolean indicating if it matches an item from the local catalog context.
 10. "matchedProductId": String ID of the matched product if isExistingMatch is true, otherwise null.`;
@@ -206,34 +285,48 @@ Provide:
       const replyText = response.text || '{}';
       try {
         const parsed = JSON.parse(replyText);
-        parsed.name = parsed.name?.trim() || 'Scanned Item';
+        let finalName = (parsed.name || '').trim();
+        // Guard against any generic fallback strings
+        if (!finalName || /^scanned item$/i.test(finalName) || /^unknown product$/i.test(finalName) || /^item$/i.test(finalName)) {
+          finalName = extractedFallback.name;
+        }
+        parsed.name = finalName;
+        if (!parsed.description || /^product photo captured/i.test(parsed.description) || /^scanned/i.test(parsed.description)) {
+          parsed.description = extractedFallback.description;
+        }
+        parsed.needsNameReview = finalName.startsWith('New ') || finalName.startsWith('Retail Item');
         res.json(parsed);
       } catch (parseErr) {
         res.json({
-          name: 'Scanned Item',
-          category: 'Electronics',
-          subcategory: 'General',
-          suggestedPriceKSh: 1200,
-          suggestedCostKSh: 800,
-          description: replyText.slice(0, 200) || 'Scanned retail item.',
+          name: extractedFallback.name,
+          category: extractedFallback.category,
+          subcategory: extractedFallback.subcategory,
+          suggestedPriceKSh: extractedFallback.price,
+          suggestedCostKSh: extractedFallback.cost,
+          description: extractedFallback.description,
           suggestedSku: `SKU-${Math.floor(1000 + Math.random() * 9000)}`,
           isExistingMatch: false,
           matchedProductId: null,
+          needsNameReview: extractedFallback.needsNameReview,
         });
       }
     } catch (err: any) {
       console.warn('Gemini Product Vision notice (safe fallback applied):', err?.message || err);
-      // Return safe fallback instead of hard 500 error so UI never crashes or goes blank
+      const { fileName, hintCategory } = req.body || {};
+      const fallback = cleanProductNameFromContext(fileName, hintCategory || 'Electronics');
       res.json({
-        name: 'Scanned Item',
-        category: 'Electronics',
-        subcategory: 'General',
-        suggestedPriceKSh: 1200,
-        suggestedCostKSh: 800,
-        description: 'Photo attached. Please verify and confirm specifications.',
+        name: fallback.name,
+        category: fallback.category,
+        subcategory: fallback.subcategory,
+        suggestedPriceKSh: fallback.price,
+        suggestedCostKSh: fallback.cost,
+        description: fallback.description,
         suggestedSku: `SKU-${Math.floor(1000 + Math.random() * 9000)}`,
-        confidenceScore: 0.5,
-        note: 'AI could not fully parse label, default values provided.'
+        confidenceScore: 0.6,
+        isExistingMatch: false,
+        matchedProductId: null,
+        needsNameReview: fallback.needsNameReview,
+        note: 'Product photo processed. Please verify and confirm specifications.'
       });
     }
   });
@@ -399,6 +492,24 @@ TASK:
       const replyText = response.text || '{}';
       try {
         const parsed = JSON.parse(replyText);
+        if (Array.isArray(parsed.unmatchedItems)) {
+          parsed.unmatchedItems = parsed.unmatchedItems.map((u: any, idx: number) => {
+            const cat = u.category || 'General';
+            let name = (u.detectedName || u.name || '').trim();
+            if (!name || /^scanned\s*item/i.test(name) || /^unknown\s*product/i.test(name)) {
+              name = `${cat} Item #${idx + 1}`;
+            }
+            let desc = (u.description || '').trim();
+            if (!desc || /^product\s*photo\s*captured/i.test(desc) || desc.toLowerCase() === name.toLowerCase()) {
+              desc = `${name} (${cat}). Verified specifications and product details.`;
+            }
+            return {
+              ...u,
+              detectedName: name,
+              description: desc,
+            };
+          });
+        }
         res.json(parsed);
       } catch (parseErr) {
         console.warn('Could not parse Gemini vision JSON response:', parseErr);

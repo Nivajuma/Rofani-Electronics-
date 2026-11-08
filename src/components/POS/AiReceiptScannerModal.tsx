@@ -39,6 +39,7 @@ export interface ScannedNewItem {
   suggestedSku: string;
   suggestedBarcode: string;
   description: string;
+  imageUrl?: string;
   selected: boolean;
   isEditing: boolean;
   stockToAdd: number;
@@ -309,9 +310,19 @@ export const AiReceiptScannerModal: React.FC<AiReceiptScannerModalProps> = ({
         const sku = (u.suggestedSku || `ROF-${catPrefix}-${Math.floor(1000 + Math.random() * 9000)}`).toUpperCase();
         const barcode = (u.suggestedBarcode || `${Math.floor(6164000000000 + Math.random() * 900000000000)}`).replace(/\D/g, '');
 
+        let cleanName = (u.detectedName || u.name || '').trim();
+        if (!cleanName || /^scanned\s*item/i.test(cleanName) || /^unknown\s*product/i.test(cleanName)) {
+          cleanName = `${category} Product #${idx + 1}`;
+        }
+
+        let cleanDesc = (u.description || '').trim();
+        if (!cleanDesc || /^product\s*photo\s*captured/i.test(cleanDesc) || cleanDesc.toLowerCase() === cleanName.toLowerCase()) {
+          cleanDesc = `${cleanName} (${category} - ${u.subcategory || 'General'}). Scanned from photo/receipt on ${new Date().toLocaleDateString()}.`;
+        }
+
         return {
           id: `new_scanned_${Date.now()}_${idx}`,
-          detectedName: u.detectedName || `Receipt Item #${idx + 1}`,
+          detectedName: cleanName,
           quantity: detectedQty,
           suggestedPriceKSh: estPrice,
           suggestedCostKSh: estCost,
@@ -321,7 +332,8 @@ export const AiReceiptScannerModal: React.FC<AiReceiptScannerModalProps> = ({
           unit: u.unit || 'pcs',
           suggestedSku: sku,
           suggestedBarcode: barcode,
-          description: u.description || `Scanned from receipt on ${new Date().toLocaleDateString()}`,
+          description: cleanDesc,
+          imageUrl: base64Image || capturedImage || '',
           selected: true,
           isEditing: false,
           stockToAdd: Math.max(detectedQty * 5, 10),
@@ -366,15 +378,27 @@ export const AiReceiptScannerModal: React.FC<AiReceiptScannerModalProps> = ({
   // Convert a ScannedNewItem into a complete Product entity
   const buildProductFromScanned = (item: ScannedNewItem): Product => {
     const timestamp = new Date().toISOString();
+    let cleanName = (item.detectedName || '').trim();
+    if (!cleanName || /^scanned\s*item/i.test(cleanName) || /^unknown\s*product/i.test(cleanName)) {
+      cleanName = `${item.category || 'General'} Item #${item.suggestedSku?.slice(-4) || Math.floor(100 + Math.random() * 900)}`;
+    }
+
+    let cleanDesc = (item.description || '').trim();
+    if (!cleanDesc || cleanDesc.toLowerCase() === cleanName.toLowerCase()) {
+      cleanDesc = `${cleanName} (${item.category || 'General'}). Scanned from photo on ${new Date().toLocaleDateString()}.`;
+    }
+
+    const assignedImage = item.imageUrl || capturedImage || '';
+
     return {
       id: `prod_${Date.now()}_${Math.floor(100 + Math.random() * 900)}`,
-      name: item.detectedName.trim(),
+      name: cleanName,
       sku: item.suggestedSku?.trim() || `ROF-NEW-${Math.floor(1000 + Math.random() * 9000)}`,
       barcode: item.suggestedBarcode?.trim() || `${Math.floor(6164000000000 + Math.random() * 900000000000)}`,
       category: item.category || 'General',
       subcategory: item.subcategory || 'General',
       sizeCapacity: item.sizeCapacity || 'Standard',
-      description: item.description || `Scanned from receipt on ${new Date().toLocaleDateString()}`,
+      description: cleanDesc,
       costPrice: Math.max(0, item.suggestedCostKSh || 0),
       sellingPrice: Math.max(1, item.suggestedPriceKSh || 100),
       stockQuantity: Math.max(1, item.stockToAdd || item.quantity * 5 || 10),
@@ -382,6 +406,7 @@ export const AiReceiptScannerModal: React.FC<AiReceiptScannerModalProps> = ({
       unit: item.unit || 'pcs',
       supplierId: 'direct_wholesale',
       supplierName: 'Direct Wholesale',
+      imageUrl: assignedImage,
       createdAt: timestamp,
       updatedAt: timestamp,
     };
@@ -477,9 +502,10 @@ export const AiReceiptScannerModal: React.FC<AiReceiptScannerModalProps> = ({
     if (!manualName.trim()) return;
 
     const catPrefix = manualCategory.slice(0, 3).toUpperCase().replace(/[^A-Z]/g, 'GEN');
+    const cleanManualName = manualName.trim();
     const newItem: ScannedNewItem = {
       id: `manual_${Date.now()}`,
-      detectedName: manualName.trim(),
+      detectedName: cleanManualName,
       quantity: Math.max(1, manualQty),
       suggestedPriceKSh: Math.max(1, manualPrice),
       suggestedCostKSh: Math.max(0, manualCost),
@@ -487,7 +513,8 @@ export const AiReceiptScannerModal: React.FC<AiReceiptScannerModalProps> = ({
       unit: 'pcs',
       suggestedSku: `ROF-${catPrefix}-${Math.floor(1000 + Math.random() * 9000)}`,
       suggestedBarcode: `${Math.floor(6164000000000 + Math.random() * 900000000000)}`,
-      description: `Manually added from receipt on ${new Date().toLocaleDateString()}`,
+      description: `${cleanManualName} (${manualCategory}). Manually entered item on ${new Date().toLocaleDateString()}.`,
+      imageUrl: capturedImage || '',
       selected: true,
       isEditing: false,
       stockToAdd: Math.max(manualStock, manualQty),
@@ -898,6 +925,17 @@ export const AiReceiptScannerModal: React.FC<AiReceiptScannerModalProps> = ({
                                   <CheckCircle2 className="w-4 h-4 text-emerald-400 mt-0.5 shrink-0" />
                                 )}
 
+                                {/* Scanned Image Thumbnail */}
+                                {(item.imageUrl || capturedImage) && (
+                                  <div className="relative w-12 h-12 rounded-lg overflow-hidden border border-slate-700 bg-slate-900 shrink-0">
+                                    <img
+                                      src={item.imageUrl || capturedImage!}
+                                      alt={item.detectedName}
+                                      className="w-full h-full object-cover"
+                                    />
+                                  </div>
+                                )}
+
                                 <div className="min-w-0">
                                   <div className="flex items-center gap-1.5 flex-wrap">
                                     <span className="font-bold text-xs text-white truncate max-w-xs">
@@ -912,6 +950,13 @@ export const AiReceiptScannerModal: React.FC<AiReceiptScannerModalProps> = ({
                                       </span>
                                     )}
                                   </div>
+
+                                  {/* Distinct Description Field */}
+                                  {item.description && (
+                                    <p className="text-[11px] text-slate-400 line-clamp-1 mt-0.5 font-normal">
+                                      {item.description}
+                                    </p>
+                                  )}
 
                                   <div className="flex items-center gap-2 mt-1 text-[11px] text-slate-400 font-mono flex-wrap">
                                     <span className="text-emerald-400 font-bold">
@@ -1008,6 +1053,7 @@ export const AiReceiptScannerModal: React.FC<AiReceiptScannerModalProps> = ({
                                     onChange={(e) =>
                                       updateScannedNewItem(item.id, { detectedName: e.target.value })
                                     }
+                                    placeholder="Product name (e.g. Oraimo Power Bank 20000mAh)"
                                     className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-xs text-white focus:outline-none focus:border-purple-500"
                                   />
                                 </div>
@@ -1027,6 +1073,19 @@ export const AiReceiptScannerModal: React.FC<AiReceiptScannerModalProps> = ({
                                       </option>
                                     ))}
                                   </select>
+                                </div>
+
+                                <div className="sm:col-span-2">
+                                  <label className="text-[10px] text-slate-400 block mb-0.5">Description / Specifications</label>
+                                  <input
+                                    type="text"
+                                    value={item.description}
+                                    onChange={(e) =>
+                                      updateScannedNewItem(item.id, { description: e.target.value })
+                                    }
+                                    placeholder="Specifications, size, color, or item details..."
+                                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-xs text-white focus:outline-none focus:border-purple-500"
+                                  />
                                 </div>
 
                                 <div className="grid grid-cols-2 gap-1.5">

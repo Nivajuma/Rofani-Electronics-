@@ -511,19 +511,36 @@ export const POSView: React.FC<POSViewProps> = ({
     andAddToCart: boolean = true,
     quantity: number = 1
   ) => {
+    const rawName = (newProduct.name || '').trim();
+    const cleanName = (!rawName || /^scanned\s*item$/i.test(rawName) || /^unknown\s*product$/i.test(rawName))
+      ? `${newProduct.category || 'General'} Item #${newProduct.sku?.slice(-4) || '101'}`
+      : rawName;
+
+    const rawDesc = (newProduct.description || '').trim();
+    const cleanDesc = (!rawDesc || rawDesc.toLowerCase() === cleanName.toLowerCase())
+      ? `${cleanName} (${newProduct.category || 'General'}). Added via AI scanner.`
+      : rawDesc;
+
+    const sanitizedProduct: Product = {
+      ...newProduct,
+      name: cleanName,
+      description: cleanDesc,
+      imageUrl: newProduct.imageUrl || '',
+    };
+
     // 1. Save new product to store catalog & cloud sync
     if (onSaveProduct) {
-      onSaveProduct(newProduct);
+      onSaveProduct(sanitizedProduct);
     }
 
     // 2. Add to sales receipt cart if requested
     if (andAddToCart) {
-      handleAddMultipleToCart([{ product: newProduct, quantity }]);
+      handleAddMultipleToCart([{ product: sanitizedProduct, quantity }]);
     }
 
     setPosNotice({
       type: 'success',
-      message: `✨ Added "${newProduct.name}" to store inventory${andAddToCart ? ' & sales receipt' : ''}!`,
+      message: `✨ Added "${sanitizedProduct.name}" to store inventory${andAddToCart ? ' & sales receipt' : ''}!`,
     });
     setTimeout(() => setPosNotice(null), 3500);
   };
@@ -535,7 +552,30 @@ export const POSView: React.FC<POSViewProps> = ({
   ) => {
     if (!newItems || newItems.length === 0) return;
 
-    const productsToSave = newItems.map((item) => item.product);
+    const sanitizedItems = newItems.map((item, idx) => {
+      const p = item.product;
+      const rawName = (p.name || '').trim();
+      const cleanName = (!rawName || /^scanned\s*item$/i.test(rawName) || /^unknown\s*product$/i.test(rawName))
+        ? `${p.category || 'General'} Item #${idx + 1}`
+        : rawName;
+
+      const rawDesc = (p.description || '').trim();
+      const cleanDesc = (!rawDesc || rawDesc.toLowerCase() === cleanName.toLowerCase())
+        ? `${cleanName} (${p.category || 'General'}). Added via AI scanner.`
+        : rawDesc;
+
+      return {
+        quantity: item.quantity,
+        product: {
+          ...p,
+          name: cleanName,
+          description: cleanDesc,
+          imageUrl: p.imageUrl || '',
+        },
+      };
+    });
+
+    const productsToSave = sanitizedItems.map((item) => item.product);
     if (onBatchImportProducts) {
       onBatchImportProducts(productsToSave, false);
     } else if (onSaveProduct) {
@@ -543,12 +583,12 @@ export const POSView: React.FC<POSViewProps> = ({
     }
 
     if (andAddToCart) {
-      handleAddMultipleToCart(newItems);
+      handleAddMultipleToCart(sanitizedItems);
     }
 
     setPosNotice({
       type: 'success',
-      message: `✨ Added ${newItems.length} new product(s) to store catalog${andAddToCart ? ' & sales receipt' : ''}!`,
+      message: `✨ Added ${sanitizedItems.length} new product(s) to store catalog${andAddToCart ? ' & sales receipt' : ''}!`,
     });
     setTimeout(() => setPosNotice(null), 3500);
   };

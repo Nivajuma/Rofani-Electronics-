@@ -279,6 +279,56 @@ export const POSView: React.FC<POSViewProps> = ({
     safeSetJSON('retail_pos_active_cart', cart);
   }, [cart]);
 
+  // Selected item ID during sale for visual highlight & auditory cue
+  const [selectedCartItemId, setSelectedCartItemId] = useState<string | null>(null);
+
+  // Subtle audio cue whenever an item is selected or added during sales
+  const playItemSelectAudioCue = () => {
+    try {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (AudioCtx) {
+        const ctx = new AudioCtx();
+        if (ctx.state === 'suspended') {
+          ctx.resume();
+        }
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+
+        // Subtle, crisp pleasant tap (sine wave glides 880Hz -> 1100Hz in 35ms)
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(880, ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(1100, ctx.currentTime + 0.035);
+
+        // Soft, non-intrusive volume (0.09 gain) with quick smooth decay
+        gain.gain.setValueAtTime(0.09, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.075);
+
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+
+        osc.start();
+        osc.stop(ctx.currentTime + 0.075);
+      }
+    } catch (_) {
+      // Audio playback suppressed if browser prevents autoplay
+    }
+
+    if ('vibrate' in navigator) {
+      try {
+        navigator.vibrate(20);
+      } catch (_) {}
+    }
+  };
+
+  // Sync selectedCartItemId if item is no longer in cart
+  useEffect(() => {
+    if (cart.length === 0) {
+      setSelectedCartItemId(null);
+    } else if (selectedCartItemId && !cart.some((item) => item.product.id === selectedCartItemId)) {
+      setSelectedCartItemId(cart[cart.length - 1]?.product.id || null);
+    }
+  }, [cart, selectedCartItemId]);
+
   const [selectedCustomer, setSelectedCustomer] = useState<Customer>(() => {
     const defaultCust = customers[0] || { id: 'cust-1', name: 'Walk-in Customer', phone: 'N/A', totalPurchases: 0, currentBalanceDue: 0 };
     const saved = safeGetJSON<Customer | null>('retail_pos_active_pos_customer', null, (val) => Boolean(val && val.id));
@@ -497,6 +547,11 @@ export const POSView: React.FC<POSViewProps> = ({
       return updated;
     });
 
+    if (itemsToAdd.length > 0) {
+      setSelectedCartItemId(itemsToAdd[itemsToAdd.length - 1].product.id);
+      playItemSelectAudioCue();
+    }
+
     const totalQty = itemsToAdd.reduce((sum, item) => sum + item.quantity, 0);
     setPosNotice({
       type: 'success',
@@ -596,6 +651,7 @@ export const POSView: React.FC<POSViewProps> = ({
   // Core New Sale Action Execution
   const executeNewSale = () => {
     setCart([]);
+    setSelectedCartItemId(null);
     setSelectedCustomer(customers[0] || { id: 'cust-1', name: 'Walk-in Customer', phone: 'N/A', totalPurchases: 0, currentBalanceDue: 0 });
     setDiscountAmount(0);
     setDiscountInputVal('');
@@ -823,6 +879,10 @@ export const POSView: React.FC<POSViewProps> = ({
       return;
     }
 
+    // Highlight selected item during sale and play subtle auditory indicator
+    setSelectedCartItemId(product.id);
+    playItemSelectAudioCue();
+
     setCart((prev) => {
       const existingIndex = prev.findIndex((item) => item.product.id === product.id);
       if (existingIndex > -1) {
@@ -948,6 +1008,8 @@ export const POSView: React.FC<POSViewProps> = ({
 
   // Cart Qty updates
   const updateCartQty = (productId: string, delta: number) => {
+    setSelectedCartItemId(productId);
+    playItemSelectAudioCue();
     setCart((prev) => {
       return prev
         .map((item) => {
@@ -977,6 +1039,9 @@ export const POSView: React.FC<POSViewProps> = ({
     setCart((prev) => prev.filter((item) => item.product.id !== productId));
     if (editingItemDiscountId === productId) {
       setEditingItemDiscountId(null);
+    }
+    if (selectedCartItemId === productId) {
+      setSelectedCartItemId(null);
     }
   };
 
@@ -1588,23 +1653,43 @@ export const POSView: React.FC<POSViewProps> = ({
             </div>
           </div>
         ) : (
-          cart.map((item) => (
-            <div
-              key={item.product.id}
-              className="bg-slate-950 p-2.5 rounded-xl border border-slate-800 space-y-2 text-xs shadow-md"
-            >
-              <div className="flex items-center justify-between gap-2">
-                <h4 className="font-bold text-slate-100 text-xs sm:text-sm leading-snug break-words flex-1 min-w-0">
-                  {item.product.name}
-                </h4>
-                <button
-                  onClick={() => removeFromCart(item.product.id)}
-                  className="p-1 hover:bg-rose-950/50 text-slate-400 hover:text-rose-400 rounded transition shrink-0 border border-slate-800 cursor-pointer"
-                  title="Remove item"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                </button>
-              </div>
+          cart.map((item) => {
+            const isSelected = selectedCartItemId === item.product.id;
+            return (
+              <div
+                key={item.product.id}
+                onClick={() => {
+                  setSelectedCartItemId(item.product.id);
+                  playItemSelectAudioCue();
+                }}
+                className={`p-2.5 rounded-xl space-y-2 text-xs shadow-md transition-all duration-200 cursor-pointer relative border ${
+                  isSelected
+                    ? 'bg-sky-950/50 border-sky-400 ring-2 ring-sky-400/60 shadow-lg shadow-sky-950/80'
+                    : 'bg-slate-950 border-slate-800 hover:border-slate-700 hover:bg-slate-900/60'
+                }`}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 flex-1 min-w-0">
+                    {isSelected && (
+                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-black bg-sky-500 text-slate-950 shadow-sm shrink-0 animate-pulse">
+                        ● Selected
+                      </span>
+                    )}
+                    <h4 className={`font-bold text-xs sm:text-sm leading-snug break-words truncate ${isSelected ? 'text-sky-200 font-black' : 'text-slate-100'}`}>
+                      {item.product.name}
+                    </h4>
+                  </div>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      removeFromCart(item.product.id);
+                    }}
+                    className="p-1 hover:bg-rose-950/50 text-slate-400 hover:text-rose-400 rounded transition shrink-0 border border-slate-800 cursor-pointer"
+                    title="Remove item"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
 
               <div className="flex items-center justify-between gap-1.5 pt-1 border-t border-slate-900 flex-wrap">
                 <div className="flex items-center gap-1.5 bg-slate-900 border border-sky-800/80 px-2 py-1 rounded-lg">
@@ -1820,7 +1905,8 @@ export const POSView: React.FC<POSViewProps> = ({
                 </div>
               )}
             </div>
-          ))
+          );
+        })
         )}
       </div>
 
@@ -2199,13 +2285,16 @@ export const POSView: React.FC<POSViewProps> = ({
                 {favoriteProducts.slice(0, 10).map((p, index) => {
                   const cartItem = cart.find((item) => item.product.id === p.id);
                   const inCartQty = cartItem ? cartItem.quantity : 0;
+                  const isSelected = selectedCartItemId === p.id;
                   return (
                     <button
                       key={`top-chip-${p.id}`}
                       type="button"
                       onClick={() => handleAddToCart(p)}
                       className={`px-2 py-1 rounded-xl whitespace-nowrap text-xs font-bold transition flex items-center gap-1 border cursor-pointer select-none shrink-0 ${
-                        inCartQty > 0
+                        isSelected
+                          ? 'bg-sky-500 text-slate-950 border-sky-300 font-black shadow-md ring-2 ring-sky-400/70 scale-105'
+                          : inCartQty > 0
                           ? 'bg-amber-500 text-slate-950 border-amber-400 font-extrabold shadow-sm'
                           : 'bg-slate-950 hover:bg-slate-800 border-slate-800 text-slate-200 hover:text-white'
                       }`}
@@ -2213,12 +2302,16 @@ export const POSView: React.FC<POSViewProps> = ({
                     >
                       <span className="text-[9px] font-mono opacity-70">#{index + 1}</span>
                       <span className="max-w-[100px] truncate">{p.name}</span>
-                      <span className="font-mono text-emerald-400 font-bold">KSh {p.sellingPrice}</span>
-                      {inCartQty > 0 && (
+                      <span className={`font-mono font-bold ${isSelected ? 'text-slate-950' : 'text-emerald-400'}`}>KSh {p.sellingPrice}</span>
+                      {isSelected ? (
+                        <span className="ml-0.5 px-1 bg-slate-950 text-sky-300 rounded text-[9px] font-mono font-bold">
+                          ●{inCartQty}
+                        </span>
+                      ) : inCartQty > 0 ? (
                         <span className="ml-0.5 px-1 bg-slate-950 text-amber-300 rounded text-[9px] font-mono">
                           ✓{inCartQty}
                         </span>
-                      )}
+                      ) : null}
                     </button>
                   );
                 })}
@@ -2668,6 +2761,7 @@ export const POSView: React.FC<POSViewProps> = ({
                           const unitsSold = salesCountMap[p.id] ?? (performanceMap[p.id]?.unitsSold ?? 0);
                           const cartItem = cart.find((item) => item.product.id === p.id);
                           const inCartQty = cartItem ? cartItem.quantity : 0;
+                          const isSelected = selectedCartItemId === p.id;
 
                           return (
                             <button
@@ -2677,6 +2771,8 @@ export const POSView: React.FC<POSViewProps> = ({
                               className={`text-left p-2.5 rounded-xl border transition flex flex-col justify-between group relative overflow-hidden active:scale-95 cursor-pointer shadow-sm select-none ${
                                 isOutOfStock
                                   ? 'bg-slate-950/60 border-slate-800 opacity-60'
+                                  : isSelected
+                                  ? 'bg-sky-950/70 border-2 border-sky-400 ring-2 ring-sky-400/60 shadow-md shadow-sky-500/20'
                                   : inCartQty > 0
                                   ? 'bg-slate-950 border-amber-500/70 hover:border-amber-400 shadow-amber-500/5 ring-1 ring-amber-500/40'
                                   : 'bg-slate-950 border-slate-800 hover:border-slate-700 hover:bg-slate-800/60'
@@ -2690,7 +2786,11 @@ export const POSView: React.FC<POSViewProps> = ({
                                   {unitsSold > 0 && <span className="opacity-80 font-normal truncate max-w-[55px]">• {unitsSold} sold</span>}
                                 </span>
 
-                                {inCartQty > 0 ? (
+                                {isSelected ? (
+                                  <span className="text-[9px] font-mono font-black px-1.5 py-0.5 rounded-full bg-sky-400 text-slate-950 border border-sky-200 shrink-0 animate-pulse">
+                                    ● {inCartQty}
+                                  </span>
+                                ) : inCartQty > 0 ? (
                                   <span className="text-[9px] font-mono font-black px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 shrink-0">
                                     ✓ {inCartQty}
                                   </span>
@@ -2779,6 +2879,7 @@ export const POSView: React.FC<POSViewProps> = ({
                           const isLowStock = p.stockQuantity <= p.minStockAlert;
                           const cartItem = cart.find((item) => item.product.id === p.id);
                           const inCartQty = cartItem ? cartItem.quantity : 0;
+                          const isSelected = selectedCartItemId === p.id;
                           const formattedDate = p.createdAt ? p.createdAt.slice(0, 10) : 'New Stock';
 
                           return (
@@ -2789,6 +2890,8 @@ export const POSView: React.FC<POSViewProps> = ({
                               className={`text-left p-2.5 rounded-xl border transition flex flex-col justify-between group relative overflow-hidden active:scale-95 cursor-pointer shadow-sm select-none ${
                                 isOutOfStock
                                   ? 'bg-slate-950/60 border-slate-800 opacity-60'
+                                  : isSelected
+                                  ? 'bg-sky-950/70 border-2 border-sky-400 ring-2 ring-sky-400/60 shadow-md shadow-sky-500/20'
                                   : inCartQty > 0
                                   ? 'bg-slate-950 border-sky-500/70 hover:border-sky-400 shadow-sky-500/5 ring-1 ring-sky-500/40'
                                   : 'bg-slate-950 border-slate-800 hover:border-sky-500/50 hover:bg-slate-800/60'
@@ -2802,7 +2905,11 @@ export const POSView: React.FC<POSViewProps> = ({
                                   <span>NEW #{index + 1}</span>
                                 </span>
 
-                                {inCartQty > 0 ? (
+                                {isSelected ? (
+                                  <span className="text-[9px] font-mono font-black px-1.5 py-0.5 rounded-full bg-sky-400 text-slate-950 border border-sky-200 shrink-0 animate-pulse">
+                                    ● {inCartQty}
+                                  </span>
+                                ) : inCartQty > 0 ? (
                                   <span className="text-[9px] font-mono font-black px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 shrink-0">
                                     ✓ {inCartQty}
                                   </span>
@@ -2887,12 +2994,22 @@ export const POSView: React.FC<POSViewProps> = ({
                       const isLowStock = p.stockQuantity <= p.minStockAlert;
                       const isOutOfStock = p.stockQuantity <= 0;
                       const perf = performanceMap[p.id];
+                      const cartItem = cart.find((item) => item.product.id === p.id);
+                      const inCartQty = cartItem ? cartItem.quantity : 0;
+                      const isInCart = inCartQty > 0;
+                      const isSelected = selectedCartItemId === p.id;
 
                       return (
                         <tr
                           key={p.id}
                           onClick={() => handleAddToCart(p)}
-                          className={`hover:bg-slate-800/70 transition cursor-pointer group ${perf ? perf.accentBorderLeft : ''} ${perf ? perf.tableRowHighlight : ''}`}
+                          className={`transition cursor-pointer group ${
+                            isSelected
+                              ? 'bg-sky-950/70 ring-2 ring-inset ring-sky-400 border-l-4 border-l-sky-400 shadow-md'
+                              : isInCart
+                              ? 'bg-emerald-950/25 border-l-4 border-l-emerald-500 hover:bg-emerald-950/40'
+                              : 'hover:bg-slate-800/70'
+                          } ${perf ? perf.accentBorderLeft : ''} ${perf && !isSelected && !isInCart ? perf.tableRowHighlight : ''}`}
                         >
                           <td className="p-3">
                             <div className="flex items-center gap-2.5">
@@ -2911,9 +3028,21 @@ export const POSView: React.FC<POSViewProps> = ({
                               )}
                               <div className="space-y-0.5">
                                 <div className="flex items-center gap-2 flex-wrap">
-                                  <span className="font-bold text-slate-100 group-hover:text-sky-300 transition text-xs">
+                                  <span className={`font-bold transition text-xs ${isSelected ? 'text-sky-300 font-black' : 'text-slate-100 group-hover:text-sky-300'}`}>
                                     {p.name}
                                   </span>
+
+                                  {/* In-Cart / Active Selection Badge */}
+                                  {isSelected && (
+                                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-black bg-sky-500 text-slate-950 shadow-sm animate-pulse shrink-0">
+                                      ● Selected ({inCartQty})
+                                    </span>
+                                  )}
+                                  {!isSelected && isInCart && (
+                                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shrink-0">
+                                      ✓ In Cart ({inCartQty})
+                                    </span>
+                                  )}
 
                                   {/* Performance Velocity & Margin Badge */}
                                   {perf && perf.tier !== 'unranked_no_sales' && (
@@ -3016,35 +3145,46 @@ export const POSView: React.FC<POSViewProps> = ({
                 const cartItem = cart.find((item) => item.product.id === p.id);
                 const inCartQty = cartItem ? cartItem.quantity : 0;
                 const isInCart = inCartQty > 0;
+                const isSelected = selectedCartItemId === p.id;
 
                 return (
                   <div
                     key={p.id}
                     onClick={() => handleAddToCart(p)}
                     className={`group border rounded-2xl p-3 transition flex flex-col justify-between cursor-pointer relative overflow-hidden ${
-                      isInCart
+                      isSelected
+                        ? 'border-2 border-sky-400 ring-2 ring-sky-400/70 shadow-lg shadow-sky-500/25 bg-sky-950/45 scale-[1.01]'
+                        : isInCart
                         ? 'border-2 border-emerald-500 shadow-md shadow-emerald-500/20 bg-emerald-950/35 ring-1 ring-emerald-400/40'
                         : perf
                         ? perf.cardBorder
                         : 'border-slate-800'
-                    } ${perf && !isInCart ? perf.cardGlow : ''} ${
+                    } ${perf && !isInCart && !isSelected ? perf.cardGlow : ''} ${
                       isOutOfStock
                         ? 'opacity-60 bg-slate-950/40'
                         : isLowStock
                         ? 'bg-slate-900/90'
+                        : isSelected
+                        ? 'bg-sky-950/45'
                         : isInCart
                         ? 'bg-emerald-950/35'
                         : 'bg-slate-900 hover:bg-slate-800/80'
                     }`}
                   >
-                    {/* In-Cart Selection Badge */}
-                    {isInCart && (
+                    {/* In-Cart / Active Selection Badge */}
+                    {isSelected ? (
                       <div className="absolute top-2 right-2 z-10">
-                        <span className="text-[10px] font-mono font-black px-2 py-0.5 rounded-full bg-emerald-500 text-slate-950 shadow-md border border-emerald-300 flex items-center gap-1 animate-pulse">
+                        <span className="text-[10px] font-mono font-black px-2 py-0.5 rounded-full bg-sky-400 text-slate-950 shadow-md border border-sky-200 flex items-center gap-1 animate-pulse">
+                          ● Selected ({inCartQty})
+                        </span>
+                      </div>
+                    ) : isInCart ? (
+                      <div className="absolute top-2 right-2 z-10">
+                        <span className="text-[10px] font-mono font-black px-2 py-0.5 rounded-full bg-emerald-500 text-slate-950 shadow-md border border-emerald-300 flex items-center gap-1">
                           ✓ In Cart ({inCartQty})
                         </span>
                       </div>
-                    )}
+                    ) : null}
 
                     <div>
                       {/* Performance Velocity & Margin Ribbon */}

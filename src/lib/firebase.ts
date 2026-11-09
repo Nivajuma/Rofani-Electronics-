@@ -20,7 +20,7 @@ export const firebaseConfig = {
   storageBucket: (env.VITE_FIREBASE_STORAGE_BUCKET as string) || rawConfig.storageBucket,
   messagingSenderId: (env.VITE_FIREBASE_MESSAGING_SENDER_ID as string) || rawConfig.messagingSenderId,
   appId: (env.VITE_FIREBASE_APP_ID as string) || rawConfig.appId,
-  firestoreDatabaseId: (env.VITE_FIREBASE_DATABASE_ID as string) || rawConfig.firestoreDatabaseId,
+  firestoreDatabaseId: (env.VITE_FIREBASE_DATABASE_ID as string) || (rawConfig as any).firestoreDatabaseId,
   measurementId: rawConfig.measurementId || '',
 };
 

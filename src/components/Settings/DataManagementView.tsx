@@ -31,11 +31,13 @@ import {
   Lock,
   KeyRound,
   Eye,
-  EyeOff
+  EyeOff,
+  Mail
 } from 'lucide-react';
 import { Product, Customer, Supplier, Transaction, Expense, AttendanceRecord, User, StoreLocation } from '../../types';
 import { detectDuplicateProducts, deduplicateProducts } from '../../utils/deduplicate';
 import { DataSnapshotModal } from './DataSnapshotModal';
+import { DailyEmailBackupModal } from './DailyEmailBackupModal';
 import { CameraPermissionsCard } from './CameraPermissionsCard';
 import { SettingsDashboardView } from './SettingsDashboardView';
 import { safeGetJSON, safeSetJSON, getLocalStorageUsageStats } from '../../utils/safeStorage';
@@ -217,6 +219,7 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
 
   // Full Data Snapshot Modal state
   const [showSnapshotModal, setShowSnapshotModal] = useState(false);
+  const [showEmailBackupModal, setShowEmailBackupModal] = useState(false);
 
   const triggerNotify = (msg: string) => {
     setSuccessMessage(msg);
@@ -958,6 +961,36 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
               Download complete backups of your system state. You can restore this file at any time on any computer or store terminal.
             </p>
 
+            {/* DAILY AUTOMATIC EMAIL BACKUP CARD */}
+            <div className="bg-gradient-to-r from-sky-950 via-slate-900 to-indigo-950 border-2 border-sky-500/60 rounded-2xl p-4.5 text-white shadow-lg flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+              <div className="flex items-start gap-3.5">
+                <div className="w-11 h-11 bg-sky-500/20 border border-sky-400/40 rounded-xl flex items-center justify-center text-sky-300 shrink-0 shadow-inner">
+                  <Mail className="w-5 h-5 text-sky-400" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h4 className="font-extrabold text-sm text-white">Daily Automatic Email Backup</h4>
+                    <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-400/40 text-[10px] px-2 py-0.5 rounded-full font-mono font-bold flex items-center gap-1">
+                      ● Active • NivaJuma@gmail.com
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-300 mt-0.5">
+                    Automated daily database snapshot emailed every evening to <b>NivaJuma@gmail.com</b> with complete JSON database, products CSV, and financial summary.
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                id="btn-open-email-backup-modal"
+                onClick={() => setShowEmailBackupModal(true)}
+                className="px-4 py-2.5 bg-gradient-to-r from-sky-500 to-indigo-600 hover:from-sky-400 hover:to-indigo-500 text-white font-extrabold rounded-xl text-xs flex items-center gap-2 shadow-lg shadow-sky-600/30 transition shrink-0 active:scale-95 cursor-pointer"
+              >
+                <Mail className="w-4 h-4" />
+                <span>Configure & Send Backup</span>
+              </button>
+            </div>
+
             {/* FULL ENCRYPTED DATA SNAPSHOT CARD */}
             <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 border-2 border-indigo-500/50 rounded-2xl p-4.5 text-white shadow-md flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
               <div className="flex items-start gap-3.5">
@@ -1223,6 +1256,19 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
         storeName={storeName}
         masterPin={masterPin}
         onRestoreSnapshot={onImportData}
+      />
+
+      {/* DAILY AUTOMATIC EMAIL BACKUP MODAL */}
+      <DailyEmailBackupModal
+        isOpen={showEmailBackupModal}
+        onClose={() => setShowEmailBackupModal(false)}
+        products={products}
+        transactions={transactions}
+        customers={customers}
+        suppliers={suppliers}
+        expenses={expenses}
+        allUsers={allUsers}
+        storeName={storeName}
       />
     </div>
   </div>

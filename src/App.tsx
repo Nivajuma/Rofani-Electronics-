@@ -42,7 +42,8 @@ import {
   Printer,
   Barcode,
   QrCode,
-  Truck
+  Truck,
+  Mail
 } from 'lucide-react';
 import {
   Product,
@@ -121,6 +122,8 @@ import { ItemAuditMiniPage } from './components/Inventory/ItemAuditMiniPage';
 import { StockAlertNotificationModal } from './components/Inventory/StockAlertNotificationModal';
 import { CameraStartupPrompt } from './components/Common/CameraStartupPrompt';
 import { AppMenuView } from './components/Common/AppMenuView';
+import { DailyEmailBackupModal } from './components/Settings/DailyEmailBackupModal';
+import { getBackupSettings, saveBackupSettings, getGmailAccessToken, buildAndDispatchStoreBackup } from './lib/gmailService';
 import { formatKSh } from './utils/currency';
 import {
   TabKey,
@@ -446,6 +449,10 @@ export default function App() {
   const [isCloudQuotaExceeded, setIsCloudQuotaExceeded] = useState<boolean>(false);
   const [showQuotaBanner, setShowQuotaBanner] = useState<boolean>(true);
   const [lastSyncedTime, setLastSyncedTime] = useState<string | null>(null);
+
+  // Daily Automatic Email Backup Modal & Status Banner
+  const [showDailyEmailBackupModal, setShowDailyEmailBackupModal] = useState<boolean>(false);
+  const [backupBanner, setBackupBanner] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
   // Application Persistent Collections State with safe lazy initialization & immediate localStorage sync
   const [products, setProductsState] = useState<Product[]>(() => {
@@ -1419,6 +1426,71 @@ export default function App() {
       console.warn('Could not sync security settings to cloud:', err);
     }
   };
+
+  // Automated Daily Gmail Backup Background Schedule Checker
+  useEffect(() => {
+    let isCancelled = false;
+
+    const performDailyBackupCheck = async () => {
+      try {
+        const settings = getBackupSettings();
+        if (!settings.enabled) return;
+
+        const now = new Date();
+        const todayStr = now.toISOString().split('T')[0];
+        const currentHour = now.getHours();
+
+        // Check if scheduled hour has arrived and today's backup has not been performed
+        if (currentHour >= settings.scheduledHour && settings.lastSentDate !== todayStr) {
+          const token = getGmailAccessToken();
+          if (!token) {
+            return;
+          }
+
+          console.log('[Daily Email Backup] Scheduled closing hour reached, generating and dispatching daily store backup via Gmail...');
+          const currentStore = stores.find((s) => s.id === activeStoreId)?.name || 'ROFANI ELECTRONICS AND BOUTIQUE';
+
+          const result = await buildAndDispatchStoreBackup({
+            accessToken: token,
+            recipientEmail: settings.recipientEmail || 'NivaJuma@gmail.com',
+            products,
+            transactions,
+            customers,
+            suppliers,
+            expenses,
+            cashTransactions,
+            allUsers,
+            storeName: currentStore,
+          });
+
+          if (isCancelled) return;
+
+          if (result.success) {
+            const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            setBackupBanner({
+              message: `Daily automated backup email sent successfully to ${settings.recipientEmail || 'NivaJuma@gmail.com'} at ${timeStr}.`,
+              type: 'success',
+            });
+          } else {
+            setBackupBanner({
+              message: `Automated daily backup failed: ${result.error || 'Check Gmail permissions'}`,
+              type: 'error',
+            });
+          }
+        }
+      } catch (err: any) {
+        console.warn('[Daily Email Backup Background Error]:', err);
+      }
+    };
+
+    performDailyBackupCheck();
+    const intervalId = window.setInterval(performDailyBackupCheck, 60000);
+
+    return () => {
+      isCancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [products, transactions, customers, suppliers, expenses, cashTransactions, allUsers, stores, activeStoreId]);
 
   // Low stock counter
   const lowStockProducts = products.filter((p) => p.stockQuantity <= p.minStockAlert);
@@ -2930,6 +3002,7 @@ export default function App() {
           onOpenCloudSync={() => setShowCloudSyncModal(true)}
           onOpenStoreManager={() => setShowStoreManagerModal(true)}
           onOpenInstallModal={() => setShowInstallModal(true)}
+          onOpenEmailBackup={() => setShowDailyEmailBackupModal(true)}
           onSwitchToComputer={() => setDeviceFormat('computer')}
           lowStockCount={lowStockCount}
           storeName={stores.find((s) => s.id === activeStoreId)?.name || 'ROFANI ELECTRONICS'}
@@ -3025,6 +3098,21 @@ export default function App() {
         <InstallPwaModal
           isOpen={showInstallModal}
           onClose={() => setShowInstallModal(false)}
+        />
+
+        {/* Daily Automatic Email Backup Modal (Phone Format Mode) */}
+        <DailyEmailBackupModal
+          isOpen={showDailyEmailBackupModal}
+          onClose={() => setShowDailyEmailBackupModal(false)}
+          products={products}
+          transactions={transactions}
+          customers={customers}
+          suppliers={suppliers}
+          expenses={expenses}
+          cashTransactions={cashTransactions}
+          allUsers={allUsers}
+          storeName={stores.find((s) => s.id === activeStoreId)?.name || 'ROFANI ELECTRONICS AND BOUTIQUE'}
+          onNotification={(msg, type) => setBackupBanner({ message: msg, type })}
         />
 
         {/* Role Authorization Modal for Sensitive Operations in Phone Mode */}
@@ -3579,6 +3667,33 @@ export default function App() {
           </div>
         )}
 
+        {/* Daily Email Backup Notification Banner */}
+        {backupBanner && (
+          <div className={`px-4 py-2.5 text-xs font-semibold flex items-center justify-between shadow-sm z-30 shrink-0 ${
+            backupBanner.type === 'success' ? 'bg-emerald-600 text-white' : 'bg-red-600 text-white'
+          }`}>
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="flex items-center gap-1 bg-black/20 text-white px-2 py-0.5 rounded text-[11px] font-bold">
+                <Mail className="w-3.5 h-3.5" /> Email Backup
+              </span>
+              <span>{backupBanner.message}</span>
+              <button
+                onClick={() => setShowDailyEmailBackupModal(true)}
+                className="underline font-bold text-white hover:text-emerald-100 cursor-pointer ml-2"
+              >
+                View Backup Details
+              </button>
+            </div>
+            <button
+              onClick={() => setBackupBanner(null)}
+              className="p-1 hover:bg-black/20 rounded text-white cursor-pointer ml-2"
+              title="Dismiss"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+
         {/* Responsive Mobile Top Header for Smartphones & Tablets on Vercel */}
         <div className="lg:hidden bg-slate-900 border-b border-slate-800 px-3 py-2 flex items-center justify-between shrink-0 z-20 text-white">
           <div className="flex items-center gap-2 min-w-0">
@@ -3754,6 +3869,16 @@ export default function App() {
                 }`}
                 title={cloudSyncStatus === 'quota_exceeded' ? 'Local storage mode' : 'Cloud connection active'}
               />
+            </button>
+
+            {/* Daily Automatic Email Backup (Gmail) Button */}
+            <button
+              onClick={() => setShowDailyEmailBackupModal(true)}
+              title="Daily Automatic Email Backup (Gmail)"
+              className="px-3 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-800 rounded-xl border border-indigo-200 transition flex items-center gap-1.5 text-xs font-bold shadow-sm shrink-0 cursor-pointer"
+            >
+              <Mail className="w-4 h-4 text-indigo-600" />
+              <span className="hidden xl:inline">Email Backup</span>
             </button>
 
             {/* AI Worker Assistant Button */}
@@ -4082,6 +4207,22 @@ export default function App() {
       />
       {/* Role Authorization Modal for Sensitive Operations (Modifying Inventory, Deleting Expenses, Stock Count Adjustment) */}
       <RoleAuthorizationModal request={roleAuthRequest} />
+
+      {/* Daily Automatic Email Backup Modal (Desktop/Laptop Mode) */}
+      <DailyEmailBackupModal
+        isOpen={showDailyEmailBackupModal}
+        onClose={() => setShowDailyEmailBackupModal(false)}
+        products={products}
+        transactions={transactions}
+        customers={customers}
+        suppliers={suppliers}
+        expenses={expenses}
+        cashTransactions={cashTransactions}
+        allUsers={allUsers}
+        storeName={stores.find((s) => s.id === activeStoreId)?.name || 'ROFANI ELECTRONICS AND BOUTIQUE'}
+        onNotification={(msg, type) => setBackupBanner({ message: msg, type })}
+      />
+
       {/* Automatic Camera Authorization on App Launch */}
       <CameraStartupPrompt />
     </div>

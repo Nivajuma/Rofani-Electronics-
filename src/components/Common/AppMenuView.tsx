@@ -22,6 +22,7 @@ import {
   Bell,
   Filter,
   Store,
+  Mail,
   X
 } from 'lucide-react';
 import { TabKey } from '../../utils/permissions';
@@ -31,6 +32,7 @@ interface AppMenuViewProps {
   onOpenCloudSync?: () => void;
   onOpenStoreManager?: () => void;
   onOpenInstallModal?: () => void;
+  onOpenEmailBackup?: () => void;
   onSwitchToComputer: () => void;
   lowStockCount: number;
   storeName?: string;
@@ -41,6 +43,7 @@ export const AppMenuView: React.FC<AppMenuViewProps> = ({
   onOpenCloudSync,
   onOpenStoreManager,
   onOpenInstallModal,
+  onOpenEmailBackup,
   onSwitchToComputer,
   lowStockCount,
   storeName = 'ROFANI ELECTRONICS'
@@ -391,6 +394,22 @@ export const AppMenuView: React.FC<AppMenuViewProps> = ({
             </button>
             {dropdowns.backup && (
               <div className="bg-slate-50/80 px-4 py-2.5 space-y-2 border-t border-slate-100 pl-14 animate-fade-in">
+                <button
+                  onClick={() => {
+                    if (onOpenEmailBackup) {
+                      onOpenEmailBackup();
+                    } else {
+                      onSelectTab('settings');
+                    }
+                  }}
+                  className="w-full text-left py-1.5 text-indigo-700 hover:text-indigo-900 font-semibold flex items-center justify-between"
+                >
+                  <span className="flex items-center gap-2">
+                    <Mail className="w-3.5 h-3.5 text-indigo-600" />
+                    Daily Email Backup
+                  </span>
+                  <span className="text-[10px] font-bold uppercase tracking-wider bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded">Gmail</span>
+                </button>
                 <button
                   onClick={() => onSelectTab('settings')}
                   className="w-full text-left py-1.5 text-slate-700 hover:text-emerald-600 font-semibold flex items-center justify-between"

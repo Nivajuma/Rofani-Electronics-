@@ -49,7 +49,7 @@ interface CloudSyncModalProps {
     expensesCount?: number;
     usersCount?: number;
   } | void>;
-  onEmergencyRestore?: (sourceKey?: string) => boolean;
+  onEmergencyRestore?: (sourceKey?: string) => Promise<boolean> | boolean;
   masterPin?: string;
   requirePinOnStartup?: boolean;
   onLockNow?: () => void;

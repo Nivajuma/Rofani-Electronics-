@@ -1,5 +1,6 @@
 import { Product, Transaction, Customer, Supplier, Expense, User } from '../types';
 import { safeGetJSON, safeSetJSON } from './safeStorage';
+import { saveToIDB, getFromIDB } from './idbStorage';
 
 export interface RecoverableBackup {
   key: string;
@@ -23,8 +24,8 @@ export interface RecoverableBackup {
 }
 
 const BACKUP_STORAGE_KEYS = [
-  { key: 'rofani_pos_pre_pull_backup', label: 'Pre-Cloud-Pull Snapshot (Saved right before pulling from cloud)' },
   { key: 'rofani_pos_largest_backup', label: 'Protected Master Catalog Backup (Largest recorded inventory)' },
+  { key: 'rofani_pos_pre_pull_backup', label: 'Pre-Cloud-Pull Snapshot (Saved right before pulling from cloud)' },
   { key: 'rofani_pos_auto_backup', label: 'Auto-Backup Snapshot' },
   { key: 'rofani_pos_last_snapshot', label: 'Last App Snapshot' },
   { key: 'rofani_pos_pre_import_backup', label: 'Pre-Import Backup' },
@@ -169,9 +170,34 @@ export function protectLargestBackup(
         expenses: currentExpenses,
         allUsers: currentUsers,
       };
+      // Save to IndexedDB (primary durable store without 5MB limits)
+      try {
+        saveToIDB('rofani_pos_largest_backup', payload);
+      } catch {}
       safeSetJSON('rofani_pos_largest_backup', payload);
     }
   } catch (err) {
     console.warn('Could not update protected largest backup:', err);
   }
+}
+
+/**
+ * Retrieves full backup data by key, checking persistent IndexedDB first, then localStorage.
+ */
+export async function getBackupDataByKey(key: string): Promise<any> {
+  try {
+    const idbData = await getFromIDB(key);
+    if (idbData && (idbData.products || idbData.transactions || Array.isArray(idbData))) {
+      return idbData;
+    }
+  } catch {}
+
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw) {
+      return JSON.parse(raw);
+    }
+  } catch {}
+
+  return null;
 }

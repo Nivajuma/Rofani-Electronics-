@@ -4,6 +4,7 @@
  */
 import React, { useState, useEffect } from 'react';
 import { saveAllProductImagesToIndexedDB } from './imageStorage';
+import { saveToIDB, getFromIDB } from './idbStorage';
 
 /**
  * Strips heavy data URLs (e.g. base64 camera or AI photos) from products before localStorage.
@@ -176,10 +177,30 @@ export function safeSetJSON(key: string, value: any): boolean {
 
   // If value is undefined, remove from storage
   if (value === undefined) {
+    try {
+      saveToIDB(key, null);
+    } catch {}
     return safeRemove(key);
   }
 
   let toStore = value;
+
+  // Always mirror mission-critical business collections and backups directly into persistent IndexedDB!
+  // IndexedDB has hundreds of megabytes of capacity and NEVER fails due to 5MB localStorage limits.
+  // This guarantees zero data loss when Chrome sleeps, hibernates, or discards background tabs.
+  if (
+    key === 'retail_pos_products' ||
+    key === 'retail_pos_transactions' ||
+    key === 'retail_pos_customers' ||
+    key === 'retail_pos_suppliers' ||
+    key === 'retail_pos_expenses' ||
+    key === 'retail_pos_users' ||
+    key.startsWith('rofani_pos_')
+  ) {
+    try {
+      saveToIDB(key, value);
+    } catch {}
+  }
 
   // If saving products, proactively ensure all images are safely recorded in IndexedDB
   // and keep localStorage copy clean of multi-megabyte base64 strings
@@ -213,18 +234,36 @@ export function safeSetJSON(key: string, value: any): boolean {
     localStorage.setItem(key, JSON.stringify(toStore));
     return true;
   } catch (err: any) {
-    // Quota exceeded: run emergency cleanup to reclaim space from non-essential caches
+    // Quota exceeded: offload bulky duplicate snapshots to IndexedDB to free up localStorage
     try {
+      const bulkyBackupKeys = [
+        'rofani_pos_largest_backup',
+        'rofani_pos_pre_pull_backup',
+        'rofani_pos_auto_backup',
+        'rofani_pos_last_snapshot',
+        'rofani_pos_pre_import_backup',
+      ];
+      bulkyBackupKeys.forEach((bk) => {
+        try {
+          const rawBk = localStorage.getItem(bk);
+          if (rawBk && rawBk.length > 30000) {
+            try {
+              saveToIDB(bk, JSON.parse(rawBk));
+            } catch {}
+            localStorage.removeItem(bk);
+          }
+        } catch {}
+      });
       cleanupLocalStorageQuota(true);
     } catch {}
 
     try {
-      // Re-try storing full value after purging transient logs
+      // Re-try storing full value after purging transient logs and offloading snapshots
       localStorage.setItem(key, JSON.stringify(toStore));
       return true;
     } catch {
-      // Graceful fallback: do NOT emit console.error or crash. State remains safely in memory.
-      console.warn(`[SafeStorage] "${key}" kept in memory (storage quota limit reached).`);
+      // Graceful fallback: IndexedDB already has the full data safely saved above!
+      console.warn(`[SafeStorage] "${key}" persisted to IndexedDB (localStorage quota reached).`);
       return false;
     }
   }

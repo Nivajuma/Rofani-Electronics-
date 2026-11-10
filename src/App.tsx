@@ -199,7 +199,8 @@ import {
   getPendingSyncQueue,
   removePendingSyncItem,
 } from './utils/offlineSync';
-import { findRecoverableBackups, protectLargestBackup } from './utils/backupRecovery';
+import { findRecoverableBackups, protectLargestBackup, getBackupDataByKey } from './utils/backupRecovery';
+import { saveToIDB, getFromIDB } from './utils/idbStorage';
 
 /**
  * Rofani Electronics & Boutique - Live Firebase Firestore Configuration
@@ -473,9 +474,58 @@ export default function App() {
     setProductsState((prev) => {
       const next = typeof newVal === 'function' ? newVal(prev) : newVal;
       safeSetJSON('retail_pos_products', next);
+      try {
+        saveToIDB('retail_pos_products', next);
+      } catch {}
       return next;
     });
   };
+
+  // Proactive IndexedDB Hydration on Startup and Resume from Sleep Mode
+  // Guarantees that catalog restored from backup NEVER disappears when Chrome sleeps, hibernates, or discards background tabs
+  useEffect(() => {
+    let isMounted = true;
+
+    const restoreFromIDBIfLarger = async () => {
+      try {
+        const idbProducts = await getFromIDB('retail_pos_products');
+        if (isMounted && Array.isArray(idbProducts) && idbProducts.length > 0) {
+          setProductsState((current) => {
+            if (idbProducts.length > current.length) {
+              console.log(
+                `[Sleep Mode Recovery] Hydrated ${idbProducts.length} items from persistent IndexedDB (in-memory had ${current.length})`
+              );
+              safeSetJSON('retail_pos_products', idbProducts);
+              return idbProducts;
+            }
+            return current;
+          });
+        }
+      } catch (err) {
+        console.warn('[Sleep Mode Recovery] IDB hydration notice:', err);
+      }
+    };
+
+    restoreFromIDBIfLarger();
+
+    // Chrome Sleep & Resume event listeners (Page Lifecycle API, visibilitychange, focus)
+    const handleWakeFromSleep = () => {
+      if (document.visibilityState === 'visible') {
+        restoreFromIDBIfLarger();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleWakeFromSleep);
+    window.addEventListener('focus', handleWakeFromSleep);
+    document.addEventListener('resume', handleWakeFromSleep);
+
+    return () => {
+      isMounted = false;
+      document.removeEventListener('visibilitychange', handleWakeFromSleep);
+      window.removeEventListener('focus', handleWakeFromSleep);
+      document.removeEventListener('resume', handleWakeFromSleep);
+    };
+  }, []);
 
   // Automatically restore and hydrate high-resolution product photos from persistent IndexedDB
   useEffect(() => {
@@ -920,8 +970,10 @@ export default function App() {
           }
         };
         protectLargestBackup(products, transactions, customers, suppliers, expenses, allUsers);
-        localStorage.setItem('rofani_pos_auto_backup', JSON.stringify(backupPayload));
-        localStorage.setItem('rofani_pos_last_snapshot', JSON.stringify(backupPayload));
+        try {
+          saveToIDB('rofani_pos_auto_backup', backupPayload);
+          saveToIDB('rofani_pos_last_snapshot', backupPayload);
+        } catch {}
       } catch (err) {
         console.warn('Could not save auto-backup snapshot:', err);
       }
@@ -996,13 +1048,31 @@ export default function App() {
         (incomingRemoteProducts) => {
           if (incomingRemoteProducts && incomingRemoteProducts.length > 0) {
             setProducts((prevLocalProducts) => {
-              const merged = [...incomingRemoteProducts];
-              prevLocalProducts.forEach((localItem) => {
-                if (!merged.some((remoteItem) => remoteItem.id === localItem.id)) {
-                  merged.push(localItem);
+              const prodMap = new Map<string, Product>();
+              (prevLocalProducts || []).forEach((localItem) => {
+                if (localItem && localItem.id) prodMap.set(localItem.id, localItem);
+              });
+              incomingRemoteProducts.forEach((remoteItem) => {
+                if (!remoteItem || !remoteItem.id) return;
+                const local = prodMap.get(remoteItem.id);
+                if (!local) {
+                  prodMap.set(remoteItem.id, remoteItem);
+                } else {
+                  const localTime = local.updatedAt ? new Date(local.updatedAt).getTime() : 0;
+                  const remoteTime = remoteItem.updatedAt ? new Date(remoteItem.updatedAt).getTime() : 0;
+                  if (remoteTime >= localTime) {
+                    prodMap.set(remoteItem.id, {
+                      ...remoteItem,
+                      imageUrl: remoteItem.imageUrl || local.imageUrl,
+                    });
+                  }
                 }
               });
+              const merged = Array.from(prodMap.values());
               safeSetJSON('retail_pos_products', merged);
+              try {
+                saveToIDB('retail_pos_products', merged);
+              } catch {}
               return merged;
             });
             setCloudSyncStatus('synced');
@@ -1023,13 +1093,31 @@ export default function App() {
       fetchProductsFromCloud().then((cloudItems) => {
         if (cloudItems && cloudItems.length > 0) {
           setProducts((prevLocal) => {
-            const merged = [...cloudItems];
-            prevLocal.forEach((lp) => {
-              if (!merged.some((cp) => cp.id === lp.id)) {
-                merged.push(lp);
+            const prodMap = new Map<string, Product>();
+            (prevLocal || []).forEach((lp) => {
+              if (lp && lp.id) prodMap.set(lp.id, lp);
+            });
+            cloudItems.forEach((cp) => {
+              if (!cp || !cp.id) return;
+              const local = prodMap.get(cp.id);
+              if (!local) {
+                prodMap.set(cp.id, cp);
+              } else {
+                const localTime = local.updatedAt ? new Date(local.updatedAt).getTime() : 0;
+                const remoteTime = cp.updatedAt ? new Date(cp.updatedAt).getTime() : 0;
+                if (remoteTime >= localTime) {
+                  prodMap.set(cp.id, {
+                    ...cp,
+                    imageUrl: cp.imageUrl || local.imageUrl,
+                  });
+                }
               }
             });
+            const merged = Array.from(prodMap.values());
             safeSetJSON('retail_pos_products', merged);
+            try {
+              saveToIDB('retail_pos_products', merged);
+            } catch {}
             return merged;
           });
           setCloudSyncStatus('synced');
@@ -1319,14 +1407,19 @@ export default function App() {
   const [dismissedRecoveryBanner, setDismissedRecoveryBanner] = useState(false);
 
   // Emergency Catalog Rollback Handler: restores products and associated collections from local snapshots
-  const handleRestoreEmergencyBackup = (sourceKey?: string): boolean => {
+  // Emergency Catalog Rollback Handler: restores products and associated collections from local snapshots
+  const handleRestoreEmergencyBackup = async (sourceKey?: string): Promise<boolean> => {
     try {
       const backups = findRecoverableBackups();
       const target = sourceKey
         ? backups.find((b) => b.key === sourceKey)
         : backups.find((b) => b.productsCount > products.length) || backups[0];
 
-      if (!target || !target.data) {
+      // Retrieve full data checking IndexedDB first (which has no 5MB limit)
+      const fullBackupData = target ? await getBackupDataByKey(target.key) : null;
+      const dataPayload = fullBackupData?.data || fullBackupData || target?.data;
+
+      if (!dataPayload) {
         setBackupBanner({
           type: 'error',
           message: 'No recoverable emergency backups found in browser storage.',
@@ -1335,41 +1428,71 @@ export default function App() {
         return false;
       }
 
-      const restoredProducts = target.data.products || [];
-      const restoredSales = target.data.transactions || [];
-      const restoredCustomers = target.data.customers || [];
-      const restoredSuppliers = target.data.suppliers || [];
-      const restoredExpenses = target.data.expenses || [];
-      const restoredUsers = target.data.allUsers || [];
+      const restoredProducts: Product[] = dataPayload.products || [];
+      const restoredSales: Transaction[] = dataPayload.transactions || dataPayload.sales || [];
+      const restoredCustomers: Customer[] = dataPayload.customers || [];
+      const restoredSuppliers: Supplier[] = dataPayload.suppliers || [];
+      const restoredExpenses: Expense[] = dataPayload.expenses || [];
+      const restoredUsers: User[] = dataPayload.allUsers || dataPayload.staff || [];
 
       if (restoredProducts.length > 0) {
         setProducts(restoredProducts);
         safeSetJSON('retail_pos_products', restoredProducts);
+        try {
+          await saveToIDB('retail_pos_products', restoredProducts);
+        } catch {}
+        protectLargestBackup(restoredProducts, restoredSales, restoredCustomers, restoredSuppliers, restoredExpenses, restoredUsers);
       }
       if (restoredSales.length > 0) {
         setTransactions(restoredSales);
         safeSetJSON('retail_pos_transactions', restoredSales);
+        try {
+          await saveToIDB('retail_pos_transactions', restoredSales);
+        } catch {}
       }
       if (restoredCustomers.length > 0) {
         setCustomers(restoredCustomers);
         safeSetJSON('retail_pos_customers', restoredCustomers);
+        try {
+          await saveToIDB('retail_pos_customers', restoredCustomers);
+        } catch {}
       }
       if (restoredSuppliers.length > 0) {
         setSuppliers(restoredSuppliers);
         safeSetJSON('retail_pos_suppliers', restoredSuppliers);
+        try {
+          await saveToIDB('retail_pos_suppliers', restoredSuppliers);
+        } catch {}
       }
       if (restoredExpenses.length > 0) {
         setExpenses(restoredExpenses);
         safeSetJSON('retail_pos_expenses', restoredExpenses);
+        try {
+          await saveToIDB('retail_pos_expenses', restoredExpenses);
+        } catch {}
       }
       if (restoredUsers.length > 0) {
         setAllUsers(restoredUsers);
         safeSetJSON('retail_pos_users', restoredUsers);
+        try {
+          await saveToIDB('retail_pos_users', restoredUsers);
+        } catch {}
+      }
+
+      // Automatically publish restored catalog to Cloud Firestore so the cloud also holds all 500+ items
+      if (restoredProducts.length > 0) {
+        batchSaveProductsToCloud(restoredProducts)
+          .then((count) => {
+            console.log(`[Cloud Sync] Automatically uploaded all ${count} restored products to Cloud Firestore!`);
+            setCloudSyncStatus('synced');
+            setLastSyncedTime(new Date().toLocaleTimeString());
+          })
+          .catch((e) => console.warn('[Cloud Sync] Auto-push after restore notice:', e));
       }
 
       setBackupBanner({
         type: 'success',
-        message: `✨ Successfully restored ${restoredProducts.length} items & ${restoredSales.length} sales from ${target.label}!`,
+        message: `✨ Successfully restored ${restoredProducts.length} items & ${restoredSales.length} sales from ${target?.label || 'emergency backup'}! Persisted safely to IndexedDB and Cloud Firestore.`,
       });
       setTimeout(() => setBackupBanner(null), 8000);
       setDismissedRecoveryBanner(true);

@@ -79,25 +79,18 @@ export function cleanupLocalStorageQuota(aggressive = false): void {
       } catch {}
     }
 
-    // 4. Cap growing collection and log arrays to prevent storage choke
-    const limits: Record<string, number> = {
-      retail_pos_transactions: aggressive ? 30 : 60,
-      retail_pos_cash_transactions: aggressive ? 20 : 40,
-      retail_pos_restock_records: aggressive ? 20 : 40,
-      retail_pos_expenses: aggressive ? 20 : 40,
-      retail_pos_attendance: aggressive ? 20 : 40,
-      retail_pos_commission_payouts: aggressive ? 15 : 30,
-      retail_pos_stock_transfers: aggressive ? 15 : 30,
-      retail_pos_online_orders: aggressive ? 15 : 30,
-      retail_pos_pending_sync_queue: aggressive ? 15 : 30,
-      retail_pos_barcode_scan_logs: aggressive ? 15 : 40,
-      retail_pos_audit_logs: aggressive ? 15 : 40,
-      retail_pos_sensitive_action_logs: aggressive ? 15 : 40,
-      retail_pos_ai_messages: aggressive ? 5 : 15,
-      retail_pos_pos_payment_entries: aggressive ? 2 : 5,
+    // 4. Cap growing transient event and log arrays to prevent storage bloat
+    // CRITICAL: NEVER truncate business records (transactions, products, customers, expenses, attendance)
+    const logLimits: Record<string, number> = {
+      retail_pos_barcode_scan_logs: aggressive ? 50 : 200,
+      retail_pos_audit_logs: aggressive ? 100 : 300,
+      retail_pos_sensitive_action_logs: aggressive ? 100 : 300,
+      retail_pos_ai_messages: aggressive ? 10 : 40,
+      retail_pos_pos_payment_entries: aggressive ? 5 : 20,
+      retail_pos_pending_sync_queue: aggressive ? 20 : 100,
     };
 
-    Object.entries(limits).forEach(([key, maxItems]) => {
+    Object.entries(logLimits).forEach(([key, maxItems]) => {
       const raw = localStorage.getItem(key);
       if (!raw) return;
       try {
@@ -201,23 +194,18 @@ export function safeSetJSON(key: string, value: any): boolean {
     }
   }
 
-  // Pre-emptively cap arrays if they exceed safe thresholds
+  // Pre-emptively cap transient and log arrays (NEVER business records like products, transactions, customers, expenses)
   if (Array.isArray(toStore)) {
-    const arrayLimits: Record<string, number> = {
-      retail_pos_transactions: 80,
-      retail_pos_cash_transactions: 50,
-      retail_pos_restock_records: 50,
-      retail_pos_expenses: 50,
-      retail_pos_attendance: 50,
-      retail_pos_commission_payouts: 30,
-      retail_pos_barcode_scan_logs: 40,
-      retail_pos_audit_logs: 40,
-      retail_pos_sensitive_action_logs: 40,
-      retail_pos_ai_messages: 15,
-      retail_pos_pos_payment_entries: 5,
+    const transientLogLimits: Record<string, number> = {
+      retail_pos_barcode_scan_logs: 200,
+      retail_pos_audit_logs: 300,
+      retail_pos_sensitive_action_logs: 300,
+      retail_pos_ai_messages: 50,
+      retail_pos_pos_payment_entries: 20,
+      retail_pos_pending_sync_queue: 100,
     };
-    if (arrayLimits[key] && toStore.length > arrayLimits[key]) {
-      toStore = toStore.slice(0, arrayLimits[key]);
+    if (transientLogLimits[key] && toStore.length > transientLogLimits[key]) {
+      toStore = toStore.slice(0, transientLogLimits[key]);
     }
   }
 
@@ -225,19 +213,14 @@ export function safeSetJSON(key: string, value: any): boolean {
     localStorage.setItem(key, JSON.stringify(toStore));
     return true;
   } catch (err: any) {
-    // Quota exceeded: run emergency cleanup to reclaim space
+    // Quota exceeded: run emergency cleanup to reclaim space from non-essential caches
     try {
       cleanupLocalStorageQuota(true);
     } catch {}
 
     try {
-      // Re-try storing with stripped/compacted data
-      let sanitized = toStore;
-      if (Array.isArray(toStore) && toStore.length > 20) {
-        sanitized = toStore.slice(0, 20);
-      }
-
-      localStorage.setItem(key, JSON.stringify(sanitized));
+      // Re-try storing full value after purging transient logs
+      localStorage.setItem(key, JSON.stringify(toStore));
       return true;
     } catch {
       // Graceful fallback: do NOT emit console.error or crash. State remains safely in memory.

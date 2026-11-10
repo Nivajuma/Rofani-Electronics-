@@ -177,6 +177,10 @@ import {
   saveAuditLogToCloud,
   fetchProductsFromCloud,
   fetchTransactionsFromCloud,
+  fetchCustomersFromCloud,
+  fetchSuppliersFromCloud,
+  fetchExpensesFromCloud,
+  fetchUsersFromCloud,
   subscribeToMpesaConfig,
 } from './lib/cloudSync';
 import { loadMpesaConfig, saveMpesaConfig } from './utils/mpesa';
@@ -1162,13 +1166,35 @@ export default function App() {
     setCloudSyncStatus('synced');
   };
 
-  // Explicit pull from Cloud Firestore handler
+  // Comprehensive pull from Cloud Firestore handler with safety merge & backup snapshot
   const handlePullFromCloud = async () => {
     setCloudSyncStatus('syncing');
     try {
-      const cloudProducts = await fetchProductsFromCloud();
-      const cloudSales = await fetchTransactionsFromCloud();
+      // 1. Proactively record a local rollback snapshot before pulling
+      try {
+        const prePullSnapshot = {
+          timestamp: Date.now(),
+          products,
+          transactions,
+          customers,
+          suppliers,
+          expenses,
+          allUsers,
+        };
+        localStorage.setItem('rofani_pos_pre_pull_backup', JSON.stringify(prePullSnapshot));
+      } catch {}
 
+      // 2. Fetch all collections from Cloud Firestore
+      const [cloudProducts, cloudSales, cloudCustomers, cloudSuppliers, cloudExpenses, cloudUsers] = await Promise.all([
+        fetchProductsFromCloud().catch(() => []),
+        fetchTransactionsFromCloud().catch(() => []),
+        fetchCustomersFromCloud().catch(() => []),
+        fetchSuppliersFromCloud().catch(() => []),
+        fetchExpensesFromCloud().catch(() => []),
+        fetchUsersFromCloud().catch(() => []),
+      ]);
+
+      // 3. ID-based union merge: NEVER discard local items if remote is empty or partial
       if (cloudProducts && cloudProducts.length > 0) {
         setProducts((localProds) => {
           const merged = [...cloudProducts];
@@ -1196,12 +1222,69 @@ export default function App() {
         });
       }
 
+      if (cloudCustomers && cloudCustomers.length > 0) {
+        setCustomers((localCusts) => {
+          const merged = [...cloudCustomers];
+          localCusts.forEach((lc) => {
+            if (!merged.some((cc) => cc.id === lc.id)) {
+              merged.push(lc);
+            }
+          });
+          safeSetJSON('retail_pos_customers', merged);
+          return merged;
+        });
+      }
+
+      if (cloudSuppliers && cloudSuppliers.length > 0) {
+        setSuppliers((localSupps) => {
+          const merged = [...cloudSuppliers];
+          localSupps.forEach((ls) => {
+            if (!merged.some((cs) => cs.id === ls.id)) {
+              merged.push(ls);
+            }
+          });
+          safeSetJSON('retail_pos_suppliers', merged);
+          return merged;
+        });
+      }
+
+      if (cloudExpenses && cloudExpenses.length > 0) {
+        setExpenses((localExps) => {
+          const merged = [...cloudExpenses];
+          localExps.forEach((le) => {
+            if (!merged.some((ce) => ce.id === le.id)) {
+              merged.push(le);
+            }
+          });
+          merged.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+          safeSetJSON('retail_pos_expenses', merged);
+          return merged;
+        });
+      }
+
+      if (cloudUsers && cloudUsers.length > 0) {
+        setAllUsers((localUsers) => {
+          const merged = [...cloudUsers];
+          localUsers.forEach((lu) => {
+            if (!merged.some((cu) => cu.id === lu.id)) {
+              merged.push(lu);
+            }
+          });
+          safeSetJSON('retail_pos_users', merged);
+          return merged;
+        });
+      }
+
       setCloudSyncStatus('synced');
       setLastSyncedTime(new Date().toLocaleTimeString());
 
       return {
         productsCount: cloudProducts.length,
         salesCount: cloudSales.length,
+        customersCount: cloudCustomers.length,
+        suppliersCount: cloudSuppliers.length,
+        expensesCount: cloudExpenses.length,
+        usersCount: cloudUsers.length,
       };
     } catch (err) {
       setCloudSyncStatus('error');
@@ -2611,12 +2694,86 @@ export default function App() {
   };
 
   const handleImportData = (imported: any) => {
-    if (imported.products) setProducts(imported.products);
-    if (imported.customers) setCustomers(imported.customers);
-    if (imported.suppliers) setSuppliers(imported.suppliers);
-    if (imported.expenses) setExpenses(imported.expenses);
-    if (imported.transactions) setTransactions(imported.transactions);
-    if (imported.attendanceRecords) setAttendanceRecords(imported.attendanceRecords);
+    try {
+      // Save emergency rollback snapshot before importing
+      const backupBefore = {
+        timestamp: Date.now(),
+        products,
+        transactions,
+        customers,
+        suppliers,
+        expenses,
+        attendanceRecords,
+      };
+      localStorage.setItem('rofani_pos_pre_import_backup', JSON.stringify(backupBefore));
+    } catch {}
+
+    if (Array.isArray(imported.products) && imported.products.length > 0) {
+      setProducts((prev) => {
+        const merged = [...imported.products];
+        prev.forEach((p) => {
+          if (!merged.some((m) => m.id === p.id)) merged.push(p);
+        });
+        safeSetJSON('retail_pos_products', merged);
+        return merged;
+      });
+    }
+
+    if (Array.isArray(imported.transactions) && imported.transactions.length > 0) {
+      setTransactions((prev) => {
+        const merged = [...imported.transactions];
+        prev.forEach((t) => {
+          if (!merged.some((m) => m.id === t.id)) merged.push(t);
+        });
+        merged.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+        safeSetJSON('retail_pos_transactions', merged);
+        return merged;
+      });
+    }
+
+    if (Array.isArray(imported.customers) && imported.customers.length > 0) {
+      setCustomers((prev) => {
+        const merged = [...imported.customers];
+        prev.forEach((c) => {
+          if (!merged.some((m) => m.id === c.id)) merged.push(c);
+        });
+        safeSetJSON('retail_pos_customers', merged);
+        return merged;
+      });
+    }
+
+    if (Array.isArray(imported.suppliers) && imported.suppliers.length > 0) {
+      setSuppliers((prev) => {
+        const merged = [...imported.suppliers];
+        prev.forEach((s) => {
+          if (!merged.some((m) => m.id === s.id)) merged.push(s);
+        });
+        safeSetJSON('retail_pos_suppliers', merged);
+        return merged;
+      });
+    }
+
+    if (Array.isArray(imported.expenses) && imported.expenses.length > 0) {
+      setExpenses((prev) => {
+        const merged = [...imported.expenses];
+        prev.forEach((e) => {
+          if (!merged.some((m) => m.id === e.id)) merged.push(e);
+        });
+        safeSetJSON('retail_pos_expenses', merged);
+        return merged;
+      });
+    }
+
+    if (Array.isArray(imported.attendanceRecords) && imported.attendanceRecords.length > 0) {
+      setAttendanceRecords((prev) => {
+        const merged = [...imported.attendanceRecords];
+        prev.forEach((a) => {
+          if (!merged.some((m) => m.id === a.id)) merged.push(a);
+        });
+        safeSetJSON('retail_pos_attendance', merged);
+        return merged;
+      });
+    }
   };
 
   const handleUpdateTransaction = (updatedTx: Transaction, updatedProducts: Product[]) => {
@@ -2983,6 +3140,7 @@ export default function App() {
           isSidebarCollapsed={isSidebarCollapsed}
           onToggleSidebar={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
           onOpenCloudSync={() => setShowCloudSyncModal(true)}
+          onPullFromCloud={handlePullFromCloud}
           deviceFormat={deviceFormat}
           onChangeDeviceFormat={setDeviceFormat}
           requirePinOnStartup={requirePinOnStartup}

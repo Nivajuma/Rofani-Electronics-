@@ -77,6 +77,7 @@ interface DataManagementViewProps {
   isSidebarCollapsed?: boolean;
   onToggleSidebar?: () => void;
   onOpenCloudSync?: () => void;
+  onPullFromCloud?: () => Promise<any>;
   deviceFormat?: 'computer' | 'phone';
   onChangeDeviceFormat?: (format: 'computer' | 'phone') => void;
   requirePinOnStartup?: boolean;
@@ -110,6 +111,7 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
   isSidebarCollapsed = false,
   onToggleSidebar,
   onOpenCloudSync,
+  onPullFromCloud,
   deviceFormat = 'computer',
   onChangeDeviceFormat,
   requirePinOnStartup = true,
@@ -155,14 +157,25 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
     setIsPullingData(true);
     setErrorMessage(null);
     try {
-      const prods = await fetchProductsFromCloud();
-      const txs = await fetchTransactionsFromCloud();
-      if (prods.length === 0 && txs.length === 0) {
-        setErrorMessage('Cloud database is currently empty (0 items found). Click "Sync Local Data to Cloud" to upload your local inventory catalog first.');
+      if (onPullFromCloud) {
+        const stats = await onPullFromCloud();
+        if (stats && (stats.productsCount > 0 || stats.salesCount > 0 || stats.customersCount > 0)) {
+          triggerNotify(
+            `Safely pulled & merged from Cloud Firestore: ${stats.productsCount || 0} products, ${stats.salesCount || 0} sales, ${stats.customersCount || 0} customers, ${stats.expensesCount || 0} expenses! All local records preserved.`
+          );
+        } else {
+          setErrorMessage('Cloud database is currently empty (0 items found). Click "Sync Local Data to Cloud" to upload your local data first.');
+        }
       } else {
-        triggerNotify(`Retrieved ${prods.length} products and ${txs.length} transactions from Cloud Firestore!`);
-        if (onImportData) {
-          onImportData({ products: prods, transactions: txs });
+        const prods = await fetchProductsFromCloud();
+        const txs = await fetchTransactionsFromCloud();
+        if (prods.length === 0 && txs.length === 0) {
+          setErrorMessage('Cloud database is currently empty (0 items found). Click "Sync Local Data to Cloud" to upload your local inventory catalog first.');
+        } else {
+          triggerNotify(`Retrieved and safely merged ${prods.length} products and ${txs.length} transactions from Cloud Firestore!`);
+          if (onImportData) {
+            onImportData({ products: prods, transactions: txs });
+          }
         }
       }
     } catch (err: any) {

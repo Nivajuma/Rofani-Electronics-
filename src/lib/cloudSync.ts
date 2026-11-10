@@ -10,16 +10,19 @@ import {
 import { db, handleFirestoreError, OperationType } from './firebase';
 import { Product, Transaction, Customer, Supplier, Expense, RestockRecord, User, SensitiveActionLog } from '../types';
 
-// Sanitize helper to remove undefined values for Firestore compatibility
-export function cleanForFirestore<T extends Record<string, any>>(obj: T): T {
+// Sanitize helper to recursively remove undefined values for Firestore compatibility
+export function cleanForFirestore<T>(val: T): T {
+  if (val === undefined) return undefined as any;
+  if (val === null || typeof val !== 'object') return val;
+  if (Array.isArray(val)) {
+    return val
+      .filter((item) => item !== undefined)
+      .map((item) => cleanForFirestore(item)) as any;
+  }
   const result: any = {};
-  for (const [key, value] of Object.entries(obj)) {
+  for (const [key, value] of Object.entries(val as Record<string, any>)) {
     if (value !== undefined) {
-      if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
-        result[key] = cleanForFirestore(value);
-      } else {
-        result[key] = value;
-      }
+      result[key] = cleanForFirestore(value);
     }
   }
   return result;
@@ -280,6 +283,23 @@ export async function deleteCustomerFromCloud(customerId: string): Promise<void>
   }
 }
 
+// Direct on-demand retrieval of all customers from Cloud Firestore
+export async function fetchCustomersFromCloud(): Promise<Customer[]> {
+  const path = 'customers';
+  try {
+    const colRef = collection(db, path);
+    const snap = await getDocs(colRef);
+    const loaded: Customer[] = [];
+    snap.forEach((d) => {
+      loaded.push({ id: d.id, ...d.data() } as Customer);
+    });
+    return loaded;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.LIST, path);
+    throw error;
+  }
+}
+
 // ---------------- SUPPLIERS LIVE SYNC ----------------
 
 export function subscribeToSuppliers(
@@ -328,6 +348,23 @@ export async function deleteSupplierFromCloud(supplierId: string): Promise<void>
   }
 }
 
+// Direct on-demand retrieval of all suppliers from Cloud Firestore
+export async function fetchSuppliersFromCloud(): Promise<Supplier[]> {
+  const path = 'suppliers';
+  try {
+    const colRef = collection(db, path);
+    const snap = await getDocs(colRef);
+    const loaded: Supplier[] = [];
+    snap.forEach((d) => {
+      loaded.push({ id: d.id, ...d.data() } as Supplier);
+    });
+    return loaded;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.LIST, path);
+    throw error;
+  }
+}
+
 // ---------------- EXPENSES LIVE SYNC ----------------
 
 export function subscribeToExpenses(
@@ -372,6 +409,24 @@ export async function deleteExpenseFromCloud(expenseId: string): Promise<void> {
     await deleteDoc(docRef);
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, path);
+    throw error;
+  }
+}
+
+// Direct on-demand retrieval of all expenses from Cloud Firestore
+export async function fetchExpensesFromCloud(): Promise<Expense[]> {
+  const path = 'expenses';
+  try {
+    const colRef = collection(db, path);
+    const snap = await getDocs(colRef);
+    const loaded: Expense[] = [];
+    snap.forEach((d) => {
+      loaded.push({ id: d.id, ...d.data() } as Expense);
+    });
+    loaded.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    return loaded;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.LIST, path);
     throw error;
   }
 }
@@ -556,6 +611,23 @@ export async function bulkUploadUsersToCloud(users: User[]): Promise<number> {
     return count;
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, 'users/batch');
+    throw error;
+  }
+}
+
+// Direct on-demand retrieval of all staff users from Cloud Firestore
+export async function fetchUsersFromCloud(): Promise<User[]> {
+  const path = 'users';
+  try {
+    const colRef = collection(db, path);
+    const snap = await getDocs(colRef);
+    const loaded: User[] = [];
+    snap.forEach((d) => {
+      loaded.push({ id: d.id, ...d.data() } as User);
+    });
+    return loaded;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.LIST, path);
     throw error;
   }
 }

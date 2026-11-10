@@ -38,7 +38,14 @@ interface CloudSyncModalProps {
   lastSyncedTime?: string | null;
   onTriggerSync?: () => void;
   onSyncCatalogComplete?: () => void;
-  onPullFromCloud?: () => Promise<{ productsCount: number; salesCount: number } | void>;
+  onPullFromCloud?: () => Promise<{
+    productsCount: number;
+    salesCount: number;
+    customersCount?: number;
+    suppliersCount?: number;
+    expensesCount?: number;
+    usersCount?: number;
+  } | void>;
   masterPin?: string;
   requirePinOnStartup?: boolean;
   onLockNow?: () => void;
@@ -152,10 +159,10 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
     try {
       const res = await onPullFromCloud();
       if (res && typeof res === 'object') {
-        if (res.productsCount === 0 && res.salesCount === 0) {
+        if (res.productsCount === 0 && res.salesCount === 0 && (res.customersCount ?? 0) === 0) {
           setUploadMsg('Cloud Firestore currently has 0 items. Click "Push All Local to Cloud" to upload your 302 products now!');
         } else {
-          setUploadMsg(`Successfully pulled ${res.productsCount} products and ${res.salesCount} sales records from Cloud Firestore!`);
+          setUploadMsg(`Successfully pulled & merged ${res.productsCount} products, ${res.salesCount} sales, ${res.customersCount || 0} customers, and ${res.expensesCount || 0} expenses! All local records safely preserved.`);
         }
       } else {
         setUploadMsg('Data pulled and synchronized from Cloud Firestore!');

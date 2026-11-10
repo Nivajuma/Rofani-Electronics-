@@ -199,6 +199,7 @@ import {
   getPendingSyncQueue,
   removePendingSyncItem,
 } from './utils/offlineSync';
+import { findRecoverableBackups, protectLargestBackup } from './utils/backupRecovery';
 
 /**
  * Rofani Electronics & Boutique - Live Firebase Firestore Configuration
@@ -918,6 +919,7 @@ export default function App() {
             ownerRecoveryEmail,
           }
         };
+        protectLargestBackup(products, transactions, customers, suppliers, expenses, allUsers);
         localStorage.setItem('rofani_pos_auto_backup', JSON.stringify(backupPayload));
         localStorage.setItem('rofani_pos_last_snapshot', JSON.stringify(backupPayload));
       } catch (err) {
@@ -1170,18 +1172,21 @@ export default function App() {
   const handlePullFromCloud = async () => {
     setCloudSyncStatus('syncing');
     try {
-      // 1. Proactively record a local rollback snapshot before pulling
+      // 1. Proactively record a local rollback snapshot and protect master backup before pulling
       try {
-        const prePullSnapshot = {
-          timestamp: Date.now(),
-          products,
-          transactions,
-          customers,
-          suppliers,
-          expenses,
-          allUsers,
-        };
-        localStorage.setItem('rofani_pos_pre_pull_backup', JSON.stringify(prePullSnapshot));
+        if (products && products.length > 0) {
+          protectLargestBackup(products, transactions, customers, suppliers, expenses, allUsers);
+          const prePullSnapshot = {
+            timestamp: Date.now(),
+            products,
+            transactions,
+            customers,
+            suppliers,
+            expenses,
+            allUsers,
+          };
+          localStorage.setItem('rofani_pos_pre_pull_backup', JSON.stringify(prePullSnapshot));
+        }
       } catch {}
 
       // 2. Fetch all collections from Cloud Firestore
@@ -1197,12 +1202,30 @@ export default function App() {
       // 3. ID-based union merge: NEVER discard local items if remote is empty or partial
       if (cloudProducts && cloudProducts.length > 0) {
         setProducts((localProds) => {
-          const merged = [...cloudProducts];
-          localProds.forEach((lp) => {
-            if (!merged.some((cp) => cp.id === lp.id)) {
-              merged.push(lp);
+          const prodMap = new Map<string, Product>();
+          // Seed with all local products first to ensure 0 items are lost
+          (localProds || []).forEach((lp) => {
+            if (lp && lp.id) prodMap.set(lp.id, lp);
+          });
+          // Merge in cloud products
+          (cloudProducts || []).forEach((cp) => {
+            if (!cp || !cp.id) return;
+            const existingLocal = prodMap.get(cp.id);
+            if (!existingLocal) {
+              prodMap.set(cp.id, cp);
+            } else {
+              // Preserve local high-res image if cloud image was omitted/sanitized
+              const localTime = existingLocal.updatedAt ? new Date(existingLocal.updatedAt).getTime() : 0;
+              const cloudTime = cp.updatedAt ? new Date(cp.updatedAt).getTime() : 0;
+              if (cloudTime >= localTime) {
+                prodMap.set(cp.id, {
+                  ...cp,
+                  imageUrl: cp.imageUrl || existingLocal.imageUrl,
+                });
+              }
             }
           });
+          const merged = Array.from(prodMap.values());
           safeSetJSON('retail_pos_products', merged);
           return merged;
         });
@@ -1289,6 +1312,75 @@ export default function App() {
     } catch (err) {
       setCloudSyncStatus('error');
       throw err;
+    }
+  };
+
+  // State to track if user dismissed the top emergency recovery banner
+  const [dismissedRecoveryBanner, setDismissedRecoveryBanner] = useState(false);
+
+  // Emergency Catalog Rollback Handler: restores products and associated collections from local snapshots
+  const handleRestoreEmergencyBackup = (sourceKey?: string): boolean => {
+    try {
+      const backups = findRecoverableBackups();
+      const target = sourceKey
+        ? backups.find((b) => b.key === sourceKey)
+        : backups.find((b) => b.productsCount > products.length) || backups[0];
+
+      if (!target || !target.data) {
+        setBackupBanner({
+          type: 'error',
+          message: 'No recoverable emergency backups found in browser storage.',
+        });
+        setTimeout(() => setBackupBanner(null), 5000);
+        return false;
+      }
+
+      const restoredProducts = target.data.products || [];
+      const restoredSales = target.data.transactions || [];
+      const restoredCustomers = target.data.customers || [];
+      const restoredSuppliers = target.data.suppliers || [];
+      const restoredExpenses = target.data.expenses || [];
+      const restoredUsers = target.data.allUsers || [];
+
+      if (restoredProducts.length > 0) {
+        setProducts(restoredProducts);
+        safeSetJSON('retail_pos_products', restoredProducts);
+      }
+      if (restoredSales.length > 0) {
+        setTransactions(restoredSales);
+        safeSetJSON('retail_pos_transactions', restoredSales);
+      }
+      if (restoredCustomers.length > 0) {
+        setCustomers(restoredCustomers);
+        safeSetJSON('retail_pos_customers', restoredCustomers);
+      }
+      if (restoredSuppliers.length > 0) {
+        setSuppliers(restoredSuppliers);
+        safeSetJSON('retail_pos_suppliers', restoredSuppliers);
+      }
+      if (restoredExpenses.length > 0) {
+        setExpenses(restoredExpenses);
+        safeSetJSON('retail_pos_expenses', restoredExpenses);
+      }
+      if (restoredUsers.length > 0) {
+        setAllUsers(restoredUsers);
+        safeSetJSON('retail_pos_users', restoredUsers);
+      }
+
+      setBackupBanner({
+        type: 'success',
+        message: `✨ Successfully restored ${restoredProducts.length} items & ${restoredSales.length} sales from ${target.label}!`,
+      });
+      setTimeout(() => setBackupBanner(null), 8000);
+      setDismissedRecoveryBanner(true);
+      return true;
+    } catch (err: any) {
+      setBackupBanner({
+        type: 'error',
+        message: `Failed to restore emergency backup: ${err.message || 'Unknown error'}`,
+      });
+      setTimeout(() => setBackupBanner(null), 5000);
+      return false;
     }
   };
 
@@ -3141,6 +3233,7 @@ export default function App() {
           onToggleSidebar={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
           onOpenCloudSync={() => setShowCloudSyncModal(true)}
           onPullFromCloud={handlePullFromCloud}
+          onEmergencyRestore={handleRestoreEmergencyBackup}
           deviceFormat={deviceFormat}
           onChangeDeviceFormat={setDeviceFormat}
           requirePinOnStartup={requirePinOnStartup}
@@ -3215,6 +3308,7 @@ export default function App() {
             setLastSyncedTime(new Date().toLocaleTimeString());
           }}
           onPullFromCloud={handlePullFromCloud}
+          onEmergencyRestore={handleRestoreEmergencyBackup}
           masterPin={masterPin}
           requirePinOnStartup={requirePinOnStartup}
           onLockNow={() => setIsTerminalLocked(true)}
@@ -3825,6 +3919,44 @@ export default function App() {
           </div>
         )}
 
+        {/* Emergency Catalog Recovery Alert Banner: Appears automatically if current catalog has < 50 items and a larger local backup exists (e.g. on Vercel) */}
+        {!dismissedRecoveryBanner && (() => {
+          const backups = findRecoverableBackups();
+          const largest = backups.find((b) => b.productsCount > products.length && b.productsCount > 50);
+          if (!largest) return null;
+
+          return (
+            <div className="bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 text-slate-950 px-4 py-3 text-xs font-bold flex items-center justify-between shadow-md z-30 shrink-0 border-b border-amber-600">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="flex items-center gap-1.5 bg-black/20 text-slate-950 px-2.5 py-0.5 rounded font-black text-[11px] uppercase tracking-wide">
+                  <AlertTriangle className="w-4 h-4 text-slate-950" /> Emergency Recovery Detected
+                </span>
+                <span>
+                  Your catalog currently has {products.length} items, but an emergency snapshot with{' '}
+                  <span className="underline font-black">{largest.productsCount} items</span> ({largest.formattedDate}) was found in browser storage!
+                </span>
+                <button
+                  type="button"
+                  id="btn-restore-full-catalog-banner"
+                  onClick={() => handleRestoreEmergencyBackup(largest.key)}
+                  className="bg-slate-950 hover:bg-slate-900 text-amber-300 px-3.5 py-1.5 rounded-xl font-black text-xs transition shadow-sm ml-2 cursor-pointer flex items-center gap-1.5 active:scale-95"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  Restore My {largest.productsCount} Items Now
+                </button>
+              </div>
+              <button
+                type="button"
+                onClick={() => setDismissedRecoveryBanner(true)}
+                className="text-slate-900 hover:text-black p-1 font-bold text-xs cursor-pointer ml-3"
+                title="Dismiss"
+              >
+                ✕
+              </button>
+            </div>
+          );
+        })()}
+
         {/* Daily Email Backup Notification Banner */}
         {backupBanner && (
           <div className={`px-4 py-2.5 text-xs font-semibold flex items-center justify-between shadow-sm z-30 shrink-0 ${
@@ -4250,6 +4382,7 @@ export default function App() {
           setLastSyncedTime(new Date().toLocaleTimeString());
         }}
         onPullFromCloud={handlePullFromCloud}
+        onEmergencyRestore={handleRestoreEmergencyBackup}
         masterPin={masterPin}
         requirePinOnStartup={requirePinOnStartup}
         onLockNow={() => setIsTerminalLocked(true)}

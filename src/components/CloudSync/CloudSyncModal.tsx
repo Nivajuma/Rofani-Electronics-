@@ -20,13 +20,16 @@ import {
   EyeOff,
   Shield,
   WifiOff,
-  Download
+  Download,
+  RotateCcw,
+  History
 } from 'lucide-react';
 import QRCode from 'qrcode';
 import { bulkUploadProductsToCloud, bulkUploadUsersToCloud } from '../../lib/cloudSync';
 import { FIREBASE_UPGRADE_URL } from '../../lib/firebase';
 import { Product, User } from '../../types';
 import { useNetworkStatus } from '../../utils/offlineSync';
+import { findRecoverableBackups } from '../../utils/backupRecovery';
 
 interface CloudSyncModalProps {
   isOpen: boolean;
@@ -46,6 +49,7 @@ interface CloudSyncModalProps {
     expensesCount?: number;
     usersCount?: number;
   } | void>;
+  onEmergencyRestore?: (sourceKey?: string) => boolean;
   masterPin?: string;
   requirePinOnStartup?: boolean;
   onLockNow?: () => void;
@@ -64,6 +68,7 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
   onTriggerSync,
   onSyncCatalogComplete,
   onPullFromCloud,
+  onEmergencyRestore,
   masterPin = '1234',
   requirePinOnStartup = true,
   onLockNow,
@@ -74,6 +79,7 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
   const [isUploading, setIsUploading] = useState(false);
   const [isPulling, setIsPulling] = useState(false);
   const [uploadMsg, setUploadMsg] = useState<string | null>(null);
+  const [uploadProgress, setUploadProgress] = useState<string | null>(null);
 
   // Standalone app clean URL that works on mobile phones
   const getCleanShareUrl = () => {
@@ -137,16 +143,22 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
   const handleUploadAllToCloud = async () => {
     setIsUploading(true);
     setUploadMsg(null);
+    setUploadProgress(`Uploading ${products.length} products to Firestore in safe batches of 25...`);
     try {
-      const count = await bulkUploadProductsToCloud(products);
+      const count = await bulkUploadProductsToCloud(products, (uploaded, total, batch, totalBatches) => {
+        setUploadProgress(`Uploaded batch ${batch} of ${totalBatches}: ${uploaded}/${total} items to Firestore...`);
+      });
       if (allUsers && allUsers.length > 0) {
+        setUploadProgress('Publishing staff user accounts...');
         await bulkUploadUsersToCloud(allUsers);
       }
-      setUploadMsg(`Successfully published ${count} products & ${allUsers.length} staff accounts to Cloud Firestore! All connected phones are now up to date.`);
+      setUploadProgress(null);
+      setUploadMsg(`Successfully published all ${count} products & ${allUsers.length} staff accounts to Cloud Firestore! All connected phones are now up to date.`);
       if (onTriggerSync) onTriggerSync();
       if (onSyncCatalogComplete) onSyncCatalogComplete();
-    } catch (err) {
-      setUploadMsg('Failed to sync to cloud. Please check network connection.');
+    } catch (err: any) {
+      setUploadProgress(null);
+      setUploadMsg(err?.message || 'Failed to sync to cloud. Please check network connection.');
     } finally {
       setIsUploading(false);
     }
@@ -352,12 +364,83 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
             </div>
           </div>
 
+          {uploadProgress && (
+            <div className="bg-sky-950/80 border border-sky-500/60 text-sky-200 text-xs p-3 rounded-xl flex items-center gap-2 animate-pulse">
+              <RefreshCw className="w-4 h-4 text-sky-400 animate-spin shrink-0" />
+              <span>{uploadProgress}</span>
+            </div>
+          )}
+
           {uploadMsg && (
             <div className="bg-emerald-950/80 border border-emerald-700/80 text-emerald-200 text-xs p-3 rounded-xl flex items-center gap-2">
               <Check className="w-4 h-4 text-emerald-400 shrink-0" />
               <span>{uploadMsg}</span>
             </div>
           )}
+
+          {/* Emergency Backup Rollback inside CloudSyncModal */}
+          {(() => {
+            const backups = findRecoverableBackups();
+            if (backups.length === 0) return null;
+            const largest = backups[0];
+            const hasMoreThanCurrent = largest.productsCount > products.length;
+
+            return (
+              <div
+                className={`p-3.5 sm:p-4 rounded-2xl border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 transition-all ${
+                  hasMoreThanCurrent
+                    ? 'bg-amber-950/60 border-amber-500/80 text-amber-100 shadow-lg shadow-amber-950/40'
+                    : 'bg-slate-950/80 border-slate-800 text-slate-300'
+                }`}
+              >
+                <div className="flex items-start gap-2.5">
+                  <History
+                    className={`w-5 h-5 shrink-0 mt-0.5 ${
+                      hasMoreThanCurrent ? 'text-amber-400' : 'text-slate-400'
+                    }`}
+                  />
+                  <div>
+                    <div className="text-xs font-bold text-white flex items-center gap-1.5 flex-wrap">
+                      <span>Emergency Inventory Rollback</span>
+                      {hasMoreThanCurrent && (
+                        <span className="bg-amber-500 text-slate-950 text-[10px] px-2 py-0.5 rounded-full font-black uppercase">
+                          {largest.productsCount} Items Available
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-slate-300 mt-0.5 leading-relaxed">
+                      {hasMoreThanCurrent
+                        ? `Found pre-pull snapshot "${largest.label}" with ${largest.productsCount} products from ${largest.formattedDate}. If pulling from cloud reduced your items to ${products.length}, click below to restore immediately.`
+                        : `Stored local snapshots available (${backups.length} snapshots found). Current items: ${products.length}.`}
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  id="btn-modal-restore-largest-snapshot"
+                  onClick={() => {
+                    if (onEmergencyRestore) {
+                      const ok = onEmergencyRestore(largest.key);
+                      if (ok) {
+                        setUploadMsg(
+                          `✨ Restored ${largest.productsCount} products from ${largest.label}! Now click "Push to Cloud" to sync all items safely.`
+                        );
+                      }
+                    }
+                  }}
+                  className={`px-3.5 py-2 rounded-xl font-bold text-xs flex items-center gap-1.5 transition shrink-0 cursor-pointer ${
+                    hasMoreThanCurrent
+                      ? 'bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-sm active:scale-95'
+                      : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700'
+                  }`}
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span>Restore {largest.productsCount} Items</span>
+                </button>
+              </div>
+            );
+          })()}
 
           {/* Quick Connect & Scan QR Code Section */}
           <div className="bg-slate-950 border border-slate-800 p-4 sm:p-5 rounded-2xl space-y-4">

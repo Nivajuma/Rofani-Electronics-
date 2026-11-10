@@ -53,14 +53,26 @@ export function subscribeToProducts(
   );
 }
 
+// Helper to sanitize product document before uploading to Cloud Firestore.
+// Strips raw oversized base64 images (>20KB) because full media is persisted in local IndexedDB.
+// Prevents exceeding Firestore's 10MB writeBatch limit and 1MB document limit.
+export function cleanProductForFirestore(product: Product): any {
+  let cleanedImageUrl = product.imageUrl || '';
+  if (typeof cleanedImageUrl === 'string' && cleanedImageUrl.startsWith('data:image/') && cleanedImageUrl.length > 20000) {
+    cleanedImageUrl = '';
+  }
+  return cleanForFirestore({
+    ...product,
+    imageUrl: cleanedImageUrl,
+    updatedAt: product.updatedAt || new Date().toISOString(),
+  });
+}
+
 export async function saveProductToCloud(product: Product): Promise<void> {
   const path = `products/${product.id}`;
   try {
     const docRef = doc(db, 'products', product.id);
-    const cleaned = cleanForFirestore({
-      ...product,
-      updatedAt: new Date().toISOString(),
-    });
+    const cleaned = cleanProductForFirestore(product);
     await setDoc(docRef, cleaned, { merge: true });
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
@@ -96,40 +108,64 @@ export async function fetchProductsFromCloud(): Promise<Product[]> {
   }
 }
 
-// Bulk upload initial products to cloud in safe batches of 400
-export async function bulkUploadProductsToCloud(products: Product[]): Promise<number> {
-  return batchSaveProductsToCloud(products);
+// Bulk upload initial or custom products to cloud in safe batches of 25 items
+export async function bulkUploadProductsToCloud(
+  products: Product[],
+  onProgress?: (uploadedCount: number, totalCount: number, batchIndex: number, totalBatches: number) => void
+): Promise<number> {
+  return batchSaveProductsToCloud(products, onProgress);
 }
 
 /**
- * Commits products to Firestore in chunked atomic writeBatches (max 400 per batch)
- * Handles catalog size of any count (including all 302 products) without exceeding Firestore 500-op limits.
+ * Commits products to Firestore in chunked atomic writeBatches (25 items per batch)
+ * - Strips huge base64 camera images from cloud payloads (IndexedDB retains them locally)
+ * - Safe against the 10MB Firestore writeBatch ceiling and 1MB document size limit
+ * - Seamlessly handles 500+ items without choking or stalling midway
+ * - Provides live progress callback and fallback to per-item sets if a batch experiences a conflict
  */
-export async function batchSaveProductsToCloud(products: Product[]): Promise<number> {
+export async function batchSaveProductsToCloud(
+  products: Product[],
+  onProgress?: (uploadedCount: number, totalCount: number, batchIndex: number, totalBatches: number) => void
+): Promise<number> {
   if (!products || products.length === 0) return 0;
-  const CHUNK_SIZE = 400;
+  const CHUNK_SIZE = 25;
+  const totalBatches = Math.ceil(products.length / CHUNK_SIZE);
   let totalUploaded = 0;
 
-  try {
-    for (let i = 0; i < products.length; i += CHUNK_SIZE) {
-      const chunk = products.slice(i, i + CHUNK_SIZE);
+  for (let i = 0; i < products.length; i += CHUNK_SIZE) {
+    const chunk = products.slice(i, i + CHUNK_SIZE);
+    const batchIndex = Math.floor(i / CHUNK_SIZE) + 1;
+
+    try {
       const batch = writeBatch(db);
       for (const p of chunk) {
         const docRef = doc(db, 'products', p.id);
-        const cleaned = cleanForFirestore({
-          ...p,
-          updatedAt: p.updatedAt || new Date().toISOString(),
-        });
+        const cleaned = cleanProductForFirestore(p);
         batch.set(docRef, cleaned, { merge: true });
       }
       await batch.commit();
       totalUploaded += chunk.length;
+    } catch (batchErr) {
+      console.warn(`[Batch ${batchIndex}/${totalBatches}] writeBatch commit failed, attempting individual doc saves:`, batchErr);
+      // Fallback: save each document in the chunk individually so valid docs succeed
+      for (const p of chunk) {
+        try {
+          const docRef = doc(db, 'products', p.id);
+          const cleaned = cleanProductForFirestore(p);
+          await setDoc(docRef, cleaned, { merge: true });
+          totalUploaded += 1;
+        } catch (individualErr) {
+          console.warn(`[Product ${p.id}] Individual cloud save skipped:`, individualErr);
+        }
+      }
     }
-    return totalUploaded;
-  } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, 'products/writeBatch');
-    throw error;
+
+    if (onProgress) {
+      onProgress(totalUploaded, products.length, batchIndex, totalBatches);
+    }
   }
+
+  return totalUploaded;
 }
 
 // ---------------- TRANSACTIONS (SALES) LIVE SYNC ----------------

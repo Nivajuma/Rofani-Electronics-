@@ -32,7 +32,9 @@ import {
   KeyRound,
   Eye,
   EyeOff,
-  Mail
+  Mail,
+  RotateCcw,
+  History
 } from 'lucide-react';
 import { Product, Customer, Supplier, Transaction, Expense, AttendanceRecord, User, StoreLocation } from '../../types';
 import { detectDuplicateProducts, deduplicateProducts } from '../../utils/deduplicate';
@@ -41,6 +43,7 @@ import { DailyEmailBackupModal } from './DailyEmailBackupModal';
 import { CameraPermissionsCard } from './CameraPermissionsCard';
 import { SettingsDashboardView } from './SettingsDashboardView';
 import { safeGetJSON, safeSetJSON, getLocalStorageUsageStats } from '../../utils/safeStorage';
+import { findRecoverableBackups } from '../../utils/backupRecovery';
 import {
   bulkUploadProductsToCloud,
   bulkUploadUsersToCloud,
@@ -78,6 +81,7 @@ interface DataManagementViewProps {
   onToggleSidebar?: () => void;
   onOpenCloudSync?: () => void;
   onPullFromCloud?: () => Promise<any>;
+  onEmergencyRestore?: (sourceKey?: string) => boolean;
   deviceFormat?: 'computer' | 'phone';
   onChangeDeviceFormat?: (format: 'computer' | 'phone') => void;
   requirePinOnStartup?: boolean;
@@ -122,18 +126,25 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
   onOpenAuditLogs,
   stores = [],
   onOpenStoreManager,
+  onEmergencyRestore,
 }) => {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isCloudSyncing, setIsCloudSyncing] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<string | null>(null);
 
   const handleUploadLocalDataToCloud = async () => {
     setIsCloudSyncing(true);
+    setUploadProgress(`Uploading ${products.length} products to Firestore in safe batches of 25...`);
     try {
-      const prodCount = await bulkUploadProductsToCloud(products);
+      const prodCount = await bulkUploadProductsToCloud(products, (uploaded, total, batch, totalBatches) => {
+        setUploadProgress(`Uploaded batch ${batch} of ${totalBatches}: ${uploaded}/${total} items to Firestore...`);
+      });
       if (allUsers && allUsers.length > 0) {
+        setUploadProgress('Syncing staff users...');
         await bulkUploadUsersToCloud(allUsers);
       }
+      setUploadProgress('Syncing recent transactions & customers...');
       for (const t of transactions.slice(0, 100)) {
         await saveTransactionToCloud(t);
       }
@@ -143,9 +154,11 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
       for (const e of expenses.slice(0, 50)) {
         await saveExpenseToCloud(e);
       }
-      triggerNotify(`Successfully uploaded ${prodCount} products & local data to live Firestore database!`);
-    } catch (err) {
-      setErrorMessage('Failed to sync local data to cloud. Check network or storage rules.');
+      setUploadProgress(null);
+      triggerNotify(`Successfully uploaded ${prodCount} products & store records to live Firestore database!`);
+    } catch (err: any) {
+      setUploadProgress(null);
+      setErrorMessage(err?.message || 'Failed to sync local data to cloud. Check network or storage rules.');
     } finally {
       setIsCloudSyncing(false);
     }
@@ -544,6 +557,86 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Live Upload Progress Indicator */}
+      {uploadProgress && (
+        <div className="bg-sky-950/70 border border-sky-500/50 text-sky-200 text-xs p-3.5 rounded-xl flex items-center gap-2.5 font-medium animate-pulse">
+          <RefreshCw className="w-4 h-4 text-sky-400 animate-spin shrink-0" />
+          <span>{uploadProgress}</span>
+        </div>
+      )}
+
+      {/* EMERGENCY RECOVERY CARD: Detects if any larger local snapshot exists (e.g. 500+ items vs current 29) */}
+      {(() => {
+        const backups = findRecoverableBackups();
+        if (backups.length === 0) return null;
+        const largest = backups[0];
+        const hasMoreThanCurrent = largest.productsCount > products.length;
+
+        return (
+          <div
+            className={`rounded-2xl p-5 border-2 shadow-lg flex flex-col md:flex-row items-start md:items-center justify-between gap-4 transition-all ${
+              hasMoreThanCurrent
+                ? 'bg-gradient-to-r from-amber-950/80 via-slate-900 to-amber-950/80 border-amber-500 text-amber-100'
+                : 'bg-slate-900 border-slate-800 text-slate-200'
+            }`}
+          >
+            <div className="flex items-start gap-3.5">
+              <div
+                className={`w-11 h-11 rounded-xl flex items-center justify-center shrink-0 shadow-inner ${
+                  hasMoreThanCurrent
+                    ? 'bg-amber-500/20 text-amber-400 border border-amber-400/50'
+                    : 'bg-slate-800 text-slate-400 border border-slate-700'
+                }`}
+              >
+                <History className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h4 className="font-extrabold text-sm text-white">Emergency Catalog Rollback & Snapshots</h4>
+                  {hasMoreThanCurrent ? (
+                    <span className="bg-amber-500 text-slate-950 text-[10px] px-2.5 py-0.5 rounded-full font-black uppercase tracking-wide animate-pulse">
+                      {largest.productsCount} Items Recoverable
+                    </span>
+                  ) : (
+                    <span className="bg-slate-800 text-slate-300 text-[10px] px-2 py-0.5 rounded-full font-mono">
+                      {backups.length} Snapshots Available
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-slate-300 mt-1 max-w-2xl leading-relaxed">
+                  {hasMoreThanCurrent
+                    ? `Found emergency snapshot "${largest.label}" containing ${largest.productsCount} products and ${largest.salesCount} sales from ${largest.formattedDate}. If pulling from cloud truncated your catalog to ${products.length} items, click below to restore your full catalog instantly.`
+                    : `Saved local snapshots detected in browser storage. Current inventory has ${products.length} items.`}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0 flex-wrap">
+              <button
+                type="button"
+                id="btn-restore-largest-snapshot"
+                onClick={() => {
+                  if (onEmergencyRestore) {
+                    const ok = onEmergencyRestore(largest.key);
+                    if (ok) {
+                      triggerNotify(`✨ Restored ${largest.productsCount} products from ${largest.label}!`);
+                    }
+                  }
+                }}
+                className={`px-4 py-2.5 rounded-xl font-black text-xs flex items-center gap-2 shadow-md transition shrink-0 cursor-pointer ${
+                  hasMoreThanCurrent
+                    ? 'bg-amber-500 hover:bg-amber-400 text-slate-950 active:scale-95 shadow-amber-500/20'
+                    : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 active:scale-95'
+                }`}
+              >
+                <RotateCcw className="w-4 h-4" />
+                <span>Restore {largest.productsCount} Items Snapshot</span>
+              </button>
+            </div>
+          </div>
+        );
+      })()}
 
       {errorMessage && (
         <div className="bg-rose-900/60 border border-rose-500/50 text-rose-200 text-xs p-3.5 rounded-xl flex items-center justify-between font-medium">

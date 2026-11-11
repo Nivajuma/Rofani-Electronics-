@@ -419,9 +419,9 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
                 <button
                   type="button"
                   id="btn-modal-restore-largest-snapshot"
-                  onClick={() => {
+                  onClick={async () => {
                     if (onEmergencyRestore) {
-                      const ok = onEmergencyRestore(largest.key);
+                      const ok = await onEmergencyRestore(largest.key);
                       if (ok) {
                         setUploadMsg(
                           `✨ Restored ${largest.productsCount} products from ${largest.label}! Now click "Push to Cloud" to sync all items safely.`

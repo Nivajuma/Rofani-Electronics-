@@ -56,7 +56,8 @@ export default async function handler(req: any, res: any) {
       req.body?.tillNumber ||
       '1833804';
 
-    const businessShortCode = (storeNumber || tillNumber || '1365369').trim();
+    const shortcodeType = (req.query?.shortcodeType || req.body?.shortcodeType || 'till') as string;
+    const businessShortCode = (shortcodeType === 'till' && storeNumber ? storeNumber : (storeNumber || tillNumber || '1365369')).trim();
     const environment = (req.query?.environment || req.body?.environment || 'production') as string;
 
     if (!consumerKey || !consumerSecret) {
@@ -118,9 +119,11 @@ export default async function handler(req: any, res: any) {
     const queryData = (await queryRes.json()) as any;
     const resultCode = String(queryData?.ResultCode ?? '');
     const responseCode = String(queryData?.ResponseCode ?? '');
+    const resultDesc = String(queryData?.ResultDesc || queryData?.ResponseDescription || queryData?.errorMessage || '');
+    const lowerDesc = resultDesc.toLowerCase();
 
-    // ResultCode 0 = Successful Payment
-    if (resultCode === '0' || (responseCode === '0' && queryData?.ResultDesc?.toLowerCase().includes('success'))) {
+    // 1. ResultCode 0 = Successful Payment
+    if (resultCode === '0' || (responseCode === '0' && (lowerDesc.includes('success') || lowerDesc.includes('accept') || lowerDesc.includes('complete')))) {
       const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
       let receipt = 'Q';
       for (let i = 0; i < 9; i++) {
@@ -144,8 +147,28 @@ export default async function handler(req: any, res: any) {
       return;
     }
 
-    // ResultCode 1032 = Cancelled by customer
-    if (resultCode === '1032') {
+    // 2. In-Progress / Customer Entering PIN (ResultCode 49, "being processed", or 500.001.1001)
+    const isPending =
+      lowerDesc.includes('being processed') ||
+      lowerDesc.includes('in progress') ||
+      lowerDesc.includes('processing') ||
+      lowerDesc.includes('pending') ||
+      lowerDesc.includes('wait') ||
+      resultCode === '49' ||
+      queryData?.errorCode === '500.001.1001';
+
+    if (isPending) {
+      res.status(200).json({
+        checkoutRequestId,
+        status: 'PENDING',
+        message: 'Customer entering PIN on Safaricom M-PESA...',
+        resultDesc: queryData?.ResultDesc,
+      });
+      return;
+    }
+
+    // 3. ResultCode 1032 = Cancelled by customer
+    if (resultCode === '1032' || lowerDesc.includes('cancel')) {
       res.status(200).json({
         checkoutRequestId,
         status: 'CANCELLED',
@@ -155,8 +178,8 @@ export default async function handler(req: any, res: any) {
       return;
     }
 
-    // ResultCode 1037 = Timeout
-    if (resultCode === '1037') {
+    // 4. ResultCode 1037 = Timeout
+    if (resultCode === '1037' || lowerDesc.includes('timed out') || lowerDesc.includes('timeout')) {
       res.status(200).json({
         checkoutRequestId,
         status: 'TIMEOUT',
@@ -166,8 +189,30 @@ export default async function handler(req: any, res: any) {
       return;
     }
 
-    // Other non-zero result code = Failed
-    if (resultCode && resultCode !== '0') {
+    // 5. ResultCode 1 = Insufficient balance
+    if (resultCode === '1' || lowerDesc.includes('insufficient')) {
+      res.status(200).json({
+        checkoutRequestId,
+        status: 'FAILED',
+        errorMessage: 'Customer M-PESA balance is insufficient for this payment.',
+        resultDesc: queryData?.ResultDesc,
+      });
+      return;
+    }
+
+    // 6. ResultCode 2001 = Wrong PIN
+    if (resultCode === '2001' || lowerDesc.includes('wrong pin') || lowerDesc.includes('invalid pin')) {
+      res.status(200).json({
+        checkoutRequestId,
+        status: 'FAILED',
+        errorMessage: 'Customer entered an incorrect M-PESA PIN.',
+        resultDesc: queryData?.ResultDesc,
+      });
+      return;
+    }
+
+    // 7. Confirmed terminal error
+    if (resultCode && resultCode !== '0' && (lowerDesc.includes('fail') || lowerDesc.includes('reject') || lowerDesc.includes('invalid') || lowerDesc.includes('error'))) {
       res.status(200).json({
         checkoutRequestId,
         status: 'FAILED',
@@ -177,7 +222,7 @@ export default async function handler(req: any, res: any) {
       return;
     }
 
-    // Otherwise, still pending
+    // 8. Otherwise, default to pending so customer has full window to complete PIN entry
     res.status(200).json({
       checkoutRequestId,
       status: 'PENDING',

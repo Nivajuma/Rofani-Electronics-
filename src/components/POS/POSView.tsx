@@ -668,7 +668,7 @@ export const POSView: React.FC<POSViewProps> = ({
     setShowNewSaleConfirmModal(false);
     setPaymentEntries([{ method: 'cash', amount: 0, reference: '' }]);
     setSaleNotes('');
-    setSaleDate('');
+    setSaleDate(getLocalDateString());
     setMobileTab('catalog');
     setPosNotice({ message: 'New sale initialized! Register is fresh and ready for items.', type: 'success' });
     setTimeout(() => {
@@ -792,15 +792,39 @@ export const POSView: React.FC<POSViewProps> = ({
   const modalDateInputRef = useRef<HTMLInputElement>(null);
 
   const handleSetToday = () => {
-    const todayStr = new Date().toISOString().split('T')[0];
-    setSaleDate(todayStr);
+    setSaleDate(getLocalDateString());
   };
 
   const handleSetYesterday = () => {
     const d = new Date();
     d.setDate(d.getDate() - 1);
-    const yestStr = d.toISOString().split('T')[0];
-    setSaleDate(yestStr);
+    setSaleDate(getLocalDateString(d));
+  };
+
+  const buildFinalTxDate = (dateVal: string): { isoDate: string; timestamp: number } => {
+    const now = new Date();
+    if (!dateVal || !dateVal.trim()) {
+      return { isoDate: now.toISOString(), timestamp: now.getTime() };
+    }
+    const clean = dateVal.trim();
+    // Format: YYYY-MM-DD
+    if (/^\d{4}-\d{2}-\d{2}$/.test(clean)) {
+      const [y, m, d] = clean.split('-').map(Number);
+      const target = new Date(y, m - 1, d, now.getHours(), now.getMinutes(), now.getSeconds());
+      return { isoDate: target.toISOString(), timestamp: target.getTime() };
+    }
+    // Format: YYYY-MM-DDTHH:mm
+    if (clean.includes('T')) {
+      const target = new Date(clean);
+      if (!isNaN(target.getTime())) {
+        return { isoDate: target.toISOString(), timestamp: target.getTime() };
+      }
+    }
+    const target = new Date(clean);
+    if (!isNaN(target.getTime())) {
+      return { isoDate: target.toISOString(), timestamp: target.getTime() };
+    }
+    return { isoDate: now.toISOString(), timestamp: now.getTime() };
   };
 
   // Consolidate categories from categories prop and all unique categories in products
@@ -1115,11 +1139,10 @@ export const POSView: React.FC<POSViewProps> = ({
     if (cart.length === 0) return;
     // Default single payment entry to total amount
     setPaymentEntries([{ method: 'cash', amount: grandTotal, reference: '' }]);
-    // Default sale date to current local date/time string for input[type="datetime-local"]
-    const now = new Date();
-    const tzOffset = now.getTimezoneOffset() * 60000;
-    const localISOTime = new Date(now.getTime() - tzOffset).toISOString().slice(0, 16);
-    setSaleDate(localISOTime);
+    // IMPORTANT: Preserve existing backdated saleDate if selected; only default if empty
+    if (!saleDate) {
+      setSaleDate(getLocalDateString());
+    }
     setShowCheckoutModal(true);
   };
 
@@ -1190,8 +1213,13 @@ export const POSView: React.FC<POSViewProps> = ({
 
   // Instant finalize sale directly after customer enters M-Pesa PIN
   const handleMpesaDirectFinalize = (receiptCode: string, phone: string) => {
-    const receiptNo = `INV-${new Date().getFullYear()}${(new Date().getMonth() + 1).toString().padStart(2, '0')}${new Date().getDate().toString().padStart(2, '0')}-${Math.floor(100 + Math.random() * 900)}`;
-    const finalTxDate = saleDate ? new Date(saleDate).toISOString() : new Date().toISOString();
+    const { isoDate: finalTxDate, timestamp: finalTxTimestamp } = buildFinalTxDate(saleDate);
+
+    const txDateObj = new Date(finalTxDate);
+    const receiptYear = txDateObj.getFullYear();
+    const receiptMonth = (txDateObj.getMonth() + 1).toString().padStart(2, '0');
+    const receiptDay = txDateObj.getDate().toString().padStart(2, '0');
+    const receiptNo = `INV-${receiptYear}${receiptMonth}${receiptDay}-${Math.floor(100 + Math.random() * 900)}`;
 
     const cuin = isEtimsRequested ? `CUIN-2026-${Math.floor(100000 + Math.random() * 900000)}` : undefined;
     const cusn = isEtimsRequested ? `CUSN-KENYA-${Math.floor(10000000 + Math.random() * 90000000)}` : undefined;
@@ -1206,6 +1234,7 @@ export const POSView: React.FC<POSViewProps> = ({
       id: `tx-${Date.now()}`,
       receiptNumber: receiptNo,
       date: finalTxDate,
+      timestamp: finalTxTimestamp,
       items: [...cart],
       subtotal,
       discountTotal: totalDiscount,
@@ -1349,12 +1378,16 @@ export const POSView: React.FC<POSViewProps> = ({
       paymentStatus = 'Partial';
     }
 
-    const receiptNo = `INV-${new Date().getFullYear()}${(new Date().getMonth() + 1).toString().padStart(2, '0')}${new Date().getDate().toString().padStart(2, '0')}-${Math.floor(100 + Math.random() * 900)}`;
+    const { isoDate: finalTxDate, timestamp: finalTxTimestamp } = buildFinalTxDate(saleDate);
+
+    const txDateObj = new Date(finalTxDate);
+    const receiptYear = txDateObj.getFullYear();
+    const receiptMonth = (txDateObj.getMonth() + 1).toString().padStart(2, '0');
+    const receiptDay = txDateObj.getDate().toString().padStart(2, '0');
+    const receiptNo = `INV-${receiptYear}${receiptMonth}${receiptDay}-${Math.floor(100 + Math.random() * 900)}`;
 
     const currentCommRate = currentCartComm.rate;
     const currentCommAmount = currentCartComm.amount;
-
-    const finalTxDate = saleDate ? new Date(saleDate).toISOString() : new Date().toISOString();
 
     const cuin = isEtimsRequested ? `CUIN-2026-${Math.floor(100000 + Math.random() * 900000)}` : undefined;
     const cusn = isEtimsRequested ? `CUSN-KENYA-${Math.floor(10000000 + Math.random() * 90000000)}` : undefined;
@@ -1369,7 +1402,7 @@ export const POSView: React.FC<POSViewProps> = ({
       id: `tx-${Date.now()}`,
       receiptNumber: receiptNo,
       date: finalTxDate,
-      timestamp: Date.now(),
+      timestamp: finalTxTimestamp,
       items: [...cart],
       subtotal,
       discountTotal: totalDiscount,

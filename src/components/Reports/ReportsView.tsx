@@ -285,10 +285,20 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
     // Net Profit safeguard: If totalRev == 0, netProfit is 0 (preventing negative expense math)
     const netProfit = totalRev === 0 ? 0 : grossProfit - totalExpenses - kraTot;
 
+    // Helper to get local YYYY-MM-DD string regardless of timezone
+    const getLocalTxDateStr = (dateInput: string | Date) => {
+      const dt = typeof dateInput === 'string' ? new Date(dateInput) : dateInput;
+      if (isNaN(dt.getTime())) return String(dateInput).slice(0, 10);
+      const y = dt.getFullYear();
+      const m = String(dt.getMonth() + 1).padStart(2, '0');
+      const d = String(dt.getDate()).padStart(2, '0');
+      return `${y}-${m}-${d}`;
+    };
+
     // Group transactions by date for Sales Report
     const salesByDateMap = new Map<string, Transaction[]>();
     filteredTx.forEach(tx => {
-      const dStr = new Date(tx.date).toISOString().split('T')[0];
+      const dStr = getLocalTxDateStr(tx.date);
       const list = salesByDateMap.get(dStr) || [];
       list.push(tx);
       salesByDateMap.set(dStr, list);

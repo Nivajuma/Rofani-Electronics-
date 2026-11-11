@@ -68,6 +68,7 @@ export const MpesaPromptModal: React.FC<MpesaPromptModalProps> = ({
   const [activeCheckoutRequestId, setActiveCheckoutRequestId] = useState('');
   const [pollStatusText, setPollStatusText] = useState('Listening for customer PIN entry on Safaricom M-PESA...');
   const [isCheckingStatusNow, setIsCheckingStatusNow] = useState(false);
+  const [manualReceiptInput, setManualReceiptInput] = useState('');
 
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
@@ -102,11 +103,11 @@ export const MpesaPromptModal: React.FC<MpesaPromptModalProps> = ({
   // Handle countdown and live STK status polling during 'prompting'
   useEffect(() => {
     if (step === 'prompting') {
-      setCountdown(55);
+      setCountdown(90);
       if (timerRef.current) clearInterval(timerRef.current);
       if (pollingRef.current) clearInterval(pollingRef.current);
 
-      // 1. Countdown timer
+      // 1. Countdown timer (90s standard Safaricom STK prompt window)
       timerRef.current = setInterval(() => {
         setCountdown((prev) => {
           if (prev <= 1) {
@@ -119,7 +120,7 @@ export const MpesaPromptModal: React.FC<MpesaPromptModalProps> = ({
               return 0;
             } else {
               setStep('failed');
-              setErrorMsg('M-PESA request timed out. The customer did not enter their PIN within 55 seconds.');
+              setErrorMsg('M-PESA request timed out after 90 seconds. If the customer entered their PIN and money was deducted, enter their M-PESA code below to confirm.');
               return 0;
             }
           }
@@ -169,6 +170,18 @@ export const MpesaPromptModal: React.FC<MpesaPromptModalProps> = ({
             }
 
             if (res.status === 'FAILED') {
+              const msg = (res.errorMessage || res.resultDesc || '').toLowerCase();
+              // If Safaricom reports in-progress or being processed, DO NOT fail! Keep polling.
+              if (
+                msg.includes('being processed') ||
+                msg.includes('processing') ||
+                msg.includes('in progress') ||
+                msg.includes('pending') ||
+                msg.includes('wait')
+              ) {
+                setPollStatusText('Customer entering PIN on Safaricom M-PESA...');
+                return;
+              }
               if (timerRef.current) clearInterval(timerRef.current);
               if (pollingRef.current) clearInterval(pollingRef.current);
               setStep('failed');
@@ -783,9 +796,19 @@ export const MpesaPromptModal: React.FC<MpesaPromptModalProps> = ({
               <div className="space-y-2">
                 <button
                   type="button"
+                  onClick={handleCheckStatusNow}
+                  disabled={isCheckingStatusNow}
+                  className="w-full bg-sky-600 hover:bg-sky-500 active:scale-95 disabled:opacity-50 text-white font-bold py-2.5 px-4 rounded-xl text-xs transition flex items-center justify-center gap-2 shadow cursor-pointer"
+                >
+                  <RotateCcw className={`w-3.5 h-3.5 ${isCheckingStatusNow ? 'animate-spin' : ''}`} />
+                  <span>{isCheckingStatusNow ? 'Querying Safaricom Network...' : 'Customer Finished PIN? Verify Status Now'}</span>
+                </button>
+
+                <button
+                  type="button"
                   id="btn-simulate-mpesa-pin-success"
                   onClick={handleCompleteSuccess}
-                  className="w-full bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-500 hover:to-green-500 text-white font-extrabold py-3 px-4 rounded-xl text-xs shadow-md transition flex items-center justify-center gap-2"
+                  className="w-full bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-500 hover:to-green-500 text-white font-extrabold py-3 px-4 rounded-xl text-xs shadow-md transition flex items-center justify-center gap-2 cursor-pointer"
                 >
                   <Zap className="w-4 h-4 text-amber-300" />
                   <span>Customer Entered PIN & Confirmed (Instant Accept)</span>
@@ -893,24 +916,77 @@ export const MpesaPromptModal: React.FC<MpesaPromptModalProps> = ({
               </div>
 
               <div>
-                <h3 className="text-lg font-bold text-white">Payment Unsuccessful</h3>
-                <p className="text-xs text-rose-300 font-medium mt-1">
-                  {errorMsg || 'The customer did not complete the M-PESA prompt.'}
+                <h3 className="text-lg font-bold text-white">Payment Not Confirmed Yet</h3>
+                <p className="text-xs text-rose-300 font-medium mt-1 max-w-md mx-auto">
+                  {errorMsg || 'The customer did not complete the M-PESA prompt in time or the transaction is still processing.'}
                 </p>
               </div>
 
-              <div className="flex items-center justify-center gap-3 pt-2">
+              {/* CARD: CUSTOMER ENTERED PIN & MONEY WAS DEDUCTED */}
+              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 text-left space-y-3">
+                <div className="flex items-center gap-2">
+                  <div className="w-7 h-7 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0 border border-emerald-500/30">
+                    <CheckCircle2 className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h5 className="text-xs font-bold text-white">Customer entered PIN on phone?</h5>
+                    <p className="text-[11px] text-slate-400">
+                      If the customer completed their PIN and received an M-PESA confirmation SMS, verify or enter their code below:
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex flex-col sm:flex-row gap-2 pt-1">
+                  <input
+                    type="text"
+                    placeholder="Enter M-PESA Code (e.g. QKH712950A)"
+                    value={manualReceiptInput}
+                    onChange={(e) => setManualReceiptInput(e.target.value.toUpperCase())}
+                    className="flex-1 bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs font-mono font-bold text-emerald-300 placeholder-slate-600 focus:outline-none focus:border-emerald-500 uppercase"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const code = manualReceiptInput.trim() || generateMpesaReceiptCode();
+                      const sms = formatMpesaConfirmationSms(code, amount, config.storeDisplayName, config.shortcode);
+                      setActiveReceiptCode(code);
+                      setConfirmedSms(sms);
+                      setStep('success');
+                      const currentPhone = normalizeKenyanPhone(phoneInput).normalized || phoneInput;
+                      onPaymentSuccess(code, currentPhone, amount, sms);
+                    }}
+                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white font-bold rounded-xl text-xs transition flex items-center justify-center gap-1.5 shadow-md cursor-pointer shrink-0"
+                  >
+                    <Check className="w-3.5 h-3.5" />
+                    <span>Confirm & Complete Sale</span>
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-center gap-2 pt-2 flex-wrap">
+                <button
+                  type="button"
+                  onClick={async () => {
+                    setIsCheckingStatusNow(true);
+                    await handleCheckStatusNow();
+                  }}
+                  disabled={isCheckingStatusNow}
+                  className="px-4 py-2.5 bg-sky-600 hover:bg-sky-500 active:scale-95 text-white font-bold rounded-xl text-xs transition flex items-center gap-1.5 shadow cursor-pointer disabled:opacity-50"
+                >
+                  <RotateCcw className={`w-3.5 h-3.5 ${isCheckingStatusNow ? 'animate-spin' : ''}`} />
+                  <span>{isCheckingStatusNow ? 'Checking Safaricom...' : 'Check Safaricom Status Again'}</span>
+                </button>
                 <button
                   type="button"
                   onClick={() => setStep('input')}
-                  className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold rounded-xl text-xs transition flex items-center gap-1.5"
+                  className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold rounded-xl text-xs transition flex items-center gap-1.5 cursor-pointer"
                 >
-                  <RotateCcw className="w-3.5 h-3.5" /> Try Again / Change Number
+                  <RotateCcw className="w-3.5 h-3.5" /> Change Number
                 </button>
                 <button
                   type="button"
                   onClick={handleSendPrompt}
-                  className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs transition flex items-center gap-1.5 shadow"
+                  className="px-4 py-2.5 bg-emerald-700 hover:bg-emerald-600 text-white font-bold rounded-xl text-xs transition flex items-center gap-1.5 shadow cursor-pointer"
                 >
                   <Send className="w-3.5 h-3.5" /> Resend Prompt
                 </button>

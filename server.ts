@@ -1269,8 +1269,10 @@ Generate high-converting, realistic copy in JSON format with these exact keys:
           // Safaricom ResultCode 0 / "0" = Payment Successful!
           const resultCode = String(queryResult?.ResultCode ?? '');
           const responseCode = String(queryResult?.ResponseCode ?? '');
+          const resultDesc = String(queryResult?.ResultDesc || queryResult?.ResponseDescription || queryResult?.errorMessage || '');
+          const lowerDesc = resultDesc.toLowerCase();
 
-          if (resultCode === '0' || responseCode === '0' && queryResult?.ResultDesc?.toLowerCase().includes('success')) {
+          if (resultCode === '0' || (responseCode === '0' && (lowerDesc.includes('success') || lowerDesc.includes('accept') || lowerDesc.includes('complete')))) {
             const now = new Date();
             const dateStr = now.toLocaleDateString('en-GB');
             const timeStr = now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
@@ -1317,8 +1319,28 @@ Generate high-converting, realistic copy in JSON format with these exact keys:
             return;
           }
 
+          // In-Progress / Customer Entering PIN (ResultCode 49, "being processed", or 500.001.1001)
+          const isPending =
+            lowerDesc.includes('being processed') ||
+            lowerDesc.includes('in progress') ||
+            lowerDesc.includes('processing') ||
+            lowerDesc.includes('pending') ||
+            lowerDesc.includes('wait') ||
+            resultCode === '49' ||
+            queryResult?.errorCode === '500.001.1001';
+
+          if (isPending) {
+            res.json({
+              checkoutRequestId,
+              status: 'PENDING',
+              message: 'Customer entering PIN on Safaricom M-PESA...',
+              resultDesc: queryResult?.ResultDesc,
+            });
+            return;
+          }
+
           // ResultCode 1032 = Request cancelled by user
-          if (resultCode === '1032') {
+          if (resultCode === '1032' || lowerDesc.includes('cancel')) {
             if (tx) tx.status = 'CANCELLED';
             res.json({
               checkoutRequestId,
@@ -1330,7 +1352,7 @@ Generate high-converting, realistic copy in JSON format with these exact keys:
           }
 
           // ResultCode 1037 = User did not enter PIN (timeout)
-          if (resultCode === '1037') {
+          if (resultCode === '1037' || lowerDesc.includes('timed out') || lowerDesc.includes('timeout')) {
             if (tx) tx.status = 'TIMEOUT';
             res.json({
               checkoutRequestId,
@@ -1341,8 +1363,32 @@ Generate high-converting, realistic copy in JSON format with these exact keys:
             return;
           }
 
-          // ResultCode 1 = Insufficient balance, 2001 = Invalid PIN, etc.
-          if (resultCode && resultCode !== '0') {
+          // ResultCode 1 = Insufficient balance
+          if (resultCode === '1' || lowerDesc.includes('insufficient')) {
+            if (tx) tx.status = 'FAILED';
+            res.json({
+              checkoutRequestId,
+              status: 'FAILED',
+              errorMessage: 'Customer M-PESA balance is insufficient for this payment.',
+              resultDesc: queryResult?.ResultDesc,
+            });
+            return;
+          }
+
+          // ResultCode 2001 = Invalid PIN
+          if (resultCode === '2001' || lowerDesc.includes('wrong pin') || lowerDesc.includes('invalid pin')) {
+            if (tx) tx.status = 'FAILED';
+            res.json({
+              checkoutRequestId,
+              status: 'FAILED',
+              errorMessage: 'Customer entered an incorrect M-PESA PIN.',
+              resultDesc: queryResult?.ResultDesc,
+            });
+            return;
+          }
+
+          // Confirmed terminal error
+          if (resultCode && resultCode !== '0' && (lowerDesc.includes('fail') || lowerDesc.includes('reject') || lowerDesc.includes('invalid') || lowerDesc.includes('error'))) {
             if (tx) tx.status = 'FAILED';
             res.json({
               checkoutRequestId,
@@ -1353,7 +1399,7 @@ Generate high-converting, realistic copy in JSON format with these exact keys:
             return;
           }
 
-          // Still in progress / processing (Safaricom returns "The transaction is being processed" or code 500.001.1001)
+          // Still in progress / processing
           res.json({
             checkoutRequestId,
             status: 'PENDING',

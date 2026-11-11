@@ -81,7 +81,7 @@ interface DataManagementViewProps {
   onToggleSidebar?: () => void;
   onOpenCloudSync?: () => void;
   onPullFromCloud?: () => Promise<any>;
-  onEmergencyRestore?: (sourceKey?: string) => boolean;
+  onEmergencyRestore?: (sourceKey?: string) => Promise<boolean> | boolean;
   deviceFormat?: 'computer' | 'phone';
   onChangeDeviceFormat?: (format: 'computer' | 'phone') => void;
   requirePinOnStartup?: boolean;
@@ -616,9 +616,9 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
               <button
                 type="button"
                 id="btn-restore-largest-snapshot"
-                onClick={() => {
+                onClick={async () => {
                   if (onEmergencyRestore) {
-                    const ok = onEmergencyRestore(largest.key);
+                    const ok = await onEmergencyRestore(largest.key);
                     if (ok) {
                       triggerNotify(`✨ Restored ${largest.productsCount} products from ${largest.label}!`);
                     }

@@ -241,12 +241,24 @@ export const DailyEmailBackupModal: React.FC<DailyEmailBackupModalProps> = ({
   // Perform email send
   const executeSendBackupEmail = async () => {
     setShowConfirmSendDialog(false);
-    if (!accessToken) {
-      setSendNotice({
-        type: 'error',
-        message: 'Please connect your Google / Gmail account first to authorize sending emails.',
-      });
-      return;
+    let activeToken = accessToken;
+
+    if (!activeToken) {
+      try {
+        setIsConnecting(true);
+        const { user, accessToken: token } = await signInWithGoogleForGmail();
+        setGoogleUser(user);
+        setAccessToken(token);
+        activeToken = token;
+      } catch (authErr: any) {
+        setSendNotice({
+          type: 'error',
+          message: 'Google authorization is required to send emails via Gmail: ' + (authErr.message || 'Cancelled'),
+        });
+        return;
+      } finally {
+        setIsConnecting(false);
+      }
     }
 
     const targetRecipient = recipientInput.trim() || settings.recipientEmail;
@@ -270,7 +282,7 @@ export const DailyEmailBackupModal: React.FC<DailyEmailBackupModalProps> = ({
       const htmlBody = generateEmailHtml(payload);
 
       const result = await sendBackupEmailViaGmail({
-        accessToken,
+        accessToken: activeToken,
         recipientEmail: targetRecipient,
         subject,
         htmlContent: htmlBody,
@@ -558,8 +570,11 @@ export const DailyEmailBackupModal: React.FC<DailyEmailBackupModalProps> = ({
                   <select
                     value={settings.scheduledHour}
                     onChange={(e) => handleSaveSettings({ scheduledHour: parseInt(e.target.value, 10) })}
-                    className="bg-slate-950 border border-slate-700 text-slate-200 text-xs font-mono font-bold rounded-lg px-2 py-1"
+                    className="bg-slate-950 border border-slate-700 text-slate-200 text-xs font-mono font-bold rounded-lg px-2 py-1 cursor-pointer"
                   >
+                    <option value={17}>17:00 (5:00 PM)</option>
+                    <option value={18}>18:00 (6:00 PM)</option>
+                    <option value={19}>19:00 (7:00 PM - Store Closing)</option>
                     <option value={20}>20:00 (8:00 PM)</option>
                     <option value={21}>21:00 (9:00 PM)</option>
                     <option value={22}>22:00 (10:00 PM)</option>
@@ -692,11 +707,11 @@ export const DailyEmailBackupModal: React.FC<DailyEmailBackupModalProps> = ({
             <button
               type="button"
               onClick={() => setShowConfirmSendDialog(true)}
-              disabled={isSending || !accessToken}
+              disabled={isSending || isConnecting}
               className="flex-1 sm:flex-initial px-5 py-2.5 bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-500 hover:to-indigo-500 disabled:opacity-50 text-white text-xs font-extrabold rounded-xl shadow-lg shadow-sky-600/30 transition flex items-center justify-center gap-2 cursor-pointer active:scale-95"
             >
               <Send className={`w-3.5 h-3.5 ${isSending ? 'animate-pulse' : ''}`} />
-              <span>{isSending ? 'Sending Backup...' : 'Send Backup Email Now'}</span>
+              <span>{isSending ? 'Sending Backup...' : accessToken ? 'Send Backup Email Now' : 'Authorize & Send Backup Now'}</span>
             </button>
           </div>
         </div>

@@ -458,7 +458,7 @@ export default function App() {
 
   // Daily Automatic Email Backup Modal & Status Banner
   const [showDailyEmailBackupModal, setShowDailyEmailBackupModal] = useState<boolean>(false);
-  const [backupBanner, setBackupBanner] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [backupBanner, setBackupBanner] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
 
   // Application Persistent Collections State with safe lazy initialization & immediate localStorage sync
   const [products, setProductsState] = useState<Product[]>(() => {
@@ -1738,10 +1738,18 @@ export default function App() {
         const todayStr = now.toISOString().split('T')[0];
         const currentHour = now.getHours();
 
-        // Check if scheduled hour has arrived and today's backup has not been performed
-        if (currentHour >= settings.scheduledHour && settings.lastSentDate !== todayStr) {
+        // Check if scheduled hour has arrived and today's backup has not been performed, OR if yesterday's was missed
+        const isPastScheduledHour = currentHour >= settings.scheduledHour;
+        const isMissedPreviousDay = settings.lastSentDate ? settings.lastSentDate < todayStr : true;
+        const isDue = (isPastScheduledHour || isMissedPreviousDay) && settings.lastSentDate !== todayStr;
+
+        if (isDue) {
           const token = getGmailAccessToken();
           if (!token) {
+            setBackupBanner((prev) => (prev ? prev : {
+              message: `Daily store database backup for ${todayStr} is pending for ${settings.recipientEmail || 'NivaJuma@gmail.com'}.`,
+              type: 'info',
+            }));
             return;
           }
 
@@ -4083,7 +4091,11 @@ export default function App() {
         {/* Daily Email Backup Notification Banner */}
         {backupBanner && (
           <div className={`px-4 py-2.5 text-xs font-semibold flex items-center justify-between shadow-sm z-30 shrink-0 ${
-            backupBanner.type === 'success' ? 'bg-emerald-600 text-white' : 'bg-red-600 text-white'
+            backupBanner.type === 'success'
+              ? 'bg-emerald-600 text-white'
+              : backupBanner.type === 'info'
+              ? 'bg-sky-600 text-white'
+              : 'bg-red-600 text-white'
           }`}>
             <div className="flex items-center gap-2 flex-wrap">
               <span className="flex items-center gap-1 bg-black/20 text-white px-2 py-0.5 rounded text-[11px] font-bold">
@@ -4092,9 +4104,9 @@ export default function App() {
               <span>{backupBanner.message}</span>
               <button
                 onClick={() => setShowDailyEmailBackupModal(true)}
-                className="underline font-bold text-white hover:text-emerald-100 cursor-pointer ml-2"
+                className="underline font-bold text-white hover:text-sky-100 cursor-pointer ml-2"
               >
-                View Backup Details
+                {backupBanner.type === 'info' ? 'Authorize & Send Backup Now' : 'View Backup Details'}
               </button>
             </div>
             <button

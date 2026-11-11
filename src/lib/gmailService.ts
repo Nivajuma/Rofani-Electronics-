@@ -88,7 +88,7 @@ export interface BackupSettings {
 const DEFAULT_SETTINGS: BackupSettings = {
   enabled: true,
   recipientEmail: 'NivaJuma@gmail.com',
-  scheduledHour: 23,
+  scheduledHour: 19,
   scheduledMinute: 0,
   lastSentDate: null,
   lastSentStatus: null,
@@ -117,14 +117,23 @@ export const saveBackupSettings = (settings: Partial<BackupSettings>): BackupSet
   return updated;
 };
 
-// Encode UTF-8 strings to Base64URL
+// High-performance chunked base64 encoder for multi-megabyte catalog payloads
+const uint8ToBase64 = (bytes: Uint8Array): string => {
+  let binary = '';
+  const len = bytes.byteLength;
+  const chunkSize = 8192;
+  for (let i = 0; i < len; i += chunkSize) {
+    const chunk = bytes.subarray(i, Math.min(i + chunkSize, len));
+    binary += String.fromCharCode.apply(null, chunk as unknown as number[]);
+  }
+  return btoa(binary);
+};
+
+// Encode UTF-8 strings to Base64URL for Gmail REST API
 const base64UrlEncode = (str: string): string => {
   const utf8Bytes = new TextEncoder().encode(str);
-  let binary = '';
-  utf8Bytes.forEach((byte) => {
-    binary += String.fromCharCode(byte);
-  });
-  return btoa(binary)
+  const b64 = uint8ToBase64(utf8Bytes);
+  return b64
     .replace(/\+/g, '-')
     .replace(/\//g, '_')
     .replace(/=+$/, '');
@@ -148,9 +157,9 @@ export const sendBackupEmailViaGmail = async ({
 }): Promise<{ success: boolean; messageId?: string; error?: string }> => {
   try {
     const boundary = `====_Boundary_${Date.now()}_====`;
-    const attachmentBase64 = btoa(
-      unescape(encodeURIComponent(backupJsonString))
-    );
+    // Clean UTF-8 binary encoding without deprecated unescape()
+    const jsonBytes = new TextEncoder().encode(backupJsonString);
+    const attachmentBase64 = uint8ToBase64(jsonBytes);
 
     const messageParts = [
       `To: ${recipientEmail}`,

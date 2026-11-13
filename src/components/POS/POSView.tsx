@@ -46,7 +46,9 @@ import {
   SlidersHorizontal,
   Truck,
   ReceiptText,
-  FileSpreadsheet
+  FileSpreadsheet,
+  ArrowDown,
+  ArrowUp
 } from 'lucide-react';
 import { Product, CartItem, Customer, PaymentMethod, PaymentBreakdown, Transaction, User as Employee, BarcodeScanLog } from '../../types';
 import { BarcodeScannerModal } from './BarcodeScannerModal';
@@ -160,6 +162,25 @@ export const POSView: React.FC<POSViewProps> = ({
   }, [productAge]);
 
   const [showAdvancedFilters, setShowAdvancedFilters] = useState<boolean>(false);
+  const posItemListRef = useRef<HTMLDivElement>(null);
+
+  const handleScrollPosListDown = () => {
+    const el = posItemListRef.current;
+    if (!el) return;
+    el.scrollBy({ top: 380, behavior: 'smooth' });
+  };
+
+  const handleScrollPosListBottom = () => {
+    const el = posItemListRef.current;
+    if (!el) return;
+    el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+  };
+
+  const handleScrollPosListTop = () => {
+    const el = posItemListRef.current;
+    if (!el) return;
+    el.scrollTo({ top: 0, behavior: 'smooth' });
+  };
 
   const allSuppliers = React.useMemo(() => {
     const set = new Set<string>();
@@ -3001,10 +3022,47 @@ export const POSView: React.FC<POSViewProps> = ({
             </div>
           )}
 
+          {/* Item List Quick Downward-Arrow Navigation Bar */}
+          <div className="bg-slate-900/90 border border-slate-800 px-3 py-2 rounded-xl flex items-center justify-between gap-2 text-xs">
+            <div className="flex items-center gap-2 text-slate-300 font-bold">
+              <Package className="w-3.5 h-3.5 text-sky-400" />
+              <span>Item List ({filteredProducts.length})</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={handleScrollPosListDown}
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-sky-600/20 hover:bg-sky-600/35 text-sky-300 hover:text-white border border-sky-500/40 font-bold text-[11px] transition cursor-pointer"
+                title="Scroll down item list"
+              >
+                <ArrowDown className="w-3.5 h-3.5" />
+                <span>Down</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleScrollPosListBottom}
+                className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-950 hover:bg-slate-800 text-slate-300 border border-slate-800 font-bold text-[11px] transition cursor-pointer"
+                title="Jump to bottom of item list"
+              >
+                <ChevronDown className="w-3.5 h-3.5 text-sky-400" />
+                <span className="hidden sm:inline">Bottom</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleScrollPosListTop}
+                className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-950 hover:bg-slate-800 text-slate-300 border border-slate-800 font-bold text-[11px] transition cursor-pointer"
+                title="Back to top of item list"
+              >
+                <ArrowUp className="w-3.5 h-3.5 text-sky-400" />
+                <span className="hidden sm:inline">Top</span>
+              </button>
+            </div>
+          </div>
+
           {/* Product Items Display (List Form vs Grid) */}
           {viewMode === 'list' ? (
             /* High-density Tabular List Form for 300+ items */
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-lg max-h-[calc(100vh-280px)] overflow-y-auto">
+            <div ref={posItemListRef} className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-lg max-h-[calc(100vh-280px)] overflow-y-auto">
               <table className="w-full text-left text-xs text-slate-300">
                 <thead className="bg-slate-950 text-slate-400 font-semibold uppercase tracking-wider border-b border-slate-800 sticky top-0 z-10">
                   <tr>
@@ -3153,7 +3211,7 @@ export const POSView: React.FC<POSViewProps> = ({
             </div>
           ) : (
             /* Product Cards Grid */
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 max-h-[calc(100vh-280px)] overflow-y-auto pr-1">
+            <div ref={posItemListRef} className="grid grid-cols-2 sm:grid-cols-3 gap-3 max-h-[calc(100vh-280px)] overflow-y-auto pr-1">
               {filteredProducts.length === 0 ? (
                 <div className="col-span-full py-10 text-center text-slate-500 bg-slate-950/40 rounded-2xl border border-dashed border-slate-800 p-6 space-y-2">
                   <Search className="w-7 h-7 text-slate-600 mx-auto" />

@@ -7,6 +7,7 @@ import {
   Users,
   Copy,
   Check,
+  CheckCircle2,
   ExternalLink,
   ShieldCheck,
   AlertTriangle,
@@ -22,12 +23,20 @@ import {
   WifiOff,
   Download,
   RotateCcw,
-  History
+  History,
+  Clock
 } from 'lucide-react';
 import QRCode from 'qrcode';
-import { bulkUploadProductsToCloud, bulkUploadUsersToCloud } from '../../lib/cloudSync';
+import {
+  batchSaveProductsToCloud,
+  batchSaveTransactionsToCloud,
+  batchSaveCustomersToCloud,
+  batchSaveSuppliersToCloud,
+  batchSaveExpensesToCloud,
+  bulkUploadUsersToCloud,
+} from '../../lib/cloudSync';
 import { FIREBASE_UPGRADE_URL } from '../../lib/firebase';
-import { Product, User } from '../../types';
+import { Product, User, Transaction, Customer, Supplier, Expense } from '../../types';
 import { useNetworkStatus } from '../../utils/offlineSync';
 import { findRecoverableBackups } from '../../utils/backupRecovery';
 
@@ -36,11 +45,16 @@ interface CloudSyncModalProps {
   onClose: () => void;
   products: Product[];
   allUsers?: User[];
+  transactions?: Transaction[];
+  customers?: Customer[];
+  suppliers?: Supplier[];
+  expenses?: Expense[];
   cloudSyncStatus?: 'synced' | 'syncing' | 'offline' | 'error' | 'quota_exceeded';
   isQuotaExceeded?: boolean;
   lastSyncedTime?: string | null;
   onTriggerSync?: () => void;
   onSyncCatalogComplete?: () => void;
+  onSyncError?: () => void;
   onPullFromCloud?: () => Promise<{
     productsCount: number;
     salesCount: number;
@@ -62,11 +76,16 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
   onClose,
   products,
   allUsers = [],
+  transactions = [],
+  customers = [],
+  suppliers = [],
+  expenses = [],
   cloudSyncStatus = 'synced',
   isQuotaExceeded = false,
   lastSyncedTime = null,
   onTriggerSync,
   onSyncCatalogComplete,
+  onSyncError,
   onPullFromCloud,
   onEmergencyRestore,
   masterPin = '1234',
@@ -78,8 +97,16 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
   const [copied, setCopied] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [isPulling, setIsPulling] = useState(false);
-  const [uploadMsg, setUploadMsg] = useState<string | null>(null);
-  const [uploadProgress, setUploadProgress] = useState<string | null>(null);
+  const [syncFeedback, setSyncFeedback] = useState<{
+    type: 'success' | 'error' | 'warning';
+    title: string;
+    details: string;
+    timestamp: string;
+  } | null>(null);
+  const [uploadProgress, setUploadProgress] = useState<{
+    label: string;
+    percent: number;
+  } | null>(null);
 
   // Standalone app clean URL that works on mobile phones
   const getCleanShareUrl = () => {
@@ -141,47 +168,166 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
   };
 
   const handleUploadAllToCloud = async () => {
-    setIsUploading(true);
-    setUploadMsg(null);
-    setUploadProgress(`Uploading ${products.length} products to Firestore in safe batches of 25...`);
-    try {
-      const count = await bulkUploadProductsToCloud(products, (uploaded, total, batch, totalBatches) => {
-        setUploadProgress(`Uploaded batch ${batch} of ${totalBatches}: ${uploaded}/${total} items to Firestore...`);
+    if (!isOnline || (typeof navigator !== 'undefined' && !navigator.onLine)) {
+      setSyncFeedback({
+        type: 'error',
+        title: 'Sync Did Not Run — Device Offline',
+        details: 'Your internet connection appears offline. Local changes are safely stored on this device. Reconnect to Wi-Fi/data and tap "Push to Cloud".',
+        timestamp: new Date().toLocaleTimeString(),
       });
-      if (allUsers && allUsers.length > 0) {
-        setUploadProgress('Publishing staff user accounts...');
-        await bulkUploadUsersToCloud(allUsers);
+      return;
+    }
+
+    setIsUploading(true);
+    setSyncFeedback(null);
+    setUploadProgress({
+      label: `Step 1/5: Preparing ${products.length} products for batch upload...`,
+      percent: 5,
+    });
+
+    try {
+      let prodCount = 0;
+      if (products.length > 0) {
+        prodCount = await batchSaveProductsToCloud(products, (uploaded, total, batch, totalBatches) => {
+          const pct = Math.min(55, 5 + Math.round((uploaded / Math.max(total, 1)) * 50));
+          setUploadProgress({
+            label: `Step 1/5: Uploaded batch ${batch}/${totalBatches} (${uploaded}/${total} products)`,
+            percent: pct,
+          });
+        });
       }
-      setUploadProgress(null);
-      setUploadMsg(`Successfully published all ${count} products & ${allUsers.length} staff accounts to Cloud Firestore! All connected phones are now up to date.`);
-      if (onTriggerSync) onTriggerSync();
+
+      let usersCount = 0;
+      if (allUsers && allUsers.length > 0) {
+        setUploadProgress({
+          label: `Step 2/5: Syncing ${allUsers.length} staff accounts...`,
+          percent: 62,
+        });
+        usersCount = await bulkUploadUsersToCloud(allUsers);
+      }
+
+      let salesCount = 0;
+      const recentSales = transactions.slice(0, 200);
+      if (recentSales.length > 0) {
+        setUploadProgress({
+          label: `Step 3/5: Syncing ${recentSales.length} sales transactions...`,
+          percent: 70,
+        });
+        salesCount = await batchSaveTransactionsToCloud(recentSales, (uploaded, total, batch, totalBatches) => {
+          setUploadProgress({
+            label: `Step 3/5: Sales batch ${batch}/${totalBatches} (${uploaded}/${total})`,
+            percent: 70 + Math.round((uploaded / Math.max(total, 1)) * 12),
+          });
+        });
+      }
+
+      let customersCount = 0;
+      const recentCustomers = customers.slice(0, 200);
+      if (recentCustomers.length > 0) {
+        setUploadProgress({
+          label: `Step 4/5: Syncing ${recentCustomers.length} customers & ${suppliers.length} suppliers...`,
+          percent: 84,
+        });
+        customersCount = await batchSaveCustomersToCloud(recentCustomers);
+      }
+
+      let suppliersCount = 0;
+      if (suppliers.length > 0) {
+        suppliersCount = await batchSaveSuppliersToCloud(suppliers);
+      }
+
+      let expensesCount = 0;
+      const recentExpenses = expenses.slice(0, 100);
+      if (recentExpenses.length > 0) {
+        setUploadProgress({
+          label: `Step 5/5: Syncing ${recentExpenses.length} expense records...`,
+          percent: 93,
+        });
+        expensesCount = await batchSaveExpensesToCloud(recentExpenses);
+      }
+
+      const parts: string[] = [`${prodCount} products`];
+      if (usersCount > 0) parts.push(`${usersCount} staff`);
+      if (salesCount > 0) parts.push(`${salesCount} sales`);
+      if (customersCount > 0) parts.push(`${customersCount} customers`);
+      if (suppliersCount > 0) parts.push(`${suppliersCount} suppliers`);
+      if (expensesCount > 0) parts.push(`${expensesCount} expenses`);
+
+      setSyncFeedback({
+        type: 'success',
+        title: 'Cloud Sync Confirmed & Completed',
+        details: `Successfully uploaded ${parts.join(', ')} to Cloud Firestore. Connected devices can now pull these updates immediately.`,
+        timestamp: new Date().toLocaleTimeString(),
+      });
       if (onSyncCatalogComplete) onSyncCatalogComplete();
     } catch (err: any) {
-      setUploadProgress(null);
-      setUploadMsg(err?.message || 'Failed to sync to cloud. Please check network connection.');
+      if (onSyncError) onSyncError();
+      setSyncFeedback({
+        type: 'error',
+        title: 'Cloud Sync Failed or Timed Out',
+        details: err?.message || 'Could not reach Cloud Firestore. Your local data is safe; check your internet connection and try again.',
+        timestamp: new Date().toLocaleTimeString(),
+      });
     } finally {
+      setUploadProgress(null);
       setIsUploading(false);
     }
   };
 
   const handlePullFromCloud = async () => {
     if (!onPullFromCloud) return;
+    if (!isOnline || (typeof navigator !== 'undefined' && !navigator.onLine)) {
+      setSyncFeedback({
+        type: 'error',
+        title: 'Pull Did Not Run — Device Offline',
+        details: 'Your internet connection appears offline. Reconnect to Wi-Fi/data and tap "Pull from Cloud".',
+        timestamp: new Date().toLocaleTimeString(),
+      });
+      return;
+    }
+
     setIsPulling(true);
-    setUploadMsg(null);
+    setSyncFeedback(null);
+    setUploadProgress({
+      label: 'Downloading & merging inventory, sales, and contacts from Cloud Firestore...',
+      percent: 45,
+    });
     try {
       const res = await onPullFromCloud();
       if (res && typeof res === 'object') {
         if (res.productsCount === 0 && res.salesCount === 0 && (res.customersCount ?? 0) === 0) {
-          setUploadMsg('Cloud Firestore currently has 0 items. Click "Push All Local to Cloud" to upload your 302 products now!');
+          setSyncFeedback({
+            type: 'warning',
+            title: 'Cloud Database Currently Empty (0 Items)',
+            details: `No records were found in Cloud Firestore yet. Tap "Push to Cloud" to upload your ${products.length} local products now.`,
+            timestamp: new Date().toLocaleTimeString(),
+          });
         } else {
-          setUploadMsg(`Successfully pulled & merged ${res.productsCount} products, ${res.salesCount} sales, ${res.customersCount || 0} customers, and ${res.expensesCount || 0} expenses! All local records safely preserved.`);
+          setSyncFeedback({
+            type: 'success',
+            title: 'Cloud Pull Confirmed & Merged',
+            details: `Pulled & safely merged ${res.productsCount} products, ${res.salesCount} sales, ${res.customersCount || 0} customers, ${res.suppliersCount || 0} suppliers, and ${res.expensesCount || 0} expenses.`,
+            timestamp: new Date().toLocaleTimeString(),
+          });
         }
       } else {
-        setUploadMsg('Data pulled and synchronized from Cloud Firestore!');
+        setSyncFeedback({
+          type: 'success',
+          title: 'Cloud Pull Completed',
+          details: 'Data pulled and synchronized from Cloud Firestore.',
+          timestamp: new Date().toLocaleTimeString(),
+        });
       }
     } catch (err: any) {
-      setUploadMsg(err?.message || 'Failed to pull from cloud. Check network connection.');
+      if (onSyncError) onSyncError();
+      setSyncFeedback({
+        type: 'error',
+        title: 'Failed to Pull from Cloud',
+        details: err?.message || 'Could not reach Cloud Firestore. Check your internet connection and try again.',
+        timestamp: new Date().toLocaleTimeString(),
+      });
     } finally {
+      setUploadProgress(null);
       setIsPulling(false);
     }
   };
@@ -307,35 +453,53 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
           <div className={`p-3.5 sm:p-4 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 border ${
             cloudSyncStatus === 'quota_exceeded' || isQuotaExceeded
               ? 'bg-amber-950/40 border-amber-800/60'
-              : cloudSyncStatus === 'offline'
+              : cloudSyncStatus === 'offline' || !isOnline
               ? 'bg-slate-950/80 border-slate-800'
+              : cloudSyncStatus === 'error'
+              ? 'bg-rose-950/40 border-rose-800/60'
               : 'bg-gradient-to-r from-sky-950/90 to-blue-950/90 border-sky-800/80'
           }`}>
             <div className="flex items-center gap-3">
               <div className={`w-3 h-3 rounded-full shrink-0 ${
                 cloudSyncStatus === 'quota_exceeded' || isQuotaExceeded
                   ? 'bg-amber-400'
-                  : cloudSyncStatus === 'offline'
+                  : cloudSyncStatus === 'offline' || !isOnline
                   ? 'bg-slate-500'
-                  : 'bg-emerald-400 animate-ping'
+                  : cloudSyncStatus === 'error'
+                  ? 'bg-rose-500'
+                  : isUploading || isPulling || cloudSyncStatus === 'syncing'
+                  ? 'bg-sky-400 animate-pulse'
+                  : 'bg-emerald-400'
               }`} />
               <div>
                 <div className="text-xs font-bold text-slate-100 flex items-center gap-1.5 flex-wrap">
                   <Radio className={`w-3.5 h-3.5 ${
                     cloudSyncStatus === 'quota_exceeded' || isQuotaExceeded
                       ? 'text-amber-400'
-                      : cloudSyncStatus === 'offline'
+                      : cloudSyncStatus === 'offline' || !isOnline
                       ? 'text-slate-400'
+                      : cloudSyncStatus === 'error'
+                      ? 'text-rose-400'
                       : 'text-emerald-400'
                   }`} />
                   {cloudSyncStatus === 'quota_exceeded' || isQuotaExceeded
                     ? 'Firestore Quota Reached — Local Mode Active'
-                    : cloudSyncStatus === 'offline'
+                    : cloudSyncStatus === 'offline' || !isOnline
                     ? 'Cloud Sync Offline — Local Cache Safe'
+                    : isUploading || isPulling || cloudSyncStatus === 'syncing'
+                    ? 'Syncing with Cloud Firestore...'
+                    : cloudSyncStatus === 'error'
+                    ? 'Last Cloud Sync Had an Error — Tap Push to Retry'
                     : 'Firebase Cloud Firestore Connected'}
                 </div>
-                <p className="text-[11px] text-slate-300">
-                  {products.length} products synced. Changes update live across all phones.
+                <p className="text-[11px] text-slate-300 flex items-center gap-2 flex-wrap">
+                  <span>{products.length} products locally ready.</span>
+                  {lastSyncedTime && (
+                    <span className="inline-flex items-center gap-1 text-emerald-300 font-mono text-[10px]">
+                      <Clock className="w-3 h-3" />
+                      Last synced: {lastSyncedTime}
+                    </span>
+                  )}
                 </p>
               </div>
             </div>
@@ -359,22 +523,57 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
                 className="px-3.5 py-2 bg-sky-600 hover:bg-sky-500 active:scale-95 text-white font-bold text-xs rounded-xl shadow-md transition flex items-center justify-center gap-1.5 shrink-0 disabled:opacity-50 cursor-pointer"
               >
                 <UploadCloud className={`w-4 h-4 ${isUploading ? 'animate-spin' : ''}`} />
-                <span>{isUploading ? 'Syncing...' : 'Push to Cloud'}</span>
+                <span>{isUploading ? 'Uploading...' : 'Push to Cloud'}</span>
               </button>
             </div>
           </div>
 
           {uploadProgress && (
-            <div className="bg-sky-950/80 border border-sky-500/60 text-sky-200 text-xs p-3 rounded-xl flex items-center gap-2 animate-pulse">
-              <RefreshCw className="w-4 h-4 text-sky-400 animate-spin shrink-0" />
-              <span>{uploadProgress}</span>
+            <div className="bg-sky-950/80 border border-sky-500/60 text-sky-100 text-xs p-3.5 rounded-xl space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 font-semibold min-w-0">
+                  <RefreshCw className="w-4 h-4 text-sky-400 animate-spin shrink-0" />
+                  <span className="truncate">{uploadProgress.label}</span>
+                </div>
+                <span className="font-mono font-bold text-sky-300 shrink-0">{uploadProgress.percent}%</span>
+              </div>
+              <div className="w-full bg-slate-900 rounded-full h-2 overflow-hidden border border-sky-800/60">
+                <div
+                  className="bg-sky-400 h-full transition-all duration-300 rounded-full"
+                  style={{ width: `${Math.max(4, uploadProgress.percent)}%` }}
+                />
+              </div>
             </div>
           )}
 
-          {uploadMsg && (
-            <div className="bg-emerald-950/80 border border-emerald-700/80 text-emerald-200 text-xs p-3 rounded-xl flex items-center gap-2">
-              <Check className="w-4 h-4 text-emerald-400 shrink-0" />
-              <span>{uploadMsg}</span>
+          {syncFeedback && (
+            <div
+              role="status"
+              aria-live="polite"
+              className={`text-xs p-3.5 rounded-xl border flex items-start gap-2.5 ${
+                syncFeedback.type === 'success'
+                  ? 'bg-emerald-950/80 border-emerald-600/80 text-emerald-100'
+                  : syncFeedback.type === 'warning'
+                  ? 'bg-amber-950/80 border-amber-600/80 text-amber-100'
+                  : 'bg-rose-950/80 border-rose-600/80 text-rose-100'
+              }`}
+            >
+              {syncFeedback.type === 'success' ? (
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+              ) : (
+                <AlertTriangle
+                  className={`w-4 h-4 shrink-0 mt-0.5 ${
+                    syncFeedback.type === 'warning' ? 'text-amber-400' : 'text-rose-400'
+                  }`}
+                />
+              )}
+              <div className="flex-1 min-w-0 space-y-0.5">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <span className="font-extrabold">{syncFeedback.title}</span>
+                  <span className="text-[10px] font-mono opacity-80">{syncFeedback.timestamp}</span>
+                </div>
+                <p className="text-[11px] leading-relaxed opacity-95">{syncFeedback.details}</p>
+              </div>
             </div>
           )}
 
@@ -423,9 +622,12 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
                     if (onEmergencyRestore) {
                       const ok = await onEmergencyRestore(largest.key);
                       if (ok) {
-                        setUploadMsg(
-                          `✨ Restored ${largest.productsCount} products from ${largest.label}! Now click "Push to Cloud" to sync all items safely.`
-                        );
+                        setSyncFeedback({
+                          type: 'success',
+                          title: `Restored ${largest.productsCount} Products`,
+                          details: `Restored ${largest.productsCount} products from ${largest.label}! Now tap "Push to Cloud" to sync all items safely.`,
+                          timestamp: new Date().toLocaleTimeString(),
+                        });
                       }
                     }
                   }}

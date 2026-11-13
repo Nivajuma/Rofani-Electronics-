@@ -27,6 +27,7 @@ import {
   downloadSnapshotFile,
   EncryptedSnapshotEnvelope
 } from '../../utils/snapshotEncryption';
+import { playBackupSuccessSound } from '../../utils/uiFeedback';
 
 interface DataSnapshotModalProps {
   isOpen: boolean;
@@ -129,12 +130,14 @@ export const DataSnapshotModal: React.FC<DataSnapshotModalProps> = ({
         const filename = `${storeSlug}_Full_Snapshot_${dateSlug}.enc.json`;
 
         downloadSnapshotFile(jsonContent, filename, 'application/json');
+        playBackupSuccessSound();
         setSuccessNotice(`AES-256 encrypted snapshot successfully downloaded (${filename})!`);
       } else if (format === 'consolidated_csv') {
         const csvContent = generateConsolidatedCsvSnapshot(snapshot);
         const filename = `${storeSlug}_Full_Snapshot_${dateSlug}.csv`;
 
         downloadSnapshotFile(csvContent, filename, 'text/csv');
+        playBackupSuccessSound();
         setSuccessNotice(`Consolidated all-collection CSV snapshot downloaded (${filename})!`);
       } else {
         // Plain JSON
@@ -142,6 +145,7 @@ export const DataSnapshotModal: React.FC<DataSnapshotModalProps> = ({
         const filename = `${storeSlug}_Full_Snapshot_${dateSlug}.json`;
 
         downloadSnapshotFile(jsonContent, filename, 'application/json');
+        playBackupSuccessSound();
         setSuccessNotice(`Plain JSON snapshot downloaded (${filename})!`);
       }
     } catch (err: any) {
@@ -459,9 +463,10 @@ export const DataSnapshotModal: React.FC<DataSnapshotModalProps> = ({
                 <button
                   type="button"
                   id="btn-execute-download-snapshot"
+                  data-feedback="backup"
                   disabled={isProcessing}
                   onClick={handleDownloadSnapshot}
-                  className="px-6 py-2.5 bg-gradient-to-r from-sky-600 via-indigo-600 to-sky-500 hover:from-sky-500 hover:to-indigo-500 text-white font-extrabold rounded-xl text-xs transition shadow-lg shadow-sky-600/30 flex items-center gap-2 disabled:opacity-50"
+                  className="px-6 py-2.5 bg-gradient-to-r from-emerald-500 via-teal-500 to-sky-500 hover:from-emerald-400 hover:to-sky-400 text-white font-extrabold rounded-xl text-xs transition shadow-xl shadow-emerald-600/35 border border-emerald-300/70 ring-2 ring-emerald-400/40 flex items-center gap-2 disabled:opacity-50 cursor-pointer active:scale-95"
                 >
                   <Download className="w-4 h-4" />
                   <span>

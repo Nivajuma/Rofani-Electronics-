@@ -46,6 +46,19 @@ export const signInWithGoogleForGmail = async (): Promise<{ user: User; accessTo
     return { user: result.user, accessToken: token };
   } catch (err: any) {
     console.error('Google Gmail Sign-in Error:', err);
+    if (
+      err?.code === 'auth/unauthorized-domain' ||
+      err?.message?.includes('unauthorized-domain')
+    ) {
+      const customErr: any = new Error(
+        `Firebase Error (auth/unauthorized-domain): The domain '${typeof window !== 'undefined' ? window.location.hostname : 'vercel.app'}' is not authorized in Firebase. Please add 'vercel.app' to Authorized Domains in your Firebase Console.`
+      );
+      customErr.code = 'auth/unauthorized-domain';
+      customErr.isUnauthorizedDomain = true;
+      customErr.hostname = typeof window !== 'undefined' ? window.location.hostname : 'vercel.app';
+      customErr.consoleUrl = 'https://console.firebase.google.com/project/gen-lang-client-0043475796/authentication/settings';
+      throw customErr;
+    }
     throw err;
   } finally {
     isSigningIn = false;

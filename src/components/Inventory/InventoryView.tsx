@@ -53,7 +53,9 @@ import {
   SlidersHorizontal,
   Truck,
   Calendar,
-  RotateCcw
+  RotateCcw,
+  ArrowDown,
+  ArrowUp
 } from 'lucide-react';
 import { Product, Supplier, BarcodeScanLog, User, Transaction, RestockRecord } from '../../types';
 import { generateAutoBarcode, printBarcodeLabels, printBatchBarcodes } from '../../utils/barcode';
@@ -110,6 +112,7 @@ interface InventoryViewProps {
   ) => void;
   onAdjustStockQuantity?: (productId: string, newQuantity: number, reason: string) => void;
   onOpenItemAuditMiniPage?: (product: Product) => void;
+  onOpenCategoryManager?: () => void;
 }
 
 export const InventoryView: React.FC<InventoryViewProps> = ({
@@ -141,6 +144,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   onAddRestock,
   onAdjustStockQuantity,
   onOpenItemAuditMiniPage,
+  onOpenCategoryManager,
 }) => {
   const [searchTerm, setSearchTerm] = useState(() =>
     safeGetJSON<string>('retail_pos_inv_search', '', (val) => typeof val === 'string')
@@ -395,7 +399,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
 
   // Pagination & View State for 300+ items
   const [itemsPerPage, setItemsPerPage] = useState<number>(() =>
-    safeGetJSON<number>('retail_pos_inv_items_per_page', 50, (val) => typeof val === 'number' && val > 0)
+    safeGetJSON<number>('retail_pos_inv_items_per_page', 50, (val) => typeof val === 'number' && val >= 0)
   );
   useEffect(() => {
     safeSetJSON('retail_pos_inv_items_per_page', itemsPerPage);
@@ -407,6 +411,31 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   useEffect(() => {
     safeSetJSON('retail_pos_inv_current_page', currentPage);
   }, [currentPage]);
+
+  const itemListTopRef = useRef<HTMLDivElement>(null);
+  const itemListBottomRef = useRef<HTMLDivElement>(null);
+  const itemListMenuRef = useRef<HTMLDivElement>(null);
+  const [showItemListQuickMenu, setShowItemListQuickMenu] = useState(false);
+
+  useEffect(() => {
+    const handleOutsideClick = (e: MouseEvent) => {
+      if (itemListMenuRef.current && !itemListMenuRef.current.contains(e.target as Node)) {
+        setShowItemListQuickMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handleOutsideClick);
+    return () => document.removeEventListener('mousedown', handleOutsideClick);
+  }, []);
+
+  const handleScrollToItemListBottom = () => {
+    setShowItemListQuickMenu(false);
+    itemListBottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  };
+
+  const handleScrollToItemListTop = () => {
+    setShowItemListQuickMenu(false);
+    itemListTopRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
 
   const [showSheetImportModal, setShowSheetImportModal] = useState<boolean>(() =>
     safeGetJSON<boolean>('retail_pos_inv_show_sheet_import', false, (val) => typeof val === 'boolean')
@@ -2599,36 +2628,50 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
 
             {/* Advanced Filters Toggle & Collapsible Panel */}
             <div className="pt-2 border-t border-slate-800/80">
-              <div className="flex items-center justify-between">
-                <button
-                  type="button"
-                  onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
-                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition border ${
-                    activeAdvancedCount > 0
-                      ? 'bg-sky-950 text-sky-300 border-sky-700/80 shadow-sm'
-                      : 'bg-slate-950 text-slate-400 hover:text-slate-200 border-slate-800'
-                  }`}
-                >
-                  <SlidersHorizontal className="w-3.5 h-3.5 text-sky-400" />
-                  <span>Advanced Filters (Price, Supplier, Age)</span>
-                  {activeAdvancedCount > 0 && (
-                    <span className="bg-sky-500 text-slate-950 px-1.5 py-0.2 rounded-full text-[10px] font-extrabold">
-                      {activeAdvancedCount}
-                    </span>
-                  )}
-                </button>
-
-                {activeAdvancedCount > 0 && (
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <button
                     type="button"
-                    onClick={() => {
-                      setSelectedSupplier('All');
-                      setPriceRange('all');
-                      setProductAge('all');
-                    }}
-                    className="text-[11px] text-slate-400 hover:text-white underline transition"
+                    onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
+                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition border ${
+                      activeAdvancedCount > 0
+                        ? 'bg-sky-950 text-sky-300 border-sky-700/80 shadow-sm'
+                        : 'bg-slate-950 text-slate-400 hover:text-slate-200 border-slate-800'
+                    }`}
                   >
-                    Reset Advanced
+                    <SlidersHorizontal className="w-3.5 h-3.5 text-sky-400" />
+                    <span>Advanced Filters (Price, Supplier, Age)</span>
+                    {activeAdvancedCount > 0 && (
+                      <span className="bg-sky-500 text-slate-950 px-1.5 py-0.2 rounded-full text-[10px] font-extrabold">
+                        {activeAdvancedCount}
+                      </span>
+                    )}
+                  </button>
+
+                  {activeAdvancedCount > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedSupplier('All');
+                        setPriceRange('all');
+                        setProductAge('all');
+                      }}
+                      className="text-[11px] text-slate-400 hover:text-white underline transition cursor-pointer"
+                    >
+                      Reset Advanced
+                    </button>
+                  )}
+                </div>
+
+                {onOpenCategoryManager && (
+                  <button
+                    type="button"
+                    onClick={onOpenCategoryManager}
+                    title="Manage Store Categories & Subcategories"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition bg-slate-950 hover:bg-slate-800 text-sky-400 hover:text-sky-300 border border-slate-800 hover:border-slate-700 cursor-pointer shadow-sm ml-auto"
+                  >
+                    <Layers className="w-3.5 h-3.5" />
+                    <span>Manage Categories & Subcategories</span>
                   </button>
                 )}
               </div>
@@ -3294,7 +3337,138 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
         </div>
       ) : inventoryViewMode === 'cards' ? (
         /* Visual Product Cards Grid View */
-        <div className="space-y-6">
+        <div ref={itemListTopRef} className="space-y-4">
+          {/* Top Item List Bar with Downward Arrow Dropdown & Quick Jump (avoids scrolling down 25/50 cards) */}
+          <div className="bg-slate-900 border border-slate-800 px-3.5 py-2.5 rounded-2xl flex flex-wrap items-center justify-between gap-2.5 text-xs shadow-sm">
+            <div className="flex items-center gap-2 flex-wrap relative" ref={itemListMenuRef}>
+              <button
+                type="button"
+                id="btn-cards-list-downward-menu"
+                onClick={() => setShowItemListQuickMenu((prev) => !prev)}
+                className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-950 hover:bg-slate-800 border border-sky-500/40 text-slate-100 font-bold transition cursor-pointer shadow-sm"
+                title="Open item count & page selector without scrolling down"
+              >
+                <LayoutGrid className="w-3.5 h-3.5 text-sky-400" />
+                <span>
+                  Item List: {filteredProducts.length === 0 ? 0 : startIndex + 1}–
+                  {itemsPerPage > 0 ? Math.min(startIndex + itemsPerPage, filteredProducts.length) : filteredProducts.length}{' '}
+                  of {filteredProducts.length}
+                </span>
+                <span className="px-1.5 py-0.5 rounded bg-sky-500/20 text-sky-300 font-mono text-[10px]">
+                  {itemsPerPage === 0 ? 'All' : `${itemsPerPage}/pg`}
+                </span>
+                <ChevronDown className={`w-4 h-4 text-sky-400 transition-transform ${showItemListQuickMenu ? 'rotate-180' : ''}`} />
+              </button>
+
+              {showItemListQuickMenu && (
+                <div className="absolute top-full left-0 mt-2 w-72 bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl z-40 p-3 space-y-3">
+                  <div>
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">
+                      Cards Per Page
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {[10, 24, 25, 48, 50, 100, 0].map((count) => (
+                        <button
+                          key={count}
+                          type="button"
+                          onClick={() => {
+                            setItemsPerPage(count);
+                            setCurrentPage(1);
+                            setShowItemListQuickMenu(false);
+                          }}
+                          className={`px-2.5 py-1 rounded-lg font-mono text-[11px] font-bold transition cursor-pointer border ${
+                            itemsPerPage === count
+                              ? 'bg-sky-600 text-white border-sky-400 shadow'
+                              : 'bg-slate-950 text-slate-300 border-slate-800 hover:bg-slate-800'
+                          }`}
+                        >
+                          {count === 0 ? `All (${filteredProducts.length})` : `${count}`}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {itemsPerPage > 0 && totalPages > 1 && (
+                    <div className="pt-2 border-t border-slate-800">
+                      <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">
+                        Jump to Page (1–{totalPages})
+                      </div>
+                      <div className="flex flex-wrap gap-1 max-h-32 overflow-y-auto">
+                        {Array.from({ length: totalPages }, (_, idx) => idx + 1).map((pg) => (
+                          <button
+                            key={pg}
+                            type="button"
+                            onClick={() => {
+                              setCurrentPage(pg);
+                              setShowItemListQuickMenu(false);
+                            }}
+                            className={`px-2 py-1 rounded-lg font-mono text-[11px] font-bold transition cursor-pointer border ${
+                              safeCurrentPage === pg
+                                ? 'bg-indigo-600 text-white border-indigo-400'
+                                : 'bg-slate-950 text-slate-300 border-slate-800 hover:bg-slate-800'
+                            }`}
+                          >
+                            {pg}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="pt-2 border-t border-slate-800">
+                    <button
+                      type="button"
+                      onClick={handleScrollToItemListBottom}
+                      className="w-full py-1.5 px-2.5 rounded-xl bg-sky-500/15 hover:bg-sky-500/25 text-sky-300 border border-sky-500/30 font-bold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
+                    >
+                      <ArrowDown className="w-3.5 h-3.5" />
+                      <span>Jump to Bottom of List</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2 ml-auto">
+              {itemsPerPage > 0 && totalPages > 1 && (
+                <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800">
+                  <button
+                    type="button"
+                    disabled={safeCurrentPage <= 1}
+                    onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                    className="p-1 rounded-lg hover:bg-slate-800 text-slate-300 disabled:opacity-40 transition cursor-pointer"
+                    title="Previous Page"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                  </button>
+                  <span className="px-2 font-mono font-bold text-slate-200 text-[11px]">
+                    Page {safeCurrentPage}/{totalPages}
+                  </span>
+                  <button
+                    type="button"
+                    disabled={safeCurrentPage >= totalPages}
+                    onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                    className="p-1 rounded-lg hover:bg-slate-800 text-slate-300 disabled:opacity-40 transition cursor-pointer"
+                    title="Next Page"
+                  >
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                </div>
+              )}
+
+              <button
+                type="button"
+                id="btn-cards-jump-down"
+                onClick={handleScrollToItemListBottom}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-sky-600/20 hover:bg-sky-600/35 text-sky-300 hover:text-white border border-sky-500/40 font-bold text-xs transition cursor-pointer"
+                title="Jump down past the cards to bottom controls"
+              >
+                <ArrowDown className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Down</span>
+              </button>
+            </div>
+          </div>
+
           {paginatedProducts.length === 0 ? (
             <div className="bg-slate-900 border border-slate-800 rounded-3xl p-12 text-center text-slate-400 space-y-4">
               <Package className="w-12 h-12 mx-auto text-slate-600 mb-2" />
@@ -3543,8 +3717,8 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           )}
 
           {/* Cards Grid Footer with Pagination Controls */}
-          <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-400">
-            <div className="flex items-center gap-2">
+          <div ref={itemListBottomRef} className="bg-slate-900 border border-slate-800 p-4 rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-400">
+            <div className="flex items-center gap-2 flex-wrap">
               <span>Show:</span>
               <select
                 value={itemsPerPage}
@@ -3554,8 +3728,11 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                 }}
                 className="bg-slate-950 border border-slate-800 text-slate-200 text-xs px-2 py-1 rounded-lg focus:outline-none focus:border-sky-500"
               >
+                <option value={10}>10 cards per page</option>
                 <option value={24}>24 cards per page</option>
+                <option value={25}>25 cards per page</option>
                 <option value={48}>48 cards per page</option>
+                <option value={50}>50 cards per page</option>
                 <option value={96}>96 cards per page</option>
                 <option value={0}>All ({filteredProducts.length})</option>
               </select>
@@ -3566,32 +3743,175 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
               </span>
             </div>
 
+            <div className="flex items-center gap-2">
+              {itemsPerPage > 0 && totalPages > 1 && (
+                <div className="flex items-center gap-1">
+                  <button
+                    disabled={safeCurrentPage <= 1}
+                    onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                    className="p-1.5 rounded-lg border border-slate-800 hover:bg-slate-800 text-slate-300 disabled:opacity-40 transition cursor-pointer"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                  </button>
+                  <span className="px-3 font-mono font-bold text-slate-200">
+                    Page {safeCurrentPage} of {totalPages}
+                  </span>
+                  <button
+                    disabled={safeCurrentPage >= totalPages}
+                    onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                    className="p-1.5 rounded-lg border border-slate-800 hover:bg-slate-800 text-slate-300 disabled:opacity-40 transition cursor-pointer"
+                  >
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                </div>
+              )}
+
+              <button
+                type="button"
+                onClick={handleScrollToItemListTop}
+                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-950 hover:bg-slate-800 text-sky-300 border border-slate-800 font-bold text-xs transition cursor-pointer"
+                title="Back to top of item list"
+              >
+                <ArrowUp className="w-3.5 h-3.5" />
+                <span>Top</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : (
+        /* Inventory Catalog Table (Standard View) */
+        <div ref={itemListTopRef} className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
+        {/* Top Item List Bar with Downward Arrow Dropdown & Quick Jump (avoids scrolling down 25/50 rows) */}
+        <div className="bg-slate-950/90 px-4 py-2.5 border-b border-slate-800 flex flex-wrap items-center justify-between gap-2.5 text-xs">
+          <div className="flex items-center gap-2 flex-wrap relative" ref={itemListMenuRef}>
+            <button
+              type="button"
+              id="btn-table-list-downward-menu"
+              onClick={() => setShowItemListQuickMenu((prev) => !prev)}
+              className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-sky-500/40 text-slate-100 font-bold transition cursor-pointer shadow-sm"
+              title="Open item count & page selector without scrolling down"
+            >
+              <List className="w-3.5 h-3.5 text-sky-400" />
+              <span>
+                Item List: {filteredProducts.length === 0 ? 0 : startIndex + 1}–
+                {itemsPerPage > 0 ? Math.min(startIndex + itemsPerPage, filteredProducts.length) : filteredProducts.length}{' '}
+                of {filteredProducts.length}
+              </span>
+              <span className="px-1.5 py-0.5 rounded bg-sky-500/20 text-sky-300 font-mono text-[10px]">
+                {itemsPerPage === 0 ? 'All' : `${itemsPerPage}/pg`}
+              </span>
+              <ChevronDown className={`w-4 h-4 text-sky-400 transition-transform ${showItemListQuickMenu ? 'rotate-180' : ''}`} />
+            </button>
+
+            {showItemListQuickMenu && (
+              <div className="absolute top-full left-0 mt-2 w-72 bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl z-40 p-3 space-y-3">
+                <div>
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">
+                    Items Per Page
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {[10, 25, 50, 100, 300, 0].map((count) => (
+                      <button
+                        key={count}
+                        type="button"
+                        onClick={() => {
+                          setItemsPerPage(count);
+                          setCurrentPage(1);
+                          setShowItemListQuickMenu(false);
+                        }}
+                        className={`px-2.5 py-1 rounded-lg font-mono text-[11px] font-bold transition cursor-pointer border ${
+                          itemsPerPage === count
+                            ? 'bg-sky-600 text-white border-sky-400 shadow'
+                            : 'bg-slate-950 text-slate-300 border-slate-800 hover:bg-slate-800'
+                        }`}
+                      >
+                        {count === 0 ? `All (${filteredProducts.length})` : `${count}`}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {itemsPerPage > 0 && totalPages > 1 && (
+                  <div className="pt-2 border-t border-slate-800">
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">
+                      Jump to Page (1–{totalPages})
+                    </div>
+                    <div className="flex flex-wrap gap-1 max-h-32 overflow-y-auto">
+                      {Array.from({ length: totalPages }, (_, idx) => idx + 1).map((pg) => (
+                        <button
+                          key={pg}
+                          type="button"
+                          onClick={() => {
+                            setCurrentPage(pg);
+                            setShowItemListQuickMenu(false);
+                          }}
+                          className={`px-2 py-1 rounded-lg font-mono text-[11px] font-bold transition cursor-pointer border ${
+                            safeCurrentPage === pg
+                              ? 'bg-indigo-600 text-white border-indigo-400'
+                              : 'bg-slate-950 text-slate-300 border-slate-800 hover:bg-slate-800'
+                          }`}
+                        >
+                          {pg}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div className="pt-2 border-t border-slate-800">
+                  <button
+                    type="button"
+                    onClick={handleScrollToItemListBottom}
+                    className="w-full py-1.5 px-2.5 rounded-xl bg-sky-500/15 hover:bg-sky-500/25 text-sky-300 border border-sky-500/30 font-bold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
+                  >
+                    <ArrowDown className="w-3.5 h-3.5" />
+                    <span>Jump to Bottom of List</span>
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="flex items-center gap-2 ml-auto">
             {itemsPerPage > 0 && totalPages > 1 && (
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-1 bg-slate-900 p-1 rounded-xl border border-slate-800">
                 <button
-                  disabled={currentPage <= 1}
+                  type="button"
+                  disabled={safeCurrentPage <= 1}
                   onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                  className="p-1.5 rounded-lg border border-slate-800 hover:bg-slate-800 text-slate-300 disabled:opacity-40 transition cursor-pointer"
+                  className="p-1 rounded-lg hover:bg-slate-800 text-slate-300 disabled:opacity-40 transition cursor-pointer"
+                  title="Previous Page"
                 >
                   <ChevronLeft className="w-4 h-4" />
                 </button>
-                <span className="px-3 font-mono font-bold text-slate-200">
-                  Page {currentPage} of {totalPages}
+                <span className="px-2 font-mono font-bold text-slate-200 text-[11px]">
+                  Page {safeCurrentPage}/{totalPages}
                 </span>
                 <button
-                  disabled={currentPage >= totalPages}
+                  type="button"
+                  disabled={safeCurrentPage >= totalPages}
                   onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-                  className="p-1.5 rounded-lg border border-slate-800 hover:bg-slate-800 text-slate-300 disabled:opacity-40 transition cursor-pointer"
+                  className="p-1 rounded-lg hover:bg-slate-800 text-slate-300 disabled:opacity-40 transition cursor-pointer"
+                  title="Next Page"
                 >
                   <ChevronRight className="w-4 h-4" />
                 </button>
               </div>
             )}
+
+            <button
+              type="button"
+              id="btn-table-jump-down"
+              onClick={handleScrollToItemListBottom}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-sky-600/20 hover:bg-sky-600/35 text-sky-300 hover:text-white border border-sky-500/40 font-bold text-xs transition cursor-pointer"
+              title="Jump down past rows to bottom controls"
+            >
+              <ArrowDown className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Down</span>
+            </button>
           </div>
         </div>
-      ) : (
-        /* Inventory Catalog Table (Standard View) */
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
+
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs text-slate-300">
             <thead className="bg-slate-950 text-slate-400 font-semibold uppercase tracking-wider border-b border-slate-800">
@@ -3856,8 +4176,8 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
         </div>
 
         {/* Table Footer with Pagination Controls for 300+ items */}
-        <div className="bg-slate-950 p-4 border-t border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-400">
-          <div className="flex items-center gap-2">
+        <div ref={itemListBottomRef} className="bg-slate-950 p-4 border-t border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-400">
+          <div className="flex items-center gap-2 flex-wrap">
             <span>Show:</span>
             <select
               value={itemsPerPage}
@@ -3867,6 +4187,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
               }}
               className="bg-slate-900 border border-slate-800 text-slate-200 text-xs px-2 py-1 rounded-lg focus:outline-none focus:border-sky-500"
             >
+              <option value={10}>10 items per page</option>
               <option value={25}>25 items per page</option>
               <option value={50}>50 items per page</option>
               <option value={100}>100 items per page</option>
@@ -3880,27 +4201,39 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
             </span>
           </div>
 
-          {itemsPerPage > 0 && totalPages > 1 && (
-            <div className="flex items-center gap-1">
-              <button
-                disabled={currentPage <= 1}
-                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                className="p-1.5 rounded-lg border border-slate-800 hover:bg-slate-800 text-slate-300 disabled:opacity-40 transition"
-              >
-                <ChevronLeft className="w-4 h-4" />
-              </button>
-              <span className="px-3 font-mono font-bold text-slate-200">
-                Page {currentPage} of {totalPages}
-              </span>
-              <button
-                disabled={currentPage >= totalPages}
-                onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-                className="p-1.5 rounded-lg border border-slate-800 hover:bg-slate-800 text-slate-300 disabled:opacity-40 transition"
-              >
-                <ChevronRight className="w-4 h-4" />
-              </button>
-            </div>
-          )}
+          <div className="flex items-center gap-2">
+            {itemsPerPage > 0 && totalPages > 1 && (
+              <div className="flex items-center gap-1">
+                <button
+                  disabled={safeCurrentPage <= 1}
+                  onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                  className="p-1.5 rounded-lg border border-slate-800 hover:bg-slate-800 text-slate-300 disabled:opacity-40 transition cursor-pointer"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+                <span className="px-3 font-mono font-bold text-slate-200">
+                  Page {safeCurrentPage} of {totalPages}
+                </span>
+                <button
+                  disabled={safeCurrentPage >= totalPages}
+                  onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                  className="p-1.5 rounded-lg border border-slate-800 hover:bg-slate-800 text-slate-300 disabled:opacity-40 transition cursor-pointer"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            )}
+
+            <button
+              type="button"
+              onClick={handleScrollToItemListTop}
+              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-sky-300 border border-slate-800 font-bold text-xs transition cursor-pointer"
+              title="Back to top of item list"
+            >
+              <ArrowUp className="w-3.5 h-3.5" />
+              <span>Top</span>
+            </button>
+          </div>
         </div>
       </div>
     )}
@@ -3980,26 +4313,38 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
 
                 {/* Category */}
                 <div>
-                  <div className="flex items-center justify-between mb-1">
+                  <div className="flex items-center justify-between mb-1 gap-2">
                     <label className="text-slate-300 font-semibold">Category *</label>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setIsCustomCategoryInput(!isCustomCategoryInput);
-                        if (!isCustomCategoryInput) {
-                          setCustomCategoryName('');
-                        }
-                      }}
-                      className="text-sky-400 hover:text-sky-300 font-bold text-[11px] flex items-center gap-1 transition bg-sky-950/60 hover:bg-sky-900/80 px-2 py-0.5 rounded-lg border border-sky-800/80"
-                    >
-                      {isCustomCategoryInput ? (
-                        <span>← Select Existing</span>
-                      ) : (
-                        <>
-                          <Plus className="w-3 h-3" /> + New Category
-                        </>
+                    <div className="flex items-center gap-1.5">
+                      {onOpenCategoryManager && !isCustomCategoryInput && (
+                        <button
+                          type="button"
+                          onClick={onOpenCategoryManager}
+                          className="text-slate-300 hover:text-white font-bold text-[11px] flex items-center gap-1 transition bg-slate-800 hover:bg-slate-700 px-2 py-0.5 rounded-lg border border-slate-700 cursor-pointer"
+                          title="Manage, rename, or delete categories & subcategories"
+                        >
+                          <Layers className="w-3 h-3 text-sky-400" /> Manage
+                        </button>
                       )}
-                    </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsCustomCategoryInput(!isCustomCategoryInput);
+                          if (!isCustomCategoryInput) {
+                            setCustomCategoryName('');
+                          }
+                        }}
+                        className="text-sky-400 hover:text-sky-300 font-bold text-[11px] flex items-center gap-1 transition bg-sky-950/60 hover:bg-sky-900/80 px-2 py-0.5 rounded-lg border border-sky-800/80 cursor-pointer"
+                      >
+                        {isCustomCategoryInput ? (
+                          <span>← Select Existing</span>
+                        ) : (
+                          <>
+                            <Plus className="w-3 h-3" /> + New Category
+                          </>
+                        )}
+                      </button>
+                    </div>
                   </div>
 
                   {isCustomCategoryInput ? (

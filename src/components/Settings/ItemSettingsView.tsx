@@ -6,12 +6,14 @@ import {
   Check,
   Save,
   Package,
-  Sliders
+  Sliders,
+  Layers
 } from 'lucide-react';
 import { safeGetJSON, safeSetJSON } from '../../utils/safeStorage';
 
 interface ItemSettingsViewProps {
   onBack: () => void;
+  onOpenCategoryManager?: () => void;
 }
 
 export interface ItemSettingsState {
@@ -30,7 +32,7 @@ export interface ItemSettingsState {
   itemWiseDiscount: boolean;
 }
 
-export const ItemSettingsView: React.FC<ItemSettingsViewProps> = ({ onBack }) => {
+export const ItemSettingsView: React.FC<ItemSettingsViewProps> = ({ onBack, onOpenCategoryManager }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [successToast, setSuccessToast] = useState<string | null>(null);
 
@@ -207,6 +209,27 @@ export const ItemSettingsView: React.FC<ItemSettingsViewProps> = ({ onBack }) =>
 
       {/* Clean List with Info Badges */}
       <div className="max-w-2xl mx-auto px-4 py-6 space-y-3">
+        {onOpenCategoryManager && (
+          <div className="bg-sky-950/30 border border-sky-800/60 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="space-y-1 flex-1 pr-2">
+              <div className="flex items-center gap-2 text-sky-300">
+                <Layers className="w-4 h-4 shrink-0" />
+                <span className="font-bold text-sm text-white">Manage Categories & Subcategories</span>
+              </div>
+              <p className="text-xs text-slate-400">
+                Create, rename, reassign, or delete product categories and subcategories across your store catalog.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={onOpenCategoryManager}
+              className="px-4 py-2 bg-sky-600 hover:bg-sky-500 text-white rounded-xl text-xs font-bold transition shadow-md shadow-sky-600/20 shrink-0 cursor-pointer"
+            >
+              Open Category Manager
+            </button>
+          </div>
+        )}
+
         {filteredItems.length === 0 ? (
           <div className="bg-slate-900 rounded-2xl p-12 text-center text-slate-400 shadow-sm border border-slate-800 text-xs">
             No item settings found matching "{searchQuery}".

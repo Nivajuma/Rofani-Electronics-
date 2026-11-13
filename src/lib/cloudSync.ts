@@ -7,8 +7,58 @@ import {
   writeBatch,
   getDocs,
 } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from './firebase';
+import { db, handleFirestoreError, OperationType, isQuotaExceededError } from './firebase';
 import { Product, Transaction, Customer, Supplier, Expense, RestockRecord, User, SensitiveActionLog } from '../types';
+
+const DEFAULT_FIRESTORE_WRITE_TIMEOUT_MS = 12000;
+const DEFAULT_FIRESTORE_READ_TIMEOUT_MS = 15000;
+
+/**
+ * Wraps any Firestore promise with an offline fast-fail check and a hard timeout
+ * so stalled WebChannel promises never leave UI spinners rotating indefinitely.
+ */
+export async function withFirestoreTimeout<T>(
+  promise: Promise<T>,
+  operationLabel: string,
+  timeoutMs: number = DEFAULT_FIRESTORE_WRITE_TIMEOUT_MS
+): Promise<T> {
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    throw new Error(`Device is offline while ${operationLabel}. Your data is safely saved locally.`);
+  }
+
+  let timerId: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timerId = setTimeout(() => {
+      reject(
+        new Error(
+          `Cloud sync timed out after ${Math.round(timeoutMs / 1000)}s while ${operationLabel}. Your local data is safe; please check your connection and try again.`
+        )
+      );
+    }, timeoutMs);
+  });
+
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    if (timerId !== undefined) {
+      clearTimeout(timerId);
+    }
+  }
+}
+
+export function isNonRetryableCloudError(error: unknown): boolean {
+  if (isQuotaExceededError(error)) return true;
+  const msg = (error instanceof Error ? error.message : String(error)).toLowerCase();
+  return (
+    msg.includes('timed out') ||
+    msg.includes('offline') ||
+    msg.includes('permission') ||
+    msg.includes('permission-denied') ||
+    msg.includes('unauthenticated') ||
+    msg.includes('could not reach') ||
+    msg.includes('unavailable')
+  );
+}
 
 // Sanitize helper to recursively remove undefined values for Firestore compatibility
 export function cleanForFirestore<T>(val: T): T {
@@ -73,7 +123,7 @@ export async function saveProductToCloud(product: Product): Promise<void> {
   try {
     const docRef = doc(db, 'products', product.id);
     const cleaned = cleanProductForFirestore(product);
-    await setDoc(docRef, cleaned, { merge: true });
+    await withFirestoreTimeout(setDoc(docRef, cleaned, { merge: true }), `saving product ${product.name || product.id}`);
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
     throw error;
@@ -84,7 +134,7 @@ export async function deleteProductFromCloud(productId: string): Promise<void> {
   const path = `products/${productId}`;
   try {
     const docRef = doc(db, 'products', productId);
-    await deleteDoc(docRef);
+    await withFirestoreTimeout(deleteDoc(docRef), `deleting product ${productId}`);
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, path);
     throw error;
@@ -96,7 +146,11 @@ export async function fetchProductsFromCloud(): Promise<Product[]> {
   const path = 'products';
   try {
     const colRef = collection(db, path);
-    const snap = await getDocs(colRef);
+    const snap = await withFirestoreTimeout(
+      getDocs(colRef),
+      'fetching products from Cloud Firestore',
+      DEFAULT_FIRESTORE_READ_TIMEOUT_MS
+    );
     const loaded: Product[] = [];
     snap.forEach((d) => {
       loaded.push({ id: d.id, ...d.data() } as Product);
@@ -117,55 +171,134 @@ export async function bulkUploadProductsToCloud(
 }
 
 /**
+ * Generic chunked writeBatch helper with hard timeout protection and live progress reporting.
+ * Never stalls indefinitely and throws a clear error when offline, timed out, or quota-exceeded.
+ */
+async function batchSaveCollectionToCloud<T extends { id: string }>(
+  collectionName: string,
+  items: T[],
+  sanitizeItem: (item: T) => any,
+  onProgress?: (uploadedCount: number, totalCount: number, batchIndex: number, totalBatches: number) => void
+): Promise<number> {
+  if (!items || items.length === 0) return 0;
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    throw new Error(`Device is offline. Cannot push ${collectionName} to Cloud Firestore right now.`);
+  }
+
+  const CHUNK_SIZE = 25;
+  const totalBatches = Math.ceil(items.length / CHUNK_SIZE);
+  let totalUploaded = 0;
+  let lastError: unknown = null;
+
+  for (let i = 0; i < items.length; i += CHUNK_SIZE) {
+    const chunk = items.slice(i, i + CHUNK_SIZE);
+    const batchIndex = Math.floor(i / CHUNK_SIZE) + 1;
+
+    try {
+      const batch = writeBatch(db);
+      for (const item of chunk) {
+        if (!item?.id) continue;
+        const docRef = doc(db, collectionName, item.id);
+        batch.set(docRef, sanitizeItem(item), { merge: true });
+      }
+      await withFirestoreTimeout(
+        batch.commit(),
+        `uploading ${collectionName} batch ${batchIndex}/${totalBatches}`,
+        DEFAULT_FIRESTORE_WRITE_TIMEOUT_MS
+      );
+      totalUploaded += chunk.length;
+    } catch (batchErr) {
+      lastError = batchErr;
+      // Fail fast on network timeout, offline, permission, or quota errors instead of hanging for 25 more retries
+      if (isNonRetryableCloudError(batchErr)) {
+        handleFirestoreError(batchErr, OperationType.WRITE, `${collectionName}/batch-${batchIndex}`);
+        const msg = batchErr instanceof Error ? batchErr.message : String(batchErr);
+        throw new Error(
+          totalUploaded > 0
+            ? `Synced ${totalUploaded}/${items.length} ${collectionName}, then stopped: ${msg}`
+            : msg
+        );
+      }
+
+      console.warn(`[${collectionName} Batch ${batchIndex}/${totalBatches}] writeBatch commit failed, attempting individual doc saves:`, batchErr);
+      let chunkUploaded = 0;
+      for (const item of chunk) {
+        if (!item?.id) continue;
+        try {
+          const docRef = doc(db, collectionName, item.id);
+          await withFirestoreTimeout(
+            setDoc(docRef, sanitizeItem(item), { merge: true }),
+            `saving ${collectionName}/${item.id}`,
+            8000
+          );
+          totalUploaded += 1;
+          chunkUploaded += 1;
+        } catch (individualErr) {
+          lastError = individualErr;
+          if (isNonRetryableCloudError(individualErr)) {
+            const msg = individualErr instanceof Error ? individualErr.message : String(individualErr);
+            throw new Error(
+              totalUploaded > 0
+                ? `Synced ${totalUploaded}/${items.length} ${collectionName}, then stopped: ${msg}`
+                : msg
+            );
+          }
+          console.warn(`[${collectionName} ${item.id}] Individual cloud save skipped:`, individualErr);
+        }
+      }
+
+      if (chunkUploaded === 0 && totalUploaded === 0 && lastError) {
+        throw lastError;
+      }
+    }
+
+    if (onProgress) {
+      onProgress(totalUploaded, items.length, batchIndex, totalBatches);
+    }
+  }
+
+  return totalUploaded;
+}
+
+/**
  * Commits products to Firestore in chunked atomic writeBatches (25 items per batch)
  * - Strips huge base64 camera images from cloud payloads (IndexedDB retains them locally)
  * - Safe against the 10MB Firestore writeBatch ceiling and 1MB document size limit
- * - Seamlessly handles 500+ items without choking or stalling midway
- * - Provides live progress callback and fallback to per-item sets if a batch experiences a conflict
+ * - Bounded by hard per-batch timeouts so sync never rotates indefinitely
  */
 export async function batchSaveProductsToCloud(
   products: Product[],
   onProgress?: (uploadedCount: number, totalCount: number, batchIndex: number, totalBatches: number) => void
 ): Promise<number> {
-  if (!products || products.length === 0) return 0;
-  const CHUNK_SIZE = 25;
-  const totalBatches = Math.ceil(products.length / CHUNK_SIZE);
-  let totalUploaded = 0;
+  return batchSaveCollectionToCloud('products', products, cleanProductForFirestore, onProgress);
+}
 
-  for (let i = 0; i < products.length; i += CHUNK_SIZE) {
-    const chunk = products.slice(i, i + CHUNK_SIZE);
-    const batchIndex = Math.floor(i / CHUNK_SIZE) + 1;
+export async function batchSaveTransactionsToCloud(
+  transactions: Transaction[],
+  onProgress?: (uploadedCount: number, totalCount: number, batchIndex: number, totalBatches: number) => void
+): Promise<number> {
+  return batchSaveCollectionToCloud('transactions', transactions, (tx) => cleanForFirestore(tx), onProgress);
+}
 
-    try {
-      const batch = writeBatch(db);
-      for (const p of chunk) {
-        const docRef = doc(db, 'products', p.id);
-        const cleaned = cleanProductForFirestore(p);
-        batch.set(docRef, cleaned, { merge: true });
-      }
-      await batch.commit();
-      totalUploaded += chunk.length;
-    } catch (batchErr) {
-      console.warn(`[Batch ${batchIndex}/${totalBatches}] writeBatch commit failed, attempting individual doc saves:`, batchErr);
-      // Fallback: save each document in the chunk individually so valid docs succeed
-      for (const p of chunk) {
-        try {
-          const docRef = doc(db, 'products', p.id);
-          const cleaned = cleanProductForFirestore(p);
-          await setDoc(docRef, cleaned, { merge: true });
-          totalUploaded += 1;
-        } catch (individualErr) {
-          console.warn(`[Product ${p.id}] Individual cloud save skipped:`, individualErr);
-        }
-      }
-    }
+export async function batchSaveCustomersToCloud(
+  customers: Customer[],
+  onProgress?: (uploadedCount: number, totalCount: number, batchIndex: number, totalBatches: number) => void
+): Promise<number> {
+  return batchSaveCollectionToCloud('customers', customers, (c) => cleanForFirestore(c), onProgress);
+}
 
-    if (onProgress) {
-      onProgress(totalUploaded, products.length, batchIndex, totalBatches);
-    }
-  }
+export async function batchSaveSuppliersToCloud(
+  suppliers: Supplier[],
+  onProgress?: (uploadedCount: number, totalCount: number, batchIndex: number, totalBatches: number) => void
+): Promise<number> {
+  return batchSaveCollectionToCloud('suppliers', suppliers, (s) => cleanForFirestore(s), onProgress);
+}
 
-  return totalUploaded;
+export async function batchSaveExpensesToCloud(
+  expenses: Expense[],
+  onProgress?: (uploadedCount: number, totalCount: number, batchIndex: number, totalBatches: number) => void
+): Promise<number> {
+  return batchSaveCollectionToCloud('expenses', expenses, (e) => cleanForFirestore(e), onProgress);
 }
 
 // ---------------- TRANSACTIONS (SALES) LIVE SYNC ----------------
@@ -209,7 +342,7 @@ export async function commitSaleToCloudBatch(
       }), { merge: true });
     }
 
-    await batch.commit();
+    await withFirestoreTimeout(batch.commit(), 'committing sale batch');
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, 'sales/writeBatch');
     throw error;
@@ -221,7 +354,11 @@ export async function fetchTransactionsFromCloud(): Promise<Transaction[]> {
   const path = 'transactions';
   try {
     const colRef = collection(db, path);
-    const snap = await getDocs(colRef);
+    const snap = await withFirestoreTimeout(
+      getDocs(colRef),
+      'fetching sales transactions from Cloud Firestore',
+      DEFAULT_FIRESTORE_READ_TIMEOUT_MS
+    );
     const loaded: Transaction[] = [];
     snap.forEach((d) => {
       loaded.push({ id: d.id, ...d.data() } as Transaction);
@@ -264,7 +401,7 @@ export async function saveTransactionToCloud(tx: Transaction): Promise<void> {
   try {
     const docRef = doc(db, 'transactions', tx.id);
     const cleaned = cleanForFirestore(tx);
-    await setDoc(docRef, cleaned, { merge: true });
+    await withFirestoreTimeout(setDoc(docRef, cleaned, { merge: true }), `saving sale ${tx.receiptNumber || tx.id}`);
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
     throw error;
@@ -301,7 +438,7 @@ export async function saveCustomerToCloud(cust: Customer): Promise<void> {
   try {
     const docRef = doc(db, 'customers', cust.id);
     const cleaned = cleanForFirestore(cust);
-    await setDoc(docRef, cleaned, { merge: true });
+    await withFirestoreTimeout(setDoc(docRef, cleaned, { merge: true }), `saving customer ${cust.name || cust.id}`);
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
     throw error;
@@ -312,7 +449,7 @@ export async function deleteCustomerFromCloud(customerId: string): Promise<void>
   const path = `customers/${customerId}`;
   try {
     const docRef = doc(db, 'customers', customerId);
-    await deleteDoc(docRef);
+    await withFirestoreTimeout(deleteDoc(docRef), `deleting customer ${customerId}`);
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, path);
     throw error;
@@ -324,7 +461,11 @@ export async function fetchCustomersFromCloud(): Promise<Customer[]> {
   const path = 'customers';
   try {
     const colRef = collection(db, path);
-    const snap = await getDocs(colRef);
+    const snap = await withFirestoreTimeout(
+      getDocs(colRef),
+      'fetching customers from Cloud Firestore',
+      DEFAULT_FIRESTORE_READ_TIMEOUT_MS
+    );
     const loaded: Customer[] = [];
     snap.forEach((d) => {
       loaded.push({ id: d.id, ...d.data() } as Customer);
@@ -366,7 +507,7 @@ export async function saveSupplierToCloud(supp: Supplier): Promise<void> {
   try {
     const docRef = doc(db, 'suppliers', supp.id);
     const cleaned = cleanForFirestore(supp);
-    await setDoc(docRef, cleaned, { merge: true });
+    await withFirestoreTimeout(setDoc(docRef, cleaned, { merge: true }), `saving supplier ${supp.name || supp.id}`);
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
     throw error;
@@ -377,7 +518,7 @@ export async function deleteSupplierFromCloud(supplierId: string): Promise<void>
   const path = `suppliers/${supplierId}`;
   try {
     const docRef = doc(db, 'suppliers', supplierId);
-    await deleteDoc(docRef);
+    await withFirestoreTimeout(deleteDoc(docRef), `deleting supplier ${supplierId}`);
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, path);
     throw error;
@@ -389,7 +530,11 @@ export async function fetchSuppliersFromCloud(): Promise<Supplier[]> {
   const path = 'suppliers';
   try {
     const colRef = collection(db, path);
-    const snap = await getDocs(colRef);
+    const snap = await withFirestoreTimeout(
+      getDocs(colRef),
+      'fetching suppliers from Cloud Firestore',
+      DEFAULT_FIRESTORE_READ_TIMEOUT_MS
+    );
     const loaded: Supplier[] = [];
     snap.forEach((d) => {
       loaded.push({ id: d.id, ...d.data() } as Supplier);
@@ -431,7 +576,7 @@ export async function saveExpenseToCloud(exp: Expense): Promise<void> {
   try {
     const docRef = doc(db, 'expenses', exp.id);
     const cleaned = cleanForFirestore(exp);
-    await setDoc(docRef, cleaned, { merge: true });
+    await withFirestoreTimeout(setDoc(docRef, cleaned, { merge: true }), `saving expense ${exp.id}`);
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
     throw error;
@@ -442,7 +587,7 @@ export async function deleteExpenseFromCloud(expenseId: string): Promise<void> {
   const path = `expenses/${expenseId}`;
   try {
     const docRef = doc(db, 'expenses', expenseId);
-    await deleteDoc(docRef);
+    await withFirestoreTimeout(deleteDoc(docRef), `deleting expense ${expenseId}`);
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, path);
     throw error;
@@ -454,7 +599,11 @@ export async function fetchExpensesFromCloud(): Promise<Expense[]> {
   const path = 'expenses';
   try {
     const colRef = collection(db, path);
-    const snap = await getDocs(colRef);
+    const snap = await withFirestoreTimeout(
+      getDocs(colRef),
+      'fetching expenses from Cloud Firestore',
+      DEFAULT_FIRESTORE_READ_TIMEOUT_MS
+    );
     const loaded: Expense[] = [];
     snap.forEach((d) => {
       loaded.push({ id: d.id, ...d.data() } as Expense);
@@ -497,7 +646,7 @@ export async function saveRestockRecordToCloud(rec: RestockRecord): Promise<void
   try {
     const docRef = doc(db, 'restock_records', rec.id);
     const cleaned = cleanForFirestore(rec);
-    await setDoc(docRef, cleaned, { merge: true });
+    await withFirestoreTimeout(setDoc(docRef, cleaned, { merge: true }), `saving restock record ${rec.id}`);
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
     throw error;
@@ -542,7 +691,7 @@ export async function saveStoreSecurityToCloud(config: StoreSecurityConfig): Pro
       ...config,
       updatedAt: new Date().toISOString(),
     });
-    await setDoc(docRef, cleaned, { merge: true });
+    await withFirestoreTimeout(setDoc(docRef, cleaned, { merge: true }), 'saving store security config');
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
     throw error;
@@ -578,7 +727,7 @@ export async function saveMpesaConfigToCloud(config: any): Promise<void> {
       ...config,
       updatedAt: new Date().toISOString(),
     });
-    await setDoc(docRef, cleaned, { merge: true });
+    await withFirestoreTimeout(setDoc(docRef, cleaned, { merge: true }), 'saving M-Pesa config');
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
     throw error;
@@ -615,7 +764,7 @@ export async function saveUserToCloud(user: User): Promise<void> {
   try {
     const docRef = doc(db, 'users', user.id);
     const cleaned = cleanForFirestore(user);
-    await setDoc(docRef, cleaned, { merge: true });
+    await withFirestoreTimeout(setDoc(docRef, cleaned, { merge: true }), `saving staff user ${user.name || user.id}`);
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
     throw error;
@@ -626,7 +775,7 @@ export async function deleteUserFromCloud(userId: string): Promise<void> {
   const path = `users/${userId}`;
   try {
     const docRef = doc(db, 'users', userId);
-    await deleteDoc(docRef);
+    await withFirestoreTimeout(deleteDoc(docRef), `deleting staff user ${userId}`);
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, path);
     throw error;
@@ -634,17 +783,9 @@ export async function deleteUserFromCloud(userId: string): Promise<void> {
 }
 
 export async function bulkUploadUsersToCloud(users: User[]): Promise<number> {
+  if (!users || users.length === 0) return 0;
   try {
-    const batch = writeBatch(db);
-    let count = 0;
-    for (const u of users) {
-      const docRef = doc(db, 'users', u.id);
-      const cleaned = cleanForFirestore(u);
-      batch.set(docRef, cleaned, { merge: true });
-      count++;
-    }
-    await batch.commit();
-    return count;
+    return await batchSaveCollectionToCloud('users', users, (u) => cleanForFirestore(u));
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, 'users/batch');
     throw error;
@@ -656,7 +797,11 @@ export async function fetchUsersFromCloud(): Promise<User[]> {
   const path = 'users';
   try {
     const colRef = collection(db, path);
-    const snap = await getDocs(colRef);
+    const snap = await withFirestoreTimeout(
+      getDocs(colRef),
+      'fetching staff users from Cloud Firestore',
+      DEFAULT_FIRESTORE_READ_TIMEOUT_MS
+    );
     const loaded: User[] = [];
     snap.forEach((d) => {
       loaded.push({ id: d.id, ...d.data() } as User);
@@ -700,7 +845,7 @@ export async function saveAuditLogToCloud(log: SensitiveActionLog): Promise<void
   try {
     const docRef = doc(db, 'sensitive_action_logs', log.id);
     const cleaned = cleanForFirestore(log);
-    await setDoc(docRef, cleaned, { merge: true });
+    await withFirestoreTimeout(setDoc(docRef, cleaned, { merge: true }), 'saving audit log');
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
     throw error;

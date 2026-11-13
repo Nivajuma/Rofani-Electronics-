@@ -16,7 +16,8 @@ import {
   AlertTriangle,
   Send,
   CreditCard,
-  Plus
+  Plus,
+  Trash2
 } from 'lucide-react';
 import { Supplier, Product } from '../../types';
 import { exportSupplierAccountStatementPDF } from '../../utils/pdfGenerator';
@@ -30,6 +31,7 @@ interface SupplierDetailsModalProps {
   onOpenEdit: (supplier: Supplier) => void;
   onOpenPayment: (supplier: Supplier) => void;
   onNavigateToRestock?: (supplierName: string) => void;
+  onDeleteSupplier?: (supplier: Supplier) => void;
 }
 
 export const SupplierDetailsModal: React.FC<SupplierDetailsModalProps> = ({
@@ -40,6 +42,7 @@ export const SupplierDetailsModal: React.FC<SupplierDetailsModalProps> = ({
   onOpenEdit,
   onOpenPayment,
   onNavigateToRestock,
+  onDeleteSupplier,
 }) => {
   const [activeSubTab, setActiveSubTab] = useState<'catalog' | 'profile'>('catalog');
 
@@ -168,14 +171,29 @@ export const SupplierDetailsModal: React.FC<SupplierDetailsModalProps> = ({
                 onOpenEdit(supplier);
               }}
               title="Edit Profile"
-              className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl transition"
+              className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl transition cursor-pointer"
             >
               <Edit2 className="w-4 h-4" />
             </button>
 
+            {onDeleteSupplier && (
+              <button
+                type="button"
+                onClick={() => {
+                  onClose();
+                  onDeleteSupplier(supplier);
+                }}
+                title="Delete Supplier Profile"
+                className="px-3 py-2 bg-rose-950/60 hover:bg-rose-900/80 text-rose-300 border border-rose-800/80 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+              >
+                <Trash2 className="w-4 h-4 text-rose-400" />
+                <span>Delete</span>
+              </button>
+            )}
+
             <button
               onClick={onClose}
-              className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white rounded-xl transition"
+              className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white rounded-xl transition cursor-pointer"
             >
               <X className="w-5 h-5" />
             </button>

@@ -181,19 +181,31 @@ export const PhoneDeviceFrame: React.FC<PhoneDeviceFrameProps> = ({
               className={`px-3 py-1.5 rounded-xl border transition flex items-center gap-1.5 text-xs font-bold shadow-sm cursor-pointer ${
                 cloudSyncStatus === 'quota_exceeded'
                   ? 'bg-amber-950/90 text-amber-200 border-amber-700'
+                  : cloudSyncStatus === 'error'
+                  ? 'bg-rose-950/90 text-rose-200 border-rose-700'
                   : 'bg-sky-950/90 text-sky-200 border-sky-600'
               }`}
               title="Cloud Sync & Multi-Phone Share with Workers"
             >
-              <Cloud className="w-3.5 h-3.5 text-sky-400" />
-              <span>Share & Sync</span>
+              <Cloud className={`w-3.5 h-3.5 ${
+                cloudSyncStatus === 'quota_exceeded'
+                  ? 'text-amber-400'
+                  : cloudSyncStatus === 'error'
+                  ? 'text-rose-400'
+                  : 'text-sky-400'
+              }`} />
+              <span>{cloudSyncStatus === 'error' ? 'Sync Retry' : cloudSyncStatus === 'syncing' ? 'Syncing...' : 'Share & Sync'}</span>
               <span
                 className={`w-2 h-2 rounded-full ${
                   cloudSyncStatus === 'quota_exceeded'
                     ? 'bg-amber-400'
                     : cloudSyncStatus === 'offline'
                     ? 'bg-slate-400'
-                    : 'bg-emerald-400 animate-pulse'
+                    : cloudSyncStatus === 'error'
+                    ? 'bg-rose-400'
+                    : cloudSyncStatus === 'syncing'
+                    ? 'bg-sky-400 animate-pulse'
+                    : 'bg-emerald-400'
                 }`}
               />
             </button>
@@ -296,21 +308,35 @@ export const PhoneDeviceFrame: React.FC<PhoneDeviceFrameProps> = ({
                 className={`p-1.5 border rounded-lg text-[10px] font-bold flex items-center gap-1 shadow-sm cursor-pointer ${
                   cloudSyncStatus === 'quota_exceeded'
                     ? 'bg-amber-950/80 hover:bg-amber-900 border-amber-800/80 text-amber-300'
+                    : cloudSyncStatus === 'error'
+                    ? 'bg-rose-950/80 hover:bg-rose-900 border-rose-800/80 text-rose-300'
                     : 'bg-sky-950/80 hover:bg-sky-900 border-sky-800/80 text-sky-300'
                 }`}
                 title={
                   cloudSyncStatus === 'quota_exceeded'
                     ? 'Firestore Daily Quota Reached: Operating in Offline Local Storage Mode'
+                    : cloudSyncStatus === 'error'
+                    ? 'Last cloud sync had an error — tap to retry'
                     : 'Live Cloud Sync: Connected across all worker phones'
                 }
               >
-                <Cloud className={`w-3.5 h-3.5 ${cloudSyncStatus === 'quota_exceeded' ? 'text-amber-400' : 'text-sky-400'}`} />
+                <Cloud className={`w-3.5 h-3.5 ${
+                  cloudSyncStatus === 'quota_exceeded'
+                    ? 'text-amber-400'
+                    : cloudSyncStatus === 'error'
+                    ? 'text-rose-400'
+                    : 'text-sky-400'
+                }`} />
                 <span className={`w-1.5 h-1.5 rounded-full ${
                   cloudSyncStatus === 'quota_exceeded'
                     ? 'bg-amber-400'
                     : cloudSyncStatus === 'offline'
                     ? 'bg-slate-400'
-                    : 'bg-emerald-400 animate-pulse'
+                    : cloudSyncStatus === 'error'
+                    ? 'bg-rose-400'
+                    : cloudSyncStatus === 'syncing'
+                    ? 'bg-sky-400 animate-pulse'
+                    : 'bg-emerald-400'
                 }`} />
               </button>
             )}

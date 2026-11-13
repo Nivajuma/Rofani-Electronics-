@@ -268,6 +268,7 @@ export const CustomersSuppliersView: React.FC<CustomersSuppliersViewProps> = ({
   const [customerToDelete, setCustomerToDelete] = useState<Customer | null>(null);
   const [supplierToDelete, setSupplierToDelete] = useState<Supplier | null>(null);
   const [deleteNoticeMessage, setDeleteNoticeMessage] = useState<string | null>(null);
+  const [toastNotice, setToastNotice] = useState<string | null>(null);
 
   // 1. Calculate Customer Metrics
   const customerMetrics = useMemo(() => {
@@ -529,8 +530,11 @@ export const CustomersSuppliersView: React.FC<CustomersSuppliersViewProps> = ({
 
   const handleConfirmDeleteCustomer = () => {
     if (!customerToDelete) return;
+    const cName = customerToDelete.name;
     onDeleteCustomer(customerToDelete.id);
     setCustomerToDelete(null);
+    setToastNotice(`✨ Customer "${cName}" removed successfully.`);
+    setTimeout(() => setToastNotice(null), 3500);
   };
 
   const handleDeleteSupplierPrompt = (s: Supplier) => {
@@ -539,12 +543,28 @@ export const CustomersSuppliersView: React.FC<CustomersSuppliersViewProps> = ({
 
   const handleConfirmDeleteSupplier = () => {
     if (!supplierToDelete) return;
+    const sName = supplierToDelete.name;
     onDeleteSupplier(supplierToDelete.id);
     setSupplierToDelete(null);
+    setToastNotice(`✨ Supplier "${sName}" was successfully deleted.`);
+    setTimeout(() => setToastNotice(null), 3500);
   };
 
   return (
     <div className="space-y-6">
+      {/* Toast Notice */}
+      {toastNotice && (
+        <div className="p-3.5 bg-emerald-950/80 border border-emerald-800 rounded-2xl flex items-center justify-between text-xs font-bold text-emerald-300 shadow-lg animate-in fade-in">
+          <span>{toastNotice}</span>
+          <button
+            onClick={() => setToastNotice(null)}
+            className="text-slate-400 hover:text-white p-1"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       {/* Top Header & Tab Switcher */}
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-slate-900 border border-slate-800 p-5 rounded-3xl shadow-xl">
         <div>
@@ -1781,6 +1801,7 @@ export const CustomersSuppliersView: React.FC<CustomersSuppliersViewProps> = ({
         }}
         supplier={editingSupplier}
         onSave={onSaveSupplier}
+        onDeleteSupplier={handleDeleteSupplierPrompt}
       />
 
       <SupplierPaymentModal
@@ -1811,6 +1832,7 @@ export const CustomersSuppliersView: React.FC<CustomersSuppliersViewProps> = ({
           setIsSupplierPayOpen(true);
         }}
         onNavigateToRestock={onNavigateToRestock}
+        onDeleteSupplier={handleDeleteSupplierPrompt}
       />
 
       <SupplierPaymentHistoryModal
@@ -1968,6 +1990,26 @@ export const CustomersSuppliersView: React.FC<CustomersSuppliersViewProps> = ({
                 <span className="text-emerald-400">{supplierToDelete.phone || 'N/A'}</span>
               </div>
             </div>
+
+            {(() => {
+              const linkedCount = products.filter(
+                (p) =>
+                  p.supplierName &&
+                  p.supplierName.trim().toLowerCase() === supplierToDelete.name.trim().toLowerCase()
+              ).length;
+              if (linkedCount === 0) return null;
+              return (
+                <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-2xl space-y-1 text-xs text-amber-200">
+                  <div className="flex items-center gap-1.5 font-bold text-amber-300">
+                    <AlertTriangle className="w-4 h-4 shrink-0" />
+                    <span>{linkedCount} {linkedCount === 1 ? 'product is' : 'products are'} currently linked to this supplier</span>
+                  </div>
+                  <p className="text-[11px] text-amber-200/80">
+                    Their supplier name will automatically be reset to "Direct Wholesale" so all inventory history stays safe.
+                  </p>
+                </div>
+              );
+            })()}
 
             <div className="flex items-center justify-end gap-3 pt-2">
               <button

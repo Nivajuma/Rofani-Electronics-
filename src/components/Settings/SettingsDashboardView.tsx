@@ -61,6 +61,7 @@ interface SettingsDashboardViewProps {
   onUpdateMasterPin?: (newPin: string) => void;
   onLockNow?: () => void;
   onOpenAuditLogs?: () => void;
+  onOpenCategoryManager?: () => void;
 }
 
 type SettingCategoryKey =
@@ -292,6 +293,7 @@ export const SettingsDashboardView: React.FC<SettingsDashboardViewProps> = ({
   onUpdateMasterPin,
   onLockNow,
   onOpenAuditLogs,
+  onOpenCategoryManager,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [activeSubPanel, setActiveSubPanel] = useState<SettingCategoryKey | null>(null);
@@ -762,7 +764,10 @@ export const SettingsDashboardView: React.FC<SettingsDashboardViewProps> = ({
 
       {activeSubPanel === 'inventory' && (
         <div className="fixed inset-0 z-50 bg-slate-950 overflow-y-auto">
-          <ItemSettingsView onBack={() => setActiveSubPanel(null)} />
+          <ItemSettingsView
+            onBack={() => setActiveSubPanel(null)}
+            onOpenCategoryManager={onOpenCategoryManager}
+          />
         </div>
       )}
 

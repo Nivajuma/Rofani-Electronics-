@@ -43,7 +43,9 @@ import {
   Barcode,
   QrCode,
   Truck,
-  Mail
+  Mail,
+  Volume2,
+  VolumeX
 } from 'lucide-react';
 import {
   Product,
@@ -120,6 +122,7 @@ import { CloudSyncModal } from './components/CloudSync/CloudSyncModal';
 import { PrintBarcodesUtilityModal } from './components/Inventory/PrintBarcodesUtilityModal';
 import { ItemAuditMiniPage } from './components/Inventory/ItemAuditMiniPage';
 import { StockAlertNotificationModal } from './components/Inventory/StockAlertNotificationModal';
+import { CategoryManagerModal } from './components/Inventory/CategoryManagerModal';
 import { CameraStartupPrompt } from './components/Common/CameraStartupPrompt';
 import { AppMenuView } from './components/Common/AppMenuView';
 import { DailyEmailBackupModal } from './components/Settings/DailyEmailBackupModal';
@@ -154,6 +157,7 @@ import {
   batchSaveProductsToCloud,
   subscribeToTransactions,
   saveTransactionToCloud,
+  batchSaveTransactionsToCloud,
   commitSaleToCloudBatch,
   subscribeToCustomers,
   saveCustomerToCloud,
@@ -200,6 +204,7 @@ import {
   removePendingSyncItem,
 } from './utils/offlineSync';
 import { findRecoverableBackups, protectLargestBackup, getBackupDataByKey } from './utils/backupRecovery';
+import { isSoundEnabled, setSoundEnabled, subscribeToSoundPref, playButtonSound } from './utils/uiFeedback';
 import { saveToIDB, getFromIDB } from './utils/idbStorage';
 
 /**
@@ -459,6 +464,23 @@ export default function App() {
   // Daily Automatic Email Backup Modal & Status Banner
   const [showDailyEmailBackupModal, setShowDailyEmailBackupModal] = useState<boolean>(false);
   const [backupBanner, setBackupBanner] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
+  const [showCategoryManagerModal, setShowCategoryManagerModal] = useState<boolean>(false);
+  const [soundEffectsEnabled, setSoundEffectsEnabled] = useState<boolean>(() => isSoundEnabled());
+
+  useEffect(() => {
+    return subscribeToSoundPref((enabled) => {
+      setSoundEffectsEnabled(enabled);
+    });
+  }, []);
+
+  const handleToggleSoundEffects = () => {
+    const next = !soundEffectsEnabled;
+    setSoundEnabled(next);
+    setSoundEffectsEnabled(next);
+    if (next) {
+      playButtonSound('backup');
+    }
+  };
 
   // Application Persistent Collections State with safe lazy initialization & immediate localStorage sync
   const [products, setProductsState] = useState<Product[]>(() => {
@@ -562,9 +584,11 @@ export default function App() {
     safeSetJSON('retail_pos_categories_v2', categories);
   }, [categories]);
 
-  // Auto-sync products' categories & subcategories into master categories state
+  // Auto-sync products' categories & subcategories into master categories state (skips user-deleted ones)
   useEffect(() => {
     if (!products || products.length === 0) return;
+    const deletedCats: string[] = safeGetJSON('retail_pos_deleted_categories', []);
+    const deletedSubs: string[] = safeGetJSON('retail_pos_deleted_subcategories', []);
 
     setCategories((prevCategories: any[]) => {
       let updated = [...(prevCategories || [])];
@@ -574,20 +598,26 @@ export default function App() {
         const catName = p.category ? p.category.trim() : '';
         const subName = p.subcategory ? p.subcategory.trim() : '';
         if (!catName) return;
+        if (deletedCats.includes(catName.toLowerCase())) return;
 
         const catIndex = updated.findIndex(
           (c) => c.name.toLowerCase() === catName.toLowerCase()
         );
 
         if (catIndex === -1) {
+          const subKey = `${catName.toLowerCase()}:::${subName.toLowerCase()}`;
+          const isSubDeleted = subName ? deletedSubs.includes(subKey) : false;
           updated.push({
             id: `cat-auto-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
             name: catName,
-            subcategories: subName ? [subName] : ['General'],
+            subcategories: subName && !isSubDeleted ? [subName] : ['General'],
           });
           hasChanges = true;
         } else {
           if (subName && subName !== 'General') {
+            const subKey = `${catName.toLowerCase()}:::${subName.toLowerCase()}`;
+            if (deletedSubs.includes(subKey)) return;
+
             const existingCat = updated[catIndex];
             const subs: string[] = existingCat.subcategories || ['General'];
             const hasSub = subs.some((s) => s.toLowerCase() === subName.toLowerCase());
@@ -605,6 +635,235 @@ export default function App() {
       return hasChanges ? updated : prevCategories;
     });
   }, [products]);
+
+  // Category & Subcategory Management Handlers
+  const handleAddCategory = (name: string, initialSubs: string[] = ['General']) => {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+
+    // Unmark from deleted categories if re-added
+    const deletedCats: string[] = safeGetJSON('retail_pos_deleted_categories', []);
+    if (deletedCats.includes(trimmed.toLowerCase())) {
+      safeSetJSON(
+        'retail_pos_deleted_categories',
+        deletedCats.filter((c) => c !== trimmed.toLowerCase())
+      );
+    }
+
+    setCategories((prev: any[]) => {
+      const exists = prev.some((c) => c.name.toLowerCase() === trimmed.toLowerCase());
+      if (exists) return prev;
+      const newCat = {
+        id: `cat-${Date.now()}`,
+        name: trimmed,
+        subcategories: initialSubs && initialSubs.length > 0 ? initialSubs : ['General'],
+      };
+      const updated = [...prev, newCat];
+      safeSetJSON('retail_pos_categories_v2', updated);
+      return updated;
+    });
+  };
+
+  const handleEditCategory = (oldName: string, newName: string) => {
+    const trimmedOld = oldName.trim();
+    const trimmedNew = newName.trim();
+    if (!trimmedNew || trimmedOld.toLowerCase() === trimmedNew.toLowerCase()) return;
+
+    // Update categories state
+    setCategories((prev: any[]) => {
+      const updated = prev.map((c) => {
+        if (c.name.toLowerCase() === trimmedOld.toLowerCase()) {
+          return { ...c, name: trimmedNew };
+        }
+        return c;
+      });
+      safeSetJSON('retail_pos_categories_v2', updated);
+      return updated;
+    });
+
+    // Cascade rename to all products
+    const affected: Product[] = [];
+    setProducts((prev) => {
+      const updated = prev.map((p) => {
+        if (p.category && p.category.trim().toLowerCase() === trimmedOld.toLowerCase()) {
+          const nextProd = { ...p, category: trimmedNew, updatedAt: new Date().toISOString() };
+          affected.push(nextProd);
+          return nextProd;
+        }
+        return p;
+      });
+      safeSetJSON('retail_pos_products', updated);
+      return updated;
+    });
+    if (affected.length > 0 && getIsOnline()) {
+      batchSaveProductsToCloud(affected).catch(() => {});
+    }
+  };
+
+  const handleDeleteCategory = (categoryName: string, reassignToCategory: string = 'General') => {
+    const targetName = categoryName.trim().toLowerCase();
+    const reassignName = reassignToCategory.trim() || 'General';
+
+    // Track as deleted so auto-sync never resurrects it, and ensure reassign target isn't blocked
+    const deletedCats: string[] = safeGetJSON('retail_pos_deleted_categories', []);
+    const nextDeleted = deletedCats.filter((c) => c !== reassignName.toLowerCase());
+    if (!nextDeleted.includes(targetName)) {
+      nextDeleted.push(targetName);
+    }
+    safeSetJSON('retail_pos_deleted_categories', nextDeleted);
+
+    // Remove from categories state
+    setCategories((prev: any[]) => {
+      const updated = prev.filter((c) => c.name.trim().toLowerCase() !== targetName);
+      safeSetJSON('retail_pos_categories_v2', updated);
+      return updated;
+    });
+
+    // Reassign all products belonging to this category
+    const affected: Product[] = [];
+    setProducts((prev) => {
+      const updated = prev.map((p) => {
+        if (p.category && p.category.trim().toLowerCase() === targetName) {
+          const nextProd = { ...p, category: reassignName, updatedAt: new Date().toISOString() };
+          affected.push(nextProd);
+          return nextProd;
+        }
+        return p;
+      });
+      safeSetJSON('retail_pos_products', updated);
+      return updated;
+    });
+    if (affected.length > 0 && getIsOnline()) {
+      batchSaveProductsToCloud(affected).catch(() => {});
+    }
+  };
+
+  const handleAddSubcategory = (categoryName: string, subName: string) => {
+    const trimmedCat = categoryName.trim();
+    const trimmedSub = subName.trim();
+    if (!trimmedSub) return;
+
+    const subKey = `${trimmedCat.toLowerCase()}:::${trimmedSub.toLowerCase()}`;
+    const deletedSubs: string[] = safeGetJSON('retail_pos_deleted_subcategories', []);
+    if (deletedSubs.includes(subKey)) {
+      safeSetJSON(
+        'retail_pos_deleted_subcategories',
+        deletedSubs.filter((k) => k !== subKey)
+      );
+    }
+
+    setCategories((prev: any[]) => {
+      const updated = prev.map((c) => {
+        if (c.name.toLowerCase() === trimmedCat.toLowerCase()) {
+          const subs = c.subcategories || ['General'];
+          if (subs.some((s: string) => s.toLowerCase() === trimmedSub.toLowerCase())) {
+            return c;
+          }
+          return { ...c, subcategories: [...subs, trimmedSub] };
+        }
+        return c;
+      });
+      safeSetJSON('retail_pos_categories_v2', updated);
+      return updated;
+    });
+  };
+
+  const handleEditSubcategory = (categoryName: string, oldSubName: string, newSubName: string) => {
+    const trimmedCat = categoryName.trim();
+    const trimmedOld = oldSubName.trim();
+    const trimmedNew = newSubName.trim();
+    if (!trimmedNew || trimmedOld.toLowerCase() === trimmedNew.toLowerCase()) return;
+
+    setCategories((prev: any[]) => {
+      const updated = prev.map((c) => {
+        if (c.name.toLowerCase() === trimmedCat.toLowerCase()) {
+          const subs = (c.subcategories || []).map((s: string) =>
+            s.toLowerCase() === trimmedOld.toLowerCase() ? trimmedNew : s
+          );
+          return { ...c, subcategories: subs };
+        }
+        return c;
+      });
+      safeSetJSON('retail_pos_categories_v2', updated);
+      return updated;
+    });
+
+    // Cascade rename to all products
+    const affected: Product[] = [];
+    setProducts((prev) => {
+      const updated = prev.map((p) => {
+        if (
+          p.category &&
+          p.category.trim().toLowerCase() === trimmedCat.toLowerCase() &&
+          p.subcategory &&
+          p.subcategory.trim().toLowerCase() === trimmedOld.toLowerCase()
+        ) {
+          const nextProd = { ...p, subcategory: trimmedNew, updatedAt: new Date().toISOString() };
+          affected.push(nextProd);
+          return nextProd;
+        }
+        return p;
+      });
+      safeSetJSON('retail_pos_products', updated);
+      return updated;
+    });
+    if (affected.length > 0 && getIsOnline()) {
+      batchSaveProductsToCloud(affected).catch(() => {});
+    }
+  };
+
+  const handleDeleteSubcategory = (
+    categoryName: string,
+    subName: string,
+    reassignToSub: string = 'General'
+  ) => {
+    const trimmedCat = categoryName.trim();
+    const trimmedSub = subName.trim();
+    const subKey = `${trimmedCat.toLowerCase()}:::${trimmedSub.toLowerCase()}`;
+
+    // Mark as deleted so auto-sync never resurrects it
+    const deletedSubs: string[] = safeGetJSON('retail_pos_deleted_subcategories', []);
+    if (!deletedSubs.includes(subKey)) {
+      safeSetJSON('retail_pos_deleted_subcategories', [...deletedSubs, subKey]);
+    }
+
+    setCategories((prev: any[]) => {
+      const updated = prev.map((c) => {
+        if (c.name.toLowerCase() === trimmedCat.toLowerCase()) {
+          const subs = (c.subcategories || []).filter(
+            (s: string) => s.toLowerCase() !== trimmedSub.toLowerCase()
+          );
+          return { ...c, subcategories: subs.length > 0 ? subs : ['General'] };
+        }
+        return c;
+      });
+      safeSetJSON('retail_pos_categories_v2', updated);
+      return updated;
+    });
+
+    // Reassign products with this subcategory
+    const affected: Product[] = [];
+    setProducts((prev) => {
+      const updated = prev.map((p) => {
+        if (
+          p.category &&
+          p.category.trim().toLowerCase() === trimmedCat.toLowerCase() &&
+          p.subcategory &&
+          p.subcategory.trim().toLowerCase() === trimmedSub.toLowerCase()
+        ) {
+          const nextProd = { ...p, subcategory: reassignToSub, updatedAt: new Date().toISOString() };
+          affected.push(nextProd);
+          return nextProd;
+        }
+        return p;
+      });
+      safeSetJSON('retail_pos_products', updated);
+      return updated;
+    });
+    if (affected.length > 0 && getIsOnline()) {
+      batchSaveProductsToCloud(affected).catch(() => {});
+    }
+  };
 
   const [customers, setCustomers] = useState<Customer[]>(() => safeGetJSON('retail_pos_customers', INITIAL_CUSTOMERS));
 
@@ -1195,69 +1454,101 @@ export default function App() {
 
   // Offline and bidirectional cloud sync handler
   const syncPendingQueueToCloud = async () => {
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      setCloudSyncStatus('offline');
+      return;
+    }
+
     setCloudSyncStatus('syncing');
+    let hadError = false;
 
-    // 1. Bidirectional Sync Guarantee: Push any local sales that haven't been uploaded yet before pulling remote updates
-    const localSales = safeGetJSON<Transaction[]>('retail_pos_transactions', transactions);
-    for (const tx of localSales) {
-      try {
-        await saveTransactionToCloud(tx);
-      } catch (err) {
-        console.warn(`[Sync] Could not push transaction ${tx.id} to cloud:`, err);
-      }
-    }
-
-    const queue = getPendingSyncQueue();
-    let syncedCount = 0;
-    for (const item of queue) {
-      try {
-        if (item.type === 'sale') {
-          await saveTransactionToCloud(item.data);
-        } else if (item.type === 'product') {
-          await saveProductToCloud(item.data);
-        } else if (item.type === 'customer') {
-          if (item.data?._deleted) {
-            await deleteCustomerFromCloud(item.data.id);
-          } else {
-            await saveCustomerToCloud(item.data);
+    try {
+      // 1. Bidirectional Sync Guarantee: Batch-push recent local sales before processing queue
+      const localSales = safeGetJSON<Transaction[]>('retail_pos_transactions', transactions);
+      if (localSales && localSales.length > 0) {
+        try {
+          await batchSaveTransactionsToCloud(localSales.slice(0, 100));
+        } catch (err) {
+          if (isQuotaExceededError(err)) {
+            setIsCloudQuotaExceeded(true);
+            setCloudSyncStatus('quota_exceeded');
+            return;
           }
-        } else if (item.type === 'supplier') {
-          if (item.data?._deleted) {
-            await deleteSupplierFromCloud(item.data.id);
-          } else {
-            await saveSupplierToCloud(item.data);
-          }
-        } else if (item.type === 'expense') {
-          await saveExpenseToCloud(item.data);
-        } else if (item.type === 'restock') {
-          await saveRestockRecordToCloud(item.data);
-        } else if (item.type === 'user') {
-          await saveUserToCloud(item.data);
+          hadError = true;
+          console.warn('[Sync] Could not batch push local sales to cloud:', err);
         }
-        removePendingSyncItem(item.id);
-        syncedCount++;
-      } catch (err) {
-        if (isQuotaExceededError(err)) {
-          setIsCloudQuotaExceeded(true);
-          setCloudSyncStatus('quota_exceeded');
-        } else {
+      }
+
+      const queue = getPendingSyncQueue();
+      for (const item of queue) {
+        try {
+          if (item.type === 'sale') {
+            await saveTransactionToCloud(item.data);
+          } else if (item.type === 'product') {
+            await saveProductToCloud(item.data);
+          } else if (item.type === 'customer') {
+            if (item.data?._deleted) {
+              await deleteCustomerFromCloud(item.data.id);
+            } else {
+              await saveCustomerToCloud(item.data);
+            }
+          } else if (item.type === 'supplier') {
+            if (item.data?._deleted) {
+              await deleteSupplierFromCloud(item.data.id);
+            } else {
+              await saveSupplierToCloud(item.data);
+            }
+          } else if (item.type === 'expense') {
+            await saveExpenseToCloud(item.data);
+          } else if (item.type === 'restock') {
+            await saveRestockRecordToCloud(item.data);
+          } else if (item.type === 'user') {
+            await saveUserToCloud(item.data);
+          }
+          removePendingSyncItem(item.id);
+        } catch (err) {
+          if (isQuotaExceededError(err)) {
+            setIsCloudQuotaExceeded(true);
+            setCloudSyncStatus('quota_exceeded');
+            return;
+          }
+          hadError = true;
           console.warn(`[Sync Queue] Offline action ${item.id} waiting for stable connection:`, err);
+          break;
         }
-        break;
       }
+
+      // 2. Merge Local & Cloud Sales (Prevent Overwrites) using ID-based union
+      const existingLocalSales = safeGetJSON<Transaction[]>('retail_pos_transactions', transactions);
+      setTransactions(existingLocalSales);
+      safeSetJSON('retail_pos_transactions', existingLocalSales);
+
+      if (hadError) {
+        setCloudSyncStatus(typeof navigator !== 'undefined' && !navigator.onLine ? 'offline' : 'error');
+      } else {
+        setLastSyncedTime(new Date().toLocaleTimeString());
+        setCloudSyncStatus('synced');
+      }
+    } catch (err) {
+      if (isQuotaExceededError(err)) {
+        setIsCloudQuotaExceeded(true);
+        setCloudSyncStatus('quota_exceeded');
+      } else if (typeof navigator !== 'undefined' && !navigator.onLine) {
+        setCloudSyncStatus('offline');
+      } else {
+        setCloudSyncStatus('error');
+      }
+      console.warn('[Sync Queue] Unexpected sync failure:', err);
     }
-
-    // 2. Merge Local & Cloud Sales (Prevent Overwrites) using ID-based union
-    const existingLocalSales = safeGetJSON<Transaction[]>('retail_pos_transactions', transactions);
-    setTransactions(existingLocalSales);
-    safeSetJSON('retail_pos_transactions', existingLocalSales);
-
-    setLastSyncedTime(new Date().toLocaleTimeString());
-    setCloudSyncStatus('synced');
   };
 
   // Comprehensive pull from Cloud Firestore handler with safety merge & backup snapshot
   const handlePullFromCloud = async () => {
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      setCloudSyncStatus('offline');
+      throw new Error('Device is offline. Please reconnect to internet and try pulling again.');
+    }
+
     setCloudSyncStatus('syncing');
     try {
       // 1. Proactively record a local rollback snapshot and protect master backup before pulling
@@ -1277,15 +1568,28 @@ export default function App() {
         }
       } catch {}
 
-      // 2. Fetch all collections from Cloud Firestore
+      // 2. Fetch all collections from Cloud Firestore, distinguishing network failure from empty cloud
+      let failedCollections = 0;
+      let lastFetchError: any = null;
+      const trackFetch = <T,>(promise: Promise<T[]>): Promise<T[]> =>
+        promise.catch((err) => {
+          failedCollections += 1;
+          lastFetchError = err;
+          return [];
+        });
+
       const [cloudProducts, cloudSales, cloudCustomers, cloudSuppliers, cloudExpenses, cloudUsers] = await Promise.all([
-        fetchProductsFromCloud().catch(() => []),
-        fetchTransactionsFromCloud().catch(() => []),
-        fetchCustomersFromCloud().catch(() => []),
-        fetchSuppliersFromCloud().catch(() => []),
-        fetchExpensesFromCloud().catch(() => []),
-        fetchUsersFromCloud().catch(() => []),
+        trackFetch(fetchProductsFromCloud()),
+        trackFetch(fetchTransactionsFromCloud()),
+        trackFetch(fetchCustomersFromCloud()),
+        trackFetch(fetchSuppliersFromCloud()),
+        trackFetch(fetchExpensesFromCloud()),
+        trackFetch(fetchUsersFromCloud()),
       ]);
+
+      if (failedCollections === 6 && lastFetchError) {
+        throw lastFetchError;
+      }
 
       // 3. ID-based union merge: NEVER discard local items if remote is empty or partial
       if (cloudProducts && cloudProducts.length > 0) {
@@ -1347,10 +1651,12 @@ export default function App() {
       }
 
       if (cloudSuppliers && cloudSuppliers.length > 0) {
+        const deletedIds: string[] = safeGetJSON('retail_pos_deleted_suppliers', []);
+        const validCloud = cloudSuppliers.filter((cs) => !deletedIds.includes(cs.id));
         setSuppliers((localSupps) => {
-          const merged = [...cloudSuppliers];
+          const merged = [...validCloud];
           localSupps.forEach((ls) => {
-            if (!merged.some((cs) => cs.id === ls.id)) {
+            if (!deletedIds.includes(ls.id) && !merged.some((cs) => cs.id === ls.id)) {
               merged.push(ls);
             }
           });
@@ -1398,7 +1704,14 @@ export default function App() {
         usersCount: cloudUsers.length,
       };
     } catch (err) {
-      setCloudSyncStatus('error');
+      if (isQuotaExceededError(err)) {
+        setIsCloudQuotaExceeded(true);
+        setCloudSyncStatus('quota_exceeded');
+      } else if (typeof navigator !== 'undefined' && !navigator.onLine) {
+        setCloudSyncStatus('offline');
+      } else {
+        setCloudSyncStatus('error');
+      }
       throw err;
     }
   };
@@ -1778,8 +2091,11 @@ export default function App() {
               type: 'success',
             });
           } else {
+            const isUnauthorized = result.error?.includes('unauthorized-domain');
             setBackupBanner({
-              message: `Automated daily backup failed: ${result.error || 'Check Gmail permissions'}`,
+              message: isUnauthorized
+                ? `Vercel domain authorization required in Firebase: Add 'vercel.app' to Authorized domains.`
+                : `Automated daily backup failed: ${result.error || 'Check Gmail permissions'}`,
               type: 'error',
             });
           }
@@ -2026,6 +2342,14 @@ export default function App() {
   };
 
   const handleSaveSupplier = (sup: Supplier) => {
+    const deletedIds: string[] = safeGetJSON('retail_pos_deleted_suppliers', []);
+    if (deletedIds.includes(sup.id)) {
+      safeSetJSON(
+        'retail_pos_deleted_suppliers',
+        deletedIds.filter((id) => id !== sup.id)
+      );
+    }
+
     setSuppliers((prev) => {
       const idx = prev.findIndex((s) => s.id === sup.id);
       if (idx > -1) {
@@ -2052,8 +2376,41 @@ export default function App() {
     }
   };
 
-  const handleDeleteSupplier = (supplierId: string) => {
-    setSuppliers((prev) => prev.filter((s) => s.id !== supplierId));
+  const handleDeleteSupplier = (supplierId: string, cascadeProducts: boolean = true) => {
+    const targetSupplier = suppliers.find((s) => s.id === supplierId);
+    const targetName = targetSupplier?.name?.trim().toLowerCase();
+
+    // Prevent resurrection on cloud pulls
+    const deletedIds: string[] = safeGetJSON('retail_pos_deleted_suppliers', []);
+    if (!deletedIds.includes(supplierId)) {
+      safeSetJSON('retail_pos_deleted_suppliers', [...deletedIds, supplierId]);
+    }
+
+    setSuppliers((prev) => {
+      const updated = prev.filter((s) => s.id !== supplierId);
+      safeSetJSON('retail_pos_suppliers', updated);
+      return updated;
+    });
+
+    if (targetName && cascadeProducts) {
+      const affected: Product[] = [];
+      setProducts((prev) => {
+        const updated = prev.map((p) => {
+          if (p.supplierName && p.supplierName.trim().toLowerCase() === targetName) {
+            const nextProd = { ...p, supplierName: 'Direct Wholesale', updatedAt: new Date().toISOString() };
+            affected.push(nextProd);
+            return nextProd;
+          }
+          return p;
+        });
+        safeSetJSON('retail_pos_products', updated);
+        return updated;
+      });
+      if (affected.length > 0 && getIsOnline()) {
+        batchSaveProductsToCloud(affected).catch(() => {});
+      }
+    }
+
     if (!getIsOnline()) {
       addPendingSyncItem({
         type: 'supplier',
@@ -3187,6 +3544,7 @@ export default function App() {
               window.history.pushState({}, '', url.toString());
             } catch {}
           }}
+          onOpenCategoryManager={() => setShowCategoryManagerModal(true)}
         />
       )}
 
@@ -3375,6 +3733,15 @@ export default function App() {
           onOpenAuditLogs={() => setActiveTab('auditlogs')}
           stores={stores}
           onOpenStoreManager={() => setShowStoreManagerModal(true)}
+          onOpenCategoryManager={() => setShowCategoryManagerModal(true)}
+          lastSyncedTime={lastSyncedTime}
+          onCloudSyncSuccess={() => {
+            setCloudSyncStatus('synced');
+            setLastSyncedTime(new Date().toLocaleTimeString());
+          }}
+          onCloudSyncError={() =>
+            setCloudSyncStatus(typeof navigator !== 'undefined' && !navigator.onLine ? 'offline' : 'error')
+          }
         />
       )}
 
@@ -3431,13 +3798,21 @@ export default function App() {
           onClose={() => setShowCloudSyncModal(false)}
           products={products}
           allUsers={allUsers}
+          transactions={transactions}
+          customers={customers}
+          suppliers={suppliers}
+          expenses={expenses}
           cloudSyncStatus={cloudSyncStatus}
           lastSyncedTime={lastSyncedTime}
           isQuotaExceeded={isCloudQuotaExceeded}
+          onTriggerSync={syncPendingQueueToCloud}
           onSyncCatalogComplete={() => {
             setCloudSyncStatus('synced');
             setLastSyncedTime(new Date().toLocaleTimeString());
           }}
+          onSyncError={() =>
+            setCloudSyncStatus(typeof navigator !== 'undefined' && !navigator.onLine ? 'offline' : 'error')
+          }
           onPullFromCloud={handlePullFromCloud}
           onEmergencyRestore={handleRestoreEmergencyBackup}
           masterPin={masterPin}
@@ -4153,18 +4528,30 @@ export default function App() {
               className={`px-2.5 py-1.5 rounded-xl border transition flex items-center gap-1.5 text-xs font-bold shadow-sm cursor-pointer ${
                 cloudSyncStatus === 'quota_exceeded'
                   ? 'bg-amber-950/90 text-amber-200 border-amber-700'
+                  : cloudSyncStatus === 'error'
+                  ? 'bg-rose-950/90 text-rose-200 border-rose-700'
                   : 'bg-sky-500/20 text-sky-200 border-sky-400/40'
               }`}
             >
-              <Cloud className={`w-3.5 h-3.5 ${cloudSyncStatus === 'quota_exceeded' ? 'text-amber-400' : 'text-sky-400'}`} />
-              <span>Sync & Share</span>
+              <Cloud className={`w-3.5 h-3.5 ${
+                cloudSyncStatus === 'quota_exceeded'
+                  ? 'text-amber-400'
+                  : cloudSyncStatus === 'error'
+                  ? 'text-rose-400'
+                  : 'text-sky-400'
+              }`} />
+              <span>{cloudSyncStatus === 'error' ? 'Sync Retry' : 'Sync & Share'}</span>
               <span
                 className={`w-1.5 h-1.5 rounded-full ${
                   cloudSyncStatus === 'quota_exceeded'
                     ? 'bg-amber-400'
                     : cloudSyncStatus === 'offline'
                     ? 'bg-slate-400'
-                    : 'bg-emerald-400 animate-pulse'
+                    : cloudSyncStatus === 'error'
+                    ? 'bg-rose-400'
+                    : cloudSyncStatus === 'syncing'
+                    ? 'bg-sky-400 animate-pulse'
+                    : 'bg-emerald-400'
                 }`}
               />
             </button>
@@ -4176,6 +4563,19 @@ export default function App() {
             >
               <Plus className="w-3.5 h-3.5" />
               <span>Sale</span>
+            </button>
+
+            <button
+              onClick={handleToggleSoundEffects}
+              data-no-feedback="true"
+              className={`p-2 rounded-xl border transition cursor-pointer ${
+                soundEffectsEnabled
+                  ? 'bg-emerald-900/70 border-emerald-500/60 text-emerald-300'
+                  : 'bg-slate-800 border-slate-700 text-slate-400'
+              }`}
+              title={soundEffectsEnabled ? 'Button Sound Effects: ON (Tap to mute)' : 'Button Sound Effects: MUTED (Tap to turn on)'}
+            >
+              {soundEffectsEnabled ? <Volume2 className="w-3.5 h-3.5" /> : <VolumeX className="w-3.5 h-3.5" />}
             </button>
 
             <button
@@ -4272,17 +4672,35 @@ export default function App() {
               title={
                 cloudSyncStatus === 'quota_exceeded'
                   ? 'Firestore Daily Quota Reached: Operating in Offline Local Storage Mode'
+                  : cloudSyncStatus === 'error'
+                  ? 'Last cloud sync had an error — click to view details & retry'
+                  : lastSyncedTime
+                  ? `Real-Time Cloud Sync Active (Last synced: ${lastSyncedTime})`
                   : 'Real-Time Cloud Synchronization & Share with Worker Mobile Phones'
               }
               className={`px-3 py-2 rounded-xl border transition flex items-center gap-1.5 text-xs font-bold shadow-sm shrink-0 cursor-pointer ${
                 cloudSyncStatus === 'quota_exceeded'
                   ? 'bg-amber-50 hover:bg-amber-100 text-amber-950 border-amber-300'
+                  : cloudSyncStatus === 'error'
+                  ? 'bg-rose-50 hover:bg-rose-100 text-rose-900 border-rose-300'
                   : 'bg-sky-50 hover:bg-sky-100 text-sky-800 border-sky-200'
               }`}
             >
-              <Cloud className={`w-4 h-4 ${cloudSyncStatus === 'quota_exceeded' ? 'text-amber-600' : 'text-sky-600'}`} />
+              <Cloud className={`w-4 h-4 ${
+                cloudSyncStatus === 'quota_exceeded'
+                  ? 'text-amber-600'
+                  : cloudSyncStatus === 'error'
+                  ? 'text-rose-600'
+                  : 'text-sky-600'
+              }`} />
               <span className="inline">
-                {cloudSyncStatus === 'quota_exceeded' ? 'Cloud Quota' : 'Share & Sync'}
+                {cloudSyncStatus === 'quota_exceeded'
+                  ? 'Cloud Quota'
+                  : cloudSyncStatus === 'error'
+                  ? 'Sync Issue'
+                  : cloudSyncStatus === 'syncing'
+                  ? 'Syncing...'
+                  : 'Share & Sync'}
               </span>
               <span
                 className={`w-2 h-2 rounded-full shrink-0 ${
@@ -4290,20 +4708,49 @@ export default function App() {
                     ? 'bg-amber-500'
                     : cloudSyncStatus === 'offline'
                     ? 'bg-slate-400'
-                    : 'bg-emerald-500 animate-pulse'
+                    : cloudSyncStatus === 'error'
+                    ? 'bg-rose-500'
+                    : cloudSyncStatus === 'syncing'
+                    ? 'bg-sky-500 animate-pulse'
+                    : 'bg-emerald-500'
                 }`}
-                title={cloudSyncStatus === 'quota_exceeded' ? 'Local storage mode' : 'Cloud connection active'}
+                title={
+                  cloudSyncStatus === 'quota_exceeded'
+                    ? 'Local storage mode'
+                    : cloudSyncStatus === 'error'
+                    ? 'Sync error — click to retry'
+                    : 'Cloud connection active'
+                }
               />
             </button>
 
             {/* Daily Automatic Email Backup (Gmail) Button */}
             <button
+              type="button"
+              id="btn-header-email-backup"
+              data-feedback="backup"
               onClick={() => setShowDailyEmailBackupModal(true)}
-              title="Daily Automatic Email Backup (Gmail)"
-              className="px-3 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-800 rounded-xl border border-indigo-200 transition flex items-center gap-1.5 text-xs font-bold shadow-sm shrink-0 cursor-pointer"
+              title="Daily Automatic Email Backup (Gmail) & Full JSON Backup"
+              className="px-3 py-2 bg-gradient-to-r from-emerald-600 via-teal-600 to-sky-600 hover:from-emerald-500 hover:to-sky-500 text-white rounded-xl border border-emerald-400/70 ring-2 ring-emerald-400/30 transition flex items-center gap-1.5 text-xs font-extrabold shadow-md shadow-emerald-600/25 shrink-0 cursor-pointer active:scale-95"
             >
-              <Mail className="w-4 h-4 text-indigo-600" />
-              <span className="hidden xl:inline">Email Backup</span>
+              <Mail className="w-4 h-4 text-amber-200" />
+              <span className="hidden xl:inline">Full Backup</span>
+            </button>
+
+            {/* Button Sound Feedback On/Off Toggle */}
+            <button
+              type="button"
+              data-no-feedback="true"
+              onClick={handleToggleSoundEffects}
+              title={soundEffectsEnabled ? 'Button Sound & Highlight: ON (Click to mute sound)' : 'Button Sound: MUTED (Click to enable sound)'}
+              className={`p-2 lg:px-2.5 lg:py-2 rounded-xl border transition flex items-center gap-1.5 text-xs font-bold shadow-sm shrink-0 cursor-pointer ${
+                soundEffectsEnabled
+                  ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-300'
+                  : 'bg-slate-100 hover:bg-slate-200 text-slate-500 border-slate-200'
+              }`}
+            >
+              {soundEffectsEnabled ? <Volume2 className="w-4 h-4 text-emerald-600 shrink-0" /> : <VolumeX className="w-4 h-4 text-slate-500 shrink-0" />}
+              <span className="hidden 2xl:inline">{soundEffectsEnabled ? 'Sound On' : 'Muted'}</span>
             </button>
 
             {/* AI Worker Assistant Button */}
@@ -4509,13 +4956,21 @@ export default function App() {
         onClose={() => setShowCloudSyncModal(false)}
         products={products}
         allUsers={allUsers}
+        transactions={transactions}
+        customers={customers}
+        suppliers={suppliers}
+        expenses={expenses}
         cloudSyncStatus={cloudSyncStatus}
         lastSyncedTime={lastSyncedTime}
         isQuotaExceeded={isCloudQuotaExceeded}
+        onTriggerSync={syncPendingQueueToCloud}
         onSyncCatalogComplete={() => {
           setCloudSyncStatus('synced');
           setLastSyncedTime(new Date().toLocaleTimeString());
         }}
+        onSyncError={() =>
+          setCloudSyncStatus(typeof navigator !== 'undefined' && !navigator.onLine ? 'offline' : 'error')
+        }
         onPullFromCloud={handlePullFromCloud}
         onEmergencyRestore={handleRestoreEmergencyBackup}
         masterPin={masterPin}
@@ -4647,6 +5102,20 @@ export default function App() {
         allUsers={allUsers}
         storeName={stores.find((s) => s.id === activeStoreId)?.name || 'ROFANI ELECTRONICS AND BOUTIQUE'}
         onNotification={(msg, type) => setBackupBanner({ message: msg, type })}
+      />
+
+      {/* Category & Subcategory Management Modal */}
+      <CategoryManagerModal
+        isOpen={showCategoryManagerModal}
+        onClose={() => setShowCategoryManagerModal(false)}
+        categories={categories}
+        products={products}
+        onAddCategory={handleAddCategory}
+        onEditCategory={handleEditCategory}
+        onDeleteCategory={handleDeleteCategory}
+        onAddSubcategory={handleAddSubcategory}
+        onEditSubcategory={handleEditSubcategory}
+        onDeleteSubcategory={handleDeleteSubcategory}
       />
 
       {/* Automatic Camera Authorization on App Launch */}

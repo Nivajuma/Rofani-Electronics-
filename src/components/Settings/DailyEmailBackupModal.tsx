@@ -14,7 +14,11 @@ import {
   Calendar,
   X,
   Database,
-  FileText
+  FileText,
+  ExternalLink,
+  Copy,
+  Check,
+  ShieldAlert
 } from 'lucide-react';
 import { User } from 'firebase/auth';
 import {
@@ -27,6 +31,7 @@ import {
   BackupSettings
 } from '../../lib/gmailService';
 import { Product, Transaction, Customer, Supplier, Expense, CashTransaction, User as POSUser } from '../../types';
+import { playBackupSuccessSound } from '../../utils/uiFeedback';
 
 interface DailyEmailBackupModalProps {
   isOpen: boolean;
@@ -62,6 +67,8 @@ export const DailyEmailBackupModal: React.FC<DailyEmailBackupModalProps> = ({
   const [isConnecting, setIsConnecting] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [sendNotice, setSendNotice] = useState<{ type: 'success' | 'error' | 'info'; message: string } | null>(null);
+  const [unauthorizedDomainInfo, setUnauthorizedDomainInfo] = useState<{ hostname: string; consoleUrl: string } | null>(null);
+  const [copiedDomain, setCopiedDomain] = useState(false);
   const [showConfirmSendDialog, setShowConfirmSendDialog] = useState(false);
 
   // Sync token on mount
@@ -78,16 +85,28 @@ export const DailyEmailBackupModal: React.FC<DailyEmailBackupModalProps> = ({
       const { user, accessToken: token } = await signInWithGoogleForGmail();
       setGoogleUser(user);
       setAccessToken(token);
+      setUnauthorizedDomainInfo(null);
       setSendNotice({
         type: 'success',
         message: `Connected as ${user.email}! Gmail sending is now authorized.`,
       });
     } catch (err: any) {
       console.error('Failed to sign in with Google:', err);
-      setSendNotice({
-        type: 'error',
-        message: err.message || 'Google authentication was cancelled or could not be completed.',
-      });
+      if (err.isUnauthorizedDomain || err.code === 'auth/unauthorized-domain' || err.message?.includes('unauthorized-domain')) {
+        setUnauthorizedDomainInfo({
+          hostname: typeof window !== 'undefined' ? window.location.hostname : 'vercel.app',
+          consoleUrl: 'https://console.firebase.google.com/project/gen-lang-client-0043475796/authentication/settings',
+        });
+        setSendNotice({
+          type: 'error',
+          message: 'Firebase Error: unauthorized-domain. Add "vercel.app" to your Firebase project authorized domains (see quick guide below).',
+        });
+      } else {
+        setSendNotice({
+          type: 'error',
+          message: err.message || 'Google authentication was cancelled or could not be completed.',
+        });
+      }
     } finally {
       setIsConnecting(false);
     }
@@ -251,10 +270,25 @@ export const DailyEmailBackupModal: React.FC<DailyEmailBackupModalProps> = ({
         setAccessToken(token);
         activeToken = token;
       } catch (authErr: any) {
-        setSendNotice({
-          type: 'error',
-          message: 'Google authorization is required to send emails via Gmail: ' + (authErr.message || 'Cancelled'),
-        });
+        if (
+          authErr.isUnauthorizedDomain ||
+          authErr.code === 'auth/unauthorized-domain' ||
+          authErr.message?.includes('unauthorized-domain')
+        ) {
+          setUnauthorizedDomainInfo({
+            hostname: typeof window !== 'undefined' ? window.location.hostname : 'vercel.app',
+            consoleUrl: 'https://console.firebase.google.com/project/gen-lang-client-0043475796/authentication/settings',
+          });
+          setSendNotice({
+            type: 'error',
+            message: 'Firebase Error: unauthorized-domain. Add "vercel.app" to your Firebase project authorized domains (see quick guide below).',
+          });
+        } else {
+          setSendNotice({
+            type: 'error',
+            message: 'Google authorization is required to send emails via Gmail: ' + (authErr.message || 'Cancelled'),
+          });
+        }
         return;
       } finally {
         setIsConnecting(false);
@@ -313,6 +347,7 @@ export const DailyEmailBackupModal: React.FC<DailyEmailBackupModalProps> = ({
         });
 
         setSettings(updatedSettings);
+        playBackupSuccessSound();
         setSendNotice({
           type: 'success',
           message: `✨ Daily backup email successfully sent to ${targetRecipient}! (File size: ${fileSizeKB} KB)`,
@@ -372,6 +407,7 @@ export const DailyEmailBackupModal: React.FC<DailyEmailBackupModalProps> = ({
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
 
+    playBackupSuccessSound();
     setSendNotice({
       type: 'success',
       message: 'Backup JSON downloaded directly to your computer.',
@@ -426,6 +462,96 @@ export const DailyEmailBackupModal: React.FC<DailyEmailBackupModalProps> = ({
                 <AlertCircle className="w-4 h-4 shrink-0" />
               )}
               <span className="flex-1">{sendNotice.message}</span>
+            </div>
+          )}
+
+          {/* Unauthorized Domain Resolution Card */}
+          {unauthorizedDomainInfo && (
+            <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-200 space-y-3.5 animate-in fade-in">
+              <div className="flex items-start gap-3">
+                <div className="p-2.5 rounded-xl bg-amber-500/20 text-amber-400 shrink-0 border border-amber-500/30">
+                  <ShieldAlert className="w-5 h-5" />
+                </div>
+                <div className="space-y-1">
+                  <h4 className="font-extrabold text-sm text-amber-100 flex items-center gap-2">
+                    <span>Authorize Vercel Domain in Firebase</span>
+                    <span className="text-[10px] uppercase tracking-wider font-extrabold px-2 py-0.5 rounded-full bg-amber-500/25 text-amber-300 border border-amber-500/40">
+                      1-Minute Fix
+                    </span>
+                  </h4>
+                  <p className="text-xs text-amber-200/90 leading-relaxed">
+                    Google & Firebase require your Vercel deployment address to be added to your Firebase project's <strong>Authorized domains</strong> list before Google sign-in can run on Chrome.
+                  </p>
+                </div>
+              </div>
+
+              <div className="bg-slate-950/90 rounded-xl p-3.5 border border-slate-800 space-y-3 text-xs text-slate-300">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <span className="text-slate-400 font-medium">Domain to add:</span>
+                  <div className="flex items-center gap-2">
+                    <code className="px-2.5 py-1 rounded-lg bg-slate-900 text-sky-400 font-mono text-xs border border-slate-700 font-bold">
+                      vercel.app
+                    </code>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigator.clipboard.writeText('vercel.app');
+                        setCopiedDomain(true);
+                        setTimeout(() => setCopiedDomain(false), 2000);
+                      }}
+                      className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition border border-slate-700"
+                    >
+                      {copiedDomain ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5 text-slate-400" />}
+                      {copiedDomain ? 'Copied vercel.app!' : 'Copy'}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="pt-2.5 border-t border-slate-800/80 space-y-2 text-[11px] text-slate-400">
+                  <div className="flex items-start gap-2">
+                    <span className="w-4 h-4 rounded-full bg-sky-500/20 text-sky-400 flex items-center justify-center font-bold shrink-0 text-[10px]">1</span>
+                    <span>Click the <strong>Open Firebase Auth Settings</strong> button below to open your project settings.</span>
+                  </div>
+                  <div className="flex items-start gap-2">
+                    <span className="w-4 h-4 rounded-full bg-sky-500/20 text-sky-400 flex items-center justify-center font-bold shrink-0 text-[10px]">2</span>
+                    <span>Scroll down to the <strong>Authorized domains</strong> section and click <strong>Add domain</strong>.</span>
+                  </div>
+                  <div className="flex items-start gap-2">
+                    <span className="w-4 h-4 rounded-full bg-sky-500/20 text-sky-400 flex items-center justify-center font-bold shrink-0 text-[10px]">3</span>
+                    <span>Paste <strong className="text-white">vercel.app</strong> (or <em>{unauthorizedDomainInfo.hostname}</em>) and click <strong>Save</strong>.</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 pt-1 flex-wrap">
+                <a
+                  href={unauthorizedDomainInfo.consoleUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-4 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs rounded-xl flex items-center gap-2 transition shadow-sm cursor-pointer"
+                >
+                  <ExternalLink className="w-4 h-4" />
+                  Open Firebase Auth Settings
+                </a>
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleConnectGmail();
+                  }}
+                  className="px-4 py-2.5 bg-slate-800 hover:bg-slate-750 text-slate-200 font-bold text-xs rounded-xl flex items-center gap-2 transition cursor-pointer border border-slate-700"
+                >
+                  <RefreshCw className="w-4 h-4" />
+                  Try Authorizing Again
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDownloadBackupLocally}
+                  className="px-3 py-2.5 bg-sky-950 hover:bg-sky-900 text-sky-300 font-medium text-xs rounded-xl flex items-center gap-1.5 transition cursor-pointer border border-sky-800/60 ml-auto"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  Download Backup JSON Now
+                </button>
+              </div>
             </div>
           )}
 
@@ -689,10 +815,11 @@ export const DailyEmailBackupModal: React.FC<DailyEmailBackupModalProps> = ({
         <div className="px-6 py-4 bg-slate-950 border-t border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-3">
           <button
             type="button"
+            data-feedback="backup"
             onClick={handleDownloadBackupLocally}
-            className="w-full sm:w-auto px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-bold rounded-xl border border-slate-700 transition flex items-center justify-center gap-1.5 cursor-pointer"
+            className="w-full sm:w-auto px-4 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-extrabold rounded-xl border border-emerald-400/70 ring-2 ring-emerald-400/35 shadow-lg shadow-emerald-600/25 transition flex items-center justify-center gap-1.5 cursor-pointer active:scale-95"
           >
-            <Download className="w-3.5 h-3.5 text-sky-400" />
+            <Download className="w-3.5 h-3.5 text-amber-200" />
             <span>Download .JSON Backup</span>
           </button>
 
@@ -706,9 +833,10 @@ export const DailyEmailBackupModal: React.FC<DailyEmailBackupModalProps> = ({
             </button>
             <button
               type="button"
+              data-feedback="backup"
               onClick={() => setShowConfirmSendDialog(true)}
               disabled={isSending || isConnecting}
-              className="flex-1 sm:flex-initial px-5 py-2.5 bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-500 hover:to-indigo-500 disabled:opacity-50 text-white text-xs font-extrabold rounded-xl shadow-lg shadow-sky-600/30 transition flex items-center justify-center gap-2 cursor-pointer active:scale-95"
+              className="flex-1 sm:flex-initial px-5 py-2.5 bg-gradient-to-r from-sky-500 to-indigo-600 hover:from-sky-400 hover:to-indigo-500 disabled:opacity-50 text-white text-xs font-extrabold rounded-xl border border-sky-300/60 ring-2 ring-sky-400/35 shadow-lg shadow-sky-600/30 transition flex items-center justify-center gap-2 cursor-pointer active:scale-95"
             >
               <Send className={`w-3.5 h-3.5 ${isSending ? 'animate-pulse' : ''}`} />
               <span>{isSending ? 'Sending Backup...' : accessToken ? 'Send Backup Email Now' : 'Authorize & Send Backup Now'}</span>

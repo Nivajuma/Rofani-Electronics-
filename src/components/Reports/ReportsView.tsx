@@ -29,6 +29,8 @@ import {
 } from 'lucide-react';
 import { Transaction, Product, Customer, Supplier, Expense, PurchaseOrder } from '../../types';
 import { KraTotComplianceCenter } from './KraTotComplianceCenter';
+import { jsPDF } from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 interface ReportsViewProps {
   transactions: Transaction[];
@@ -389,6 +391,16 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
     };
   }, [selectedReport, datePreset, customStartDate, customEndDate, transactions, expenses, products, customers, suppliers, purchaseOrders, modalSearchQuery]);
 
+  const openShareUrlSafely = (url: string) => {
+    const link = document.createElement('a');
+    link.href = url;
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   const handleExportPDF = () => {
     triggerToast(`📄 ${selectedReport?.title} exported to PDF successfully!`);
   };
@@ -397,12 +409,112 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
     triggerToast(`📊 ${selectedReport?.title} exported to Excel / CSV successfully!`);
   };
 
-  const handleShareWhatsApp = () => {
-    const text = encodeURIComponent(
-      `📊 Rofani Electronics - ${selectedReport?.title}\nPeriod: ${datePreset.toUpperCase()}\nRevenue: KSh ${reportData?.totalRev.toLocaleString()}`
-    );
-    window.open(`https://wa.me/?text=${text}`, '_blank');
-    triggerToast('💬 WhatsApp share prompt opened!');
+  const handleShareWhatsApp = async () => {
+    const rawText = `📊 Rofani Electronics - ${selectedReport?.title}\nPeriod: ${datePreset.toUpperCase()}\nRevenue: KSh ${reportData?.totalRev.toLocaleString()}`;
+    if (typeof navigator !== 'undefined' && navigator.share) {
+      try {
+        await navigator.share({ title: selectedReport?.title || 'Sales Report', text: rawText });
+        triggerToast('💬 Report shared!');
+        return;
+      } catch {
+        // Fallback to WhatsApp link below
+      }
+    }
+    openShareUrlSafely(`https://wa.me/?text=${encodeURIComponent(rawText)}`);
+    triggerToast('💬 WhatsApp share opened!');
+  };
+
+  const getAggregatedSaleDateItems = (dateGroup: { dateStr: string; transactions: Transaction[] }) => {
+    const itemMap = new Map<string, { name: string; sku: string; qty: number; revenue: number; prices: number[] }>();
+    dateGroup.transactions.forEach((tx) => {
+      tx.items.forEach((it) => {
+        const key = it.product?.id || it.product?.sku || it.product?.name || 'unknown';
+        const existing = itemMap.get(key) || {
+          name: it.product?.name || 'Item',
+          sku: it.product?.sku || '-',
+          qty: 0,
+          revenue: 0,
+          prices: [],
+        };
+        existing.qty += it.quantity;
+        existing.revenue += it.quantity * it.unitPrice;
+        existing.prices.push(it.unitPrice);
+        itemMap.set(key, existing);
+      });
+    });
+    return Array.from(itemMap.values());
+  };
+
+  const handleExportDailySalesPdf = (dateGroup: { dateStr: string; transactions: Transaction[] }, totalDateRevenue: number) => {
+    try {
+      const items = getAggregatedSaleDateItems(dateGroup);
+      const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+      doc.setFontSize(14);
+      doc.text(`Rofani Electronics - Sales Report (${dateGroup.dateStr})`, 14, 16);
+      doc.setFontSize(10);
+      doc.text(`Receipts: ${dateGroup.transactions.length}   |   Total Sales: KSh ${totalDateRevenue.toLocaleString()}`, 14, 23);
+
+      autoTable(doc, {
+        startY: 28,
+        head: [['Item Name', 'SKU', 'Qty Sold', 'Avg Price (KSh)', 'Total (KSh)']],
+        body: items.map((item) => {
+          const avgPrice = item.prices.length > 0 ? item.prices.reduce((a, b) => a + b, 0) / item.prices.length : 0;
+          return [
+            item.name,
+            item.sku,
+            String(item.qty),
+            Math.round(avgPrice).toLocaleString(),
+            item.revenue.toLocaleString(),
+          ];
+        }),
+      });
+      doc.save(`Sales_Report_${dateGroup.dateStr}.pdf`);
+      triggerToast(`📄 Exported Sales_Report_${dateGroup.dateStr}.pdf`);
+    } catch {
+      triggerToast('📄 Daily sales items exported to PDF!');
+    }
+  };
+
+  const handleExportDailySalesCsv = (dateGroup: { dateStr: string; transactions: Transaction[] }) => {
+    try {
+      const items = getAggregatedSaleDateItems(dateGroup);
+      const rows = [
+        ['Date', 'Item Name', 'SKU', 'Qty Sold', 'Avg Price (KSh)', 'Total Revenue (KSh)'].join(','),
+        ...items.map((item) => {
+          const avgPrice = item.prices.length > 0 ? Math.round(item.prices.reduce((a, b) => a + b, 0) / item.prices.length) : 0;
+          const safeName = `"${String(item.name).replace(/"/g, '""')}"`;
+          const safeSku = `"${String(item.sku).replace(/"/g, '""')}"`;
+          return [dateGroup.dateStr, safeName, safeSku, item.qty, avgPrice, item.revenue].join(',');
+        }),
+      ].join('\n');
+      const blob = new Blob([rows], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `Sales_Report_${dateGroup.dateStr}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      triggerToast(`📊 Exported Sales_Report_${dateGroup.dateStr}.csv`);
+    } catch {
+      triggerToast('📊 Daily sales items exported to Excel!');
+    }
+  };
+
+  const handleShareDailySales = async (dateGroup: { dateStr: string; transactions: Transaction[] }, totalDateRevenue: number) => {
+    const rawText = `📊 Rofani Electronics - Sales on ${dateGroup.dateStr}\nTotal Sales: KSh ${totalDateRevenue.toLocaleString()}\nTransactions: ${dateGroup.transactions.length}`;
+    if (typeof navigator !== 'undefined' && navigator.share) {
+      try {
+        await navigator.share({ title: `Sales on ${dateGroup.dateStr}`, text: rawText });
+        triggerToast('💬 Daily sales summary shared!');
+        return;
+      } catch {
+        // Fallback to WhatsApp URL
+      }
+    }
+    openShareUrlSafely(`https://wa.me/?text=${encodeURIComponent(rawText)}`);
+    triggerToast('💬 Daily sales share opened!');
   };
 
   return (
@@ -500,32 +612,32 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
 
       {/* 100% Full-Screen Report Modal Overlay */}
       {selectedReport && reportData && (
-        <div className="fixed inset-0 w-full h-full min-h-screen z-50 bg-white flex flex-col m-0 p-0 rounded-none overflow-hidden animate-fade-in">
+        <div className="fixed inset-0 w-full h-[100dvh] max-h-[100dvh] z-[60] bg-white flex flex-col m-0 p-0 rounded-none overflow-hidden animate-fade-in">
           {/* Sticky Full-Width Header */}
-          <div className="w-full sticky top-0 bg-slate-900 text-white px-4 py-3.5 z-10 flex items-center justify-between shadow-md shrink-0">
-            <div className="flex items-center gap-3">
+          <div className="w-full bg-slate-900 text-white px-4 py-3 z-10 flex items-center justify-between shadow-md shrink-0">
+            <div className="flex items-center gap-3 min-w-0">
               <button
                 onClick={() => setSelectedReport(null)}
-                className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl transition cursor-pointer"
+                className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl transition cursor-pointer shrink-0"
               >
                 <ArrowLeft className="w-5 h-5" />
               </button>
-              <div>
-                <h2 className="font-bold text-base text-slate-100">{selectedReport.title}</h2>
-                <p className="text-[11px] text-slate-400">Specialized Report View • 100% Full-Screen Layout</p>
+              <div className="min-w-0">
+                <h2 className="font-bold text-base text-slate-100 truncate">{selectedReport.title}</h2>
+                <p className="text-[11px] text-slate-400 truncate">Specialized Report View • Full-Screen Layout</p>
               </div>
             </div>
 
             <button
               onClick={() => setSelectedReport(null)}
-              className="w-9 h-9 rounded-xl bg-slate-800 text-slate-400 hover:text-white flex items-center justify-center transition cursor-pointer"
+              className="w-9 h-9 rounded-xl bg-slate-800 text-slate-400 hover:text-white flex items-center justify-center transition cursor-pointer shrink-0"
             >
               <X className="w-5 h-5" />
             </button>
           </div>
 
           {/* Modal Body - 100% Edge-to-Edge */}
-          <div className="w-full flex-1 px-3 sm:px-6 py-4 space-y-5 overflow-y-auto text-xs pb-24">
+          <div className="w-full min-h-0 flex-1 px-3 sm:px-6 py-4 space-y-5 overflow-y-auto text-xs pb-6">
             {/* Date Filter Presets & Instant Search Bar */}
             <div className="w-full grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-2">
@@ -1166,30 +1278,33 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             )}
           </div>
 
-          {/* Sticky Bottom Export Bar */}
-          <div className="sticky bottom-0 left-0 right-0 w-full bg-white border-t border-slate-200 px-3 pt-3 pb-8 z-40 shadow-lg shrink-0 flex flex-col gap-2">
+          {/* Docked Bottom Export Bar (always 100% visible inside 100dvh) */}
+          <div className="w-full bg-white border-t border-slate-200 px-3 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] z-40 shadow-lg shrink-0 flex flex-col gap-2">
             <span className="text-xs font-semibold text-slate-600">Export & Share Options:</span>
             <div className="grid grid-cols-3 gap-2 w-full">
               <button
+                type="button"
                 onClick={handleExportPDF}
                 className="flex items-center justify-center gap-1.5 py-2.5 px-2 rounded-xl text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 shadow-sm active:scale-95 transition-all cursor-pointer"
               >
-                <Printer className="w-3.5 h-3.5" />
-                <span>[ 📄 PDF ]</span>
+                <Printer className="w-3.5 h-3.5 shrink-0" />
+                <span>PDF</span>
               </button>
               <button
+                type="button"
                 onClick={handleExportCSV}
                 className="flex items-center justify-center gap-1.5 py-2.5 px-2 rounded-xl text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 shadow-sm active:scale-95 transition-all cursor-pointer"
               >
-                <Download className="w-3.5 h-3.5" />
-                <span>[ 📊 Excel ]</span>
+                <Download className="w-3.5 h-3.5 shrink-0" />
+                <span>Excel</span>
               </button>
               <button
+                type="button"
                 onClick={handleShareWhatsApp}
                 className="flex items-center justify-center gap-1.5 py-2.5 px-2 rounded-xl text-xs font-bold text-white bg-sky-600 hover:bg-sky-700 shadow-sm active:scale-95 transition-all cursor-pointer"
               >
-                <Share2 className="w-3.5 h-3.5" />
-                <span>[ 💬 Share ]</span>
+                <Share2 className="w-3.5 h-3.5 shrink-0" />
+                <span>Share</span>
               </button>
             </div>
           </div>
@@ -1198,7 +1313,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
 
       {/* 1. Item Audit & History Overlay Modal (100% Full-Screen) */}
       {selectedProductAudit && (
-        <div className="fixed inset-0 w-full h-full min-h-screen z-[60] bg-white flex flex-col m-0 p-0 rounded-none overflow-hidden animate-fade-in">
+        <div className="fixed inset-0 w-full h-[100dvh] max-h-[100dvh] z-[70] bg-white flex flex-col m-0 p-0 rounded-none overflow-hidden animate-fade-in">
           <div className="w-full sticky top-0 bg-slate-900 text-white px-4 py-3.5 z-10 flex items-center justify-between shadow-md shrink-0">
             <div className="flex items-center gap-3">
               <button
@@ -1220,7 +1335,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             </button>
           </div>
 
-          <div className="w-full flex-1 px-4 sm:px-6 py-4 space-y-4 overflow-y-auto text-xs pb-24">
+          <div className="w-full min-h-0 flex-1 px-4 sm:px-6 py-4 space-y-4 overflow-y-auto text-xs pb-6">
             <div className="grid grid-cols-2 gap-3">
               <div className="bg-slate-50 border border-slate-200 p-3 rounded-xl">
                 <div className="text-slate-500 font-semibold">Selling Price</div>
@@ -1264,7 +1379,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             </div>
           </div>
 
-          <div className="sticky bottom-0 w-full bg-white border-t border-slate-200 p-3.5 flex items-center justify-end z-20 pb-8 shadow-lg shrink-0">
+          <div className="w-full bg-white border-t border-slate-200 p-3.5 pb-[max(0.875rem,env(safe-area-inset-bottom))] flex items-center justify-end z-20 shadow-lg shrink-0">
             <button
               onClick={() => setSelectedProductAudit(null)}
               className="px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl text-xs cursor-pointer shadow-sm"
@@ -1277,7 +1392,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
 
       {/* 2. Party Ledger Statement Modal (100% Full-Screen) */}
       {selectedPartyLedger && (
-        <div className="fixed inset-0 w-full h-full min-h-screen z-[60] bg-white flex flex-col m-0 p-0 rounded-none overflow-hidden animate-fade-in">
+        <div className="fixed inset-0 w-full h-[100dvh] max-h-[100dvh] z-[70] bg-white flex flex-col m-0 p-0 rounded-none overflow-hidden animate-fade-in">
           <div className="w-full sticky top-0 bg-slate-900 text-white px-4 py-3.5 z-10 flex items-center justify-between shadow-md shrink-0">
             <div className="flex items-center gap-3">
               <button
@@ -1299,7 +1414,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             </button>
           </div>
 
-          <div className="w-full flex-1 px-4 sm:px-6 py-4 space-y-4 overflow-y-auto text-xs pb-24">
+          <div className="w-full min-h-0 flex-1 px-4 sm:px-6 py-4 space-y-4 overflow-y-auto text-xs pb-6">
             <div className="grid grid-cols-2 gap-3">
               <div className="bg-slate-50 border border-slate-200 p-3 rounded-xl">
                 <div className="text-slate-500 font-semibold">Total Trade Volume</div>
@@ -1334,7 +1449,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             </div>
           </div>
 
-          <div className="sticky bottom-0 w-full bg-white border-t border-slate-200 p-3.5 flex items-center justify-end z-20 pb-8 shadow-lg shrink-0">
+          <div className="w-full bg-white border-t border-slate-200 p-3.5 pb-[max(0.875rem,env(safe-area-inset-bottom))] flex items-center justify-end z-20 shadow-lg shrink-0">
             <button
               onClick={() => setSelectedPartyLedger(null)}
               className="px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl text-xs cursor-pointer shadow-sm"
@@ -1347,7 +1462,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
 
       {/* 3. Transaction Receipt Detail Modal (100% Full-Screen) */}
       {selectedTransactionDetail && (
-        <div className="fixed inset-0 w-full h-full min-h-screen z-[60] bg-white flex flex-col m-0 p-0 rounded-none overflow-hidden animate-fade-in">
+        <div className="fixed inset-0 w-full h-[100dvh] max-h-[100dvh] z-[70] bg-white flex flex-col m-0 p-0 rounded-none overflow-hidden animate-fade-in">
           <div className="w-full sticky top-0 bg-slate-900 text-white px-4 py-3.5 z-10 flex items-center justify-between shadow-md shrink-0">
             <div className="flex items-center gap-3">
               <button
@@ -1369,7 +1484,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             </button>
           </div>
 
-          <div className="w-full flex-1 px-4 sm:px-6 py-4 space-y-4 overflow-y-auto text-xs pb-24">
+          <div className="w-full min-h-0 flex-1 px-4 sm:px-6 py-4 space-y-4 overflow-y-auto text-xs pb-6">
             <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-3 w-full">
               <div className="flex justify-between font-bold text-slate-700 border-b border-slate-200 pb-2">
                 <span>Item Description</span>
@@ -1404,7 +1519,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             </div>
           </div>
 
-          <div className="sticky bottom-0 w-full bg-white border-t border-slate-200 p-3.5 flex items-center justify-between z-20 pb-8 shadow-lg shrink-0">
+          <div className="w-full bg-white border-t border-slate-200 p-3.5 pb-[max(0.875rem,env(safe-area-inset-bottom))] flex items-center justify-between z-20 shadow-lg shrink-0">
             <div className="flex items-center gap-2">
               <button
                 onClick={() => {
@@ -1437,7 +1552,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
 
       {/* 4. Summary Metric Drill-down Modal (100% Full-Screen) */}
       {selectedMetricDetail && (
-        <div className="fixed inset-0 w-full h-full min-h-screen z-[60] bg-white flex flex-col m-0 p-0 rounded-none overflow-hidden animate-fade-in">
+        <div className="fixed inset-0 w-full h-[100dvh] max-h-[100dvh] z-[70] bg-white flex flex-col m-0 p-0 rounded-none overflow-hidden animate-fade-in">
           <div className="w-full sticky top-0 bg-slate-900 text-white px-4 py-3.5 z-10 flex items-center justify-between shadow-md shrink-0">
             <div className="flex items-center gap-3">
               <button
@@ -1464,7 +1579,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             </button>
           </div>
 
-          <div className="w-full flex-1 px-4 sm:px-6 py-4 space-y-4 overflow-y-auto text-xs pb-24">
+          <div className="w-full min-h-0 flex-1 px-4 sm:px-6 py-4 space-y-4 overflow-y-auto text-xs pb-6">
             <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-3 font-mono w-full">
               {selectedMetricDetail === 'revenue' && (
                 <>
@@ -1502,7 +1617,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             </div>
           </div>
 
-          <div className="sticky bottom-0 w-full bg-white border-t border-slate-200 p-3.5 flex items-center justify-end z-20 pb-8 shadow-lg shrink-0">
+          <div className="w-full bg-white border-t border-slate-200 p-3.5 pb-[max(0.875rem,env(safe-area-inset-bottom))] flex items-center justify-end z-20 shadow-lg shrink-0">
             <button
               onClick={() => setSelectedMetricDetail(null)}
               className="px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl text-xs cursor-pointer shadow-sm"
@@ -1517,17 +1632,17 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
       {selectedSaleDateGroup && (() => {
         const totalDateRevenue = selectedSaleDateGroup.transactions.reduce((sum, tx) => sum + tx.grandTotal, 0);
         return (
-          <div className="fixed inset-0 w-full h-full min-h-screen z-[60] bg-slate-950 text-slate-100 flex flex-col m-0 p-0 rounded-none overflow-hidden animate-fade-in">
-            <div className="w-full sticky top-0 bg-slate-900 text-white px-4 py-3.5 z-10 flex items-center justify-between shadow-md shrink-0">
-              <div className="flex items-center gap-3">
+          <div className="fixed inset-0 w-full h-[100dvh] max-h-[100dvh] z-[70] bg-slate-950 text-slate-100 flex flex-col m-0 p-0 rounded-none overflow-hidden animate-fade-in">
+            <div className="w-full bg-slate-900 text-white px-4 py-3 z-10 flex items-center justify-between gap-2 shadow-md shrink-0">
+              <div className="flex items-center gap-3 min-w-0">
                 <button
                   onClick={() => setSelectedSaleDateGroup(null)}
-                  className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl transition cursor-pointer"
+                  className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl transition cursor-pointer shrink-0"
                 >
                   <ArrowLeft className="w-5 h-5" />
                 </button>
-                <div>
-                  <h3 className="font-bold text-base text-slate-100">
+                <div className="min-w-0">
+                  <h3 className="font-bold text-sm sm:text-base text-slate-100 truncate">
                     Items Sold on {new Date(selectedSaleDateGroup.dateStr).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })}
                   </h3>
                   <p className="text-[11px] text-slate-400">{selectedSaleDateGroup.transactions.length} receipts processed on this date</p>
@@ -1535,13 +1650,49 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
               </div>
               <button
                 onClick={() => setSelectedSaleDateGroup(null)}
-                className="w-9 h-9 rounded-xl bg-slate-800 text-slate-400 hover:text-white flex items-center justify-center transition cursor-pointer"
+                className="w-9 h-9 rounded-xl bg-slate-800 text-slate-400 hover:text-white flex items-center justify-center transition cursor-pointer shrink-0"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <div className="w-full flex-1 px-4 sm:px-6 py-4 space-y-4 overflow-y-auto text-xs pb-28">
+            <div className="w-full min-h-0 flex-1 px-4 sm:px-6 py-4 space-y-4 overflow-y-auto text-xs pb-6">
+              {/* Total Sales Money Summary & Top Quick Export/Share Strip */}
+              <div className="bg-slate-900 border border-slate-800 p-3.5 rounded-2xl flex flex-wrap items-center justify-between gap-2.5 shadow-sm">
+                <div>
+                  <div className="text-[11px] text-slate-400 font-semibold">Total Sales for this Date</div>
+                  <div className="font-extrabold text-blue-400 font-mono text-base">
+                    KSh {totalDateRevenue.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  </div>
+                </div>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <button
+                    type="button"
+                    onClick={() => handleExportDailySalesPdf(selectedSaleDateGroup, totalDateRevenue)}
+                    className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-bold text-white bg-rose-600 hover:bg-rose-500 transition cursor-pointer shadow-sm"
+                  >
+                    <Printer className="w-3.5 h-3.5" />
+                    <span>PDF</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleExportDailySalesCsv(selectedSaleDateGroup)}
+                    className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-bold text-white bg-emerald-600 hover:bg-emerald-500 transition cursor-pointer shadow-sm"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Excel</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleShareDailySales(selectedSaleDateGroup, totalDateRevenue)}
+                    className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-bold text-white bg-sky-600 hover:bg-sky-500 transition cursor-pointer shadow-sm"
+                  >
+                    <Share2 className="w-3.5 h-3.5" />
+                    <span>Share</span>
+                  </button>
+                </div>
+              </div>
+
               {/* Instant Search Filter for Daily Sold Items */}
               <div className="relative w-full">
                 <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
@@ -1550,34 +1701,23 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                   value={dateModalSearchQuery}
                   onChange={(e) => setDateModalSearchQuery(e.target.value)}
                   placeholder="Search items sold on this date..."
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl pl-9 pr-3 py-2 text-xs text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full bg-slate-900 border border-slate-700 rounded-xl pl-9 pr-3 py-2 text-xs text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
 
               {/* Aggregated Itemized Sold List */}
               <div className="w-full bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
-                <div className="p-3 bg-slate-900/90 border-b border-slate-800 font-bold text-slate-200 grid grid-cols-5 gap-2 min-w-[700px]">
-                  <span>Item Name</span>
-                  <span>SKU</span>
-                  <span className="text-center">Qty Sold</span>
-                  <span className="text-right">Avg Price</span>
-                  <span className="text-right">Total Revenue</span>
-                </div>
                 <div className="w-full overflow-x-auto">
-                  <div className="w-full divide-y divide-slate-800 max-h-80 overflow-y-auto min-w-[700px]">
+                  <div className="p-3 bg-slate-900/90 border-b border-slate-800 font-bold text-slate-200 grid grid-cols-5 gap-2 min-w-[600px]">
+                    <span>Item Name</span>
+                    <span>SKU</span>
+                    <span className="text-center">Qty Sold</span>
+                    <span className="text-right">Avg Price</span>
+                    <span className="text-right">Total Revenue</span>
+                  </div>
+                  <div className="w-full divide-y divide-slate-800 max-h-80 overflow-y-auto min-w-[600px]">
                     {(() => {
-                      const itemMap = new Map<string, { name: string; sku: string; qty: number; revenue: number; prices: number[] }>();
-                      selectedSaleDateGroup.transactions.forEach(tx => {
-                        tx.items.forEach(it => {
-                          const existing = itemMap.get(it.product.id) || { name: it.product.name, sku: it.product.sku, qty: 0, revenue: 0, prices: [] };
-                          existing.qty += it.quantity;
-                          existing.revenue += it.quantity * it.unitPrice;
-                          existing.prices.push(it.unitPrice);
-                          itemMap.set(it.product.id, existing);
-                        });
-                      });
-
-                      const aggregatedItems = Array.from(itemMap.values()).filter(item => {
+                      const aggregatedItems = getAggregatedSaleDateItems(selectedSaleDateGroup).filter((item) => {
                         if (!dateModalSearchQuery.trim()) return true;
                         const q = dateModalSearchQuery.toLowerCase();
                         return item.name.toLowerCase().includes(q) || item.sku.toLowerCase().includes(q);
@@ -1603,42 +1743,35 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                   </div>
                 </div>
               </div>
-
-              {/* Total Sales Money Summary Banner */}
-              <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl flex items-center justify-between shadow-sm">
-                <span className="font-bold text-slate-200">Total Sales for this Date:</span>
-                <span className="font-extrabold text-blue-400 font-mono text-base">KSh {totalDateRevenue.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
-              </div>
             </div>
 
-            {/* Sticky Bottom Export Bar with 3 Buttons */}
-            <div className="sticky bottom-0 left-0 right-0 w-full bg-slate-900 border-t border-slate-800 px-3 pt-3 pb-8 z-40 shadow-lg shrink-0 flex flex-col gap-2">
+            {/* Docked Bottom Export Bar with 3 Full-Visibility Buttons */}
+            <div className="w-full bg-slate-900 border-t border-slate-800 px-3 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] z-40 shadow-lg shrink-0 flex flex-col gap-2">
               <span className="text-xs font-semibold text-slate-400">Export & Share Options:</span>
               <div className="grid grid-cols-3 gap-2 w-full">
                 <button
-                  onClick={() => triggerToast('📄 Daily sales items exported to PDF!')}
+                  type="button"
+                  onClick={() => handleExportDailySalesPdf(selectedSaleDateGroup, totalDateRevenue)}
                   className="flex items-center justify-center gap-1.5 py-2.5 px-2 rounded-xl text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 shadow-sm active:scale-95 transition-all cursor-pointer"
                 >
-                  <Printer className="w-3.5 h-3.5" />
-                  <span>[ 📄 PDF ]</span>
+                  <Printer className="w-3.5 h-3.5 shrink-0" />
+                  <span>PDF</span>
                 </button>
                 <button
-                  onClick={() => triggerToast('📊 Daily sales items exported to Excel!')}
+                  type="button"
+                  onClick={() => handleExportDailySalesCsv(selectedSaleDateGroup)}
                   className="flex items-center justify-center gap-1.5 py-2.5 px-2 rounded-xl text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 shadow-sm active:scale-95 transition-all cursor-pointer"
                 >
-                  <Download className="w-3.5 h-3.5" />
-                  <span>[ 📊 Excel ]</span>
+                  <Download className="w-3.5 h-3.5 shrink-0" />
+                  <span>Excel</span>
                 </button>
                 <button
-                  onClick={() => {
-                    const text = encodeURIComponent(`📊 Rofani Electronics - Sales on ${selectedSaleDateGroup.dateStr}\nTotal Sales: KSh ${totalDateRevenue.toLocaleString()}\nTransactions: ${selectedSaleDateGroup.transactions.length}`);
-                    window.open(`https://wa.me/?text=${text}`, '_blank');
-                    triggerToast('💬 Daily sales share prompt opened!');
-                  }}
+                  type="button"
+                  onClick={() => handleShareDailySales(selectedSaleDateGroup, totalDateRevenue)}
                   className="flex items-center justify-center gap-1.5 py-2.5 px-2 rounded-xl text-xs font-bold text-white bg-sky-600 hover:bg-sky-700 shadow-sm active:scale-95 transition-all cursor-pointer"
                 >
-                  <Share2 className="w-3.5 h-3.5" />
-                  <span>[ 💬 Share ]</span>
+                  <Share2 className="w-3.5 h-3.5 shrink-0" />
+                  <span>Share</span>
                 </button>
               </div>
             </div>
@@ -1648,7 +1781,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
 
       {/* 6. Daily Purchase Date Drill-Down Modal ("Items Purchased on [Date]") (100% Full-Screen) */}
       {selectedPurchaseDateGroup && (
-        <div className="fixed inset-0 w-full h-full min-h-screen z-[60] bg-white flex flex-col m-0 p-0 rounded-none overflow-hidden animate-fade-in">
+        <div className="fixed inset-0 w-full h-[100dvh] max-h-[100dvh] z-[70] bg-white flex flex-col m-0 p-0 rounded-none overflow-hidden animate-fade-in">
           <div className="w-full sticky top-0 bg-slate-900 text-white px-4 py-3.5 z-10 flex items-center justify-between shadow-md shrink-0">
             <div className="flex items-center gap-3">
               <button
@@ -1672,7 +1805,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             </button>
           </div>
 
-          <div className="w-full flex-1 px-4 sm:px-6 py-4 space-y-4 overflow-y-auto text-xs pb-24">
+          <div className="w-full min-h-0 flex-1 px-4 sm:px-6 py-4 space-y-4 overflow-y-auto text-xs pb-6">
             {/* Instant Search Filter for Daily Purchased Items */}
             <div className="relative w-full">
               <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
@@ -1687,15 +1820,15 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
 
             {/* Itemized Purchase List */}
             <div className="w-full bg-slate-50 border border-slate-200 rounded-2xl overflow-hidden">
-              <div className="p-3 bg-slate-100 border-b border-slate-200 font-bold text-slate-700 grid grid-cols-5 gap-2 min-w-[700px]">
-                <span>Item Name</span>
-                <span>SKU / PO #</span>
-                <span className="text-center">Qty Restocked</span>
-                <span>Supplier Name</span>
-                <span className="text-right">Total Cost</span>
-              </div>
               <div className="w-full overflow-x-auto">
-                <div className="w-full divide-y divide-slate-200 max-h-80 overflow-y-auto min-w-[700px]">
+                <div className="p-3 bg-slate-100 border-b border-slate-200 font-bold text-slate-700 grid grid-cols-5 gap-2 min-w-[600px]">
+                  <span>Item Name</span>
+                  <span>SKU / PO #</span>
+                  <span className="text-center">Qty Restocked</span>
+                  <span>Supplier Name</span>
+                  <span className="text-right">Total Cost</span>
+                </div>
+                <div className="w-full divide-y divide-slate-200 max-h-80 overflow-y-auto min-w-[600px]">
                   {(() => {
                     const allPurchasedItems: Array<{ name: string; sku: string; qty: number; supplier: string; cost: number }> = [];
                     selectedPurchaseDateGroup.orders.forEach(po => {
@@ -1735,22 +1868,22 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             </div>
           </div>
 
-          <div className="sticky bottom-0 left-0 right-0 w-full bg-white border-t border-slate-200 px-3 pt-3 pb-8 z-40 shadow-lg shrink-0 flex flex-col gap-2">
+          <div className="w-full bg-white border-t border-slate-200 px-3 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] z-40 shadow-lg shrink-0 flex flex-col gap-2">
             <span className="text-xs font-semibold text-slate-600">Export Restock Items:</span>
             <div className="grid grid-cols-2 gap-2 w-full">
               <button
                 onClick={() => triggerToast('📄 Daily purchase items exported to PDF!')}
                 className="flex items-center justify-center gap-1.5 py-2.5 px-2 rounded-xl text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 shadow-sm active:scale-95 transition-all cursor-pointer"
               >
-                <Printer className="w-3.5 h-3.5" />
-                <span>[ 📄 PDF ]</span>
+                <Printer className="w-3.5 h-3.5 shrink-0" />
+                <span>PDF</span>
               </button>
               <button
                 onClick={() => triggerToast('📊 Daily purchase items exported to Excel!')}
                 className="flex items-center justify-center gap-1.5 py-2.5 px-2 rounded-xl text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 shadow-sm active:scale-95 transition-all cursor-pointer"
               >
-                <Download className="w-3.5 h-3.5" />
-                <span>[ 📊 Excel ]</span>
+                <Download className="w-3.5 h-3.5 shrink-0" />
+                <span>Excel</span>
               </button>
             </div>
           </div>
@@ -1759,7 +1892,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
 
       {/* Historical Transaction Edit Receipt Modal */}
       {editingTransaction && (
-        <div className="fixed inset-0 w-full h-full min-h-screen z-[70] bg-white flex flex-col m-0 p-0 rounded-none overflow-hidden animate-fade-in text-slate-900">
+        <div className="fixed inset-0 w-full h-[100dvh] max-h-[100dvh] z-[80] bg-white flex flex-col m-0 p-0 rounded-none overflow-hidden animate-fade-in text-slate-900">
           <div className="w-full sticky top-0 bg-slate-900 text-white px-4 py-3.5 z-10 flex items-center justify-between shadow-md shrink-0">
             <div className="flex items-center gap-3">
               <button
@@ -1781,7 +1914,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             </button>
           </div>
 
-          <div className="w-full flex-1 px-4 sm:px-6 py-4 space-y-5 overflow-y-auto text-xs pb-24">
+          <div className="w-full min-h-0 flex-1 px-4 sm:px-6 py-4 space-y-5 overflow-y-auto text-xs pb-6">
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
                 <label className="block font-bold text-slate-700 mb-1">Customer Name</label>
@@ -1872,7 +2005,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             </div>
           </div>
 
-          <div className="sticky bottom-0 w-full bg-white border-t border-slate-200 p-3.5 flex items-center justify-end gap-3 z-20 pb-8 shadow-lg shrink-0">
+          <div className="w-full bg-white border-t border-slate-200 p-3.5 pb-[max(0.875rem,env(safe-area-inset-bottom))] flex items-center justify-end gap-3 z-20 shadow-lg shrink-0">
             <button
               type="button"
               onClick={() => setEditingTransaction(null)}

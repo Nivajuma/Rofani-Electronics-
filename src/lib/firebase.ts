@@ -34,15 +34,15 @@ try {
 // Initialize Firebase App instance safely
 export const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 
-// Initialize Firestore database using memoryLocalCache and long polling.
-// Initialize Firestore database using standard WebChannel duplex streams
-// ignoreUndefinedProperties ensures Firestore ignores undefined fields without throwing errors
+// Initialize Firestore database with ignoreUndefinedProperties and experimentalForceLongPolling
+// so restricted mobile, proxy, and iframe networks never hang on WebChannel streams.
 export const db: Firestore = (() => {
   try {
     return initializeFirestore(
       app,
       {
         ignoreUndefinedProperties: true,
+        experimentalForceLongPolling: true,
       },
       firebaseConfig.firestoreDatabaseId
     );
@@ -151,12 +151,17 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
   if (
     lowerMsg.includes("could not reach cloud firestore backend") ||
     lowerMsg.includes("didn't respond within 10 seconds") ||
+    lowerMsg.includes("timed out") ||
+    lowerMsg.includes("aborterror") ||
+    lowerMsg.includes("failed to fetch") ||
+    lowerMsg.includes("networkerror") ||
+    lowerMsg.includes("load failed") ||
     lowerMsg.includes("the client is offline") ||
     lowerMsg.includes("failed to get document because the client is offline") ||
     lowerMsg.includes("unavailable") ||
     lowerMsg.includes("offline")
   ) {
-    // POS gracefully runs with local memory/storage when offline
+    // POS gracefully runs with local memory/storage when offline or temporarily unreachable
     return errInfo;
   }
 

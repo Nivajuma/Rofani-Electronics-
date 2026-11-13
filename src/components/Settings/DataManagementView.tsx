@@ -166,7 +166,7 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
     setErrorMessage(null);
     setCloudSyncFeedback(null);
     setUploadProgress({
-      label: `Step 1/5: Uploading ${products.length} products in safe batches of 25...`,
+      label: `Step 1/5: Uploading ${products.length} products in safe batches...`,
       percent: 5,
     });
 

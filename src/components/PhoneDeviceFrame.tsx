@@ -284,8 +284,8 @@ export const PhoneDeviceFrame: React.FC<PhoneDeviceFrameProps> = ({
         </div>
 
         {/* MOBILE HEADER BAR */}
-        <div className="bg-slate-900 border-b border-slate-800 p-2.5 flex items-center justify-between shrink-0 z-30">
-          <div className="flex items-center gap-2 min-w-0">
+        <div className="bg-slate-900 border-b border-slate-800 p-2.5 flex flex-wrap items-center justify-between gap-2 shrink-0 z-30">
+          <div className="flex items-center gap-2 min-w-0 shrink">
             <div className="w-7 h-7 rounded-lg bg-blue-600 text-white flex items-center justify-center font-black text-xs shrink-0 shadow-md">
               R
             </div>
@@ -297,7 +297,7 @@ export const PhoneDeviceFrame: React.FC<PhoneDeviceFrameProps> = ({
             </div>
           </div>
 
-          <div className="flex items-center gap-1.5 shrink-0">
+          <div className="flex items-center gap-1.5 flex-wrap justify-end max-w-full">
             {/* Real-time Network & Offline Status Indicator */}
             <NetworkStatusBadge onClick={onOpenCloudSync} />
 
@@ -386,7 +386,7 @@ export const PhoneDeviceFrame: React.FC<PhoneDeviceFrameProps> = ({
 
             <button
               onClick={() => setShowMobileMoreMenu(!showMobileMoreMenu)}
-              className="p-1.5 bg-slate-800 text-slate-300 hover:text-white rounded-lg border border-slate-700 cursor-pointer"
+              className="p-1.5 bg-slate-800 text-slate-300 hover:text-white rounded-lg border border-slate-700 cursor-pointer shrink-0"
               title="Mobile Quick Menu"
             >
               {showMobileMoreMenu ? <X className="w-4 h-4 text-rose-400" /> : <Menu className="w-4 h-4" />}

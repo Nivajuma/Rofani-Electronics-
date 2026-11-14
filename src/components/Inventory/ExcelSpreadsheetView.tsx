@@ -179,7 +179,7 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
     const updatedProduct: Product = {
       ...p,
       [field]: updatedVal,
-      updatedAt: new Date().toISOString().slice(0, 10),
+      updatedAt: new Date().toISOString(),
     };
 
     onSaveProduct(updatedProduct);
@@ -188,7 +188,7 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
 
   // Add New Blank Row (like Excel Insert Row)
   const handleAddExcelRow = () => {
-    const now = new Date().toISOString().slice(0, 10);
+    const now = new Date().toISOString();
     const defaultCat = categories[0]?.name || 'General';
     const defaultSupp = suppliers[0]?.name || 'Direct Wholesale';
     const defaultSuppId = suppliers[0]?.id || 'sup-1';

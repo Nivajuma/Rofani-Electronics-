@@ -529,10 +529,13 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
         if (!cleanDesc || /^product photo captured/i.test(cleanDesc)) {
           cleanDesc = `${cleanName} (${item.category || 'Store Item'}). Ready for sale.`;
         }
+        const nowIso = new Date().toISOString();
         return {
           ...item,
           name: cleanName,
           description: cleanDesc,
+          createdAt: item.createdAt || nowIso,
+          updatedAt: nowIso,
         };
       });
 
@@ -811,8 +814,8 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
             supplierId: activeSupplier?.id || '',
             supplierName: activeSupplier?.name || 'Direct Wholesale',
             description: '',
-            createdAt: new Date().toISOString().slice(0, 10),
-            updatedAt: new Date().toISOString().slice(0, 10),
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
           };
           return { ...base, imageUrl: dataUrl };
         });
@@ -912,8 +915,8 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           supplierId: targetSupplierId,
           supplierName: targetSupplierName,
           imageUrl: imageDataUrl,
-          createdAt: new Date().toISOString().slice(0, 10),
-          updatedAt: new Date().toISOString().slice(0, 10),
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
         };
 
         setDraftItems((prev) => [stagedDraftItem, ...prev]);
@@ -942,8 +945,8 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
             supplierId: targetSupplierId,
             supplierName: targetSupplierName,
             description: itemDescription,
-            createdAt: new Date().toISOString().slice(0, 10),
-            updatedAt: new Date().toISOString().slice(0, 10),
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
           };
 
           return {
@@ -988,8 +991,8 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
         supplierName: targetSupplierName,
         description: `${fallbackName}. Product photo attached. Please verify and confirm specifications.`,
         imageUrl: imageDataUrl,
-        createdAt: new Date().toISOString().slice(0, 10),
-        updatedAt: new Date().toISOString().slice(0, 10),
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
       };
 
       if (showAiScanModal && !isManualInModal && !showModal) {
@@ -1053,8 +1056,8 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           supplierId: suppliers[0]?.id || '',
           supplierName: suppliers[0]?.name || 'Direct Wholesale',
           description: '',
-          createdAt: new Date().toISOString().slice(0, 10),
-          updatedAt: new Date().toISOString().slice(0, 10),
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
         };
         return { ...base, name: base.name || initialTitle, imageUrl: compressedDataUrl };
       });
@@ -1167,8 +1170,8 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           supplierId: activeSupplier?.id || '',
           supplierName: activeSupplier?.name || 'Direct Wholesale',
           imageUrl: compressedDataUrl,
-          createdAt: new Date().toISOString().slice(0, 10),
-          updatedAt: new Date().toISOString().slice(0, 10),
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
         };
 
         // Core Requirement 2: Save to local draft state - DO NOT call setDoc directly to Firestore!
@@ -1561,8 +1564,8 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
       unit: 'pcs',
       supplierId: defaultSupId,
       supplierName: defaultSupName,
-      createdAt: new Date().toISOString().slice(0, 10),
-      updatedAt: new Date().toISOString().slice(0, 10),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
     });
     setShowModal(true);
   };
@@ -1662,6 +1665,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
       ? `${finalProdName} (${finalCat} - ${finalSub}). Saved to inventory.`
       : cleanProdDesc;
 
+    const nowIso = new Date().toISOString();
     const prodToSave: Product = {
       ...(editingProduct as Product),
       name: finalProdName,
@@ -1676,6 +1680,8 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
       stockQuantity: parseIntNum(editingProduct.stockQuantity, 0),
       minStockAlert: parseIntNum(editingProduct.minStockAlert, 0),
       imageUrl: editingProduct.imageUrl || '',
+      createdAt: editingProduct.createdAt || nowIso,
+      updatedAt: nowIso,
     };
 
     onSaveProduct(prodToSave);

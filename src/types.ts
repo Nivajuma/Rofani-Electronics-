@@ -40,6 +40,9 @@ export type Role = CoreStoreRole | Granular21Role | (string & {});
 
 export type CommissionType = 'percentage' | 'tiered' | 'fixed_per_sale' | 'profit_share';
 
+export type PayType = 'monthly' | 'daily' | 'hourly';
+export type PayCycle = 'Monthly' | 'Weekly' | 'Bi-Weekly' | 'Daily';
+
 export interface CommissionTier {
   minSales: number;
   maxSales?: number;
@@ -103,6 +106,10 @@ export interface User {
   profitShareRate?: number; // percentage of gross profit e.g. 15%
   biometricEnrolled?: boolean; // Fingerprint / Touch ID biometric authentication enabled
   biometricEnrolledAt?: string; // Timestamp of biometric registration
+  payType?: PayType; // 'monthly' | 'daily' | 'hourly'
+  payCycle?: PayCycle; // 'Monthly' | 'Weekly' | 'Bi-Weekly' | 'Daily'
+  basePayRate?: number; // Monthly salary, daily shift wage, or hourly rate in KSh
+  fixedAllowance?: number; // Recurring transport/lunch/housing allowance in KSh
 }
 
 export type PaymentMethod = 'cash' | 'credit_card' | 'cheque' | 'mpesa' | 'upi' | 'bank_transfer';
@@ -288,6 +295,35 @@ export interface StaffCommissionPayout {
   paymentMethod?: PaymentMethod | 'salary_addition';
   referenceNo?: string;
   notes?: string;
+}
+
+export interface WorkerSalaryPayout {
+  id: string;
+  employeeId: string;
+  employeeName: string;
+  role: string;
+  payType: PayType;
+  payCycle: PayCycle;
+  payPeriodLabel: string;
+  startDate: string;
+  endDate: string;
+  baseRate: number;
+  unitsWorked: number;
+  basePayEarned: number;
+  allowances: number;
+  overtimeOrBonus: number;
+  grossPay: number;
+  loanDeduction: number;
+  deductedLoanId?: string;
+  otherDeductions: number;
+  otherDeductionReason?: string;
+  netPayPaid: number;
+  paymentMethod: PaymentMethod;
+  referenceNo?: string;
+  notes?: string;
+  paidBy: string;
+  paidAt: string;
+  status: 'Paid';
 }
 
 export interface WorkerLoanRepayment {

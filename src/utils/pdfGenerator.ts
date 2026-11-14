@@ -1,6 +1,6 @@
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { Transaction, Product, Customer, Supplier, Expense, StaffCommissionPayout, User, RestockRecord } from '../types';
+import { Transaction, Product, Customer, Supplier, Expense, StaffCommissionPayout, WorkerSalaryPayout, User, RestockRecord } from '../types';
 
 /**
  * Common Header styling for reports
@@ -927,4 +927,123 @@ export const exportItemAuditReportPDF = (params: {
   doc.save(filename);
   return filename;
 };
+
+/**
+ * 16. Export Official Worker Salary / Wage Payslip PDF
+ */
+export const exportSalaryPayslipPDF = (payout: WorkerSalaryPayout) => {
+  const doc = new jsPDF();
+  addReportHeader(doc, 'OFFICIAL WORKER SALARY / WAGE PAYSLIP', `Payslip ID: ${payout.id}`);
+
+  doc.setFontSize(11);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(15, 23, 42);
+  doc.text('EMPLOYEE PAYROLL & EARNINGS STATEMENT', 14, 36);
+
+  doc.setFontSize(9);
+  doc.setFont('helvetica', 'normal');
+  doc.text(`Employee Name: ${payout.employeeName}`, 14, 43);
+  doc.text(`Role / Position: ${payout.role}`, 14, 49);
+  doc.text(`Pay Period: ${payout.payPeriodLabel} (${payout.startDate} to ${payout.endDate})`, 14, 55);
+
+  const payTypeLabel =
+    payout.payType === 'monthly'
+      ? 'Monthly Salary'
+      : payout.payType === 'daily'
+      ? 'Daily Wage'
+      : 'Hourly Rate';
+
+  doc.text(`Pay Structure: ${payTypeLabel} (${payout.payCycle})`, 115, 43);
+  doc.text(`Payment Method: ${(payout.paymentMethod || 'mpesa').toUpperCase()}`, 115, 49);
+  doc.text(`Reference No: ${payout.referenceNo || 'N/A'}`, 115, 55);
+
+  const unitLabel =
+    payout.payType === 'monthly'
+      ? `${payout.unitsWorked} month(s)`
+      : payout.payType === 'daily'
+      ? `${payout.unitsWorked} day(s)`
+      : `${payout.unitsWorked} hr(s)`;
+
+  const rows = [
+    [`Base Rate (${payTypeLabel})`, `KSh ${payout.baseRate.toLocaleString(undefined, { minimumFractionDigits: 2 })}`],
+    ['Units / Attendance Worked', unitLabel],
+    ['Base Salary / Wage Earned', `KSh ${payout.basePayEarned.toLocaleString(undefined, { minimumFractionDigits: 2 })}`],
+    ['Fixed Allowances (Transport / Meal / Housing)', `KSh ${payout.allowances.toLocaleString(undefined, { minimumFractionDigits: 2 })}`],
+    ['Overtime / Bonus / Additions', `KSh ${payout.overtimeOrBonus.toLocaleString(undefined, { minimumFractionDigits: 2 })}`],
+    ['GROSS EARNINGS', `KSh ${payout.grossPay.toLocaleString(undefined, { minimumFractionDigits: 2 })}`],
+    ['Salary Advance / Worker Loan Deduction', payout.loanDeduction > 0 ? `- KSh ${payout.loanDeduction.toLocaleString(undefined, { minimumFractionDigits: 2 })}` : 'KSh 0.00'],
+    [
+      `Other Deductions${payout.otherDeductionReason ? ` (${payout.otherDeductionReason})` : ''}`,
+      payout.otherDeductions > 0 ? `- KSh ${payout.otherDeductions.toLocaleString(undefined, { minimumFractionDigits: 2 })}` : 'KSh 0.00',
+    ],
+    ['NET SALARY / WAGE PAID', `KSh ${payout.netPayPaid.toLocaleString(undefined, { minimumFractionDigits: 2 })}`],
+    ['Disbursed By', payout.paidBy || 'Admin'],
+    ['Payment Timestamp', payout.paidAt ? new Date(payout.paidAt).toLocaleString() : new Date().toLocaleString()],
+    ['Payroll Notes', payout.notes || 'Routine salary & wage disbursement'],
+  ];
+
+  autoTable(doc, {
+    startY: 63,
+    head: [['Earnings & Deductions Component', 'Details / Amount']],
+    body: rows,
+    theme: 'grid',
+    headStyles: { fillColor: [15, 23, 42], textColor: [255, 255, 255], fontStyle: 'bold' },
+    styles: { fontSize: 9, cellPadding: 3.5 },
+  });
+
+  const finalY = (doc as any).lastAutoTable?.finalY || 145;
+
+  doc.setFontSize(9);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(71, 85, 105);
+  doc.text('I hereby acknowledge receipt of the above net salary / wage disbursement.', 14, finalY + 14);
+  doc.text('Employee Signature: ________________________', 14, finalY + 28);
+  doc.text('Approving Manager Signature: ________________________', 110, finalY + 28);
+
+  const safeName = payout.employeeName.replace(/[^a-zA-Z0-9_-]/g, '_');
+  doc.save(`Payslip_${safeName}_${payout.startDate || payout.id}.pdf`);
+};
+
+/**
+ * 17. Export Payroll Summary Register PDF
+ */
+export const exportPayrollSummaryPDF = (payouts: WorkerSalaryPayout[], periodLabel: string) => {
+  const doc = new jsPDF();
+  addReportHeader(doc, 'STAFF SALARIES & WAGES PAYROLL REGISTER', `Period: ${periodLabel}`);
+
+  const totalGross = payouts.reduce((s, p) => s + p.grossPay, 0);
+  const totalDeductions = payouts.reduce((s, p) => s + p.loanDeduction + p.otherDeductions, 0);
+  const totalNet = payouts.reduce((s, p) => s + p.netPayPaid, 0);
+
+  doc.setFontSize(10);
+  doc.setFont('helvetica', 'bold');
+  doc.text(
+    `Total Payouts: ${payouts.length}   |   Gross Pay: KSh ${totalGross.toLocaleString()}   |   Deductions: KSh ${totalDeductions.toLocaleString()}   |   Net Paid: KSh ${totalNet.toLocaleString()}`,
+    14,
+    36
+  );
+
+  const rows = payouts.map((p) => [
+    p.paidAt ? new Date(p.paidAt).toLocaleDateString() : p.endDate,
+    p.employeeName,
+    p.payType === 'monthly' ? 'Monthly' : p.payType === 'daily' ? 'Daily' : 'Hourly',
+    `KSh ${p.basePayEarned.toLocaleString()}`,
+    `KSh ${(p.allowances + p.overtimeOrBonus).toLocaleString()}`,
+    `KSh ${(p.loanDeduction + p.otherDeductions).toLocaleString()}`,
+    `KSh ${p.netPayPaid.toLocaleString()}`,
+    (p.paymentMethod || 'mpesa').toUpperCase(),
+  ]);
+
+  autoTable(doc, {
+    startY: 42,
+    head: [['Paid Date', 'Worker', 'Type', 'Base Pay', 'Allow/Bonus', 'Deductions', 'Net Paid', 'Method']],
+    body: rows.length > 0 ? rows : [['No salary payouts recorded', '', '', '', '', '', '', '']],
+    theme: 'striped',
+    headStyles: { fillColor: [15, 23, 42], textColor: [255, 255, 255], fontStyle: 'bold' },
+    styles: { fontSize: 8.5, cellPadding: 3 },
+  });
+
+  doc.save(`Payroll_Register_${new Date().toISOString().slice(0, 10)}.pdf`);
+};
+
 

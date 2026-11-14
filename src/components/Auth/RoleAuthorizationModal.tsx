@@ -31,6 +31,22 @@ interface RoleAuthorizationModalProps {
 }
 
 export const RoleAuthorizationModal: React.FC<RoleAuthorizationModalProps> = ({ request }) => {
+  const getDefaultRole = (req: RoleAuthorizationRequest | null): Role => {
+    if (!req) return 'Staff';
+    const assigned = getUserRoles(req.user);
+    return req.qualifyingRoles.find((r) => r !== 'Admin') || req.qualifyingRoles[0] || assigned[0] || 'Staff';
+  };
+
+  const [selectedRole, setSelectedRole] = useState<Role>(() => getDefaultRole(request));
+  const [reason, setReason] = useState<string>('');
+
+  React.useEffect(() => {
+    if (request) {
+      setSelectedRole(getDefaultRole(request));
+      setReason('');
+    }
+  }, [request]);
+
   if (!request) return null;
 
   const {
@@ -46,13 +62,6 @@ export const RoleAuthorizationModal: React.FC<RoleAuthorizationModalProps> = ({ 
 
   const allAssignedRoles = getUserRoles(user);
   const spec = SENSITIVE_ACTION_SPECS[actionType];
-
-  // Pre-select the first qualifying role, preferring a domain-specific role over Admin if available
-  const defaultRole =
-    qualifyingRoles.find((r) => r !== 'Admin') || qualifyingRoles[0] || allAssignedRoles[0] || 'Staff';
-
-  const [selectedRole, setSelectedRole] = useState<Role>(defaultRole);
-  const [reason, setReason] = useState<string>('');
 
   const handleAuthorize = () => {
     if (!selectedRole) return;
@@ -96,7 +105,7 @@ export const RoleAuthorizationModal: React.FC<RoleAuthorizationModalProps> = ({ 
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md animate-fadeIn">
+    <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md animate-fadeIn">
       <div className="bg-slate-900 border border-slate-700/80 rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden flex flex-col max-h-[92vh]">
         {/* Header */}
         <div className="p-5 border-b border-slate-800 bg-gradient-to-r from-slate-950 via-slate-900 to-slate-950 flex items-center justify-between">

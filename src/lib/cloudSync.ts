@@ -121,11 +121,34 @@ export function cleanProductForFirestore(product: Product): any {
 
 export async function saveProductToCloud(product: Product): Promise<void> {
   const path = `products/${product.id}`;
+  const productWithTimestamp: Product = {
+    ...product,
+    updatedAt: product.updatedAt || new Date().toISOString(),
+  };
   try {
-    const docRef = doc(db, 'products', product.id);
-    const cleaned = cleanProductForFirestore(product);
-    await withFirestoreTimeout(setDoc(docRef, cleaned, { merge: true }), `saving product ${product.name || product.id}`);
+    const docRef = doc(db, 'products', productWithTimestamp.id);
+    const cleaned = cleanProductForFirestore(productWithTimestamp);
+    await withFirestoreTimeout(setDoc(docRef, cleaned, { merge: true }), `saving product ${productWithTimestamp.name || productWithTimestamp.id}`);
   } catch (error) {
+    if (
+      !isQuotaExceededError(error) &&
+      isTransportStallError(error) &&
+      (typeof navigator === 'undefined' || navigator.onLine)
+    ) {
+      try {
+        console.warn(`[products/${productWithTimestamp.id}] SDK setDoc stalled, using HTTPS REST write fallback...`);
+        await commitChunkViaRest(
+          'products',
+          [productWithTimestamp],
+          cleanProductForFirestore,
+          `saving product ${productWithTimestamp.name || productWithTimestamp.id}`
+        );
+        return;
+      } catch (restError) {
+        handleFirestoreError(restError, OperationType.WRITE, path);
+        throw restError;
+      }
+    }
     handleFirestoreError(error, OperationType.WRITE, path);
     throw error;
   }
@@ -137,6 +160,34 @@ export async function deleteProductFromCloud(productId: string): Promise<void> {
     const docRef = doc(db, 'products', productId);
     await withFirestoreTimeout(deleteDoc(docRef), `deleting product ${productId}`);
   } catch (error) {
+    if (
+      !isQuotaExceededError(error) &&
+      isTransportStallError(error) &&
+      (typeof navigator === 'undefined' || navigator.onLine) &&
+      firebaseConfig.projectId &&
+      firebaseConfig.apiKey
+    ) {
+      try {
+        const dbId = firebaseConfig.firestoreDatabaseId || '(default)';
+        const endpointDbId = dbId === '(default)' ? '(default)' : encodeURIComponent(dbId);
+        const endpoint = `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(
+          firebaseConfig.projectId
+        )}/databases/${endpointDbId}/documents/products/${encodeURIComponent(productId)}?key=${encodeURIComponent(
+          firebaseConfig.apiKey
+        )}`;
+        const headers: Record<string, string> = {};
+        if (auth.currentUser) {
+          const token = await auth.currentUser.getIdToken();
+          if (token) headers['Authorization'] = `Bearer ${token}`;
+        }
+        const res = await fetch(endpoint, { method: 'DELETE', headers });
+        if (res.ok || res.status === 404) {
+          return;
+        }
+      } catch {
+        // Fall through to standard error handling
+      }
+    }
     handleFirestoreError(error, OperationType.DELETE, path);
     throw error;
   }

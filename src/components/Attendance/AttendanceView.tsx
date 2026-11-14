@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { UserCheck, Clock, CheckCircle2, AlertCircle, Calendar, Plus, User, FileSpreadsheet, Award, Percent, CreditCard, Users, BarChart3, ArrowUpRight } from 'lucide-react';
-import { AttendanceRecord, User as Employee, Transaction, StaffCommissionPayout, WorkerLoan, WorkerLoanRepayment } from '../../types';
+import { UserCheck, Clock, CheckCircle2, AlertCircle, Calendar, Plus, User, FileSpreadsheet, Award, Percent, CreditCard, Users, BarChart3, ArrowUpRight, Wallet } from 'lucide-react';
+import { AttendanceRecord, User as Employee, Transaction, StaffCommissionPayout, WorkerLoan, WorkerLoanRepayment, WorkerSalaryPayout } from '../../types';
 import { StaffCommissionView } from './StaffCommissionView';
 import { WorkerLoansView } from './WorkerLoansView';
 import { WorkerDirectoryView } from './WorkerDirectoryView';
 import { StaffPerformanceDashboard } from './StaffPerformanceDashboard';
+import { WorkerPayrollView } from './WorkerPayrollView';
 import { safeGetJSON, safeSetJSON } from '../../utils/safeStorage';
 
 interface AttendanceViewProps {
@@ -27,6 +28,9 @@ interface AttendanceViewProps {
   onUpdateUser?: (updatedUser: Employee) => void;
   onDeleteUser?: (userId: string) => void;
   onOpenStaffModal?: () => void;
+  salaryPayouts?: WorkerSalaryPayout[];
+  onPaySalary?: (payout: WorkerSalaryPayout) => void;
+  onUpdateUserSalarySettings?: (userId: string, settings: Partial<Employee>) => void;
 }
 
 export const AttendanceView: React.FC<AttendanceViewProps> = ({
@@ -49,8 +53,11 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
   onUpdateUser,
   onDeleteUser,
   onOpenStaffModal,
+  salaryPayouts = [],
+  onPaySalary,
+  onUpdateUserSalarySettings,
 }) => {
-  const VALID_ATTENDANCE_TABS = ['attendance', 'performance', 'workers', 'commission', 'loans'] as const;
+  const VALID_ATTENDANCE_TABS = ['attendance', 'performance', 'workers', 'commission', 'payroll', 'loans'] as const;
   type AttendanceTab = (typeof VALID_ATTENDANCE_TABS)[number];
 
   const [activeTab, setActiveTab] = useState<AttendanceTab>(() =>
@@ -188,6 +195,18 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
         </button>
 
         <button
+          onClick={() => setActiveTab('payroll')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 ${
+            activeTab === 'payroll'
+              ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-600/30'
+              : 'text-slate-400 hover:text-white hover:bg-slate-800'
+          }`}
+        >
+          <Wallet className="w-4 h-4 text-emerald-300" />
+          <span>Salaries &amp; Wages Payroll</span>
+        </button>
+
+        <button
           onClick={() => setActiveTab('loans')}
           className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 ${
             activeTab === 'loans'
@@ -244,6 +263,16 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
           onIssueLoan={onIssueLoan}
           onRepayLoan={onRepayLoan}
           onUpdateLoanStatus={onUpdateLoanStatus}
+        />
+      ) : activeTab === 'payroll' ? (
+        <WorkerPayrollView
+          allUsers={allUsers}
+          currentUser={currentUser}
+          attendanceRecords={attendanceRecords}
+          workerLoans={workerLoans}
+          salaryPayouts={salaryPayouts}
+          onPaySalary={(payout) => onPaySalary?.(payout)}
+          onUpdateUserSalarySettings={onUpdateUserSalarySettings || onUpdateUserCommissionSettings}
         />
       ) : activeTab === 'commission' ? (
         <StaffCommissionView

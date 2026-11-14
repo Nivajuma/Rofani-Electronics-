@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   ShoppingBag,
   Package,
@@ -61,6 +61,7 @@ import {
   CashTransaction,
   RestockRecord,
   StaffCommissionPayout,
+  WorkerSalaryPayout,
   StoreLocation,
   OfferDeal,
   OnlineOrder,
@@ -221,6 +222,106 @@ export const ROFANI_FIREBASE_CONFIG = {
   appId: "1:1059699871684:web:b5260e337",
   firestoreDatabaseId: "ai-studio-retailstockmanag-35779e9e-08d0-4311-8158-8be055847014",
 };
+
+const DELETED_PRODUCTS_STORAGE_KEY = 'retail_pos_deleted_products';
+
+function getDeletedProductIds(): Set<string> {
+  const ids = safeGetJSON<string[]>(DELETED_PRODUCTS_STORAGE_KEY, []);
+  return new Set(Array.isArray(ids) ? ids.filter(Boolean) : []);
+}
+
+function markProductDeletedLocally(productId: string): void {
+  if (!productId) return;
+  const ids = getDeletedProductIds();
+  ids.add(productId);
+  safeSetJSON(DELETED_PRODUCTS_STORAGE_KEY, Array.from(ids).slice(-500));
+}
+
+function unmarkProductDeletedLocally(productId: string): void {
+  if (!productId) return;
+  const ids = getDeletedProductIds();
+  if (ids.delete(productId)) {
+    safeSetJSON(DELETED_PRODUCTS_STORAGE_KEY, Array.from(ids));
+  }
+}
+
+function parseProductTimestampMs(val?: string): number {
+  if (!val || typeof val !== 'string') return 0;
+  const ms = Date.parse(val);
+  return Number.isFinite(ms) ? ms : 0;
+}
+
+function getPendingProductMap(): Map<string, Product> {
+  const map = new Map<string, Product>();
+  try {
+    const queue = getPendingSyncQueue();
+    queue.forEach((item) => {
+      if (item.type === 'product' && item.data && item.data.id && !item.data._deleted) {
+        const p = item.data as Product;
+        const existing = map.get(p.id);
+        if (!existing || parseProductTimestampMs(p.updatedAt) >= parseProductTimestampMs(existing.updatedAt)) {
+          map.set(p.id, p);
+        }
+      }
+    });
+  } catch {}
+  return map;
+}
+
+function mergeProductListsByTimestamp(
+  localProducts: Product[],
+  incomingProducts: Product[],
+  deletedIds: Set<string> = getDeletedProductIds(),
+  pendingMap: Map<string, Product> = getPendingProductMap()
+): Product[] {
+  const prodMap = new Map<string, Product>();
+
+  (localProducts || []).forEach((lp) => {
+    if (lp && lp.id && !deletedIds.has(lp.id)) {
+      prodMap.set(lp.id, lp);
+    }
+  });
+
+  // Ensure any locally queued unsynced product edits/additions are never lost
+  pendingMap.forEach((pendingProd, id) => {
+    if (deletedIds.has(id)) return;
+    const existing = prodMap.get(id);
+    if (!existing || parseProductTimestampMs(pendingProd.updatedAt) >= parseProductTimestampMs(existing.updatedAt)) {
+      prodMap.set(id, {
+        ...pendingProd,
+        imageUrl: pendingProd.imageUrl || existing?.imageUrl || '',
+      });
+    }
+  });
+
+  (incomingProducts || []).forEach((remoteItem) => {
+    if (!remoteItem || !remoteItem.id || deletedIds.has(remoteItem.id)) return;
+    const local = prodMap.get(remoteItem.id);
+    if (!local) {
+      prodMap.set(remoteItem.id, remoteItem);
+      return;
+    }
+
+    const remoteMs = parseProductTimestampMs(remoteItem.updatedAt);
+    const localMs = parseProductTimestampMs(local.updatedAt);
+    const hasPendingLocalWrite = pendingMap.has(remoteItem.id);
+
+    // Strictly newer (`>`) wins, and never clobber an unsynced local pending edit unless remote is strictly newer
+    if (remoteMs > localMs && (!hasPendingLocalWrite || remoteMs > parseProductTimestampMs(pendingMap.get(remoteItem.id)?.updatedAt))) {
+      prodMap.set(remoteItem.id, {
+        ...remoteItem,
+        imageUrl: remoteItem.imageUrl || local.imageUrl || '',
+      });
+    } else if (!local.imageUrl && remoteItem.imageUrl) {
+      prodMap.set(remoteItem.id, {
+        ...local,
+        imageUrl: remoteItem.imageUrl,
+      });
+    }
+  });
+
+  return Array.from(prodMap.values());
+}
 
 export default function App() {
   // Navigation & Display Layout State
@@ -482,17 +583,25 @@ export default function App() {
     }
   };
 
+  const hasHydratedProductsFromIdbRef = useRef(false);
+  const userMutatedProductsRef = useRef(false);
+
   // Application Persistent Collections State with safe lazy initialization & immediate localStorage sync
   const [products, setProductsState] = useState<Product[]>(() => {
     try {
+      const deletedIds = getDeletedProductIds();
+      const pendingMap = getPendingProductMap();
       const saved = localStorage.getItem('retail_pos_products');
-      return saved ? JSON.parse(saved) : INITIAL_PRODUCTS;
+      const parsed = saved ? JSON.parse(saved) : INITIAL_PRODUCTS;
+      const baseList = Array.isArray(parsed) ? parsed : INITIAL_PRODUCTS;
+      return mergeProductListsByTimestamp(baseList, [], deletedIds, pendingMap);
     } catch (e) {
       return INITIAL_PRODUCTS;
     }
   });
 
   const setProducts = (newVal: Product[] | ((prev: Product[]) => Product[])) => {
+    userMutatedProductsRef.current = true;
     setProductsState((prev) => {
       const next = typeof newVal === 'function' ? newVal(prev) : newVal;
       safeSetJSON('retail_pos_products', next);
@@ -504,36 +613,47 @@ export default function App() {
   };
 
   // Proactive IndexedDB Hydration on Startup and Resume from Sleep Mode
-  // Guarantees that catalog restored from backup NEVER disappears when Chrome sleeps, hibernates, or discards background tabs
+  // Merges by item ID and newest `updatedAt` timestamp so neither newly added items nor recent edits are ever lost
   useEffect(() => {
     let isMounted = true;
 
-    const restoreFromIDBIfLarger = async () => {
+    const restoreAndMergeFromIDB = async () => {
       try {
         const idbProducts = await getFromIDB('retail_pos_products');
         if (isMounted && Array.isArray(idbProducts) && idbProducts.length > 0) {
+          const deletedIds = getDeletedProductIds();
+          const pendingMap = getPendingProductMap();
           setProductsState((current) => {
-            if (idbProducts.length > current.length) {
-              console.log(
-                `[Sleep Mode Recovery] Hydrated ${idbProducts.length} items from persistent IndexedDB (in-memory had ${current.length})`
-              );
-              safeSetJSON('retail_pos_products', idbProducts);
-              return idbProducts;
+            const merged = mergeProductListsByTimestamp(current, idbProducts, deletedIds, pendingMap);
+            const changed =
+              merged.length !== current.length ||
+              merged.some((m, i) => {
+                const cur = current[i];
+                return !cur || cur.id !== m.id || cur.updatedAt !== m.updatedAt || cur.stockQuantity !== m.stockQuantity || cur.sellingPrice !== m.sellingPrice || cur.name !== m.name;
+              });
+            if (changed) {
+              safeSetJSON('retail_pos_products', merged);
+              try {
+                saveToIDB('retail_pos_products', merged);
+              } catch {}
+              return merged;
             }
             return current;
           });
         }
       } catch (err) {
         console.warn('[Sleep Mode Recovery] IDB hydration notice:', err);
+      } finally {
+        hasHydratedProductsFromIdbRef.current = true;
       }
     };
 
-    restoreFromIDBIfLarger();
+    restoreAndMergeFromIDB();
 
     // Chrome Sleep & Resume event listeners (Page Lifecycle API, visibilitychange, focus)
     const handleWakeFromSleep = () => {
       if (document.visibilityState === 'visible') {
-        restoreFromIDBIfLarger();
+        restoreAndMergeFromIDB();
       }
     };
 
@@ -926,7 +1046,7 @@ export default function App() {
     safeSetJSON('pos_store_sales', archivedChecked);
   }, [transactions]);
 
-  // Aggressive Post-Sleep Rehydration Effect (focus and visibilitychange)
+  // Post-Sleep / Focus Rehydration Effect (NEVER blindly overwrite newer state or IndexedDB with stale localStorage)
   useEffect(() => {
     const handleFocusAndVisibility = () => {
       if (document.visibilityState === 'visible') {
@@ -935,7 +1055,12 @@ export default function App() {
           if (freshSales) {
             const parsed = JSON.parse(freshSales);
             if (Array.isArray(parsed) && parsed.length > 0) {
-              setTransactionsState(parsed);
+              setTransactionsState((current) => {
+                if (parsed.length > current.length) return parsed;
+                const existingIds = new Set(current.map((t) => t.id));
+                const missing = parsed.filter((t: Transaction) => t && t.id && !existingIds.has(t.id));
+                return missing.length > 0 ? [...missing, ...current] : current;
+              });
             }
           }
 
@@ -943,7 +1068,18 @@ export default function App() {
           if (freshProducts) {
             const parsed = JSON.parse(freshProducts);
             if (Array.isArray(parsed) && parsed.length > 0) {
-              setProductsState(parsed);
+              const deletedIds = getDeletedProductIds();
+              const pendingMap = getPendingProductMap();
+              setProductsState((current) => {
+                const merged = mergeProductListsByTimestamp(current, parsed, deletedIds, pendingMap);
+                const changed =
+                  merged.length !== current.length ||
+                  merged.some((m, i) => {
+                    const cur = current[i];
+                    return !cur || cur.id !== m.id || cur.updatedAt !== m.updatedAt || cur.stockQuantity !== m.stockQuantity || cur.sellingPrice !== m.sellingPrice || cur.name !== m.name;
+                  });
+                return changed ? merged : current;
+              });
             }
           }
 
@@ -951,7 +1087,7 @@ export default function App() {
           if (freshUsers) {
             const parsed = JSON.parse(freshUsers);
             if (Array.isArray(parsed) && parsed.length > 0) {
-              setAllUsersState(parsed);
+              setAllUsersState((current) => (parsed.length >= current.length ? parsed : current));
             }
           }
 
@@ -959,7 +1095,7 @@ export default function App() {
           if (freshExpenses) {
             const parsed = JSON.parse(freshExpenses);
             if (Array.isArray(parsed) && parsed.length > 0) {
-              setExpensesState(parsed);
+              setExpensesState((current) => (parsed.length >= current.length ? parsed : current));
             }
           }
 
@@ -967,7 +1103,7 @@ export default function App() {
           if (freshPurchases) {
             const parsed = JSON.parse(freshPurchases);
             if (Array.isArray(parsed) && parsed.length > 0) {
-              setPurchaseOrdersState(parsed);
+              setPurchaseOrdersState((current) => (parsed.length >= current.length ? parsed : current));
             }
           }
         } catch (e) {
@@ -1010,6 +1146,10 @@ export default function App() {
   };
 
   const [commissionPayouts, setCommissionPayouts] = useState<StaffCommissionPayout[]>(() => safeGetJSON('retail_pos_commission_payouts', INITIAL_COMMISSION_PAYOUTS));
+
+  const [salaryPayouts, setSalaryPayouts] = useState<WorkerSalaryPayout[]>(() =>
+    safeGetJSON<WorkerSalaryPayout[]>('retail_pos_salary_payouts', [])
+  );
 
   const [workerLoans, setWorkerLoans] = useState<WorkerLoan[]>(() => safeGetJSON('retail_pos_worker_loans', INITIAL_WORKER_LOANS));
 
@@ -1166,14 +1306,21 @@ export default function App() {
     safeSetJSON('retail_pos_stock_transfers', stockTransfers);
   }, [stockTransfers]);
 
-  // Save changes to LocalStorage with quota and OOM protection
+  // Save changes to LocalStorage & IndexedDB only after initial IDB hydration or user mutation
   useEffect(() => {
+    if (!hasHydratedProductsFromIdbRef.current && !userMutatedProductsRef.current) {
+      return;
+    }
     safeSetJSON('retail_pos_products', products);
   }, [products]);
 
   useEffect(() => {
     safeSetJSON('retail_pos_commission_payouts', commissionPayouts);
   }, [commissionPayouts]);
+
+  useEffect(() => {
+    safeSetJSON('retail_pos_salary_payouts', salaryPayouts);
+  }, [salaryPayouts]);
 
   useEffect(() => {
     safeSetJSON('retail_pos_restock_records', restockRecords);
@@ -1306,28 +1453,15 @@ export default function App() {
       unsubscribe = subscribeToProducts(
         (incomingRemoteProducts) => {
           if (incomingRemoteProducts && incomingRemoteProducts.length > 0) {
+            const deletedIds = getDeletedProductIds();
+            const pendingMap = getPendingProductMap();
             setProducts((prevLocalProducts) => {
-              const prodMap = new Map<string, Product>();
-              (prevLocalProducts || []).forEach((localItem) => {
-                if (localItem && localItem.id) prodMap.set(localItem.id, localItem);
-              });
-              incomingRemoteProducts.forEach((remoteItem) => {
-                if (!remoteItem || !remoteItem.id) return;
-                const local = prodMap.get(remoteItem.id);
-                if (!local) {
-                  prodMap.set(remoteItem.id, remoteItem);
-                } else {
-                  const localTime = local.updatedAt ? new Date(local.updatedAt).getTime() : 0;
-                  const remoteTime = remoteItem.updatedAt ? new Date(remoteItem.updatedAt).getTime() : 0;
-                  if (remoteTime >= localTime) {
-                    prodMap.set(remoteItem.id, {
-                      ...remoteItem,
-                      imageUrl: remoteItem.imageUrl || local.imageUrl,
-                    });
-                  }
-                }
-              });
-              const merged = Array.from(prodMap.values());
+              const merged = mergeProductListsByTimestamp(
+                prevLocalProducts,
+                incomingRemoteProducts,
+                deletedIds,
+                pendingMap
+              );
               safeSetJSON('retail_pos_products', merged);
               try {
                 saveToIDB('retail_pos_products', merged);
@@ -1348,31 +1482,18 @@ export default function App() {
         }
       );
 
-      // Proactive initial retrieval from cloud: guarantees all 302 products populate immediately on any device
+      // Proactive initial retrieval from cloud: guarantees all products populate while preserving newer local edits
       fetchProductsFromCloud().then((cloudItems) => {
         if (cloudItems && cloudItems.length > 0) {
+          const deletedIds = getDeletedProductIds();
+          const pendingMap = getPendingProductMap();
           setProducts((prevLocal) => {
-            const prodMap = new Map<string, Product>();
-            (prevLocal || []).forEach((lp) => {
-              if (lp && lp.id) prodMap.set(lp.id, lp);
-            });
-            cloudItems.forEach((cp) => {
-              if (!cp || !cp.id) return;
-              const local = prodMap.get(cp.id);
-              if (!local) {
-                prodMap.set(cp.id, cp);
-              } else {
-                const localTime = local.updatedAt ? new Date(local.updatedAt).getTime() : 0;
-                const remoteTime = cp.updatedAt ? new Date(cp.updatedAt).getTime() : 0;
-                if (remoteTime >= localTime) {
-                  prodMap.set(cp.id, {
-                    ...cp,
-                    imageUrl: cp.imageUrl || local.imageUrl,
-                  });
-                }
-              }
-            });
-            const merged = Array.from(prodMap.values());
+            const merged = mergeProductListsByTimestamp(
+              prevLocal,
+              cloudItems,
+              deletedIds,
+              pendingMap
+            );
             safeSetJSON('retail_pos_products', merged);
             try {
               saveToIDB('retail_pos_products', merged);
@@ -1485,7 +1606,11 @@ export default function App() {
           if (item.type === 'sale') {
             await saveTransactionToCloud(item.data);
           } else if (item.type === 'product') {
-            await saveProductToCloud(item.data);
+            if (item.data?._deleted) {
+              await deleteProductFromCloud(item.data.id);
+            } else {
+              await saveProductToCloud(item.data);
+            }
           } else if (item.type === 'customer') {
             if (item.data?._deleted) {
               await deleteCustomerFromCloud(item.data.id);
@@ -1591,33 +1716,12 @@ export default function App() {
         throw lastFetchError;
       }
 
-      // 3. ID-based union merge: NEVER discard local items if remote is empty or partial
+      // 3. ID-based union merge: NEVER discard local items or newer local edits
       if (cloudProducts && cloudProducts.length > 0) {
+        const deletedIds = getDeletedProductIds();
+        const pendingMap = getPendingProductMap();
         setProducts((localProds) => {
-          const prodMap = new Map<string, Product>();
-          // Seed with all local products first to ensure 0 items are lost
-          (localProds || []).forEach((lp) => {
-            if (lp && lp.id) prodMap.set(lp.id, lp);
-          });
-          // Merge in cloud products
-          (cloudProducts || []).forEach((cp) => {
-            if (!cp || !cp.id) return;
-            const existingLocal = prodMap.get(cp.id);
-            if (!existingLocal) {
-              prodMap.set(cp.id, cp);
-            } else {
-              // Preserve local high-res image if cloud image was omitted/sanitized
-              const localTime = existingLocal.updatedAt ? new Date(existingLocal.updatedAt).getTime() : 0;
-              const cloudTime = cp.updatedAt ? new Date(cp.updatedAt).getTime() : 0;
-              if (cloudTime >= localTime) {
-                prodMap.set(cp.id, {
-                  ...cp,
-                  imageUrl: cp.imageUrl || existingLocal.imageUrl,
-                });
-              }
-            }
-          });
-          const merged = Array.from(prodMap.values());
+          const merged = mergeProductListsByTimestamp(localProds, cloudProducts, deletedIds, pendingMap);
           safeSetJSON('retail_pos_products', merged);
           return merged;
         });
@@ -2196,6 +2300,69 @@ export default function App() {
     }
   };
 
+  const handlePaySalary = (payout: WorkerSalaryPayout) => {
+    setSalaryPayouts((prev) => [payout, ...prev]);
+
+    // Record net paid salary under Expenses -> Salaries and sync to cloud
+    if (payout.netPayPaid > 0) {
+      const salaryExpense: Expense = {
+        id: `exp-sal-${Date.now()}`,
+        date: payout.paidAt ? payout.paidAt.slice(0, 10) : new Date().toISOString().slice(0, 10),
+        category: 'Salaries',
+        description: `Salary / Wage: ${payout.employeeName} (${payout.payPeriodLabel})`,
+        amount: payout.netPayPaid,
+        paymentMethod: payout.paymentMethod,
+        recordedBy: payout.paidBy || currentUser.name,
+        receiptNo: payout.referenceNo || payout.id,
+        recurringType: 'One-Time',
+        status: 'Paid',
+      };
+      handleAddExpense(salaryExpense);
+    }
+
+    // Automatically apply loan/advance deduction to worker loan balance if applicable
+    if (payout.loanDeduction > 0 && payout.deductedLoanId) {
+      const repayment: WorkerLoanRepayment = {
+        id: `rep-sal-${Date.now()}`,
+        loanId: payout.deductedLoanId,
+        amount: payout.loanDeduction,
+        date: new Date().toISOString().slice(0, 10),
+        paymentMethod: 'salary_deduction',
+        referenceNo: payout.referenceNo || payout.id,
+        notes: `Automatic salary deduction from payslip ${payout.id} (${payout.payPeriodLabel})`,
+        recordedBy: `${currentUser.name} (${currentUser.role})`,
+      };
+      handleRepayWorkerLoan(payout.deductedLoanId, repayment);
+    }
+  };
+
+  const handleUpdateUserSalarySettings = (userId: string, settings: Partial<User>) => {
+    let updatedTarget: User | null = null;
+    setAllUsers((prev) => {
+      const next = prev.map((u) => {
+        if (u.id === userId) {
+          updatedTarget = { ...u, ...settings };
+          return updatedTarget;
+        }
+        return u;
+      });
+      safeSetJSON('retail_pos_users', next);
+      return next;
+    });
+    if (currentUser.id === userId) {
+      setCurrentUser((prev) => {
+        const nextUser = { ...prev, ...settings };
+        safeSetJSON('retail_pos_active_user', nextUser);
+        return nextUser;
+      });
+    }
+    if (updatedTarget) {
+      saveUserToCloud(updatedTarget).catch((err) =>
+        console.warn('Could not sync salary settings to cloud:', err)
+      );
+    }
+  };
+
   const handleReattributeSale = (txId: string, salesRepId: string, salesRepName: string) => {
     setTransactions((prev) =>
       prev.map((tx) => (tx.id === txId ? { ...tx, salesRepId, salesRepName } : tx))
@@ -2213,13 +2380,17 @@ export default function App() {
       safeSetJSON('pos_store_sales', updated);
       return updated;
     });
-    setProducts(updatedProducts);
+    const nowIso = new Date().toISOString();
+    const soldProductIds = new Set((tx.items || []).map((it) => it.product?.id || (it as any).productId));
+    const stampedUpdatedProducts = updatedProducts.map((p) =>
+      soldProductIds.has(p.id) ? { ...p, updatedAt: nowIso } : p
+    );
+    setProducts(stampedUpdatedProducts);
     setCustomers(updatedCustomers);
 
     const isCurrentlyOffline = !getIsOnline();
-    const soldProductIds = new Set((tx.items || []).map((it) => it.product?.id || (it as any).productId));
-    const affectedProducts = updatedProducts.filter((p) => soldProductIds.has(p.id));
-    const productsToSync = affectedProducts.length > 0 ? affectedProducts : updatedProducts.slice(0, 5);
+    const affectedProducts = stampedUpdatedProducts.filter((p) => soldProductIds.has(p.id));
+    const productsToSync = affectedProducts.length > 0 ? affectedProducts : stampedUpdatedProducts.slice(0, 5);
 
     if (isCurrentlyOffline) {
       addPendingSyncItem({
@@ -2533,58 +2704,65 @@ export default function App() {
 
   const handleSaveProduct = (prod: Product) => {
     const existing = products.find((p) => p.id === prod.id);
+    const nowIso = new Date().toISOString();
+    const stampedProd: Product = {
+      ...prod,
+      createdAt: prod.createdAt || existing?.createdAt || nowIso,
+      updatedAt: nowIso,
+    };
 
     const performSave = (authorizingRole?: Role, reason?: string) => {
-      if (prod.imageUrl && prod.imageUrl.trim() !== '') {
-        saveProductImageToIndexedDB(prod.id, prod.imageUrl);
+      unmarkProductDeletedLocally(stampedProd.id);
+      if (stampedProd.imageUrl && stampedProd.imageUrl.trim() !== '') {
+        saveProductImageToIndexedDB(stampedProd.id, stampedProd.imageUrl);
       }
       setProducts((prev) => {
-        const idx = prev.findIndex((p) => p.id === prod.id);
+        const idx = prev.findIndex((p) => p.id === stampedProd.id);
         if (idx > -1) {
           const copy = [...prev];
-          copy[idx] = prod;
+          copy[idx] = stampedProd;
           return copy;
         }
-        return [prod, ...prev];
+        return [stampedProd, ...prev];
       });
 
-      // Real-Time Cloud Sync to Firestore
+      // Real-Time Cloud Sync to Firestore (with pending queue safety so snapshots never revert unsynced edits)
       if (!getIsOnline()) {
         addPendingSyncItem({
           type: 'product',
-          description: `Product: ${prod.name} (${prod.stockQuantity} ${prod.unit})`,
-          data: prod,
+          description: `Product: ${stampedProd.name} (${stampedProd.stockQuantity} ${stampedProd.unit})`,
+          data: stampedProd,
         });
       } else {
-        saveProductToCloud(prod).catch(() => {
+        saveProductToCloud(stampedProd).catch(() => {
           addPendingSyncItem({
             type: 'product',
-            description: `Product: ${prod.name} (${prod.stockQuantity} ${prod.unit})`,
-            data: prod,
+            description: `Product: ${stampedProd.name} (${stampedProd.stockQuantity} ${stampedProd.unit})`,
+            data: stampedProd,
           });
         });
       }
 
       if (existing && authorizingRole) {
-        const diff = computeProductDiff(existing, prod);
+        const diff = computeProductDiff(existing, stampedProd);
         const diffKeys = Object.keys(diff);
         const diffSummary = diffKeys.map(
-          (k) => `${k}: ${existing[k as keyof Product]} → ${prod[k as keyof Product]}`
+          (k) => `${k}: ${existing[k as keyof Product]} → ${stampedProd[k as keyof Product]}`
         );
 
         const log = buildSensitiveActionLog({
           actionType: 'MODIFY_INVENTORY',
-          actionTitle: `Modified Product: ${prod.name}`,
+          actionTitle: `Modified Product: ${stampedProd.name}`,
           user: currentUser,
           authorizingRole,
-          targetId: prod.id,
-          targetName: prod.name,
+          targetId: stampedProd.id,
+          targetName: stampedProd.name,
           details: {
             summary: diffSummary.length > 0
-              ? `Updated ${diffSummary.join(', ')} on ${prod.name}`
-              : `Updated catalog attributes for ${prod.name}`,
+              ? `Updated ${diffSummary.join(', ')} on ${stampedProd.name}`
+              : `Updated catalog attributes for ${stampedProd.name}`,
             before: existing,
-            after: prod,
+            after: stampedProd,
             diff,
           },
           reason,
@@ -2595,7 +2773,7 @@ export default function App() {
     };
 
     if (existing) {
-      const diff = computeProductDiff(existing, prod);
+      const diff = computeProductDiff(existing, stampedProd);
       const diffKeys = Object.keys(diff);
       if (diffKeys.length > 0) {
         const qualifyingRoles = getQualifyingRolesForAction(currentUser, 'MODIFY_INVENTORY');
@@ -2603,18 +2781,18 @@ export default function App() {
 
         if (qualifyingRoles.length > 1 || userRoles.length > 1) {
           const diffSummary = diffKeys.map(
-            (k) => `${k}: ${existing[k as keyof Product]} → ${prod[k as keyof Product]}`
+            (k) => `${k}: ${existing[k as keyof Product]} → ${stampedProd[k as keyof Product]}`
           );
 
           setRoleAuthRequest({
             actionType: 'MODIFY_INVENTORY',
-            actionTitle: `Modify Product: ${prod.name}`,
-            targetId: prod.id,
-            targetName: prod.name,
+            actionTitle: `Modify Product: ${stampedProd.name}`,
+            targetId: stampedProd.id,
+            targetName: stampedProd.name,
             qualifyingRoles: qualifyingRoles.length > 0 ? qualifyingRoles : userRoles,
             user: currentUser,
             diffSummary,
-            metadata: { before: existing, after: prod },
+            metadata: { before: existing, after: stampedProd },
             onConfirm: (selectedRole, reason) => {
               performSave(selectedRole, reason);
               setRoleAuthRequest(null);
@@ -2635,28 +2813,53 @@ export default function App() {
   };
 
   const handleBatchImportProducts = (importedProducts: Product[], replaceExisting: boolean) => {
-    importedProducts.forEach((p) => {
+    const nowIso = new Date().toISOString();
+    const stampedImports = importedProducts.map((p) => {
+      unmarkProductDeletedLocally(p.id);
       if (p.imageUrl && p.imageUrl.trim() !== '') {
         saveProductImageToIndexedDB(p.id, p.imageUrl);
       }
+      return {
+        ...p,
+        createdAt: p.createdAt || nowIso,
+        updatedAt: nowIso,
+      };
     });
 
     if (replaceExisting) {
-      setProducts(importedProducts);
+      setProducts(stampedImports);
     } else {
       setProducts((prev) => {
         const existingBarcodes = new Set(prev.map((p) => p.barcode.toLowerCase()));
         const existingSkus = new Set(prev.map((p) => p.sku.toLowerCase()));
 
-        const newUnique = importedProducts.filter(
+        const newUnique = stampedImports.filter(
           (p) => !existingBarcodes.has(p.barcode.toLowerCase()) && !existingSkus.has(p.sku.toLowerCase())
         );
         return [...newUnique, ...prev];
       });
     }
 
-    // Sync imported products to Firestore cloud catalog
-    bulkUploadProductsToCloud(importedProducts).catch(() => {});
+    // Sync imported products to Firestore cloud catalog (with offline queue fallback)
+    if (!getIsOnline()) {
+      stampedImports.forEach((p) =>
+        addPendingSyncItem({
+          type: 'product',
+          description: `Imported Product: ${p.name}`,
+          data: p,
+        })
+      );
+    } else {
+      bulkUploadProductsToCloud(stampedImports).catch(() => {
+        stampedImports.forEach((p) =>
+          addPendingSyncItem({
+            type: 'product',
+            description: `Imported Product: ${p.name}`,
+            data: p,
+          })
+        );
+      });
+    }
   };
 
   const handleDeleteProduct = (productId: string) => {
@@ -2665,9 +2868,25 @@ export default function App() {
     const userRoles = getUserRoles(currentUser);
 
     const performDelete = (authorizingRole: Role, reason?: string) => {
+      markProductDeletedLocally(productId);
       deleteProductImageFromIndexedDB(productId);
       setProducts((prev) => prev.filter((p) => p.id !== productId));
-      deleteProductFromCloud(productId).catch(() => {});
+
+      if (!getIsOnline()) {
+        addPendingSyncItem({
+          type: 'product',
+          description: `Delete Product: ${existing?.name || productId}`,
+          data: { id: productId, _deleted: true },
+        });
+      } else {
+        deleteProductFromCloud(productId).catch(() => {
+          addPendingSyncItem({
+            type: 'product',
+            description: `Delete Product: ${existing?.name || productId}`,
+            data: { id: productId, _deleted: true },
+          });
+        });
+      }
 
       const log = buildSensitiveActionLog({
         actionType: 'DELETE_PRODUCT',
@@ -2748,13 +2967,19 @@ export default function App() {
       ...prod,
       stockQuantity: prod.stockQuantity + quantityAdded,
       costPrice: unitCost,
-      updatedAt: new Date().toISOString().slice(0, 10)
+      updatedAt: new Date().toISOString()
     };
 
     setProducts((prev) =>
       prev.map((p) => (p.id === productId ? updatedProd : p))
     );
-    saveProductToCloud(updatedProd).catch(() => {});
+    saveProductToCloud(updatedProd).catch(() => {
+      addPendingSyncItem({
+        type: 'product',
+        description: `Restock: ${updatedProd.name} (${updatedProd.stockQuantity} ${updatedProd.unit})`,
+        data: updatedProd,
+      });
+    });
 
     const restockExp: Expense = {
       id: `exp-rst-${Date.now()}`,
@@ -2777,8 +3002,22 @@ export default function App() {
     const userRoles = getUserRoles(currentUser);
 
     const performAdjustment = (authorizingRole: Role, reason?: string) => {
-      setProducts(updatedProducts);
-      updatedProducts.forEach((p) => saveProductToCloud(p).catch(() => {}));
+      const nowIso = new Date().toISOString();
+      const adjustedIds = new Set((audit.items || []).map((it) => it.productId));
+      const stampedProducts = updatedProducts.map((p) =>
+        adjustedIds.has(p.id) ? { ...p, updatedAt: nowIso } : p
+      );
+      setProducts(stampedProducts);
+      const changedItems = stampedProducts.filter((p) => adjustedIds.has(p.id));
+      (changedItems.length > 0 ? changedItems : stampedProducts).forEach((p) =>
+        saveProductToCloud(p).catch(() => {
+          addPendingSyncItem({
+            type: 'product',
+            description: `Stock Adjust: ${p.name}`,
+            data: p,
+          });
+        })
+      );
 
       const log = buildSensitiveActionLog({
         actionType: 'ADJUST_STOCK',
@@ -2829,10 +3068,16 @@ export default function App() {
     const targetProduct = products.find((p) => p.id === productId);
     if (!targetProduct) return;
     const variance = newQuantity - targetProduct.stockQuantity;
-    const updatedProduct = { ...targetProduct, stockQuantity: newQuantity };
+    const updatedProduct = { ...targetProduct, stockQuantity: newQuantity, updatedAt: new Date().toISOString() };
     const updatedProducts = products.map((p) => (p.id === productId ? updatedProduct : p));
     setProducts(updatedProducts);
-    saveProductToCloud(updatedProduct).catch(() => {});
+    saveProductToCloud(updatedProduct).catch(() => {
+      addPendingSyncItem({
+        type: 'product',
+        description: `Audit Adjust: ${updatedProduct.name}`,
+        data: updatedProduct,
+      });
+    });
 
     if (auditUrlProduct && auditUrlProduct.id === productId) {
       setAuditUrlProduct(updatedProduct);
@@ -3127,14 +3372,16 @@ export default function App() {
     if (status === 'Completed') {
       const orderObj = onlineOrders.find((o) => o.id === orderId);
       if (orderObj) {
-        // Deduct stock for each product
+        // Deduct stock for each product with fresh updatedAt timestamp
+        const orderNowIso = new Date().toISOString();
         setProducts((prev) =>
           prev.map((prod) => {
             const itemInOrder = orderObj.items.find((i) => i.product.id === prod.id);
             if (itemInOrder) {
               return {
                 ...prod,
-                stockQuantity: Math.max(0, prod.stockQuantity - itemInOrder.quantity)
+                stockQuantity: Math.max(0, prod.stockQuantity - itemInOrder.quantity),
+                updatedAt: orderNowIso,
               };
             }
             return prod;
@@ -3643,6 +3890,9 @@ export default function App() {
           onUpdateUser={handleUpdateUser}
           onDeleteUser={handleDeleteUser}
           onOpenStaffModal={() => setShowStaffModal(true)}
+          salaryPayouts={salaryPayouts}
+          onPaySalary={handlePaySalary}
+          onUpdateUserSalarySettings={handleUpdateUserSalarySettings}
         />
       )}
 

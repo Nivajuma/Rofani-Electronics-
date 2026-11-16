@@ -46,6 +46,29 @@ export const NetworkStatusBadge: React.FC<NetworkStatusBadgeProps> = ({
     );
   }
 
+  if (pendingCount > 0) {
+    return (
+      <div
+        role="status"
+        aria-live="polite"
+        onClick={onClick}
+        title={`${pendingCount} unsynced local record(s) awaiting upload to Cloud Firestore. Click to view or retry sync.`}
+        className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-amber-500/20 border-2 border-amber-500/70 text-amber-900 dark:text-amber-300 font-extrabold text-xs shadow-sm transition ${
+          onClick ? 'cursor-pointer hover:bg-amber-500/30 active:scale-95' : ''
+        } ${className}`}
+      >
+        <Wifi className="w-3.5 h-3.5 text-amber-500 shrink-0 animate-pulse" />
+        <span className="hidden xl:inline">Unsynced</span>
+        <span
+          className="bg-amber-500 text-slate-950 text-[10px] font-black px-1.5 py-0.2 rounded-full font-mono"
+          title={`${pendingCount} pending record(s) in queue`}
+        >
+          {pendingCount}
+        </span>
+      </div>
+    );
+  }
+
   return (
     <div
       role="status"

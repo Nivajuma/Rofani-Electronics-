@@ -202,7 +202,10 @@ import {
   getIsOnline,
   addPendingSyncItem,
   getPendingSyncQueue,
+  getPendingSyncCount,
   removePendingSyncItem,
+  getAggressiveAutoSync,
+  SyncRetryResult,
 } from './utils/offlineSync';
 import { findRecoverableBackups, protectLargestBackup, getBackupDataByKey } from './utils/backupRecovery';
 import { isSoundEnabled, setSoundEnabled, subscribeToSoundPref, playButtonSound } from './utils/uiFeedback';
@@ -1574,34 +1577,26 @@ export default function App() {
   }, []);
 
   // Offline and bidirectional cloud sync handler
-  const syncPendingQueueToCloud = async () => {
-    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+  const syncPendingQueueToCloud = async (): Promise<SyncRetryResult> => {
+    const initialQueue = getPendingSyncQueue();
+    if (!getIsOnline() || (typeof navigator !== 'undefined' && !navigator.onLine)) {
       setCloudSyncStatus('offline');
-      return;
+      return {
+        syncedCount: 0,
+        remainingCount: initialQueue.length,
+        errorMessage: 'Device is offline. Connect to Wi-Fi or mobile data and try again.',
+      };
     }
 
     setCloudSyncStatus('syncing');
     let hadError = false;
+    let syncedCount = 0;
+    let lastErrorMessage: string | undefined;
 
     try {
-      // 1. Bidirectional Sync Guarantee: Batch-push recent local sales before processing queue
-      const localSales = safeGetJSON<Transaction[]>('retail_pos_transactions', transactions);
-      if (localSales && localSales.length > 0) {
-        try {
-          await batchSaveTransactionsToCloud(localSales.slice(0, 100));
-        } catch (err) {
-          if (isQuotaExceededError(err)) {
-            setIsCloudQuotaExceeded(true);
-            setCloudSyncStatus('quota_exceeded');
-            return;
-          }
-          hadError = true;
-          console.warn('[Sync] Could not batch push local sales to cloud:', err);
-        }
-      }
-
-      const queue = getPendingSyncQueue();
-      for (const item of queue) {
+      // 1. Flush pendingSyncQueue first (oldest-to-newest so newest edits always win)
+      const chronologicalQueue = [...initialQueue].reverse();
+      for (const item of chronologicalQueue) {
         try {
           if (item.type === 'sale') {
             await saveTransactionToCloud(item.data);
@@ -1631,30 +1626,67 @@ export default function App() {
             await saveUserToCloud(item.data);
           }
           removePendingSyncItem(item.id);
+          syncedCount += 1;
         } catch (err) {
           if (isQuotaExceededError(err)) {
             setIsCloudQuotaExceeded(true);
             setCloudSyncStatus('quota_exceeded');
-            return;
+            return {
+              syncedCount,
+              remainingCount: getPendingSyncCount(),
+              errorMessage: 'Cloud Firestore daily free quota limit reached.',
+            };
           }
           hadError = true;
+          lastErrorMessage = err instanceof Error ? err.message : String(err);
           console.warn(`[Sync Queue] Offline action ${item.id} waiting for stable connection:`, err);
-          break;
+          // Continue trying remaining queued entries so one failing record does not block others
         }
       }
 
-      // 2. Merge Local & Cloud Sales (Prevent Overwrites) using ID-based union
+      // 2. Bidirectional Sync Guarantee: Batch-push recent local sales
+      const localSales = safeGetJSON<Transaction[]>('retail_pos_transactions', transactions);
+      if (localSales && localSales.length > 0) {
+        try {
+          await batchSaveTransactionsToCloud(localSales.slice(0, 100));
+        } catch (err) {
+          if (isQuotaExceededError(err)) {
+            setIsCloudQuotaExceeded(true);
+            setCloudSyncStatus('quota_exceeded');
+            return {
+              syncedCount,
+              remainingCount: getPendingSyncCount(),
+              errorMessage: 'Cloud Firestore daily free quota limit reached.',
+            };
+          }
+          hadError = true;
+          if (!lastErrorMessage) {
+            lastErrorMessage = err instanceof Error ? err.message : String(err);
+          }
+          console.warn('[Sync] Could not batch push local sales to cloud:', err);
+        }
+      }
+
+      // 3. Preserve Local Sales State
       const existingLocalSales = safeGetJSON<Transaction[]>('retail_pos_transactions', transactions);
       setTransactions(existingLocalSales);
       safeSetJSON('retail_pos_transactions', existingLocalSales);
 
-      if (hadError) {
+      const remainingCount = getPendingSyncCount();
+      if (hadError || remainingCount > 0) {
         setCloudSyncStatus(typeof navigator !== 'undefined' && !navigator.onLine ? 'offline' : 'error');
       } else {
         setLastSyncedTime(new Date().toLocaleTimeString());
         setCloudSyncStatus('synced');
       }
+
+      return {
+        syncedCount,
+        remainingCount,
+        errorMessage: lastErrorMessage,
+      };
     } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
       if (isQuotaExceededError(err)) {
         setIsCloudQuotaExceeded(true);
         setCloudSyncStatus('quota_exceeded');
@@ -1664,8 +1696,22 @@ export default function App() {
         setCloudSyncStatus('error');
       }
       console.warn('[Sync Queue] Unexpected sync failure:', err);
+      return {
+        syncedCount,
+        remainingCount: getPendingSyncCount(),
+        errorMessage: msg,
+      };
     }
   };
+
+  // Proactively attempt flushing any queued offline records shortly after app launch when Aggressive Auto-Sync is enabled
+  useEffect(() => {
+    if (!getAggressiveAutoSync() || !getIsOnline() || getPendingSyncCount() === 0) return;
+    const timer = setTimeout(() => {
+      syncPendingQueueToCloud().catch(() => {});
+    }, 1500);
+    return () => clearTimeout(timer);
+  }, []);
 
   // Comprehensive pull from Cloud Firestore handler with safety merge & backup snapshot
   const handlePullFromCloud = async () => {
@@ -1924,10 +1970,12 @@ export default function App() {
     }
   };
 
-  // Automatically attempt sync when network connection transitions from offline to online
+  // Automatically attempt sync when network connection transitions from offline to online (if Aggressive Auto-Sync is enabled)
   useEffect(() => {
     const handleReconnected = () => {
-      syncPendingQueueToCloud();
+      if (getAggressiveAutoSync()) {
+        syncPendingQueueToCloud();
+      }
     };
 
     window.addEventListener('online', handleReconnected);
@@ -4635,8 +4683,11 @@ export default function App() {
 
       {/* Main Container */}
       <main className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        {/* Real-Time Offline and Cloud Sync Notification Banner */}
-        <OfflineSyncBanner onTriggerSync={syncPendingQueueToCloud} />
+        {/* Real-Time Offline and Pending Cloud Sync Notification Banner */}
+        <OfflineSyncBanner
+          onTriggerSync={syncPendingQueueToCloud}
+          onOpenCloudSync={() => setShowCloudSyncModal(true)}
+        />
 
         {/* Firestore Quota Notice Banner */}
         {isCloudQuotaExceeded && showQuotaBanner && (

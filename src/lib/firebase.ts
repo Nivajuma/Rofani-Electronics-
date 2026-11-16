@@ -55,10 +55,10 @@ export const db: Firestore = (() => {
 // Initialize Firebase Auth
 export const auth: Auth = getAuth(app);
 
-// Connection test helper: verifies live Firestore connectivity against the products collection
+// Connection test helper: verifies live Firestore connectivity against the server
 export async function testFirestoreConnection(): Promise<boolean> {
   try {
-    const fetchDoc = getDoc(doc(db, 'products', 'prod-1'));
+    const fetchDoc = getDocFromServer(doc(db, 'test', 'connection'));
     const timeout = new Promise<never>((_, reject) =>
       setTimeout(() => reject(new Error('Connection check timeout')), 8000)
     );
@@ -66,6 +66,9 @@ export async function testFirestoreConnection(): Promise<boolean> {
     return true;
   } catch (error) {
     if (error instanceof Error) {
+      if (error.message.includes('the client is offline')) {
+        console.error('Please check your Firebase configuration.');
+      }
       if (
         error.message.includes('the client is offline') ||
         error.message.includes('Quota') ||

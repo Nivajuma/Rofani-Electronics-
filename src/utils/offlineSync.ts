@@ -14,10 +14,18 @@ export interface PendingSyncItem {
   data: any;
 }
 
+export interface SyncRetryResult {
+  syncedCount: number;
+  remainingCount: number;
+  errorMessage?: string;
+}
+
 const STORAGE_KEY = 'retail_pos_pending_sync_queue';
 const SYNC_EVENT = 'retail_pos_sync_queue_changed';
 const SIMULATED_OFFLINE_KEY = 'retail_pos_simulated_offline';
 const NETWORK_STATUS_EVENT = 'retail_pos_network_status_changed';
+const AGGRESSIVE_AUTO_SYNC_KEY = 'retail_pos_aggressive_auto_sync';
+const AGGRESSIVE_SYNC_EVENT = 'retail_pos_aggressive_auto_sync_changed';
 
 let _simulatedOffline: boolean = false;
 
@@ -71,19 +79,25 @@ export function getPendingSyncCount(): number {
 }
 
 /**
- * Add an action performed while offline to the sync queue
+ * Add an action performed while offline (or when cloud write stalled) to the sync queue.
+ * Deduplicates older queued entries for the same (type, data.id) so the newest state always wins.
  */
 export function addPendingSyncItem(
   item: Omit<PendingSyncItem, 'id' | 'timestamp'>
 ): PendingSyncItem {
   const current = getPendingSyncQueue();
+  const targetRecordId = item.data?.id ? String(item.data.id) : '';
+  const filtered = targetRecordId
+    ? current.filter((existing) => !(existing.type === item.type && String(existing.data?.id || '') === targetRecordId))
+    : current;
+
   const newItem: PendingSyncItem = {
     ...item,
     id: `sync-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
     timestamp: new Date().toISOString(),
   };
 
-  const updated = [newItem, ...current];
+  const updated = [newItem, ...filtered];
   safeSetJSON(STORAGE_KEY, updated);
 
   if (typeof window !== 'undefined') {
@@ -202,5 +216,66 @@ export function useNetworkStatus() {
     toggleSimulatedOffline,
     checkConnection,
   };
+}
+
+/**
+ * Read whether Aggressive Auto-Sync on reconnect/detection is enabled.
+ * Defaults to true for continuous real-time sync; disable to prioritize battery life & mobile data.
+ */
+export function getAggressiveAutoSync(): boolean {
+  if (typeof window === 'undefined' || !window.localStorage) return true;
+  try {
+    const raw = localStorage.getItem(AGGRESSIVE_AUTO_SYNC_KEY);
+    if (raw === null) return true;
+    return raw !== 'false';
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * Persist Aggressive Auto-Sync setting and notify all listeners
+ */
+export function setAggressiveAutoSync(enabled: boolean): void {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(AGGRESSIVE_AUTO_SYNC_KEY, enabled ? 'true' : 'false');
+    }
+  } catch {
+    // Ignore storage issues
+  }
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent(AGGRESSIVE_SYNC_EVENT, { detail: { enabled } }));
+  }
+}
+
+/**
+ * Reactive hook for reading and toggling Aggressive Auto-Sync setting
+ */
+export function useAggressiveAutoSync(): [boolean, (enabled: boolean) => void] {
+  const [enabled, setEnabledState] = useState<boolean>(() => getAggressiveAutoSync());
+
+  useEffect(() => {
+    const handler = (e: any) => {
+      if (typeof e?.detail?.enabled === 'boolean') {
+        setEnabledState(e.detail.enabled);
+      } else {
+        setEnabledState(getAggressiveAutoSync());
+      }
+    };
+    window.addEventListener(AGGRESSIVE_SYNC_EVENT, handler);
+    window.addEventListener('storage', handler);
+    return () => {
+      window.removeEventListener(AGGRESSIVE_SYNC_EVENT, handler);
+      window.removeEventListener('storage', handler);
+    };
+  }, []);
+
+  const updateSetting = useCallback((nextVal: boolean) => {
+    setAggressiveAutoSync(nextVal);
+    setEnabledState(nextVal);
+  }, []);
+
+  return [enabled, updateSetting];
 }
 

@@ -34,7 +34,7 @@ import { User } from '../types';
 import { TabKey } from '../utils/permissions';
 import { OfflineSyncBanner } from './Network/OfflineSyncBanner';
 import { NetworkStatusBadge } from './Network/NetworkStatusBadge';
-import { useNetworkStatus } from '../utils/offlineSync';
+import { useNetworkStatus, SyncRetryResult } from '../utils/offlineSync';
 
 interface PhoneDeviceFrameProps {
   children: React.ReactNode;
@@ -54,7 +54,7 @@ interface PhoneDeviceFrameProps {
   onNewSale?: () => void;
   onOpenCloudSync?: () => void;
   cloudSyncStatus?: 'synced' | 'syncing' | 'offline' | 'error' | 'quota_exceeded';
-  onTriggerSync?: () => Promise<void> | void;
+  onTriggerSync?: () => Promise<SyncRetryResult | void> | void;
 }
 
 export const PhoneDeviceFrame: React.FC<PhoneDeviceFrameProps> = ({
@@ -565,7 +565,7 @@ export const PhoneDeviceFrame: React.FC<PhoneDeviceFrameProps> = ({
 
         {/* Pinned Sticky Offline Notification Banner in Mobile Phone Screen */}
         <div className="bg-slate-950 px-2 pt-1.5 shrink-0 z-20">
-          <OfflineSyncBanner compact onTriggerSync={onTriggerSync} />
+          <OfflineSyncBanner compact onTriggerSync={onTriggerSync} onOpenCloudSync={onOpenCloudSync} />
         </div>
 
         {/* MOBILE MAIN VIEWPORT CONTENT CONTAINER */}

@@ -36,7 +36,9 @@ import {
   EyeOff,
   Mail,
   RotateCcw,
-  History
+  History,
+  BatteryCharging,
+  Wifi
 } from 'lucide-react';
 import { Product, Customer, Supplier, Transaction, Expense, AttendanceRecord, User, StoreLocation } from '../../types';
 import { detectDuplicateProducts, deduplicateProducts } from '../../utils/deduplicate';
@@ -46,8 +48,8 @@ import { CameraPermissionsCard } from './CameraPermissionsCard';
 import { SettingsDashboardView } from './SettingsDashboardView';
 import { safeGetJSON, safeSetJSON, getLocalStorageUsageStats } from '../../utils/safeStorage';
 import { findRecoverableBackups } from '../../utils/backupRecovery';
-import { getIsOnline } from '../../utils/offlineSync';
-import { playBackupSuccessSound } from '../../utils/uiFeedback';
+import { getIsOnline, useAggressiveAutoSync, useNetworkStatus } from '../../utils/offlineSync';
+import { playBackupSuccessSound, playButtonSound } from '../../utils/uiFeedback';
 import {
   batchSaveProductsToCloud,
   batchSaveTransactionsToCloud,
@@ -142,6 +144,8 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
 }) => {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [aggressiveAutoSync, setAggressiveAutoSync] = useAggressiveAutoSync();
+  const { pendingCount } = useNetworkStatus();
   const [isCloudSyncing, setIsCloudSyncing] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<{ label: string; percent: number } | null>(null);
   const [cloudSyncFeedback, setCloudSyncFeedback] = useState<{
@@ -150,6 +154,17 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
     details: string;
     timestamp: string;
   } | null>(null);
+
+  const handleToggleAggressiveAutoSync = () => {
+    const nextVal = !aggressiveAutoSync;
+    setAggressiveAutoSync(nextVal);
+    playButtonSound('tap');
+    triggerNotify(
+      nextVal
+        ? 'Aggressive Auto-Sync enabled — queued changes will upload automatically as soon as connectivity returns.'
+        : 'Battery & Mobile Data Saver enabled — automatic reconnect sync paused until you tap "Retry All Pending Syncs".'
+    );
+  };
 
   const handleUploadLocalDataToCloud = async () => {
     if (!getIsOnline()) {
@@ -770,6 +785,72 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
             </div>
           </div>
         )}
+
+        {/* Aggressive Auto-Sync Toggle (Battery & Mobile Data Optimization) */}
+        <div className="pt-4 border-t border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex items-start gap-3">
+            <div
+              className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 border ${
+                aggressiveAutoSync
+                  ? 'bg-sky-500/15 text-sky-400 border-sky-500/40'
+                  : 'bg-amber-500/15 text-amber-400 border-amber-500/40'
+              }`}
+            >
+              {aggressiveAutoSync ? (
+                <Wifi className="w-5 h-5" />
+              ) : (
+                <BatteryCharging className="w-5 h-5" />
+              )}
+            </div>
+            <div className="space-y-1">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h4 className="font-bold text-sm text-slate-100">Aggressive Auto-Sync on Connection</h4>
+                <span
+                  className={`text-[10px] font-bold px-2 py-0.5 rounded-full border uppercase tracking-wide ${
+                    aggressiveAutoSync
+                      ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40'
+                      : 'bg-amber-500/15 text-amber-300 border-amber-500/40'
+                  }`}
+                >
+                  {aggressiveAutoSync ? 'Enabled (Instant Sync)' : 'Paused (Battery & Data Saver)'}
+                </span>
+                {!aggressiveAutoSync && pendingCount > 0 && (
+                  <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-orange-500 text-slate-950">
+                    {pendingCount} Pending
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-slate-400 leading-relaxed max-w-2xl">
+                {aggressiveAutoSync
+                  ? 'Automatically flushes queued offline sales, edits, and inventory updates to Cloud Firestore the moment internet connectivity is detected or restored.'
+                  : 'Saves mobile data and battery life by holding offline queue uploads until you manually tap "Retry All Pending Syncs" or "Sync Local Data to Cloud".'}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3 self-end sm:self-center shrink-0">
+            <span className="text-xs font-bold text-slate-300">
+              {aggressiveAutoSync ? 'Auto-Sync ON' : 'Data Saver ON'}
+            </span>
+            <button
+              type="button"
+              id="toggle-aggressive-auto-sync"
+              role="switch"
+              aria-checked={aggressiveAutoSync}
+              aria-label="Toggle Aggressive Auto-Sync"
+              onClick={handleToggleAggressiveAutoSync}
+              className={`relative inline-flex h-7 w-13 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-sky-500 focus:ring-offset-2 focus:ring-offset-slate-900 ${
+                aggressiveAutoSync ? 'bg-sky-500' : 'bg-slate-700'
+              }`}
+            >
+              <span
+                className={`pointer-events-none inline-block h-6 w-6 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out ${
+                  aggressiveAutoSync ? 'translate-x-6' : 'translate-x-0'
+                }`}
+              />
+            </button>
+          </div>
+        </div>
       </div>
 
       {/* EMERGENCY RECOVERY CARD: Detects if any larger local snapshot exists (e.g. 500+ items vs current 29) */}

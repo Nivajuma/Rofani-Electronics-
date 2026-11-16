@@ -37,7 +37,7 @@ import {
 } from '../../lib/cloudSync';
 import { FIREBASE_UPGRADE_URL } from '../../lib/firebase';
 import { Product, User, Transaction, Customer, Supplier, Expense } from '../../types';
-import { useNetworkStatus } from '../../utils/offlineSync';
+import { useNetworkStatus, SyncRetryResult } from '../../utils/offlineSync';
 import { findRecoverableBackups } from '../../utils/backupRecovery';
 
 interface CloudSyncModalProps {
@@ -52,7 +52,7 @@ interface CloudSyncModalProps {
   cloudSyncStatus?: 'synced' | 'syncing' | 'offline' | 'error' | 'quota_exceeded';
   isQuotaExceeded?: boolean;
   lastSyncedTime?: string | null;
-  onTriggerSync?: () => void;
+  onTriggerSync?: () => Promise<SyncRetryResult | void> | void;
   onSyncCatalogComplete?: () => void;
   onSyncError?: () => void;
   onPullFromCloud?: () => Promise<{
@@ -93,10 +93,11 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
   onLockNow,
   recoveryEmail = 'NivaJuma@gmail.com',
 }) => {
-  const { isOnline, pendingCount, isSimulated, toggleSimulatedOffline, checkConnection } = useNetworkStatus();
+  const { isOnline, pendingCount, queuedItems, isSimulated, toggleSimulatedOffline, checkConnection } = useNetworkStatus();
   const [copied, setCopied] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [isPulling, setIsPulling] = useState(false);
+  const [isRetryingPending, setIsRetryingPending] = useState(false);
   const [syncFeedback, setSyncFeedback] = useState<{
     type: 'success' | 'error' | 'warning';
     title: string;
@@ -165,6 +166,62 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
     }
     setShareUrl(cleaned);
     setIsEditingUrl(false);
+  };
+
+  const handleRetryPendingQueue = async () => {
+    if (!onTriggerSync || isRetryingPending || isUploading || isPulling) return;
+    const online = await checkConnection();
+    if (!online) {
+      setSyncFeedback({
+        type: 'error',
+        title: 'Cannot Retry Sync — Device Offline',
+        details: 'Reconnect to Wi-Fi or mobile data, then click "Retry All Pending Syncs" again. Your queued records remain safely stored locally.',
+        timestamp: new Date().toLocaleTimeString(),
+      });
+      return;
+    }
+
+    setIsRetryingPending(true);
+    setSyncFeedback(null);
+    try {
+      const result = await onTriggerSync();
+      if (result && typeof result === 'object') {
+        if (result.remainingCount === 0) {
+          setSyncFeedback({
+            type: 'success',
+            title: 'All Pending Records Synced',
+            details: `Successfully uploaded ${result.syncedCount} queued offline record${result.syncedCount === 1 ? '' : 's'} to Cloud Firestore.`,
+            timestamp: new Date().toLocaleTimeString(),
+          });
+          if (onSyncCatalogComplete) onSyncCatalogComplete();
+        } else {
+          if (onSyncError) onSyncError();
+          setSyncFeedback({
+            type: 'error',
+            title: 'Some Pending Records Still Waiting',
+            details: `Synced ${result.syncedCount} record(s); ${result.remainingCount} remaining in queue. ${result.errorMessage || 'Check connection and retry.'}`,
+            timestamp: new Date().toLocaleTimeString(),
+          });
+        }
+      } else {
+        setSyncFeedback({
+          type: 'success',
+          title: 'Pending Queue Retry Completed',
+          details: 'Finished flushing queued offline records to Cloud Firestore.',
+          timestamp: new Date().toLocaleTimeString(),
+        });
+      }
+    } catch (err: any) {
+      if (onSyncError) onSyncError();
+      setSyncFeedback({
+        type: 'error',
+        title: 'Pending Queue Retry Failed',
+        details: err?.message || 'Could not sync pending queue right now. Your local records remain safe.',
+        timestamp: new Date().toLocaleTimeString(),
+      });
+    } finally {
+      setIsRetryingPending(false);
+    }
   };
 
   const handleUploadAllToCloud = async () => {
@@ -446,6 +503,60 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
                   </div>
                 </div>
               </div>
+            </div>
+          )}
+
+          {/* Unsynced Offline Queue Panel (pendingSyncQueue) */}
+          {pendingCount > 0 && (
+            <div className="bg-orange-950/60 border border-orange-500/70 p-3.5 sm:p-4 rounded-2xl space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-start gap-2.5">
+                  <AlertTriangle className="w-5 h-5 text-orange-400 shrink-0 mt-0.5 animate-pulse" />
+                  <div className="space-y-1">
+                    <div className="text-xs font-bold text-orange-100 flex items-center gap-2 flex-wrap">
+                      <span>{pendingCount} Unsynced Record{pendingCount === 1 ? '' : 's'} Waiting in Queue</span>
+                      <span className="bg-orange-500 text-slate-950 text-[10px] px-2 py-0.5 rounded-full font-black uppercase">
+                        Saved Locally
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-orange-200/90 leading-relaxed">
+                      These offline or previously interrupted edits/sales are safely stored on this device and have not uploaded to Cloud Firestore yet.
+                    </p>
+                  </div>
+                </div>
+
+                {onTriggerSync && (
+                  <button
+                    type="button"
+                    id="btn-modal-retry-all-pending-syncs"
+                    onClick={handleRetryPendingQueue}
+                    disabled={isRetryingPending || isUploading || isPulling}
+                    className="px-3.5 py-2 bg-orange-500 hover:bg-orange-400 active:scale-95 text-slate-950 font-black text-xs rounded-xl shadow-md transition flex items-center justify-center gap-1.5 shrink-0 disabled:opacity-60 cursor-pointer"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isRetryingPending ? 'animate-spin' : ''}`} />
+                    <span>{isRetryingPending ? 'Retrying Queue...' : `Retry All Pending Syncs (${pendingCount})`}</span>
+                  </button>
+                )}
+              </div>
+
+              {queuedItems.length > 0 && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-32 overflow-y-auto pt-1 border-t border-orange-800/40">
+                  {queuedItems.slice(0, 8).map((item) => (
+                    <div
+                      key={item.id}
+                      className="bg-slate-950/80 border border-orange-700/40 rounded-lg px-2.5 py-1.5 text-[11px] flex items-center justify-between gap-2"
+                    >
+                      <span className="truncate text-slate-200">
+                        <strong className="text-orange-300 uppercase text-[10px] mr-1">{item.type}:</strong>
+                        {item.description}
+                      </span>
+                      <span className="text-[9px] text-slate-400 font-mono shrink-0">
+                        {new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 

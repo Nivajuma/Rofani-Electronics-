@@ -1,8 +1,303 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    // Global safety net: deny all unmatched paths by default
     match /{document=**} {
-      allow read, write: if true;
+      allow read, write: if false;
+    }
+
+    // Core identity & input validation helpers
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isEmailVerified() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isOwner() {
+      return isEmailVerified()
+        && request.auth.token.email != null
+        && request.auth.token.email.lower() == 'nivajuma@gmail.com';
+    }
+
+    function isAdmin() {
+      return isOwner()
+        || (isEmailVerified() && exists(/databases/$(database)/documents/admins/$(request.auth.uid)));
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isOptionalString(data, field, maxLen) {
+      return !(field in data) || data[field] == null || (data[field] is string && data[field].size() <= maxLen);
+    }
+
+    function isOptionalNumber(data, field) {
+      return !(field in data) || data[field] == null || data[field] is number;
+    }
+
+    function isOptionalBool(data, field) {
+      return !(field in data) || data[field] == null || data[field] is bool;
+    }
+
+    // Entity schema validators
+    function isValidProduct(data) {
+      return data.keys().hasAll(['id', 'name'])
+        && isValidId(data.id)
+        && data.name is string && data.name.size() > 0 && data.name.size() <= 300
+        && isOptionalString(data, 'sku', 128)
+        && isOptionalString(data, 'barcode', 128)
+        && isOptionalString(data, 'category', 128)
+        && isOptionalString(data, 'subcategory', 128)
+        && isOptionalString(data, 'sizeCapacity', 128)
+        && isOptionalString(data, 'description', 2000)
+        && isOptionalString(data, 'unit', 64)
+        && isOptionalString(data, 'supplierId', 128)
+        && isOptionalString(data, 'supplierName', 200)
+        && isOptionalString(data, 'imageUrl', 20000)
+        && isOptionalString(data, 'kraTaxType', 64)
+        && isOptionalString(data, 'createdAt', 64)
+        && isOptionalString(data, 'updatedAt', 64)
+        && isOptionalNumber(data, 'costPrice')
+        && isOptionalNumber(data, 'buyingPrice')
+        && isOptionalNumber(data, 'sellingPrice')
+        && isOptionalNumber(data, 'profitMargin')
+        && isOptionalNumber(data, 'stockQuantity')
+        && isOptionalNumber(data, 'stock')
+        && isOptionalNumber(data, 'minStockAlert');
+    }
+
+    function isValidTransaction(data) {
+      return data.keys().hasAll(['id', 'receiptNumber', 'grandTotal'])
+        && isValidId(data.id)
+        && data.receiptNumber is string && data.receiptNumber.size() > 0 && data.receiptNumber.size() <= 128
+        && data.grandTotal is number
+        && isOptionalString(data, 'date', 64)
+        && isOptionalString(data, 'paymentStatus', 32)
+        && isOptionalString(data, 'customerId', 128)
+        && isOptionalString(data, 'customerName', 200)
+        && isOptionalString(data, 'customerPhone', 64)
+        && isOptionalString(data, 'cashierName', 200)
+        && isOptionalString(data, 'cashierId', 128)
+        && isOptionalString(data, 'salesRepId', 128)
+        && isOptionalString(data, 'salesRepName', 200)
+        && isOptionalString(data, 'notes', 2000)
+        && isOptionalString(data, 'editedAt', 64)
+        && isOptionalString(data, 'updatedAt', 64)
+        && isOptionalString(data, 'syncedAt', 64)
+        && isOptionalNumber(data, 'subtotal')
+        && isOptionalNumber(data, 'discountTotal')
+        && isOptionalNumber(data, 'taxTotal')
+        && isOptionalNumber(data, 'amountPaid')
+        && isOptionalNumber(data, 'balanceDue')
+        && (!('items' in data) || data.items == null || (data.items is list && data.items.size() <= 500));
+    }
+
+    function isValidCustomer(data) {
+      return data.keys().hasAll(['id', 'name'])
+        && isValidId(data.id)
+        && data.name is string && data.name.size() > 0 && data.name.size() <= 200
+        && isOptionalString(data, 'phone', 64)
+        && isOptionalString(data, 'email', 200)
+        && isOptionalString(data, 'address', 300)
+        && isOptionalString(data, 'kraPin', 64)
+        && isOptionalString(data, 'customerType', 64)
+        && isOptionalString(data, 'notes', 2000)
+        && isOptionalString(data, 'createdAt', 64)
+        && isOptionalString(data, 'updatedAt', 64)
+        && isOptionalNumber(data, 'totalPurchases')
+        && isOptionalNumber(data, 'currentBalanceDue')
+        && isOptionalNumber(data, 'debtBalance')
+        && isOptionalNumber(data, 'creditLimit');
+    }
+
+    function isValidSupplier(data) {
+      return data.keys().hasAll(['id', 'name'])
+        && isValidId(data.id)
+        && data.name is string && data.name.size() > 0 && data.name.size() <= 200
+        && isOptionalString(data, 'contactPerson', 200)
+        && isOptionalString(data, 'phone', 64)
+        && isOptionalString(data, 'email', 200)
+        && isOptionalString(data, 'address', 300)
+        && isOptionalString(data, 'kraPin', 64)
+        && isOptionalString(data, 'paymentTerms', 200)
+        && isOptionalString(data, 'bankDetails', 300)
+        && isOptionalString(data, 'categorySpecialty', 200)
+        && isOptionalString(data, 'notes', 2000)
+        && isOptionalString(data, 'createdAt', 64)
+        && isOptionalString(data, 'updatedAt', 64)
+        && isOptionalNumber(data, 'totalSuppliedValue')
+        && isOptionalNumber(data, 'currentBalanceDue')
+        && isOptionalNumber(data, 'currentBalance');
+    }
+
+    function isValidExpense(data) {
+      return data.keys().hasAll(['id', 'amount'])
+        && isValidId(data.id)
+        && data.amount is number
+        && isOptionalString(data, 'date', 64)
+        && isOptionalString(data, 'category', 128)
+        && isOptionalString(data, 'description', 1000)
+        && isOptionalString(data, 'paymentMethod', 64)
+        && isOptionalString(data, 'recordedBy', 200)
+        && isOptionalString(data, 'receiptNo', 128)
+        && isOptionalString(data, 'recurringType', 32)
+        && isOptionalString(data, 'nextDueDate', 64)
+        && isOptionalString(data, 'status', 32)
+        && isOptionalString(data, 'updatedAt', 64)
+        && isOptionalBool(data, 'isRecurring');
+    }
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['id', 'name'])
+        && isValidId(data.id)
+        && data.name is string && data.name.size() > 0 && data.name.size() <= 200
+        && isOptionalString(data, 'role', 128)
+        && isOptionalString(data, 'email', 200)
+        && isOptionalString(data, 'pin', 32)
+        && isOptionalString(data, 'phone', 64)
+        && isOptionalString(data, 'status', 32)
+        && isOptionalString(data, 'department', 128)
+        && isOptionalString(data, 'hireDate', 64)
+        && isOptionalString(data, 'notes', 2000)
+        && isOptionalString(data, 'payType', 32)
+        && isOptionalString(data, 'payCycle', 32)
+        && isOptionalString(data, 'updatedAt', 64)
+        && isOptionalNumber(data, 'commissionRate')
+        && isOptionalNumber(data, 'basePayRate')
+        && isOptionalNumber(data, 'fixedAllowance')
+        && (!('roles' in data) || data.roles == null || (data.roles is list && data.roles.size() <= 50));
+    }
+
+    function isValidRestockRecord(data) {
+      return data.keys().hasAll(['id', 'productId', 'quantityAdded'])
+        && isValidId(data.id)
+        && isValidId(data.productId)
+        && data.quantityAdded is number
+        && isOptionalString(data, 'productName', 300)
+        && isOptionalString(data, 'supplierName', 200)
+        && isOptionalString(data, 'supplierId', 128)
+        && isOptionalString(data, 'date', 64)
+        && isOptionalString(data, 'receivedBy', 200)
+        && isOptionalString(data, 'batchNo', 128)
+        && isOptionalString(data, 'notes', 1000)
+        && isOptionalNumber(data, 'unitCost')
+        && isOptionalNumber(data, 'totalCost');
+    }
+
+    function isValidAuditLog(data) {
+      return data.keys().hasAll(['id', 'timestamp', 'actionType', 'actionTitle'])
+        && isValidId(data.id)
+        && data.timestamp is string && data.timestamp.size() <= 64
+        && data.actionType is string && data.actionType.size() <= 64
+        && data.actionTitle is string && data.actionTitle.size() <= 300
+        && isOptionalString(data, 'userId', 128)
+        && isOptionalString(data, 'userName', 200)
+        && isOptionalString(data, 'userEmail', 200)
+        && isOptionalString(data, 'authorizingRole', 128)
+        && isOptionalString(data, 'severity', 32);
+    }
+
+    // Store Admins Registry
+    match /admins/{adminUid} {
+      allow get: if isOwner() || (isEmailVerified() && request.auth.uid == adminUid);
+      allow list: if isOwner();
+      allow create, update, delete: if isOwner() && isValidId(adminUid);
+    }
+
+    // Connection health-check document
+    match /test/{docId} {
+      allow get: if isEmailVerified() && docId == 'connection';
+      allow list, create, update, delete: if false;
+    }
+
+    // Products Catalog
+    match /products/{productId} {
+      allow get: if isAdmin() && isValidId(productId);
+      allow list: if isOwner();
+      allow create: if isAdmin() && isValidId(productId) && isValidProduct(incoming());
+      allow update: if isAdmin() && isValidId(productId) && isValidProduct(incoming()) && incoming().id == existing().id;
+      allow delete: if isAdmin() && isValidId(productId);
+    }
+
+    // Sales Transactions
+    match /transactions/{transactionId} {
+      allow get: if isAdmin() && isValidId(transactionId);
+      allow list: if isOwner();
+      allow create: if isAdmin() && isValidId(transactionId) && isValidTransaction(incoming());
+      allow update: if isAdmin() && isValidId(transactionId) && isValidTransaction(incoming()) && incoming().id == existing().id;
+      allow delete: if isAdmin() && isValidId(transactionId);
+    }
+
+    // Customers (PII protected: restricted strictly to verified store owner / admins)
+    match /customers/{customerId} {
+      allow get: if isAdmin() && isValidId(customerId);
+      allow list: if isOwner();
+      allow create: if isAdmin() && isValidId(customerId) && isValidCustomer(incoming());
+      allow update: if isAdmin() && isValidId(customerId) && isValidCustomer(incoming()) && incoming().id == existing().id;
+      allow delete: if isAdmin() && isValidId(customerId);
+    }
+
+    // Suppliers (PII protected: restricted strictly to verified store owner / admins)
+    match /suppliers/{supplierId} {
+      allow get: if isAdmin() && isValidId(supplierId);
+      allow list: if isOwner();
+      allow create: if isAdmin() && isValidId(supplierId) && isValidSupplier(incoming());
+      allow update: if isAdmin() && isValidId(supplierId) && isValidSupplier(incoming()) && incoming().id == existing().id;
+      allow delete: if isAdmin() && isValidId(supplierId);
+    }
+
+    // Store Expenses
+    match /expenses/{expenseId} {
+      allow get: if isAdmin() && isValidId(expenseId);
+      allow list: if isOwner();
+      allow create: if isAdmin() && isValidId(expenseId) && isValidExpense(incoming());
+      allow update: if isAdmin() && isValidId(expenseId) && isValidExpense(incoming()) && incoming().id == existing().id;
+      allow delete: if isAdmin() && isValidId(expenseId);
+    }
+
+    // Staff & Worker Profiles (PII & PIN protected: restricted strictly to verified store owner / admins)
+    match /users/{userId} {
+      allow get: if isAdmin() && isValidId(userId);
+      allow list: if isOwner();
+      allow create: if isAdmin() && isValidId(userId) && isValidUser(incoming());
+      allow update: if isAdmin() && isValidId(userId) && isValidUser(incoming()) && incoming().id == existing().id;
+      allow delete: if isAdmin() && isValidId(userId);
+    }
+
+    // Inventory Restock Batches
+    match /restock_records/{recordId} {
+      allow get: if isAdmin() && isValidId(recordId);
+      allow list: if isOwner();
+      allow create: if isAdmin() && isValidId(recordId) && isValidRestockRecord(incoming());
+      allow update: if isAdmin() && isValidId(recordId) && isValidRestockRecord(incoming()) && incoming().id == existing().id;
+      allow delete: if isAdmin() && isValidId(recordId);
+    }
+
+    // Sensitive Action Audit Logs (Append-only)
+    match /sensitive_action_logs/{logId} {
+      allow get: if isAdmin() && isValidId(logId);
+      allow list: if isOwner();
+      allow create: if isAdmin() && isValidId(logId) && isValidAuditLog(incoming());
+      allow update, delete: if false;
+    }
+
+    // Store Configuration (Master PIN & M-Pesa Credentials)
+    match /store_settings/{settingId} {
+      allow get: if isAdmin() && isValidId(settingId);
+      allow list: if isOwner();
+      allow create, update: if isAdmin() && isValidId(settingId) && isOptionalString(incoming(), 'updatedAt', 64);
+      allow delete: if false;
     }
   }
 }

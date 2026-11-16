@@ -8,7 +8,14 @@ import {
   setLogLevel,
   Firestore
 } from 'firebase/firestore';
-import { getAuth, Auth } from 'firebase/auth';
+import {
+  getAuth,
+  Auth,
+  GoogleAuthProvider,
+  signInWithPopup,
+  signOut,
+  User as FirebaseUser,
+} from 'firebase/auth';
 import rawConfig from '../../firebase-applet-config.json';
 
 // Support Vercel environment variables (VITE_FIREBASE_*) with safe fallback to firebase-applet-config.json
@@ -55,8 +62,46 @@ export const db: Firestore = (() => {
 // Initialize Firebase Auth
 export const auth: Auth = getAuth(app);
 
+export const OWNER_CLOUD_EMAIL = 'nivajuma@gmail.com';
+
+export function isAuthorizedCloudUser(user: FirebaseUser | null | undefined): boolean {
+  return Boolean(
+    user &&
+    user.emailVerified &&
+    user.email &&
+    user.email.toLowerCase() === OWNER_CLOUD_EMAIL
+  );
+}
+
+export async function signInWithGoogleForCloud(): Promise<FirebaseUser> {
+  const provider = new GoogleAuthProvider();
+  provider.setCustomParameters({ prompt: 'select_account' });
+  try {
+    const result = await signInWithPopup(auth, provider);
+    return result.user;
+  } catch (err: any) {
+    if (
+      err?.code === 'auth/unauthorized-domain' ||
+      err?.message?.includes('unauthorized-domain')
+    ) {
+      const host = typeof window !== 'undefined' ? window.location.hostname : 'this domain';
+      throw new Error(
+        `Domain '${host}' is not yet in Firebase Authorized Domains. Add it in Firebase Console -> Authentication -> Settings -> Authorized domains.`
+      );
+    }
+    throw err;
+  }
+}
+
+export async function signOutFromCloud(): Promise<void> {
+  await signOut(auth);
+}
+
 // Connection test helper: verifies live Firestore connectivity against the server
 export async function testFirestoreConnection(): Promise<boolean> {
+  if (!auth.currentUser || !auth.currentUser.emailVerified) {
+    return false;
+  }
   try {
     const fetchDoc = getDocFromServer(doc(db, 'test', 'connection'));
     const timeout = new Promise<never>((_, reject) =>

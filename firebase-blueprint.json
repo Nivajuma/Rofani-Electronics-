@@ -5,10 +5,18 @@
       "description": "Inventory product item",
       "type": "object",
       "properties": {
-        "id": { "type": "string", "maxLength": 128 },
-        "name": { "type": "string", "maxLength": 200 },
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "maxLength": 300 },
+        "sku": { "type": "string", "maxLength": 128 },
+        "barcode": { "type": "string", "maxLength": 128 },
+        "category": { "type": "string", "maxLength": 128 },
+        "subcategory": { "type": "string", "maxLength": 128 },
         "sellingPrice": { "type": "number" },
-        "stockQuantity": { "type": "number" }
+        "costPrice": { "type": "number" },
+        "stockQuantity": { "type": "number" },
+        "minStockAlert": { "type": "number" },
+        "unit": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "maxLength": 64 }
       },
       "required": ["id", "name"]
     },
@@ -17,10 +25,14 @@
       "description": "Sales transaction receipt",
       "type": "object",
       "properties": {
-        "id": { "type": "string", "maxLength": 128 },
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
         "receiptNumber": { "type": "string", "maxLength": 128 },
         "grandTotal": { "type": "number" },
-        "date": { "type": "string", "maxLength": 64 }
+        "amountPaid": { "type": "number" },
+        "balanceDue": { "type": "number" },
+        "paymentStatus": { "type": "string", "enum": ["Paid", "Partial", "Unpaid"] },
+        "date": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "maxLength": 64 }
       },
       "required": ["id", "receiptNumber", "grandTotal"]
     },
@@ -29,8 +41,11 @@
       "description": "Customer profile",
       "type": "object",
       "properties": {
-        "id": { "type": "string", "maxLength": 128 },
-        "name": { "type": "string", "maxLength": 128 }
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "maxLength": 200 },
+        "phone": { "type": "string", "maxLength": 64 },
+        "currentBalanceDue": { "type": "number" },
+        "updatedAt": { "type": "string", "maxLength": 64 }
       },
       "required": ["id", "name"]
     },
@@ -39,8 +54,11 @@
       "description": "Supplier profile",
       "type": "object",
       "properties": {
-        "id": { "type": "string", "maxLength": 128 },
-        "name": { "type": "string", "maxLength": 128 }
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "maxLength": 200 },
+        "phone": { "type": "string", "maxLength": 64 },
+        "currentBalanceDue": { "type": "number" },
+        "updatedAt": { "type": "string", "maxLength": 64 }
       },
       "required": ["id", "name"]
     },
@@ -49,9 +67,12 @@
       "description": "Store expense record",
       "type": "object",
       "properties": {
-        "id": { "type": "string", "maxLength": 128 },
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
         "amount": { "type": "number" },
-        "category": { "type": "string", "maxLength": 128 }
+        "category": { "type": "string", "maxLength": 128 },
+        "description": { "type": "string", "maxLength": 500 },
+        "date": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "maxLength": 64 }
       },
       "required": ["id", "amount"]
     },
@@ -60,11 +81,48 @@
       "description": "Staff user profile",
       "type": "object",
       "properties": {
-        "id": { "type": "string", "maxLength": 128 },
-        "name": { "type": "string", "maxLength": 128 },
-        "role": { "type": "string", "maxLength": 64 }
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "maxLength": 200 },
+        "role": { "type": "string", "maxLength": 128 },
+        "email": { "type": "string", "maxLength": 200 },
+        "updatedAt": { "type": "string", "maxLength": 64 }
       },
       "required": ["id", "name"]
+    },
+    "RestockRecord": {
+      "title": "RestockRecord",
+      "description": "Inventory restock batch record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "productId": { "type": "string", "maxLength": 128 },
+        "productName": { "type": "string", "maxLength": 300 },
+        "quantityAdded": { "type": "number" },
+        "totalCost": { "type": "number" },
+        "date": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "productId", "quantityAdded"]
+    },
+    "SensitiveActionLog": {
+      "title": "SensitiveActionLog",
+      "description": "Immutable security and inventory audit log entry",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "timestamp": { "type": "string", "maxLength": 64 },
+        "actionType": { "type": "string", "maxLength": 64 },
+        "actionTitle": { "type": "string", "maxLength": 300 },
+        "userId": { "type": "string", "maxLength": 128 }
+      },
+      "required": ["id", "timestamp", "actionType", "actionTitle"]
+    },
+    "StoreSetting": {
+      "title": "StoreSetting",
+      "description": "Store security and payment configuration document",
+      "type": "object",
+      "properties": {
+        "updatedAt": { "type": "string", "maxLength": 64 }
+      }
     }
   },
   "firestore": {
@@ -93,16 +151,16 @@
       "description": "Users collection"
     },
     "/restock_records/{recordId}": {
-      "schema": { "$ref": "#/entities/Product" },
-      "description": "Restock records"
+      "schema": { "$ref": "#/entities/RestockRecord" },
+      "description": "Restock records collection"
     },
     "/sensitive_action_logs/{logId}": {
-      "schema": { "$ref": "#/entities/User" },
-      "description": "Audit logs"
+      "schema": { "$ref": "#/entities/SensitiveActionLog" },
+      "description": "Immutable audit logs collection"
     },
     "/store_settings/{settingId}": {
-      "schema": { "$ref": "#/entities/User" },
-      "description": "Store security settings"
+      "schema": { "$ref": "#/entities/StoreSetting" },
+      "description": "Store security and M-Pesa configuration documents"
     }
   }
 }

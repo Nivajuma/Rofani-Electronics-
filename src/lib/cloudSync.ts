@@ -702,7 +702,7 @@ export async function commitSaleToCloudBatch(
     const targetProducts = updatedProducts.filter((p) => soldProductIds.has(p.id));
     for (const p of (targetProducts.length > 0 ? targetProducts : updatedProducts.slice(0, 5))) {
       const pRef = doc(db, 'products', p.id);
-      batch.set(pRef, cleanForFirestore({
+      batch.set(pRef, cleanProductForFirestore({
         ...p,
         updatedAt: new Date().toISOString(),
       }), { merge: true });

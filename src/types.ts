@@ -110,6 +110,7 @@ export interface User {
   payCycle?: PayCycle; // 'Monthly' | 'Weekly' | 'Bi-Weekly' | 'Daily'
   basePayRate?: number; // Monthly salary, daily shift wage, or hourly rate in KSh
   fixedAllowance?: number; // Recurring transport/lunch/housing allowance in KSh
+  updatedAt?: string;
 }
 
 export type PaymentMethod = 'cash' | 'credit_card' | 'cheque' | 'mpesa' | 'upi' | 'bank_transfer';
@@ -272,6 +273,7 @@ export interface Transaction {
     totTotal: number;
   };
   editedAt?: string;
+  updatedAt?: string;
 }
 
 export interface StaffCommissionPayout {
@@ -372,6 +374,7 @@ export interface Expense {
   nextDueDate?: string;
   isRecurring?: boolean;
   status?: 'Paid' | 'Due' | 'Overdue';
+  updatedAt?: string;
 }
 
 export interface RestockRecord {

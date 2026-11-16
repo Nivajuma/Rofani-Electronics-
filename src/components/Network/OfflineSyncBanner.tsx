@@ -12,6 +12,7 @@ import {
   Maximize2,
   UploadCloud,
   CheckCircle2,
+  GitCompareArrows,
 } from 'lucide-react';
 import {
   useNetworkStatus,
@@ -23,12 +24,16 @@ interface OfflineSyncBannerProps {
   compact?: boolean;
   onTriggerSync?: () => Promise<SyncRetryResult | void> | void;
   onOpenCloudSync?: () => void;
+  conflictCount?: number;
+  onOpenConflictAssistant?: () => void;
 }
 
 export const OfflineSyncBanner: React.FC<OfflineSyncBannerProps> = ({
   compact = false,
   onTriggerSync,
   onOpenCloudSync,
+  conflictCount = 0,
+  onOpenConflictAssistant,
 }) => {
   const {
     isOnline,
@@ -155,6 +160,35 @@ export const OfflineSyncBanner: React.FC<OfflineSyncBannerProps> = ({
       .map(([type, count]) => `${count} ${type}${count === 1 ? '' : 's'}`)
       .join(', ');
   }, [queuedItems]);
+
+  // Proactive alert when millisecond-tie conflicts were deferred via "Resolve Later"
+  const renderConflictStrip = () => {
+    if (!conflictCount || conflictCount <= 0 || !onOpenConflictAssistant) return null;
+    return (
+      <aside
+        aria-live="polite"
+        className={`bg-slate-900 border-b border-amber-500/50 text-slate-100 px-4 py-2 text-xs flex items-center justify-between gap-3 z-40 ${
+          compact ? 'rounded-xl my-1 border' : 'w-full'
+        }`}
+      >
+        <div className="flex items-center gap-2.5 min-w-0">
+          <GitCompareArrows className="w-4 h-4 text-amber-400 shrink-0" />
+          <span className="truncate font-medium">
+            <strong className="text-amber-300 font-mono tabular-nums">{conflictCount}</strong>{' '}
+            record sync conflict{conflictCount === 1 ? '' : 's'} with matching millisecond timestamps awaiting your comparison.
+          </span>
+        </div>
+        <button
+          type="button"
+          id="btn-open-conflict-assistant"
+          onClick={onOpenConflictAssistant}
+          className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs whitespace-nowrap shrink-0 transition cursor-pointer"
+        >
+          Open Conflict Assistant
+        </button>
+      </aside>
+    );
+  };
 
   // Brief success confirmation after all pending records finish syncing
   if (isOnline && pendingCount === 0 && retryFeedback?.type === 'success') {
@@ -372,9 +406,9 @@ export const OfflineSyncBanner: React.FC<OfflineSyncBannerProps> = ({
     );
   }
 
-  // If online and queue is empty, render nothing
+  // If online and queue is empty, still show deferred conflict strip if any conflicts remain
   if (isOnline) {
-    return null;
+    return renderConflictStrip();
   }
 
   // When offline and user minimized the full top banner, show a persistent floating indicator

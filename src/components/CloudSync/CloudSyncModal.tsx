@@ -24,7 +24,8 @@ import {
   Download,
   RotateCcw,
   History,
-  Clock
+  Clock,
+  GitCompareArrows,
 } from 'lucide-react';
 import QRCode from 'qrcode';
 import {
@@ -35,7 +36,13 @@ import {
   batchSaveExpensesToCloud,
   bulkUploadUsersToCloud,
 } from '../../lib/cloudSync';
-import { FIREBASE_UPGRADE_URL } from '../../lib/firebase';
+import {
+  FIREBASE_UPGRADE_URL,
+  OWNER_CLOUD_EMAIL,
+  isAuthorizedCloudUser,
+  signInWithGoogleForCloud,
+  signOutFromCloud,
+} from '../../lib/firebase';
 import { Product, User, Transaction, Customer, Supplier, Expense } from '../../types';
 import { useNetworkStatus, SyncRetryResult } from '../../utils/offlineSync';
 import { findRecoverableBackups } from '../../utils/backupRecovery';
@@ -69,6 +76,9 @@ interface CloudSyncModalProps {
   onLockNow?: () => void;
   recoveryEmail?: string;
   emergencyKey?: string;
+  conflictCount?: number;
+  onOpenConflictAssistant?: () => void;
+  firebaseUser?: { email?: string | null; emailVerified?: boolean; uid?: string } | null;
 }
 
 export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
@@ -92,12 +102,17 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
   requirePinOnStartup = true,
   onLockNow,
   recoveryEmail = 'NivaJuma@gmail.com',
+  conflictCount = 0,
+  onOpenConflictAssistant,
+  firebaseUser = null,
 }) => {
   const { isOnline, pendingCount, queuedItems, isSimulated, toggleSimulatedOffline, checkConnection } = useNetworkStatus();
   const [copied, setCopied] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [isPulling, setIsPulling] = useState(false);
   const [isRetryingPending, setIsRetryingPending] = useState(false);
+  const [isSigningInGoogle, setIsSigningInGoogle] = useState(false);
+  const hasAuthorizedCloudUser = isAuthorizedCloudUser(firebaseUser as any);
   const [syncFeedback, setSyncFeedback] = useState<{
     type: 'success' | 'error' | 'warning';
     title: string;
@@ -168,8 +183,53 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
     setIsEditingUrl(false);
   };
 
+  const handleGoogleSignIn = async () => {
+    if (isSigningInGoogle) return;
+    setIsSigningInGoogle(true);
+    setSyncFeedback(null);
+    try {
+      const signedInUser = await signInWithGoogleForCloud();
+      if (isAuthorizedCloudUser(signedInUser)) {
+        setSyncFeedback({
+          type: 'success',
+          title: 'Google Cloud Account Connected',
+          details: `Signed in as ${signedInUser.email}. Cloud Firestore sync is now active across your devices.`,
+          timestamp: new Date().toLocaleTimeString(),
+        });
+        if (onTriggerSync && pendingCount > 0) {
+          onTriggerSync();
+        }
+      } else {
+        setSyncFeedback({
+          type: 'warning',
+          title: 'Store Owner Google Account Required',
+          details: `Signed in as ${signedInUser.email || 'unknown account'}, but Cloud Firestore access is restricted to ${OWNER_CLOUD_EMAIL}. Please switch to the store owner Google account.`,
+          timestamp: new Date().toLocaleTimeString(),
+        });
+      }
+    } catch (err: any) {
+      setSyncFeedback({
+        type: 'error',
+        title: 'Google Sign-In Cancelled or Failed',
+        details: err?.message || 'Could not complete Google Sign-In. Please allow popups and try again.',
+        timestamp: new Date().toLocaleTimeString(),
+      });
+    } finally {
+      setIsSigningInGoogle(false);
+    }
+  };
+
   const handleRetryPendingQueue = async () => {
     if (!onTriggerSync || isRetryingPending || isUploading || isPulling) return;
+    if (!hasAuthorizedCloudUser) {
+      setSyncFeedback({
+        type: 'warning',
+        title: 'Google Sign-In Required for Cloud Sync',
+        details: `Please click "Sign in with Google" below using ${OWNER_CLOUD_EMAIL} to upload your ${pendingCount} queued record(s).`,
+        timestamp: new Date().toLocaleTimeString(),
+      });
+      return;
+    }
     const online = await checkConnection();
     if (!online) {
       setSyncFeedback({
@@ -225,6 +285,15 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
   };
 
   const handleUploadAllToCloud = async () => {
+    if (!hasAuthorizedCloudUser) {
+      setSyncFeedback({
+        type: 'warning',
+        title: 'Google Sign-In Required Before Pushing',
+        details: `Please sign in with the verified store Google account (${OWNER_CLOUD_EMAIL}) below to push records to Cloud Firestore.`,
+        timestamp: new Date().toLocaleTimeString(),
+      });
+      return;
+    }
     if (!isOnline || (typeof navigator !== 'undefined' && !navigator.onLine)) {
       setSyncFeedback({
         type: 'error',
@@ -333,6 +402,15 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
 
   const handlePullFromCloud = async () => {
     if (!onPullFromCloud) return;
+    if (!hasAuthorizedCloudUser) {
+      setSyncFeedback({
+        type: 'warning',
+        title: 'Google Sign-In Required Before Pulling',
+        details: `Please sign in with the verified store Google account (${OWNER_CLOUD_EMAIL}) below to pull records from Cloud Firestore.`,
+        timestamp: new Date().toLocaleTimeString(),
+      });
+      return;
+    }
     if (!isOnline || (typeof navigator !== 'undefined' && !navigator.onLine)) {
       setSyncFeedback({
         type: 'error',
@@ -506,6 +584,35 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
             </div>
           )}
 
+          {/* Millisecond Timestamp Sync Conflicts Panel */}
+          {conflictCount > 0 && onOpenConflictAssistant && (
+            <div className="bg-amber-950/60 border border-amber-500/70 p-3.5 sm:p-4 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-start gap-2.5 min-w-0">
+                <GitCompareArrows className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+                <div className="space-y-1 min-w-0">
+                  <div className="text-xs font-bold text-amber-100">
+                    {conflictCount} Millisecond Timestamp Conflict{conflictCount === 1 ? '' : 's'} Detected
+                  </div>
+                  <p className="text-[11px] text-amber-200/90 leading-relaxed">
+                    Local edits and remote Cloud Firestore updates share the exact same millisecond timestamp. Compare both versions side-by-side to choose which to keep.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                id="btn-modal-open-conflict-assistant"
+                onClick={() => {
+                  onClose();
+                  onOpenConflictAssistant();
+                }}
+                className="px-3.5 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs rounded-xl shadow-md transition whitespace-nowrap shrink-0 cursor-pointer flex items-center gap-1.5"
+              >
+                <GitCompareArrows className="w-3.5 h-3.5" />
+                <span>Compare & Resolve ({conflictCount})</span>
+              </button>
+            </div>
+          )}
+
           {/* Unsynced Offline Queue Panel (pendingSyncQueue) */}
           {pendingCount > 0 && (
             <div className="bg-orange-950/60 border border-orange-500/70 p-3.5 sm:p-4 rounded-2xl space-y-3">
@@ -557,6 +664,65 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
                   ))}
                 </div>
               )}
+            </div>
+          )}
+
+          {/* Firebase Google Cloud Account Sign-In & Authorization Card */}
+          {!hasAuthorizedCloudUser ? (
+            <div className="bg-sky-950/70 border border-sky-500/70 p-3.5 sm:p-4 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-start gap-2.5 min-w-0">
+                <Shield className="w-5 h-5 text-sky-400 shrink-0 mt-0.5" />
+                <div className="space-y-1 min-w-0">
+                  <div className="text-xs font-bold text-sky-100">
+                    {firebaseUser?.email
+                      ? `Signed in as ${firebaseUser.email} (Not Store Owner)`
+                      : 'Sign in with Google to Enable Cloud Firestore Sync'}
+                  </div>
+                  <p className="text-[11px] text-sky-200/90 leading-relaxed">
+                    {firebaseUser?.email
+                      ? `Cloud Firestore read/write access is restricted to verified store owner ${OWNER_CLOUD_EMAIL}. Switch accounts to sync across devices.`
+                      : `Your local data is safe on this device. Sign in with verified store owner account (${OWNER_CLOUD_EMAIL}) to sync inventory and sales to Cloud Firestore.`}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  id="btn-google-cloud-signin"
+                  onClick={handleGoogleSignIn}
+                  disabled={isSigningInGoogle}
+                  className="px-3.5 py-2 bg-white hover:bg-slate-100 text-slate-900 font-black text-xs rounded-xl shadow-md transition flex items-center gap-1.5 cursor-pointer disabled:opacity-60"
+                >
+                  <ShieldCheck className="w-4 h-4 text-sky-600" />
+                  <span>{isSigningInGoogle ? 'Signing in...' : firebaseUser?.email ? 'Switch Google Account' : 'Sign in with Google'}</span>
+                </button>
+                {firebaseUser && (
+                  <button
+                    type="button"
+                    onClick={() => signOutFromCloud().catch(() => {})}
+                    className="px-2.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold rounded-xl border border-slate-700 transition cursor-pointer"
+                  >
+                    Sign Out
+                  </button>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="bg-emerald-950/40 border border-emerald-700/50 px-3.5 py-2.5 rounded-2xl flex items-center justify-between gap-2 text-xs">
+              <div className="flex items-center gap-2 min-w-0 text-emerald-200">
+                <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span className="truncate">
+                  Cloud Auth Verified: <strong className="text-white">{firebaseUser?.email}</strong>
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={handleGoogleSignIn}
+                disabled={isSigningInGoogle}
+                className="text-[11px] text-emerald-300 hover:text-white font-semibold shrink-0 cursor-pointer"
+              >
+                Switch Account
+              </button>
             </div>
           )}
 

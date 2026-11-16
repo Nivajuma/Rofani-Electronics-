@@ -55,6 +55,8 @@ interface PhoneDeviceFrameProps {
   onOpenCloudSync?: () => void;
   cloudSyncStatus?: 'synced' | 'syncing' | 'offline' | 'error' | 'quota_exceeded';
   onTriggerSync?: () => Promise<SyncRetryResult | void> | void;
+  conflictCount?: number;
+  onOpenConflictAssistant?: () => void;
 }
 
 export const PhoneDeviceFrame: React.FC<PhoneDeviceFrameProps> = ({
@@ -76,6 +78,8 @@ export const PhoneDeviceFrame: React.FC<PhoneDeviceFrameProps> = ({
   onOpenCloudSync,
   cloudSyncStatus = 'synced',
   onTriggerSync,
+  conflictCount = 0,
+  onOpenConflictAssistant,
 }) => {
   const [showMobileMoreMenu, setShowMobileMoreMenu] = useState(false);
   const [currentTime, setCurrentTime] = useState('09:41');
@@ -565,7 +569,13 @@ export const PhoneDeviceFrame: React.FC<PhoneDeviceFrameProps> = ({
 
         {/* Pinned Sticky Offline Notification Banner in Mobile Phone Screen */}
         <div className="bg-slate-950 px-2 pt-1.5 shrink-0 z-20">
-          <OfflineSyncBanner compact onTriggerSync={onTriggerSync} onOpenCloudSync={onOpenCloudSync} />
+          <OfflineSyncBanner
+            compact
+            onTriggerSync={onTriggerSync}
+            onOpenCloudSync={onOpenCloudSync}
+            conflictCount={conflictCount}
+            onOpenConflictAssistant={onOpenConflictAssistant}
+          />
         </div>
 
         {/* MOBILE MAIN VIEWPORT CONTENT CONTAINER */}

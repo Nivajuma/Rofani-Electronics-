@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
 import {
   ShoppingBag,
   Package,
@@ -120,6 +121,7 @@ import { CustomersSuppliersView } from './components/Contacts/CustomersSuppliers
 import { AIAssistantModal } from './components/AI/AIAssistantModal';
 import { AIAssistantWidget } from './components/AI/AIAssistantWidget';
 import { CloudSyncModal } from './components/CloudSync/CloudSyncModal';
+import { ConflictResolutionModal } from './components/CloudSync/ConflictResolutionModal';
 import { PrintBarcodesUtilityModal } from './components/Inventory/PrintBarcodesUtilityModal';
 import { ItemAuditMiniPage } from './components/Inventory/ItemAuditMiniPage';
 import { StockAlertNotificationModal } from './components/Inventory/StockAlertNotificationModal';
@@ -189,7 +191,13 @@ import {
   subscribeToMpesaConfig,
 } from './lib/cloudSync';
 import { loadMpesaConfig, saveMpesaConfig } from './utils/mpesa';
-import { testFirestoreConnection, isQuotaExceededError, FIREBASE_UPGRADE_URL } from './lib/firebase';
+import {
+  auth,
+  isAuthorizedCloudUser,
+  testFirestoreConnection,
+  isQuotaExceededError,
+  FIREBASE_UPGRADE_URL,
+} from './lib/firebase';
 import { safeGetJSON, safeSetJSON, checkAndRunRollingSalesArchive } from './utils/safeStorage';
 import {
   getAllProductImagesFromIndexedDB,
@@ -207,6 +215,12 @@ import {
   getAggressiveAutoSync,
   SyncRetryResult,
 } from './utils/offlineSync';
+import {
+  SyncConflictRecordType,
+  SyncConflict,
+  ConflictResolutionChoice,
+  mergeRecordsWithConflictDetection,
+} from './utils/syncConflicts';
 import { findRecoverableBackups, protectLargestBackup, getBackupDataByKey } from './utils/backupRecovery';
 import { isSoundEnabled, setSoundEnabled, subscribeToSoundPref, playButtonSound } from './utils/uiFeedback';
 import { saveToIDB, getFromIDB } from './utils/idbStorage';
@@ -254,21 +268,41 @@ function parseProductTimestampMs(val?: string): number {
   return Number.isFinite(ms) ? ms : 0;
 }
 
-function getPendingProductMap(): Map<string, Product> {
-  const map = new Map<string, Product>();
+function getPendingRecordMap<T extends { id: string }>(
+  queueType: 'product' | 'sale' | 'customer' | 'supplier' | 'expense' | 'user'
+): Map<string, T> {
+  const map = new Map<string, T>();
   try {
     const queue = getPendingSyncQueue();
     queue.forEach((item) => {
-      if (item.type === 'product' && item.data && item.data.id && !item.data._deleted) {
-        const p = item.data as Product;
-        const existing = map.get(p.id);
-        if (!existing || parseProductTimestampMs(p.updatedAt) >= parseProductTimestampMs(existing.updatedAt)) {
-          map.set(p.id, p);
+      if (item.type === queueType && item.data && item.data.id && !item.data._deleted) {
+        const rec = item.data as T & { updatedAt?: string; editedAt?: string };
+        const existing = map.get(rec.id) as (T & { updatedAt?: string; editedAt?: string }) | undefined;
+        const recTs = parseProductTimestampMs(rec.editedAt || rec.updatedAt);
+        const existingTs = existing ? parseProductTimestampMs(existing.editedAt || existing.updatedAt) : -1;
+        if (!existing || recTs >= existingTs) {
+          map.set(rec.id, rec);
         }
       }
     });
   } catch {}
   return map;
+}
+
+function getPendingProductMap(): Map<string, Product> {
+  return getPendingRecordMap<Product>('product');
+}
+
+function clearPendingSyncItemsForRecord(recordType: SyncConflictRecordType, recordId: string): void {
+  try {
+    const queueType = recordType === 'transaction' ? 'sale' : recordType;
+    const queue = getPendingSyncQueue();
+    queue.forEach((item) => {
+      if (item.type === queueType && String(item.data?.id || '') === String(recordId)) {
+        removePendingSyncItem(item.id);
+      }
+    });
+  } catch {}
 }
 
 function mergeProductListsByTimestamp(
@@ -560,10 +594,49 @@ export default function App() {
     safeSetJSON('retail_pos_show_print_modal', showPrintBarcodesModal);
   }, [showPrintBarcodesModal]);
 
-  const [cloudSyncStatus, setCloudSyncStatus] = useState<'synced' | 'syncing' | 'offline' | 'error' | 'quota_exceeded'>('syncing');
+  const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(() => auth.currentUser);
+  const [isFirebaseAuthReady, setIsFirebaseAuthReady] = useState<boolean>(false);
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      setFirebaseUser(user);
+      setIsFirebaseAuthReady(true);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const isCloudAuthReady = isFirebaseAuthReady && isAuthorizedCloudUser(firebaseUser);
+  const canAutoSyncCloud = () => getIsOnline() && isAuthorizedCloudUser(auth.currentUser);
+
+  const [cloudSyncStatus, setCloudSyncStatus] = useState<'synced' | 'syncing' | 'offline' | 'error' | 'quota_exceeded'>('offline');
   const [isCloudQuotaExceeded, setIsCloudQuotaExceeded] = useState<boolean>(false);
   const [showQuotaBanner, setShowQuotaBanner] = useState<boolean>(true);
   const [lastSyncedTime, setLastSyncedTime] = useState<string | null>(null);
+  const [syncConflicts, setSyncConflicts] = useState<SyncConflict[]>([]);
+  const [isConflictModalOpen, setIsConflictModalOpen] = useState<boolean>(false);
+  const resolvedConflictFingerprintsRef = useRef<Set<string>>(new Set());
+
+  const enqueueSyncConflicts = (incoming: SyncConflict[], autoOpen: boolean = true) => {
+    if (!incoming || incoming.length === 0) return;
+    const filtered = incoming.filter((c) => !resolvedConflictFingerprintsRef.current.has(c.fingerprint));
+    if (filtered.length === 0) return;
+
+    let addedAny = false;
+    setSyncConflicts((prev) => {
+      const next = [...prev];
+      filtered.forEach((conflict) => {
+        if (!next.some((existing) => existing.fingerprint === conflict.fingerprint || existing.id === conflict.id)) {
+          next.push(conflict);
+          addedAny = true;
+        }
+      });
+      return addedAny ? next : prev;
+    });
+
+    if (autoOpen) {
+      setIsConflictModalOpen(true);
+    }
+  };
 
   // Daily Automatic Email Backup Modal & Status Banner
   const [showDailyEmailBackupModal, setShowDailyEmailBackupModal] = useState<boolean>(false);
@@ -818,8 +891,18 @@ export default function App() {
       safeSetJSON('retail_pos_products', updated);
       return updated;
     });
-    if (affected.length > 0 && getIsOnline()) {
-      batchSaveProductsToCloud(affected).catch(() => {});
+    if (affected.length > 0) {
+      if (canAutoSyncCloud()) {
+        batchSaveProductsToCloud(affected).catch(() => {});
+      } else {
+        affected.forEach((p) =>
+          addPendingSyncItem({
+            type: 'product',
+            description: `Category Rename: ${p.name}`,
+            data: p,
+          })
+        );
+      }
     }
   };
 
@@ -856,8 +939,18 @@ export default function App() {
       safeSetJSON('retail_pos_products', updated);
       return updated;
     });
-    if (affected.length > 0 && getIsOnline()) {
-      batchSaveProductsToCloud(affected).catch(() => {});
+    if (affected.length > 0) {
+      if (canAutoSyncCloud()) {
+        batchSaveProductsToCloud(affected).catch(() => {});
+      } else {
+        affected.forEach((p) =>
+          addPendingSyncItem({
+            type: 'product',
+            description: `Category Reassign: ${p.name}`,
+            data: p,
+          })
+        );
+      }
     }
   };
 
@@ -930,8 +1023,18 @@ export default function App() {
       safeSetJSON('retail_pos_products', updated);
       return updated;
     });
-    if (affected.length > 0 && getIsOnline()) {
-      batchSaveProductsToCloud(affected).catch(() => {});
+    if (affected.length > 0) {
+      if (canAutoSyncCloud()) {
+        batchSaveProductsToCloud(affected).catch(() => {});
+      } else {
+        affected.forEach((p) =>
+          addPendingSyncItem({
+            type: 'product',
+            description: `Subcategory Rename: ${p.name}`,
+            data: p,
+          })
+        );
+      }
     }
   };
 
@@ -983,8 +1086,18 @@ export default function App() {
       safeSetJSON('retail_pos_products', updated);
       return updated;
     });
-    if (affected.length > 0 && getIsOnline()) {
-      batchSaveProductsToCloud(affected).catch(() => {});
+    if (affected.length > 0) {
+      if (canAutoSyncCloud()) {
+        batchSaveProductsToCloud(affected).catch(() => {});
+      } else {
+        affected.forEach((p) =>
+          addPendingSyncItem({
+            type: 'product',
+            description: `Subcategory Reassign: ${p.name}`,
+            data: p,
+          })
+        );
+      }
     }
   };
 
@@ -1048,6 +1161,19 @@ export default function App() {
     safeSetJSON('retail_pos_transactions', archivedChecked);
     safeSetJSON('pos_store_sales', archivedChecked);
   }, [transactions]);
+
+  const productsRef = useRef<Product[]>(products);
+  productsRef.current = products;
+  const transactionsRef = useRef<Transaction[]>(transactions);
+  transactionsRef.current = transactions;
+  const customersRef = useRef<Customer[]>(customers);
+  customersRef.current = customers;
+  const suppliersRef = useRef<Supplier[]>(suppliers);
+  suppliersRef.current = suppliers;
+  const expensesRef = useRef<Expense[]>(expenses);
+  expensesRef.current = expenses;
+  const allUsersRef = useRef<User[]>(allUsers);
+  allUsersRef.current = allUsers;
 
   // Post-Sleep / Focus Rehydration Effect (NEVER blindly overwrite newer state or IndexedDB with stale localStorage)
   useEffect(() => {
@@ -1405,22 +1531,31 @@ export default function App() {
     };
   }, [transactions, allUsers, products, expenses, activeStoreId, requirePinOnStartup, masterPin, ownerRecoveryEmail]);
 
-  // Real-time synchronization subscription for transactions with ID-based local preservation
+  // Real-time synchronization subscription for transactions with conflict detection
   useEffect(() => {
+    if (!isCloudAuthReady) return;
     let unsubscribe: (() => void) | undefined;
     try {
       unsubscribe = subscribeToTransactions(
         (incomingRemoteSales) => {
-          const existingLocalSales = safeGetJSON<Transaction[]>('retail_pos_transactions', transactions);
-          const mergedSales = [...existingLocalSales];
-          incomingRemoteSales.forEach((remoteTxn) => {
-            if (!mergedSales.some((localTxn) => localTxn.id === remoteTxn.id)) {
-              mergedSales.push(remoteTxn);
-            }
+          const currentLocal = transactionsRef.current.length > 0
+            ? transactionsRef.current
+            : safeGetJSON<Transaction[]>('retail_pos_transactions', []);
+          const { merged, conflicts } = mergeRecordsWithConflictDetection<Transaction>({
+            recordType: 'transaction',
+            localRecords: currentLocal,
+            incomingRecords: incomingRemoteSales,
+            pendingMap: getPendingRecordMap<Transaction>('sale'),
+            resolvedFingerprints: resolvedConflictFingerprintsRef.current,
+            sourceLabel: 'Cloud Firestore Live Sales Sync',
           });
-          mergedSales.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-          setTransactions(mergedSales);
-          safeSetJSON('retail_pos_transactions', mergedSales);
+          merged.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+          transactionsRef.current = merged;
+          setTransactions(merged);
+          safeSetJSON('retail_pos_transactions', merged);
+          if (conflicts.length > 0) {
+            enqueueSyncConflicts(conflicts, true);
+          }
         },
         (err) => {
           console.warn('Transactions subscription notice:', err);
@@ -1430,15 +1565,24 @@ export default function App() {
       // Proactive initial fetch for transactions on startup
       fetchTransactionsFromCloud().then((sales) => {
         if (sales && sales.length > 0) {
-          setTransactions((prev) => {
-            const merged = [...sales];
-            prev.forEach((p) => {
-              if (!merged.some((m) => m.id === p.id)) merged.push(p);
-            });
-            merged.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-            safeSetJSON('retail_pos_transactions', merged);
-            return merged;
+          const currentLocal = transactionsRef.current.length > 0
+            ? transactionsRef.current
+            : safeGetJSON<Transaction[]>('retail_pos_transactions', []);
+          const { merged, conflicts } = mergeRecordsWithConflictDetection<Transaction>({
+            recordType: 'transaction',
+            localRecords: currentLocal,
+            incomingRecords: sales,
+            pendingMap: getPendingRecordMap<Transaction>('sale'),
+            resolvedFingerprints: resolvedConflictFingerprintsRef.current,
+            sourceLabel: 'Cloud Firestore Startup Sales Sync',
           });
+          merged.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+          transactionsRef.current = merged;
+          setTransactions(merged);
+          safeSetJSON('retail_pos_transactions', merged);
+          if (conflicts.length > 0) {
+            enqueueSyncConflicts(conflicts, true);
+          }
         }
       }).catch((e) => console.warn('Startup transactions fetch notice:', e));
     } catch (err) {
@@ -1447,10 +1591,11 @@ export default function App() {
     return () => {
       if (unsubscribe) unsubscribe();
     };
-  }, []);
+  }, [isCloudAuthReady, firebaseUser?.uid]);
 
-  // Real-time synchronization subscription for products with ID-based local preservation
+  // Real-time synchronization subscription for products with ID-based local preservation & exact-ms conflict detection
   useEffect(() => {
+    if (!isCloudAuthReady) return;
     let unsubscribe: (() => void) | undefined;
     try {
       unsubscribe = subscribeToProducts(
@@ -1458,21 +1603,26 @@ export default function App() {
           if (incomingRemoteProducts && incomingRemoteProducts.length > 0) {
             const deletedIds = getDeletedProductIds();
             const pendingMap = getPendingProductMap();
-            setProducts((prevLocalProducts) => {
-              const merged = mergeProductListsByTimestamp(
-                prevLocalProducts,
-                incomingRemoteProducts,
-                deletedIds,
-                pendingMap
-              );
-              safeSetJSON('retail_pos_products', merged);
-              try {
-                saveToIDB('retail_pos_products', merged);
-              } catch {}
-              return merged;
+            const { merged, conflicts } = mergeRecordsWithConflictDetection<Product>({
+              recordType: 'product',
+              localRecords: productsRef.current,
+              incomingRecords: incomingRemoteProducts,
+              deletedIds,
+              pendingMap,
+              resolvedFingerprints: resolvedConflictFingerprintsRef.current,
+              sourceLabel: 'Cloud Firestore Live Catalog Sync',
             });
+            productsRef.current = merged;
+            setProducts(merged);
+            safeSetJSON('retail_pos_products', merged);
+            try {
+              saveToIDB('retail_pos_products', merged);
+            } catch {}
             setCloudSyncStatus('synced');
             setLastSyncedTime(new Date().toLocaleTimeString());
+            if (conflicts.length > 0) {
+              enqueueSyncConflicts(conflicts, true);
+            }
           }
         },
         (err) => {
@@ -1490,21 +1640,26 @@ export default function App() {
         if (cloudItems && cloudItems.length > 0) {
           const deletedIds = getDeletedProductIds();
           const pendingMap = getPendingProductMap();
-          setProducts((prevLocal) => {
-            const merged = mergeProductListsByTimestamp(
-              prevLocal,
-              cloudItems,
-              deletedIds,
-              pendingMap
-            );
-            safeSetJSON('retail_pos_products', merged);
-            try {
-              saveToIDB('retail_pos_products', merged);
-            } catch {}
-            return merged;
+          const { merged, conflicts } = mergeRecordsWithConflictDetection<Product>({
+            recordType: 'product',
+            localRecords: productsRef.current,
+            incomingRecords: cloudItems,
+            deletedIds,
+            pendingMap,
+            resolvedFingerprints: resolvedConflictFingerprintsRef.current,
+            sourceLabel: 'Cloud Firestore Startup Catalog Sync',
           });
+          productsRef.current = merged;
+          setProducts(merged);
+          safeSetJSON('retail_pos_products', merged);
+          try {
+            saveToIDB('retail_pos_products', merged);
+          } catch {}
           setCloudSyncStatus('synced');
           setLastSyncedTime(new Date().toLocaleTimeString());
+          if (conflicts.length > 0) {
+            enqueueSyncConflicts(conflicts, true);
+          }
         }
       }).catch((e) => console.warn('Startup products cloud fetch notice:', e));
     } catch (err) {
@@ -1513,11 +1668,12 @@ export default function App() {
     return () => {
       if (unsubscribe) unsubscribe();
     };
-  }, []);
+  }, [isCloudAuthReady, firebaseUser?.uid]);
 
   // Real-time synchronization subscription for M-PESA & Daraja store configuration
   // Automatically propagates keys set on Vercel, mobile, or AI Studio across all devices
   useEffect(() => {
+    if (!isCloudAuthReady) return;
     let unsubscribe: (() => void) | undefined;
     try {
       unsubscribe = subscribeToMpesaConfig(
@@ -1544,26 +1700,31 @@ export default function App() {
     return () => {
       if (unsubscribe) unsubscribe();
     };
-  }, []);
+  }, [isCloudAuthReady, firebaseUser?.uid]);
 
   // Real-time synchronization subscription for users & staff accounts
   useEffect(() => {
+    if (!isCloudAuthReady) return;
     let unsubscribe: (() => void) | undefined;
     try {
       unsubscribe = subscribeToUsers(
         (incomingRemoteUsers) => {
           if (incomingRemoteUsers && incomingRemoteUsers.length > 0) {
-            setAllUsers((prevLocalUsers) => {
-              const merged = [...incomingRemoteUsers];
-              prevLocalUsers.forEach((localUser) => {
-                if (!merged.some((rUser) => rUser.id === localUser.id)) {
-                  merged.push(localUser);
-                }
-              });
-              safeSetJSON('retail_pos_users', merged);
-              safeSetJSON('pos_store_staff_users', merged);
-              return merged;
+            const { merged, conflicts } = mergeRecordsWithConflictDetection<User>({
+              recordType: 'user',
+              localRecords: allUsersRef.current,
+              incomingRecords: incomingRemoteUsers,
+              pendingMap: getPendingRecordMap<User>('user'),
+              resolvedFingerprints: resolvedConflictFingerprintsRef.current,
+              sourceLabel: 'Cloud Firestore Live Staff Sync',
             });
+            allUsersRef.current = merged;
+            setAllUsers(merged);
+            safeSetJSON('retail_pos_users', merged);
+            safeSetJSON('pos_store_staff_users', merged);
+            if (conflicts.length > 0) {
+              enqueueSyncConflicts(conflicts, true);
+            }
           }
         },
         (err) => console.warn('Users cloud subscription notice:', err)
@@ -1574,7 +1735,7 @@ export default function App() {
     return () => {
       if (unsubscribe) unsubscribe();
     };
-  }, []);
+  }, [isCloudAuthReady, firebaseUser?.uid]);
 
   // Offline and bidirectional cloud sync handler
   const syncPendingQueueToCloud = async (): Promise<SyncRetryResult> => {
@@ -1585,6 +1746,14 @@ export default function App() {
         syncedCount: 0,
         remainingCount: initialQueue.length,
         errorMessage: 'Device is offline. Connect to Wi-Fi or mobile data and try again.',
+      };
+    }
+    if (!isAuthorizedCloudUser(auth.currentUser)) {
+      setCloudSyncStatus('offline');
+      return {
+        syncedCount: 0,
+        remainingCount: initialQueue.length,
+        errorMessage: 'Sign in with your Google store account (NivaJuma@gmail.com) in Sync & Share to sync queued records.',
       };
     }
 
@@ -1704,20 +1873,24 @@ export default function App() {
     }
   };
 
-  // Proactively attempt flushing any queued offline records shortly after app launch when Aggressive Auto-Sync is enabled
+  // Proactively attempt flushing any queued offline records shortly after app launch & Google auth readiness when Aggressive Auto-Sync is enabled
   useEffect(() => {
-    if (!getAggressiveAutoSync() || !getIsOnline() || getPendingSyncCount() === 0) return;
+    if (!isCloudAuthReady || !getAggressiveAutoSync() || !getIsOnline() || getPendingSyncCount() === 0) return;
     const timer = setTimeout(() => {
       syncPendingQueueToCloud().catch(() => {});
     }, 1500);
     return () => clearTimeout(timer);
-  }, []);
+  }, [isCloudAuthReady, firebaseUser?.uid]);
 
   // Comprehensive pull from Cloud Firestore handler with safety merge & backup snapshot
   const handlePullFromCloud = async () => {
     if (typeof navigator !== 'undefined' && !navigator.onLine) {
       setCloudSyncStatus('offline');
       throw new Error('Device is offline. Please reconnect to internet and try pulling again.');
+    }
+    if (!isAuthorizedCloudUser(auth.currentUser)) {
+      setCloudSyncStatus('offline');
+      throw new Error('Sign in with your verified Google store account (NivaJuma@gmail.com) first before pulling from Cloud Firestore.');
     }
 
     setCloudSyncStatus('syncing');
@@ -1762,84 +1935,112 @@ export default function App() {
         throw lastFetchError;
       }
 
-      // 3. ID-based union merge: NEVER discard local items or newer local edits
+      // 3. ID-based union merge with exact-ms conflict detection: NEVER discard local items or newer local edits
+      const pullConflicts: SyncConflict[] = [];
+
       if (cloudProducts && cloudProducts.length > 0) {
         const deletedIds = getDeletedProductIds();
         const pendingMap = getPendingProductMap();
-        setProducts((localProds) => {
-          const merged = mergeProductListsByTimestamp(localProds, cloudProducts, deletedIds, pendingMap);
-          safeSetJSON('retail_pos_products', merged);
-          return merged;
+        const { merged, conflicts } = mergeRecordsWithConflictDetection<Product>({
+          recordType: 'product',
+          localRecords: productsRef.current,
+          incomingRecords: cloudProducts,
+          deletedIds,
+          pendingMap,
+          resolvedFingerprints: resolvedConflictFingerprintsRef.current,
+          sourceLabel: 'Manual Cloud Pull',
         });
+        productsRef.current = merged;
+        setProducts(merged);
+        safeSetJSON('retail_pos_products', merged);
+        try {
+          saveToIDB('retail_pos_products', merged);
+        } catch {}
+        pullConflicts.push(...conflicts);
       }
 
       if (cloudSales && cloudSales.length > 0) {
-        setTransactions((localSales) => {
-          const merged = [...cloudSales];
-          localSales.forEach((ls) => {
-            if (!merged.some((cs) => cs.id === ls.id)) {
-              merged.push(ls);
-            }
-          });
-          merged.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-          safeSetJSON('retail_pos_transactions', merged);
-          return merged;
+        const { merged, conflicts } = mergeRecordsWithConflictDetection<Transaction>({
+          recordType: 'transaction',
+          localRecords: transactionsRef.current,
+          incomingRecords: cloudSales,
+          pendingMap: getPendingRecordMap<Transaction>('sale'),
+          resolvedFingerprints: resolvedConflictFingerprintsRef.current,
+          sourceLabel: 'Manual Cloud Pull',
         });
+        merged.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+        transactionsRef.current = merged;
+        setTransactions(merged);
+        safeSetJSON('retail_pos_transactions', merged);
+        pullConflicts.push(...conflicts);
       }
 
       if (cloudCustomers && cloudCustomers.length > 0) {
-        setCustomers((localCusts) => {
-          const merged = [...cloudCustomers];
-          localCusts.forEach((lc) => {
-            if (!merged.some((cc) => cc.id === lc.id)) {
-              merged.push(lc);
-            }
-          });
-          safeSetJSON('retail_pos_customers', merged);
-          return merged;
+        const { merged, conflicts } = mergeRecordsWithConflictDetection<Customer>({
+          recordType: 'customer',
+          localRecords: customersRef.current,
+          incomingRecords: cloudCustomers,
+          pendingMap: getPendingRecordMap<Customer>('customer'),
+          resolvedFingerprints: resolvedConflictFingerprintsRef.current,
+          sourceLabel: 'Manual Cloud Pull',
         });
+        customersRef.current = merged;
+        setCustomers(merged);
+        safeSetJSON('retail_pos_customers', merged);
+        pullConflicts.push(...conflicts);
       }
 
       if (cloudSuppliers && cloudSuppliers.length > 0) {
         const deletedIds: string[] = safeGetJSON('retail_pos_deleted_suppliers', []);
-        const validCloud = cloudSuppliers.filter((cs) => !deletedIds.includes(cs.id));
-        setSuppliers((localSupps) => {
-          const merged = [...validCloud];
-          localSupps.forEach((ls) => {
-            if (!deletedIds.includes(ls.id) && !merged.some((cs) => cs.id === ls.id)) {
-              merged.push(ls);
-            }
-          });
-          safeSetJSON('retail_pos_suppliers', merged);
-          return merged;
+        const deletedSet = new Set(deletedIds);
+        const { merged, conflicts } = mergeRecordsWithConflictDetection<Supplier>({
+          recordType: 'supplier',
+          localRecords: suppliersRef.current,
+          incomingRecords: cloudSuppliers,
+          deletedIds: deletedSet,
+          pendingMap: getPendingRecordMap<Supplier>('supplier'),
+          resolvedFingerprints: resolvedConflictFingerprintsRef.current,
+          sourceLabel: 'Manual Cloud Pull',
         });
+        suppliersRef.current = merged;
+        setSuppliers(merged);
+        safeSetJSON('retail_pos_suppliers', merged);
+        pullConflicts.push(...conflicts);
       }
 
       if (cloudExpenses && cloudExpenses.length > 0) {
-        setExpenses((localExps) => {
-          const merged = [...cloudExpenses];
-          localExps.forEach((le) => {
-            if (!merged.some((ce) => ce.id === le.id)) {
-              merged.push(le);
-            }
-          });
-          merged.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-          safeSetJSON('retail_pos_expenses', merged);
-          return merged;
+        const { merged, conflicts } = mergeRecordsWithConflictDetection<Expense>({
+          recordType: 'expense',
+          localRecords: expensesRef.current,
+          incomingRecords: cloudExpenses,
+          pendingMap: getPendingRecordMap<Expense>('expense'),
+          resolvedFingerprints: resolvedConflictFingerprintsRef.current,
+          sourceLabel: 'Manual Cloud Pull',
         });
+        merged.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+        expensesRef.current = merged;
+        setExpenses(merged);
+        safeSetJSON('retail_pos_expenses', merged);
+        pullConflicts.push(...conflicts);
       }
 
       if (cloudUsers && cloudUsers.length > 0) {
-        setAllUsers((localUsers) => {
-          const merged = [...cloudUsers];
-          localUsers.forEach((lu) => {
-            if (!merged.some((cu) => cu.id === lu.id)) {
-              merged.push(lu);
-            }
-          });
-          safeSetJSON('retail_pos_users', merged);
-          return merged;
+        const { merged, conflicts } = mergeRecordsWithConflictDetection<User>({
+          recordType: 'user',
+          localRecords: allUsersRef.current,
+          incomingRecords: cloudUsers,
+          pendingMap: getPendingRecordMap<User>('user'),
+          resolvedFingerprints: resolvedConflictFingerprintsRef.current,
+          sourceLabel: 'Manual Cloud Pull',
         });
+        allUsersRef.current = merged;
+        setAllUsers(merged);
+        safeSetJSON('retail_pos_users', merged);
+        pullConflicts.push(...conflicts);
+      }
+
+      if (pullConflicts.length > 0) {
+        enqueueSyncConflicts(pullConflicts, true);
       }
 
       setCloudSyncStatus('synced');
@@ -1864,6 +2065,244 @@ export default function App() {
       }
       throw err;
     }
+  };
+
+  // Resolve a timestamp-tie sync conflict chosen in the Conflict Resolution Assistant modal
+  const handleResolveSyncConflict = async (
+    conflict: SyncConflict,
+    choice: ConflictResolutionChoice,
+    customMergedRecord?: Record<string, any>
+  ) => {
+    const nowIso = new Date().toISOString();
+    const chosenBase =
+      choice === 'remote'
+        ? conflict.remoteRecord
+        : choice === 'custom' && customMergedRecord
+        ? customMergedRecord
+        : conflict.localRecord;
+
+    const shouldPushToCloud = choice === 'local' || choice === 'custom';
+    const resolvedRecord: any = shouldPushToCloud
+      ? {
+          ...chosenBase,
+          updatedAt: nowIso,
+          ...(conflict.recordType === 'transaction' ? { editedAt: nowIso } : {}),
+        }
+      : { ...chosenBase };
+
+    if (
+      conflict.recordType === 'product' &&
+      !resolvedRecord.imageUrl &&
+      conflict.localRecord?.imageUrl
+    ) {
+      resolvedRecord.imageUrl = conflict.localRecord.imageUrl;
+    }
+
+    const upsertById = <T extends { id: string }>(list: T[], item: T): T[] => {
+      const idx = list.findIndex((x) => x.id === item.id);
+      if (idx > -1) {
+        const next = [...list];
+        next[idx] = item;
+        return next;
+      }
+      return [item, ...list];
+    };
+
+    if (conflict.recordType === 'product') {
+      const prod = resolvedRecord as Product;
+      unmarkProductDeletedLocally(prod.id);
+      if (prod.imageUrl && prod.imageUrl.trim() !== '') {
+        saveProductImageToIndexedDB(prod.id, prod.imageUrl);
+      }
+      const nextList = upsertById(productsRef.current, prod);
+      productsRef.current = nextList;
+      setProducts(nextList);
+      safeSetJSON('retail_pos_products', nextList);
+      try {
+        saveToIDB('retail_pos_products', nextList);
+      } catch {}
+
+      if (shouldPushToCloud) {
+        if (!canAutoSyncCloud()) {
+          addPendingSyncItem({
+            type: 'product',
+            description: `Conflict Resolved (Local/Merged): ${prod.name}`,
+            data: prod,
+          });
+        } else {
+          try {
+            await saveProductToCloud(prod);
+          } catch {
+            addPendingSyncItem({
+              type: 'product',
+              description: `Conflict Resolved (Local/Merged): ${prod.name}`,
+              data: prod,
+            });
+          }
+        }
+      } else {
+        clearPendingSyncItemsForRecord('product', prod.id);
+      }
+    } else if (conflict.recordType === 'customer') {
+      const cust = resolvedRecord as Customer;
+      const nextList = upsertById(customersRef.current, cust);
+      customersRef.current = nextList;
+      setCustomers(nextList);
+      safeSetJSON('retail_pos_customers', nextList);
+
+      if (shouldPushToCloud) {
+        if (!canAutoSyncCloud()) {
+          addPendingSyncItem({
+            type: 'customer',
+            description: `Conflict Resolved: ${cust.name}`,
+            data: cust,
+          });
+        } else {
+          try {
+            await saveCustomerToCloud(cust);
+          } catch {
+            addPendingSyncItem({
+              type: 'customer',
+              description: `Conflict Resolved: ${cust.name}`,
+              data: cust,
+            });
+          }
+        }
+      } else {
+        clearPendingSyncItemsForRecord('customer', cust.id);
+      }
+    } else if (conflict.recordType === 'supplier') {
+      const sup = resolvedRecord as Supplier;
+      const nextList = upsertById(suppliersRef.current, sup);
+      suppliersRef.current = nextList;
+      setSuppliers(nextList);
+      safeSetJSON('retail_pos_suppliers', nextList);
+
+      if (shouldPushToCloud) {
+        if (!canAutoSyncCloud()) {
+          addPendingSyncItem({
+            type: 'supplier',
+            description: `Conflict Resolved: ${sup.name}`,
+            data: sup,
+          });
+        } else {
+          try {
+            await saveSupplierToCloud(sup);
+          } catch {
+            addPendingSyncItem({
+              type: 'supplier',
+              description: `Conflict Resolved: ${sup.name}`,
+              data: sup,
+            });
+          }
+        }
+      } else {
+        clearPendingSyncItemsForRecord('supplier', sup.id);
+      }
+    } else if (conflict.recordType === 'transaction') {
+      const tx = resolvedRecord as Transaction;
+      const nextList = upsertById(transactionsRef.current, tx);
+      nextList.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      transactionsRef.current = nextList;
+      setTransactions(nextList);
+      safeSetJSON('retail_pos_transactions', nextList);
+      safeSetJSON('pos_store_sales', nextList);
+
+      if (shouldPushToCloud) {
+        if (!canAutoSyncCloud()) {
+          addPendingSyncItem({
+            type: 'sale',
+            description: `Conflict Resolved Sale #${tx.receiptNumber}`,
+            data: tx,
+          });
+        } else {
+          try {
+            await saveTransactionToCloud(tx);
+          } catch {
+            addPendingSyncItem({
+              type: 'sale',
+              description: `Conflict Resolved Sale #${tx.receiptNumber}`,
+              data: tx,
+            });
+          }
+        }
+      } else {
+        clearPendingSyncItemsForRecord('transaction', tx.id);
+      }
+    } else if (conflict.recordType === 'expense') {
+      const exp = resolvedRecord as Expense;
+      const nextList = upsertById(expensesRef.current, exp);
+      nextList.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      expensesRef.current = nextList;
+      setExpenses(nextList);
+      safeSetJSON('retail_pos_expenses', nextList);
+
+      if (shouldPushToCloud) {
+        if (!canAutoSyncCloud()) {
+          addPendingSyncItem({
+            type: 'expense',
+            description: `Conflict Resolved Expense: ${exp.category}`,
+            data: exp,
+          });
+        } else {
+          try {
+            await saveExpenseToCloud(exp);
+          } catch {
+            addPendingSyncItem({
+              type: 'expense',
+              description: `Conflict Resolved Expense: ${exp.category}`,
+              data: exp,
+            });
+          }
+        }
+      } else {
+        clearPendingSyncItemsForRecord('expense', exp.id);
+      }
+    } else if (conflict.recordType === 'user') {
+      const usr = resolvedRecord as User;
+      const nextList = upsertById(allUsersRef.current, usr);
+      allUsersRef.current = nextList;
+      setAllUsers(nextList);
+      safeSetJSON('retail_pos_users', nextList);
+      safeSetJSON('pos_store_staff_users', nextList);
+      if (currentUser.id === usr.id) {
+        setCurrentUser(usr);
+        safeSetJSON('retail_pos_active_user', usr);
+      }
+
+      if (shouldPushToCloud) {
+        if (!canAutoSyncCloud()) {
+          addPendingSyncItem({
+            type: 'user',
+            description: `Conflict Resolved Staff: ${usr.name}`,
+            data: usr,
+          });
+        } else {
+          try {
+            await saveUserToCloud(usr);
+          } catch {
+            addPendingSyncItem({
+              type: 'user',
+              description: `Conflict Resolved Staff: ${usr.name}`,
+              data: usr,
+            });
+          }
+        }
+      } else {
+        clearPendingSyncItemsForRecord('user', usr.id);
+      }
+    }
+
+    resolvedConflictFingerprintsRef.current.add(conflict.fingerprint);
+    setSyncConflicts((prev) => {
+      const remaining = prev.filter(
+        (c) => c.id !== conflict.id && c.fingerprint !== conflict.fingerprint
+      );
+      if (remaining.length === 0) {
+        setIsConflictModalOpen(false);
+      }
+      return remaining;
+    });
   };
 
   // State to track if user dismissed the top emergency recovery banner
@@ -1942,8 +2381,8 @@ export default function App() {
         } catch {}
       }
 
-      // Automatically publish restored catalog to Cloud Firestore so the cloud also holds all 500+ items
-      if (restoredProducts.length > 0) {
+      // Automatically publish restored catalog to Cloud Firestore if Google auth is ready
+      if (restoredProducts.length > 0 && canAutoSyncCloud()) {
         batchSaveProductsToCloud(restoredProducts)
           .then((count) => {
             console.log(`[Cloud Sync] Automatically uploaded all ${count} restored products to Cloud Firestore!`);
@@ -1973,7 +2412,7 @@ export default function App() {
   // Automatically attempt sync when network connection transitions from offline to online (if Aggressive Auto-Sync is enabled)
   useEffect(() => {
     const handleReconnected = () => {
-      if (getAggressiveAutoSync()) {
+      if (getAggressiveAutoSync() && isAuthorizedCloudUser(auth.currentUser)) {
         syncPendingQueueToCloud();
       }
     };
@@ -1982,11 +2421,16 @@ export default function App() {
     return () => {
       window.removeEventListener('online', handleReconnected);
     };
-  }, []);
+  }, [isCloudAuthReady, firebaseUser?.uid]);
 
   // Optimized Firebase Cloud Connection Test & Local Storage Cache Strategy
-  // Eliminates continuous background read polling to protect the Firebase free tier quota limit.
+  // Only executes after Firebase Auth initializes and store owner account is verified.
   useEffect(() => {
+    if (!isFirebaseAuthReady) return;
+    if (!isCloudAuthReady) {
+      setCloudSyncStatus('offline');
+      return;
+    }
     let active = true;
 
     testFirestoreConnection().then((connected) => {
@@ -2011,7 +2455,7 @@ export default function App() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [isFirebaseAuthReady, isCloudAuthReady, firebaseUser?.uid]);
 
   // Sensitive Action Role Authorization & Audit Trail State
   const [auditLogs, setAuditLogs] = useState<SensitiveActionLog[]>(() =>
@@ -2025,9 +2469,11 @@ export default function App() {
 
   const handleRecordAuditLog = (log: SensitiveActionLog) => {
     setAuditLogs((prev) => [log, ...prev]);
-    saveAuditLogToCloud(log).catch((err) =>
-      console.warn('Could not sync audit log to cloud:', err)
-    );
+    if (canAutoSyncCloud()) {
+      saveAuditLogToCloud(log).catch((err) =>
+        console.warn('Could not sync audit log to cloud:', err)
+      );
+    }
   };
 
   // Barcode Scanner Activity & Staff Scans Audit Log State
@@ -2051,19 +2497,25 @@ export default function App() {
   // Worker & PIN Auth Handlers
   const handleAddUser = (newUser: User) => {
     const roles = getUserRoles(newUser);
+    const nowIso = new Date().toISOString();
     const sanitizedUser: User = {
       ...newUser,
       roles: newUser.roles && newUser.roles.length > 0 ? newUser.roles : roles,
       assignedRoles: newUser.roles && newUser.roles.length > 0 ? newUser.roles : roles,
+      updatedAt: newUser.updatedAt || nowIso,
     };
     setAllUsers((prev) => {
       const updated = [...prev, sanitizedUser];
       safeSetJSON('retail_pos_users', updated);
       return updated;
     });
-    saveUserToCloud(sanitizedUser).catch((err) =>
-      console.warn('Could not save user to cloud:', err)
-    );
+    if (canAutoSyncCloud()) {
+      saveUserToCloud(sanitizedUser).catch(() => {
+        addPendingSyncItem({ type: 'user', description: `Add Staff: ${sanitizedUser.name}`, data: sanitizedUser });
+      });
+    } else {
+      addPendingSyncItem({ type: 'user', description: `Add Staff: ${sanitizedUser.name}`, data: sanitizedUser });
+    }
   };
 
   const handleUpdateUser = (updatedUser: User) => {
@@ -2071,6 +2523,7 @@ export default function App() {
     const sanitizedUser: User = {
       ...updatedUser,
       roles: updatedUser.roles && updatedUser.roles.length > 0 ? updatedUser.roles : roles,
+      updatedAt: new Date().toISOString(),
     };
     setAllUsers((prev) => {
       const updated = prev.map((u) => (u.id === sanitizedUser.id ? sanitizedUser : u));
@@ -2081,9 +2534,13 @@ export default function App() {
       setCurrentUser(sanitizedUser);
       safeSetJSON('retail_pos_active_user', sanitizedUser);
     }
-    saveUserToCloud(sanitizedUser).catch((err) =>
-      console.warn('Could not update user in cloud:', err)
-    );
+    if (canAutoSyncCloud()) {
+      saveUserToCloud(sanitizedUser).catch(() => {
+        addPendingSyncItem({ type: 'user', description: `Update Staff: ${sanitizedUser.name}`, data: sanitizedUser });
+      });
+    } else {
+      addPendingSyncItem({ type: 'user', description: `Update Staff: ${sanitizedUser.name}`, data: sanitizedUser });
+    }
   };
 
   const handleDeleteUser = (userId: string) => {
@@ -2100,9 +2557,11 @@ export default function App() {
         safeSetJSON('retail_pos_active_user', remainingUser);
       }
     }
-    deleteUserFromCloud(userId).catch((err) =>
-      console.warn('Could not delete user from cloud:', err)
-    );
+    if (canAutoSyncCloud()) {
+      deleteUserFromCloud(userId).catch((err) =>
+        console.warn('Could not delete user from cloud:', err)
+      );
+    }
   };
 
   const handleLoginSuccess = (user: User) => {
@@ -2125,6 +2584,7 @@ export default function App() {
   const handleUpdateMasterPin = async (newPin: string) => {
     setMasterPin(newPin);
     safeSetJSON('retail_pos_master_pin', newPin);
+    if (!canAutoSyncCloud()) return;
     try {
       await saveStoreSecurityToCloud({
         requirePinOnStartup,
@@ -2169,10 +2629,14 @@ export default function App() {
         setCurrentUser(updatedUser);
         safeSetJSON('retail_pos_active_user', updatedUser);
       }
-      try {
-        await saveUserToCloud(updatedUser);
-      } catch (err) {
-        console.warn('Could not sync reset admin PIN to cloud:', err);
+      if (canAutoSyncCloud()) {
+        try {
+          await saveUserToCloud(updatedUser);
+        } catch (err) {
+          console.warn('Could not sync reset admin PIN to cloud:', err);
+        }
+      } else {
+        addPendingSyncItem({ type: 'user', description: `Reset Admin PIN: ${updatedUser.name}`, data: updatedUser });
       }
     }
   };
@@ -2180,6 +2644,7 @@ export default function App() {
   const handleToggleRequirePinOnStartup = async (require: boolean) => {
     setRequirePinOnStartup(require);
     safeSetJSON('retail_pos_require_pin_startup', require);
+    if (!canAutoSyncCloud()) return;
     try {
       await saveStoreSecurityToCloud({
         requirePinOnStartup: require,
@@ -2334,17 +2799,19 @@ export default function App() {
   };
 
   const handleUpdateUserCommissionRate = (userId: string, newRate: number) => {
+    const nowIso = new Date().toISOString();
     setAllUsers((prev) =>
-      prev.map((u) => (u.id === userId ? { ...u, commissionRate: newRate } : u))
+      prev.map((u) => (u.id === userId ? { ...u, commissionRate: newRate, updatedAt: nowIso } : u))
     );
   };
 
   const handleUpdateUserCommissionSettings = (userId: string, settings: Partial<User>) => {
+    const nowIso = new Date().toISOString();
     setAllUsers((prev) =>
-      prev.map((u) => (u.id === userId ? { ...u, ...settings } : u))
+      prev.map((u) => (u.id === userId ? { ...u, ...settings, updatedAt: nowIso } : u))
     );
     if (currentUser.id === userId) {
-      setCurrentUser((prev) => ({ ...prev, ...settings }));
+      setCurrentUser((prev) => ({ ...prev, ...settings, updatedAt: nowIso }));
     }
   };
 
@@ -2364,6 +2831,7 @@ export default function App() {
         receiptNo: payout.referenceNo || payout.id,
         recurringType: 'One-Time',
         status: 'Paid',
+        updatedAt: new Date().toISOString(),
       };
       handleAddExpense(salaryExpense);
     }
@@ -2385,11 +2853,12 @@ export default function App() {
   };
 
   const handleUpdateUserSalarySettings = (userId: string, settings: Partial<User>) => {
+    const nowIso = new Date().toISOString();
     let updatedTarget: User | null = null;
     setAllUsers((prev) => {
       const next = prev.map((u) => {
         if (u.id === userId) {
-          updatedTarget = { ...u, ...settings };
+          updatedTarget = { ...u, ...settings, updatedAt: nowIso };
           return updatedTarget;
         }
         return u;
@@ -2399,21 +2868,26 @@ export default function App() {
     });
     if (currentUser.id === userId) {
       setCurrentUser((prev) => {
-        const nextUser = { ...prev, ...settings };
+        const nextUser = { ...prev, ...settings, updatedAt: nowIso };
         safeSetJSON('retail_pos_active_user', nextUser);
         return nextUser;
       });
     }
     if (updatedTarget) {
-      saveUserToCloud(updatedTarget).catch((err) =>
-        console.warn('Could not sync salary settings to cloud:', err)
-      );
+      if (canAutoSyncCloud()) {
+        saveUserToCloud(updatedTarget).catch(() => {
+          addPendingSyncItem({ type: 'user', description: `Staff Salary Settings: ${updatedTarget!.name}`, data: updatedTarget! });
+        });
+      } else {
+        addPendingSyncItem({ type: 'user', description: `Staff Salary Settings: ${updatedTarget.name}`, data: updatedTarget });
+      }
     }
   };
 
   const handleReattributeSale = (txId: string, salesRepId: string, salesRepName: string) => {
+    const nowIso = new Date().toISOString();
     setTransactions((prev) =>
-      prev.map((tx) => (tx.id === txId ? { ...tx, salesRepId, salesRepName } : tx))
+      prev.map((tx) => (tx.id === txId ? { ...tx, salesRepId, salesRepName, editedAt: nowIso, updatedAt: nowIso } : tx))
     );
   };
 
@@ -2422,29 +2896,36 @@ export default function App() {
     updatedProducts: Product[],
     updatedCustomers: Customer[]
   ) => {
+    const nowIso = new Date().toISOString();
+    const stampedTx: Transaction = {
+      ...tx,
+      updatedAt: tx.updatedAt || nowIso,
+    };
     setTransactions((prev) => {
-      const updated = [tx, ...prev.filter((t) => t.id !== tx.id)];
+      const updated = [stampedTx, ...prev.filter((t) => t.id !== stampedTx.id)];
       safeSetJSON('retail_pos_transactions', updated);
       safeSetJSON('pos_store_sales', updated);
       return updated;
     });
-    const nowIso = new Date().toISOString();
-    const soldProductIds = new Set((tx.items || []).map((it) => it.product?.id || (it as any).productId));
+    const soldProductIds = new Set((stampedTx.items || []).map((it) => it.product?.id || (it as any).productId));
     const stampedUpdatedProducts = updatedProducts.map((p) =>
       soldProductIds.has(p.id) ? { ...p, updatedAt: nowIso } : p
     );
+    const stampedUpdatedCustomers = updatedCustomers.map((c) =>
+      c.id === stampedTx.customerId ? { ...c, updatedAt: nowIso } : c
+    );
     setProducts(stampedUpdatedProducts);
-    setCustomers(updatedCustomers);
+    setCustomers(stampedUpdatedCustomers);
 
-    const isCurrentlyOffline = !getIsOnline();
+    const isCurrentlyOffline = !canAutoSyncCloud();
     const affectedProducts = stampedUpdatedProducts.filter((p) => soldProductIds.has(p.id));
     const productsToSync = affectedProducts.length > 0 ? affectedProducts : stampedUpdatedProducts.slice(0, 5);
 
     if (isCurrentlyOffline) {
       addPendingSyncItem({
         type: 'sale',
-        description: `POS Sale #${tx.receiptNumber} (KSh ${tx.grandTotal.toLocaleString()})`,
-        data: tx,
+        description: `POS Sale #${stampedTx.receiptNumber} (KSh ${stampedTx.grandTotal.toLocaleString()})`,
+        data: stampedTx,
       });
       productsToSync.forEach((p) => {
         addPendingSyncItem({
@@ -2453,7 +2934,7 @@ export default function App() {
           data: p,
         });
       });
-      const customerToUpdate = updatedCustomers.find((c) => c.id === tx.customerId);
+      const customerToUpdate = stampedUpdatedCustomers.find((c) => c.id === stampedTx.customerId);
       if (customerToUpdate) {
         addPendingSyncItem({
           type: 'customer',
@@ -2463,8 +2944,8 @@ export default function App() {
       }
     } else {
       // Real-Time Atomic Cloud Sync via SINGLE writeBatch() (Zero quota waste)
-      const customerToUpdate = updatedCustomers.find((c) => c.id === tx.customerId);
-      commitSaleToCloudBatch(tx, productsToSync, customerToUpdate).catch((err) => {
+      const customerToUpdate = stampedUpdatedCustomers.find((c) => c.id === stampedTx.customerId);
+      commitSaleToCloudBatch(stampedTx, productsToSync, customerToUpdate).catch((err) => {
         if (isQuotaExceededError(err)) {
           setIsCloudQuotaExceeded(true);
           setCloudSyncStatus('quota_exceeded');
@@ -2474,8 +2955,8 @@ export default function App() {
         // Graceful offline fallback queue so sale completes smoothly with 0 interruption
         addPendingSyncItem({
           type: 'sale',
-          description: `POS Sale #${tx.receiptNumber} (KSh ${tx.grandTotal.toLocaleString()})`,
-          data: tx,
+          description: `POS Sale #${stampedTx.receiptNumber} (KSh ${stampedTx.grandTotal.toLocaleString()})`,
+          data: stampedTx,
         });
         productsToSync.forEach((p) => {
           addPendingSyncItem({
@@ -2496,46 +2977,58 @@ export default function App() {
   };
 
   const handleAddCustomer = (newCust: Customer) => {
-    setCustomers((prev) => [...prev, newCust]);
-    if (!getIsOnline()) {
+    const nowIso = new Date().toISOString();
+    const stampedCust: Customer = {
+      ...newCust,
+      createdAt: newCust.createdAt || nowIso,
+      updatedAt: newCust.updatedAt || nowIso,
+    };
+    setCustomers((prev) => [...prev, stampedCust]);
+    if (!canAutoSyncCloud()) {
       addPendingSyncItem({
         type: 'customer',
-        description: `Add Customer: ${newCust.name} (${newCust.phone})`,
-        data: newCust,
+        description: `Add Customer: ${stampedCust.name} (${stampedCust.phone})`,
+        data: stampedCust,
       });
     } else {
-      saveCustomerToCloud(newCust).catch(() => {
+      saveCustomerToCloud(stampedCust).catch(() => {
         addPendingSyncItem({
           type: 'customer',
-          description: `Add Customer: ${newCust.name} (${newCust.phone})`,
-          data: newCust,
+          description: `Add Customer: ${stampedCust.name} (${stampedCust.phone})`,
+          data: stampedCust,
         });
       });
     }
   };
 
   const handleSaveCustomer = (cust: Customer) => {
+    const nowIso = new Date().toISOString();
+    const stampedCust: Customer = {
+      ...cust,
+      createdAt: cust.createdAt || nowIso,
+      updatedAt: nowIso,
+    };
     setCustomers((prev) => {
-      const idx = prev.findIndex((c) => c.id === cust.id);
+      const idx = prev.findIndex((c) => c.id === stampedCust.id);
       if (idx > -1) {
         const copy = [...prev];
-        copy[idx] = cust;
+        copy[idx] = stampedCust;
         return copy;
       }
-      return [cust, ...prev];
+      return [stampedCust, ...prev];
     });
-    if (!getIsOnline()) {
+    if (!canAutoSyncCloud()) {
       addPendingSyncItem({
         type: 'customer',
-        description: `Update Customer: ${cust.name} (${cust.phone})`,
-        data: cust,
+        description: `Update Customer: ${stampedCust.name} (${stampedCust.phone})`,
+        data: stampedCust,
       });
     } else {
-      saveCustomerToCloud(cust).catch(() => {
+      saveCustomerToCloud(stampedCust).catch(() => {
         addPendingSyncItem({
           type: 'customer',
-          description: `Update Customer: ${cust.name} (${cust.phone})`,
-          data: cust,
+          description: `Update Customer: ${stampedCust.name} (${stampedCust.phone})`,
+          data: stampedCust,
         });
       });
     }
@@ -2543,7 +3036,7 @@ export default function App() {
 
   const handleDeleteCustomer = (customerId: string) => {
     setCustomers((prev) => prev.filter((c) => c.id !== customerId));
-    if (!getIsOnline()) {
+    if (!canAutoSyncCloud()) {
       addPendingSyncItem({
         type: 'customer',
         description: `Delete Customer (${customerId})`,
@@ -2561,35 +3054,41 @@ export default function App() {
   };
 
   const handleSaveSupplier = (sup: Supplier) => {
+    const nowIso = new Date().toISOString();
+    const stampedSup: Supplier = {
+      ...sup,
+      createdAt: sup.createdAt || nowIso,
+      updatedAt: nowIso,
+    };
     const deletedIds: string[] = safeGetJSON('retail_pos_deleted_suppliers', []);
-    if (deletedIds.includes(sup.id)) {
+    if (deletedIds.includes(stampedSup.id)) {
       safeSetJSON(
         'retail_pos_deleted_suppliers',
-        deletedIds.filter((id) => id !== sup.id)
+        deletedIds.filter((id) => id !== stampedSup.id)
       );
     }
 
     setSuppliers((prev) => {
-      const idx = prev.findIndex((s) => s.id === sup.id);
+      const idx = prev.findIndex((s) => s.id === stampedSup.id);
       if (idx > -1) {
         const copy = [...prev];
-        copy[idx] = sup;
+        copy[idx] = stampedSup;
         return copy;
       }
-      return [...prev, sup];
+      return [...prev, stampedSup];
     });
-    if (!getIsOnline()) {
+    if (!canAutoSyncCloud()) {
       addPendingSyncItem({
         type: 'supplier',
-        description: `Supplier: ${sup.name}`,
-        data: sup,
+        description: `Supplier: ${stampedSup.name}`,
+        data: stampedSup,
       });
     } else {
-      saveSupplierToCloud(sup).catch(() => {
+      saveSupplierToCloud(stampedSup).catch(() => {
         addPendingSyncItem({
           type: 'supplier',
-          description: `Supplier: ${sup.name}`,
-          data: sup,
+          description: `Supplier: ${stampedSup.name}`,
+          data: stampedSup,
         });
       });
     }
@@ -2625,12 +3124,12 @@ export default function App() {
         safeSetJSON('retail_pos_products', updated);
         return updated;
       });
-      if (affected.length > 0 && getIsOnline()) {
+      if (affected.length > 0 && canAutoSyncCloud()) {
         batchSaveProductsToCloud(affected).catch(() => {});
       }
     }
 
-    if (!getIsOnline()) {
+    if (!canAutoSyncCloud()) {
       addPendingSyncItem({
         type: 'supplier',
         description: `Delete Supplier (${supplierId})`,
@@ -2655,6 +3154,7 @@ export default function App() {
     notes?: string
   ) => {
     let customerName = 'Customer';
+    const nowIso = new Date().toISOString();
     setCustomers((prev) =>
       prev.map((c) => {
         if (c.id === customerId) {
@@ -2663,7 +3163,7 @@ export default function App() {
           return {
             ...c,
             currentBalanceDue: newBalance,
-            updatedAt: new Date().toISOString().slice(0, 10),
+            updatedAt: nowIso,
           };
         }
         return c;
@@ -2695,6 +3195,7 @@ export default function App() {
     notes?: string
   ) => {
     let supplierName = 'Supplier';
+    const nowIso = new Date().toISOString();
     setSuppliers((prev) =>
       prev.map((s) => {
         if (s.id === supplierId) {
@@ -2703,7 +3204,7 @@ export default function App() {
           return {
             ...s,
             currentBalanceDue: newBalance,
-            updatedAt: new Date().toISOString().slice(0, 10),
+            updatedAt: nowIso,
           };
         }
         return s;
@@ -2736,7 +3237,11 @@ export default function App() {
           (c.phone !== 'N/A' && !existingPhones.has(c.phone.trim())) ||
           (c.phone === 'N/A' && !existingNames.has(c.name.toLowerCase().trim()))
       );
-      uniqueNew.forEach((c) => saveCustomerToCloud(c).catch(() => {}));
+      if (canAutoSyncCloud()) {
+        uniqueNew.forEach((c) => saveCustomerToCloud(c).catch(() => {}));
+      } else {
+        uniqueNew.forEach((c) => addPendingSyncItem({ type: 'customer', description: `Import Customer: ${c.name}`, data: c }));
+      }
       return [...prev, ...uniqueNew];
     });
   };
@@ -2745,7 +3250,11 @@ export default function App() {
     setSuppliers((prev) => {
       const existingNames = new Set(prev.map((s) => s.name.toLowerCase().trim()));
       const uniqueNew = newSuppliers.filter((s) => !existingNames.has(s.name.toLowerCase().trim()));
-      uniqueNew.forEach((s) => saveSupplierToCloud(s).catch(() => {}));
+      if (canAutoSyncCloud()) {
+        uniqueNew.forEach((s) => saveSupplierToCloud(s).catch(() => {}));
+      } else {
+        uniqueNew.forEach((s) => addPendingSyncItem({ type: 'supplier', description: `Import Supplier: ${s.name}`, data: s }));
+      }
       return [...prev, ...uniqueNew];
     });
   };
@@ -2775,7 +3284,7 @@ export default function App() {
       });
 
       // Real-Time Cloud Sync to Firestore (with pending queue safety so snapshots never revert unsynced edits)
-      if (!getIsOnline()) {
+      if (!canAutoSyncCloud()) {
         addPendingSyncItem({
           type: 'product',
           description: `Product: ${stampedProd.name} (${stampedProd.stockQuantity} ${stampedProd.unit})`,
@@ -2920,7 +3429,7 @@ export default function App() {
       deleteProductImageFromIndexedDB(productId);
       setProducts((prev) => prev.filter((p) => p.id !== productId));
 
-      if (!getIsOnline()) {
+      if (!canAutoSyncCloud()) {
         addPendingSyncItem({
           type: 'product',
           description: `Delete Product: ${existing?.name || productId}`,
@@ -3009,7 +3518,13 @@ export default function App() {
     };
 
     setRestockRecords((prev) => [newRestock, ...prev]);
-    saveRestockRecordToCloud(newRestock).catch(() => {});
+    if (canAutoSyncCloud()) {
+      saveRestockRecordToCloud(newRestock).catch(() => {
+        addPendingSyncItem({ type: 'restock', description: `Restock Batch: ${prod.name}`, data: newRestock });
+      });
+    } else {
+      addPendingSyncItem({ type: 'restock', description: `Restock Batch: ${prod.name}`, data: newRestock });
+    }
 
     const updatedProd: Product = {
       ...prod,
@@ -3021,13 +3536,21 @@ export default function App() {
     setProducts((prev) =>
       prev.map((p) => (p.id === productId ? updatedProd : p))
     );
-    saveProductToCloud(updatedProd).catch(() => {
+    if (canAutoSyncCloud()) {
+      saveProductToCloud(updatedProd).catch(() => {
+        addPendingSyncItem({
+          type: 'product',
+          description: `Restock: ${updatedProd.name} (${updatedProd.stockQuantity} ${updatedProd.unit})`,
+          data: updatedProd,
+        });
+      });
+    } else {
       addPendingSyncItem({
         type: 'product',
         description: `Restock: ${updatedProd.name} (${updatedProd.stockQuantity} ${updatedProd.unit})`,
         data: updatedProd,
       });
-    });
+    }
 
     const restockExp: Expense = {
       id: `exp-rst-${Date.now()}`,
@@ -3042,7 +3565,13 @@ export default function App() {
       status: 'Paid'
     };
     setExpenses((prev) => [restockExp, ...prev]);
-    saveExpenseToCloud(restockExp).catch(() => {});
+    if (canAutoSyncCloud()) {
+      saveExpenseToCloud(restockExp).catch(() => {
+        addPendingSyncItem({ type: 'expense', description: `Restock Expense: ${prod.name}`, data: restockExp });
+      });
+    } else {
+      addPendingSyncItem({ type: 'expense', description: `Restock Expense: ${prod.name}`, data: restockExp });
+    }
   };
 
   const handleApplyStockAdjustment = (updatedProducts: Product[], audit: StockCountAudit) => {
@@ -3057,15 +3586,23 @@ export default function App() {
       );
       setProducts(stampedProducts);
       const changedItems = stampedProducts.filter((p) => adjustedIds.has(p.id));
-      (changedItems.length > 0 ? changedItems : stampedProducts).forEach((p) =>
-        saveProductToCloud(p).catch(() => {
+      (changedItems.length > 0 ? changedItems : stampedProducts).forEach((p) => {
+        if (canAutoSyncCloud()) {
+          saveProductToCloud(p).catch(() => {
+            addPendingSyncItem({
+              type: 'product',
+              description: `Stock Adjust: ${p.name}`,
+              data: p,
+            });
+          });
+        } else {
           addPendingSyncItem({
             type: 'product',
             description: `Stock Adjust: ${p.name}`,
             data: p,
           });
-        })
-      );
+        }
+      });
 
       const log = buildSensitiveActionLog({
         actionType: 'ADJUST_STOCK',
@@ -3119,13 +3656,21 @@ export default function App() {
     const updatedProduct = { ...targetProduct, stockQuantity: newQuantity, updatedAt: new Date().toISOString() };
     const updatedProducts = products.map((p) => (p.id === productId ? updatedProduct : p));
     setProducts(updatedProducts);
-    saveProductToCloud(updatedProduct).catch(() => {
+    if (canAutoSyncCloud()) {
+      saveProductToCloud(updatedProduct).catch(() => {
+        addPendingSyncItem({
+          type: 'product',
+          description: `Audit Adjust: ${updatedProduct.name}`,
+          data: updatedProduct,
+        });
+      });
+    } else {
       addPendingSyncItem({
         type: 'product',
         description: `Audit Adjust: ${updatedProduct.name}`,
         data: updatedProduct,
       });
-    });
+    }
 
     if (auditUrlProduct && auditUrlProduct.id === productId) {
       setAuditUrlProduct(updatedProduct);
@@ -3147,19 +3692,23 @@ export default function App() {
   };
 
   const handleAddExpense = (exp: Expense) => {
-    setExpenses((prev) => [exp, ...prev]);
-    if (!getIsOnline()) {
+    const stampedExp: Expense = {
+      ...exp,
+      updatedAt: exp.updatedAt || new Date().toISOString(),
+    };
+    setExpenses((prev) => [stampedExp, ...prev]);
+    if (!canAutoSyncCloud()) {
       addPendingSyncItem({
         type: 'expense',
-        description: `Expense: ${exp.category} (KSh ${exp.amount.toLocaleString()})`,
-        data: exp,
+        description: `Expense: ${stampedExp.category} (KSh ${stampedExp.amount.toLocaleString()})`,
+        data: stampedExp,
       });
     } else {
-      saveExpenseToCloud(exp).catch(() => {
+      saveExpenseToCloud(stampedExp).catch(() => {
         addPendingSyncItem({
           type: 'expense',
-          description: `Expense: ${exp.category} (KSh ${exp.amount.toLocaleString()})`,
-          data: exp,
+          description: `Expense: ${stampedExp.category} (KSh ${stampedExp.amount.toLocaleString()})`,
+          data: stampedExp,
         });
       });
     }
@@ -3172,7 +3721,9 @@ export default function App() {
 
     const performDelete = (authorizingRole: Role, reason?: string) => {
       setExpenses((prev) => prev.filter((e) => e.id !== expId));
-      deleteExpenseFromCloud(expId).catch(() => {});
+      if (canAutoSyncCloud()) {
+        deleteExpenseFromCloud(expId).catch(() => {});
+      }
 
       const log = buildSensitiveActionLog({
         actionType: 'DELETE_EXPENSE',
@@ -3652,8 +4203,11 @@ export default function App() {
   };
 
   const handleUpdateTransaction = (updatedTx: Transaction, updatedProducts: Product[]) => {
+    const nowIso = new Date().toISOString();
     setTransactions((prev) => {
-      const next = prev.map((t) => (t.id === updatedTx.id ? { ...updatedTx, editedAt: new Date().toISOString() } : t));
+      const next = prev.map((t) =>
+        t.id === updatedTx.id ? { ...updatedTx, editedAt: nowIso, updatedAt: nowIso } : t
+      );
       safeSetJSON('retail_pos_transactions', next);
       safeSetJSON('pos_store_sales', next);
       return next;
@@ -4086,6 +4640,8 @@ export default function App() {
           onOpenCloudSync={() => setShowCloudSyncModal(true)}
           cloudSyncStatus={cloudSyncStatus}
           onTriggerSync={syncPendingQueueToCloud}
+          conflictCount={syncConflicts.length}
+          onOpenConflictAssistant={() => setIsConflictModalOpen(true)}
         >
           {renderActiveTabContent()}
         </PhoneDeviceFrame>
@@ -4104,6 +4660,8 @@ export default function App() {
           lastSyncedTime={lastSyncedTime}
           isQuotaExceeded={isCloudQuotaExceeded}
           onTriggerSync={syncPendingQueueToCloud}
+          conflictCount={syncConflicts.length}
+          onOpenConflictAssistant={() => setIsConflictModalOpen(true)}
           onSyncCatalogComplete={() => {
             setCloudSyncStatus('synced');
             setLastSyncedTime(new Date().toLocaleTimeString());
@@ -4118,6 +4676,14 @@ export default function App() {
           onLockNow={() => setIsTerminalLocked(true)}
           recoveryEmail={ownerRecoveryEmail}
           emergencyKey={emergencyRecoveryKey}
+          firebaseUser={firebaseUser}
+        />
+
+        <ConflictResolutionModal
+          isOpen={isConflictModalOpen && syncConflicts.length > 0}
+          conflicts={syncConflicts}
+          onResolveConflict={handleResolveSyncConflict}
+          onClose={() => setIsConflictModalOpen(false)}
         />
 
         <PinLoginModal
@@ -4687,6 +5253,8 @@ export default function App() {
         <OfflineSyncBanner
           onTriggerSync={syncPendingQueueToCloud}
           onOpenCloudSync={() => setShowCloudSyncModal(true)}
+          conflictCount={syncConflicts.length}
+          onOpenConflictAssistant={() => setIsConflictModalOpen(true)}
         />
 
         {/* Firestore Quota Notice Banner */}
@@ -5315,6 +5883,8 @@ export default function App() {
         lastSyncedTime={lastSyncedTime}
         isQuotaExceeded={isCloudQuotaExceeded}
         onTriggerSync={syncPendingQueueToCloud}
+        conflictCount={syncConflicts.length}
+        onOpenConflictAssistant={() => setIsConflictModalOpen(true)}
         onSyncCatalogComplete={() => {
           setCloudSyncStatus('synced');
           setLastSyncedTime(new Date().toLocaleTimeString());
@@ -5329,6 +5899,15 @@ export default function App() {
         onLockNow={() => setIsTerminalLocked(true)}
         recoveryEmail={ownerRecoveryEmail}
         emergencyKey={emergencyRecoveryKey}
+        firebaseUser={firebaseUser}
+      />
+
+      {/* Conflict Resolution Assistant Modal */}
+      <ConflictResolutionModal
+        isOpen={isConflictModalOpen && syncConflicts.length > 0}
+        conflicts={syncConflicts}
+        onResolveConflict={handleResolveSyncConflict}
+        onClose={() => setIsConflictModalOpen(false)}
       />
 
       {/* Multi-Store Branch Outlets & Inter-Store Stock Transfer Manager Modal */}

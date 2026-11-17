@@ -1,4 +1,5 @@
 import express from 'express';
+import http from 'http';
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI, Type } from '@google/genai';
@@ -8,7 +9,8 @@ dotenv.config();
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = Number(process.env.PORT) || 3000;
+  const httpServer = http.createServer(app);
 
   app.use(express.json({ limit: '50mb' }));
   app.use(express.urlencoded({ limit: '50mb', extended: true }));
@@ -1637,13 +1639,28 @@ Generate high-converting, realistic copy in JSON format with these exact keys:
     res.json({ status: 'ok', time: new Date().toISOString() });
   });
 
-  // Vite middleware for development vs static build in production
+  // Vite middleware for development vs static build in production.
+  // Bind port 3000 immediately so healthchecks pass without waiting for Vite cold-start.
   if (process.env.NODE_ENV !== 'production') {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
+    const vitePromise = createViteServer({
+      server: {
+        middlewareMode: true,
+        hmr: process.env.DISABLE_HMR === 'true' ? false : { server: httpServer },
+      },
       appType: 'spa',
+    }).catch((err) => {
+      console.error('Failed to initialize Vite dev middleware:', err);
+      throw err;
     });
-    app.use(vite.middlewares);
+
+    app.use(async (req, res, next) => {
+      try {
+        const vite = await vitePromise;
+        vite.middlewares(req, res, next);
+      } catch (err) {
+        next(err);
+      }
+    });
   } else {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
@@ -1652,7 +1669,7 @@ Generate high-converting, realistic copy in JSON format with these exact keys:
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
+  httpServer.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on http://0.0.0.0:${PORT}`);
   });
 }

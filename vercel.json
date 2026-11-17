@@ -3,9 +3,24 @@
   "framework": "vite",
   "buildCommand": "vite build",
   "outputDirectory": "dist",
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "Cross-Origin-Opener-Policy",
+          "value": "same-origin-allow-popups"
+        }
+      ]
+    }
+  ],
   "rewrites": [
     {
-      "source": "/((?!api/).*)",
+      "source": "/__/auth/(.*)",
+      "destination": "https://gen-lang-client-0043475796.firebaseapp.com/__/auth/$1"
+    },
+    {
+      "source": "/((?!api/|__/auth/).*)",
       "destination": "/index.html"
     }
   ]

@@ -13,21 +13,27 @@ import {
   Auth,
   GoogleAuthProvider,
   signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
   signOut,
   User as FirebaseUser,
 } from 'firebase/auth';
 import rawConfig from '../../firebase-applet-config.json';
 
-// Support Vercel environment variables (VITE_FIREBASE_*) with safe fallback to firebase-applet-config.json
+// Always use the provisioned Firebase project from firebase-applet-config.json
+// (ignoring stale legacy VITE_FIREBASE_* env overrides if they target a different project).
 const env = (import.meta as any)?.env || {};
+const hasMatchingEnvProject =
+  !env.VITE_FIREBASE_PROJECT_ID || env.VITE_FIREBASE_PROJECT_ID === rawConfig.projectId;
+
 export const firebaseConfig = {
-  apiKey: (env.VITE_FIREBASE_API_KEY as string) || rawConfig.apiKey,
-  authDomain: (env.VITE_FIREBASE_AUTH_DOMAIN as string) || rawConfig.authDomain,
-  projectId: (env.VITE_FIREBASE_PROJECT_ID as string) || rawConfig.projectId,
-  storageBucket: (env.VITE_FIREBASE_STORAGE_BUCKET as string) || rawConfig.storageBucket,
-  messagingSenderId: (env.VITE_FIREBASE_MESSAGING_SENDER_ID as string) || rawConfig.messagingSenderId,
-  appId: (env.VITE_FIREBASE_APP_ID as string) || rawConfig.appId,
-  firestoreDatabaseId: (env.VITE_FIREBASE_DATABASE_ID as string) || (rawConfig as any).firestoreDatabaseId,
+  apiKey: (hasMatchingEnvProject && (env.VITE_FIREBASE_API_KEY as string)) || rawConfig.apiKey,
+  authDomain: (hasMatchingEnvProject && (env.VITE_FIREBASE_AUTH_DOMAIN as string)) || rawConfig.authDomain,
+  projectId: rawConfig.projectId,
+  storageBucket: (hasMatchingEnvProject && (env.VITE_FIREBASE_STORAGE_BUCKET as string)) || rawConfig.storageBucket,
+  messagingSenderId: (hasMatchingEnvProject && (env.VITE_FIREBASE_MESSAGING_SENDER_ID as string)) || rawConfig.messagingSenderId,
+  appId: (hasMatchingEnvProject && (env.VITE_FIREBASE_APP_ID as string)) || rawConfig.appId,
+  firestoreDatabaseId: (hasMatchingEnvProject && (env.VITE_FIREBASE_DATABASE_ID as string)) || (rawConfig as any).firestoreDatabaseId,
   measurementId: rawConfig.measurementId || '',
 };
 
@@ -73,6 +79,10 @@ export function isAuthorizedCloudUser(user: FirebaseUser | null | undefined): bo
   );
 }
 
+export function getFirebaseAuthConsoleUrl(): string {
+  return `https://console.firebase.google.com/project/${firebaseConfig.projectId}/authentication/settings`;
+}
+
 export async function signInWithGoogleForCloud(): Promise<FirebaseUser> {
   const provider = new GoogleAuthProvider();
   provider.setCustomParameters({ prompt: 'select_account' });
@@ -80,16 +90,49 @@ export async function signInWithGoogleForCloud(): Promise<FirebaseUser> {
     const result = await signInWithPopup(auth, provider);
     return result.user;
   } catch (err: any) {
+    const host = typeof window !== 'undefined' ? window.location.hostname : 'vercel.app';
     if (
       err?.code === 'auth/unauthorized-domain' ||
       err?.message?.includes('unauthorized-domain')
     ) {
-      const host = typeof window !== 'undefined' ? window.location.hostname : 'this domain';
-      throw new Error(
-        `Domain '${host}' is not yet in Firebase Authorized Domains. Add it in Firebase Console -> Authentication -> Settings -> Authorized domains.`
+      const customErr: any = new Error(
+        `Domain '${host}' is not authorized in Firebase Authentication. Add '${host}' (and 'vercel.app') in Firebase Console -> Authentication -> Settings -> Authorized domains.`
       );
+      customErr.code = 'auth/unauthorized-domain';
+      customErr.isUnauthorizedDomain = true;
+      customErr.hostname = host;
+      customErr.consoleUrl = getFirebaseAuthConsoleUrl();
+      throw customErr;
+    }
+    if (
+      err?.code === 'auth/popup-blocked' ||
+      err?.code === 'auth/operation-not-supported-in-this-environment' ||
+      err?.code === 'auth/cancelled-popup-request'
+    ) {
+      const popupErr: any = new Error(
+        'Browser popup sign-in was blocked or interrupted. Allow popups for this site or use "Sign in via Redirect" below.'
+      );
+      popupErr.code = err?.code || 'auth/popup-blocked';
+      popupErr.isPopupBlocked = true;
+      throw popupErr;
     }
     throw err;
+  }
+}
+
+export async function signInWithGoogleRedirectForCloud(): Promise<void> {
+  const provider = new GoogleAuthProvider();
+  provider.setCustomParameters({ prompt: 'select_account' });
+  await signInWithRedirect(auth, provider);
+}
+
+export async function completeGoogleRedirectSignIn(): Promise<FirebaseUser | null> {
+  try {
+    const result = await getRedirectResult(auth);
+    return result?.user || null;
+  } catch (err: any) {
+    console.warn('Google redirect sign-in check notice:', err?.message || err);
+    return null;
   }
 }
 

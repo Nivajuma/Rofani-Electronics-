@@ -194,6 +194,7 @@ import { loadMpesaConfig, saveMpesaConfig } from './utils/mpesa';
 import {
   auth,
   isAuthorizedCloudUser,
+  completeGoogleRedirectSignIn,
   testFirestoreConnection,
   isQuotaExceededError,
   FIREBASE_UPGRADE_URL,
@@ -224,21 +225,6 @@ import {
 import { findRecoverableBackups, protectLargestBackup, getBackupDataByKey } from './utils/backupRecovery';
 import { isSoundEnabled, setSoundEnabled, subscribeToSoundPref, playButtonSound } from './utils/uiFeedback';
 import { saveToIDB, getFromIDB } from './utils/idbStorage';
-
-/**
- * Rofani Electronics & Boutique - Live Firebase Firestore Configuration
- * Project: rofani-pos (rofi-pos)
- * Multi-device Cloud Sync: products (302 items), transactions, customers, suppliers, expenses, users
- */
-export const ROFANI_FIREBASE_CONFIG = {
-  apiKey: "AIzaSyCqfkqKusjttxhr0sDx5005",
-  authDomain: "rofani-pos.firebaseapp.com",
-  projectId: "rofani-pos",
-  storageBucket: "rofani-pos.firebasestorage.app",
-  messagingSenderId: "1059699871684",
-  appId: "1:1059699871684:web:b5260e337",
-  firestoreDatabaseId: "ai-studio-retailstockmanag-35779e9e-08d0-4311-8158-8be055847014",
-};
 
 const DELETED_PRODUCTS_STORAGE_KEY = 'retail_pos_deleted_products';
 
@@ -598,6 +584,7 @@ export default function App() {
   const [isFirebaseAuthReady, setIsFirebaseAuthReady] = useState<boolean>(false);
 
   useEffect(() => {
+    completeGoogleRedirectSignIn().catch(() => null);
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       setFirebaseUser(user);
       setIsFirebaseAuthReady(true);

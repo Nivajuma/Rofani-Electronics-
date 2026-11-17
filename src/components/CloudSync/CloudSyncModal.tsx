@@ -41,6 +41,8 @@ import {
   OWNER_CLOUD_EMAIL,
   isAuthorizedCloudUser,
   signInWithGoogleForCloud,
+  signInWithGoogleRedirectForCloud,
+  getFirebaseAuthConsoleUrl,
   signOutFromCloud,
 } from '../../lib/firebase';
 import { Product, User, Transaction, Customer, Supplier, Expense } from '../../types';
@@ -112,6 +114,12 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
   const [isPulling, setIsPulling] = useState(false);
   const [isRetryingPending, setIsRetryingPending] = useState(false);
   const [isSigningInGoogle, setIsSigningInGoogle] = useState(false);
+  const [showRedirectOption, setShowRedirectOption] = useState(false);
+  const [copiedHost, setCopiedHost] = useState(false);
+  const [unauthorizedDomainInfo, setUnauthorizedDomainInfo] = useState<{
+    hostname: string;
+    consoleUrl: string;
+  } | null>(null);
   const hasAuthorizedCloudUser = isAuthorizedCloudUser(firebaseUser as any);
   const [syncFeedback, setSyncFeedback] = useState<{
     type: 'success' | 'error' | 'warning';
@@ -187,8 +195,10 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
     if (isSigningInGoogle) return;
     setIsSigningInGoogle(true);
     setSyncFeedback(null);
+    setUnauthorizedDomainInfo(null);
     try {
       const signedInUser = await signInWithGoogleForCloud();
+      setShowRedirectOption(false);
       if (isAuthorizedCloudUser(signedInUser)) {
         setSyncFeedback({
           type: 'success',
@@ -208,14 +218,60 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
         });
       }
     } catch (err: any) {
-      setSyncFeedback({
-        type: 'error',
-        title: 'Google Sign-In Cancelled or Failed',
-        details: err?.message || 'Could not complete Google Sign-In. Please allow popups and try again.',
-        timestamp: new Date().toLocaleTimeString(),
-      });
+      if (
+        err?.isUnauthorizedDomain ||
+        err?.code === 'auth/unauthorized-domain' ||
+        err?.message?.includes('unauthorized-domain')
+      ) {
+        const host =
+          err?.hostname ||
+          (typeof window !== 'undefined' ? window.location.hostname : 'vercel.app');
+        setUnauthorizedDomainInfo({
+          hostname: host,
+          consoleUrl: err?.consoleUrl || getFirebaseAuthConsoleUrl(),
+        });
+        setSyncFeedback({
+          type: 'error',
+          title: 'Vercel / Custom Domain Not Yet Authorized in Firebase',
+          details: `Add "${host}" to Authorized domains in Firebase Authentication Settings (see quick fix steps below).`,
+          timestamp: new Date().toLocaleTimeString(),
+        });
+      } else {
+        if (
+          err?.isPopupBlocked ||
+          err?.code === 'auth/popup-blocked' ||
+          err?.code === 'auth/cancelled-popup-request' ||
+          err?.code === 'auth/popup-closed-by-user'
+        ) {
+          setShowRedirectOption(true);
+        }
+        setSyncFeedback({
+          type: 'error',
+          title: 'Google Sign-In Cancelled or Failed',
+          details: err?.message || 'Could not complete Google Sign-In. Allow popups or try Redirect Sign-In below.',
+          timestamp: new Date().toLocaleTimeString(),
+        });
+      }
     } finally {
       setIsSigningInGoogle(false);
+    }
+  };
+
+  const handleGoogleRedirectSignIn = async () => {
+    if (isSigningInGoogle) return;
+    setIsSigningInGoogle(true);
+    setSyncFeedback(null);
+    setUnauthorizedDomainInfo(null);
+    try {
+      await signInWithGoogleRedirectForCloud();
+    } catch (err: any) {
+      setIsSigningInGoogle(false);
+      setSyncFeedback({
+        type: 'error',
+        title: 'Redirect Sign-In Failed',
+        details: err?.message || 'Could not start Google redirect sign-in.',
+        timestamp: new Date().toLocaleTimeString(),
+      });
     }
   };
 
@@ -669,43 +725,116 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
 
           {/* Firebase Google Cloud Account Sign-In & Authorization Card */}
           {!hasAuthorizedCloudUser ? (
-            <div className="bg-sky-950/70 border border-sky-500/70 p-3.5 sm:p-4 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div className="flex items-start gap-2.5 min-w-0">
-                <Shield className="w-5 h-5 text-sky-400 shrink-0 mt-0.5" />
-                <div className="space-y-1 min-w-0">
-                  <div className="text-xs font-bold text-sky-100">
-                    {firebaseUser?.email
-                      ? `Signed in as ${firebaseUser.email} (Not Store Owner)`
-                      : 'Sign in with Google to Enable Cloud Firestore Sync'}
+            <div className="space-y-3">
+              <div className="bg-sky-950/70 border border-sky-500/70 p-3.5 sm:p-4 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-start gap-2.5 min-w-0">
+                  <Shield className="w-5 h-5 text-sky-400 shrink-0 mt-0.5" />
+                  <div className="space-y-1 min-w-0">
+                    <div className="text-xs font-bold text-sky-100">
+                      {firebaseUser?.email
+                        ? `Signed in as ${firebaseUser.email} (Not Store Owner)`
+                        : 'Sign in with Google to Enable Cloud Firestore Sync'}
+                    </div>
+                    <p className="text-[11px] text-sky-200/90 leading-relaxed">
+                      {firebaseUser?.email
+                        ? `Cloud Firestore read/write access is restricted to verified store owner ${OWNER_CLOUD_EMAIL}. Switch accounts to sync across devices.`
+                        : `Your local data is safe on this device. Sign in with verified store owner account (${OWNER_CLOUD_EMAIL}) to sync inventory and sales to Cloud Firestore.`}
+                    </p>
                   </div>
-                  <p className="text-[11px] text-sky-200/90 leading-relaxed">
-                    {firebaseUser?.email
-                      ? `Cloud Firestore read/write access is restricted to verified store owner ${OWNER_CLOUD_EMAIL}. Switch accounts to sync across devices.`
-                      : `Your local data is safe on this device. Sign in with verified store owner account (${OWNER_CLOUD_EMAIL}) to sync inventory and sales to Cloud Firestore.`}
-                  </p>
                 </div>
-              </div>
-              <div className="flex items-center gap-2 shrink-0">
-                <button
-                  type="button"
-                  id="btn-google-cloud-signin"
-                  onClick={handleGoogleSignIn}
-                  disabled={isSigningInGoogle}
-                  className="px-3.5 py-2 bg-white hover:bg-slate-100 text-slate-900 font-black text-xs rounded-xl shadow-md transition flex items-center gap-1.5 cursor-pointer disabled:opacity-60"
-                >
-                  <ShieldCheck className="w-4 h-4 text-sky-600" />
-                  <span>{isSigningInGoogle ? 'Signing in...' : firebaseUser?.email ? 'Switch Google Account' : 'Sign in with Google'}</span>
-                </button>
-                {firebaseUser && (
+                <div className="flex flex-col sm:items-end gap-1.5 shrink-0">
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      id="btn-google-cloud-signin"
+                      onClick={handleGoogleSignIn}
+                      disabled={isSigningInGoogle}
+                      className="px-3.5 py-2 bg-white hover:bg-slate-100 text-slate-900 font-black text-xs rounded-xl shadow-md transition flex items-center gap-1.5 cursor-pointer disabled:opacity-60"
+                    >
+                      <ShieldCheck className="w-4 h-4 text-sky-600" />
+                      <span>{isSigningInGoogle ? 'Signing in...' : firebaseUser?.email ? 'Switch Google Account' : 'Sign in with Google'}</span>
+                    </button>
+                    {firebaseUser && (
+                      <button
+                        type="button"
+                        onClick={() => signOutFromCloud().catch(() => {})}
+                        className="px-2.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold rounded-xl border border-slate-700 transition cursor-pointer"
+                      >
+                        Sign Out
+                      </button>
+                    )}
+                  </div>
                   <button
                     type="button"
-                    onClick={() => signOutFromCloud().catch(() => {})}
-                    className="px-2.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold rounded-xl border border-slate-700 transition cursor-pointer"
+                    id="btn-google-cloud-redirect-signin"
+                    onClick={handleGoogleRedirectSignIn}
+                    disabled={isSigningInGoogle}
+                    className={`text-[10px] font-semibold underline transition cursor-pointer ${
+                      showRedirectOption ? 'text-amber-300 hover:text-amber-200' : 'text-sky-300/80 hover:text-sky-200'
+                    }`}
                   >
-                    Sign Out
+                    Popup blocked on mobile/Vercel? Sign in via Redirect
                   </button>
-                )}
+                </div>
               </div>
+
+              {unauthorizedDomainInfo && (
+                <div className="bg-amber-950/75 border-2 border-amber-500/75 p-3.5 sm:p-4 rounded-2xl space-y-3 text-xs">
+                  <div className="flex items-start gap-2.5">
+                    <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+                    <div className="space-y-1 flex-1 min-w-0">
+                      <div className="font-extrabold text-amber-200">
+                        Action Needed: Authorize Your Vercel Domain in Firebase Console
+                      </div>
+                      <p className="text-[11px] text-amber-100/90 leading-relaxed">
+                        Firebase blocks Google Sign-In on new deployment URLs until the domain is allowlisted:
+                      </p>
+                      <ol className="list-decimal list-inside space-y-1 text-[11px] text-amber-100/90 pt-0.5">
+                        <li>Copy your exact domain below.</li>
+                        <li>Open <strong>Firebase Auth Settings</strong> → scroll to <strong>Authorized domains</strong> → click <strong>Add domain</strong>.</li>
+                        <li>Paste the domain (and optionally <code className="bg-slate-900 px-1 rounded text-amber-300">vercel.app</code>) and click <strong>Add</strong>, then retry sign-in.</li>
+                      </ol>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 bg-slate-950 border border-amber-700/60 rounded-xl px-3 py-2 font-mono text-[11px] text-amber-200">
+                    <span className="truncate flex-1 select-all">{unauthorizedDomainInfo.hostname}</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigator.clipboard.writeText(unauthorizedDomainInfo.hostname);
+                        setCopiedHost(true);
+                        setTimeout(() => setCopiedHost(false), 2000);
+                      }}
+                      className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-white rounded-lg font-sans font-bold text-[11px] flex items-center gap-1 shrink-0 cursor-pointer"
+                    >
+                      {copiedHost ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                      <span>{copiedHost ? 'Copied!' : 'Copy Domain'}</span>
+                    </button>
+                  </div>
+
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <a
+                      href={unauthorizedDomainInfo.consoleUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="px-3.5 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs rounded-xl flex items-center gap-1.5 transition cursor-pointer"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5" />
+                      <span>Open Firebase Auth Settings</span>
+                    </a>
+                    <button
+                      type="button"
+                      onClick={handleGoogleSignIn}
+                      disabled={isSigningInGoogle}
+                      className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs rounded-xl border border-slate-700 flex items-center gap-1.5 transition cursor-pointer"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${isSigningInGoogle ? 'animate-spin' : ''}`} />
+                      <span>Try Sign-In Again</span>
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           ) : (
             <div className="bg-emerald-950/40 border border-emerald-700/50 px-3.5 py-2.5 rounded-2xl flex items-center justify-between gap-2 text-xs">

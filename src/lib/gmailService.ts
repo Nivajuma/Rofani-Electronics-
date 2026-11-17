@@ -1,5 +1,5 @@
 import { GoogleAuthProvider, signInWithPopup, onAuthStateChanged, User } from 'firebase/auth';
-import { auth } from './firebase';
+import { auth, getFirebaseAuthConsoleUrl } from './firebase';
 
 export const GMAIL_SCOPES = [
   'https://www.googleapis.com/auth/gmail.send',
@@ -56,7 +56,7 @@ export const signInWithGoogleForGmail = async (): Promise<{ user: User; accessTo
       customErr.code = 'auth/unauthorized-domain';
       customErr.isUnauthorizedDomain = true;
       customErr.hostname = typeof window !== 'undefined' ? window.location.hostname : 'vercel.app';
-      customErr.consoleUrl = 'https://console.firebase.google.com/project/gen-lang-client-0043475796/authentication/settings';
+      customErr.consoleUrl = getFirebaseAuthConsoleUrl();
       throw customErr;
     }
     throw err;

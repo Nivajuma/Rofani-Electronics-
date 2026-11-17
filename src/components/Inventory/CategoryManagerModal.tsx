@@ -221,7 +221,7 @@ export const CategoryManagerModal: React.FC<CategoryManagerModalProps> = ({
 
   return (
     <div
-      className="fixed inset-0 z-[60] bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5 overflow-y-auto animate-in fade-in duration-200"
+      className="fixed inset-0 z-[110] bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5 overflow-y-auto animate-in fade-in duration-200"
       onClick={onClose}
     >
       <div
@@ -642,7 +642,7 @@ export const CategoryManagerModal: React.FC<CategoryManagerModalProps> = ({
       {/* CONFIRMATION MODAL: DELETE CATEGORY */}
       {categoryToDelete && (
         <div
-          className="fixed inset-0 z-[70] bg-slate-950/90 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in"
+          className="fixed inset-0 z-[120] bg-slate-950/90 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in"
           onClick={() => setCategoryToDelete(null)}
         >
           <div
@@ -728,7 +728,7 @@ export const CategoryManagerModal: React.FC<CategoryManagerModalProps> = ({
       {/* CONFIRMATION MODAL: DELETE SUBCATEGORY */}
       {subToDelete && (
         <div
-          className="fixed inset-0 z-60 bg-slate-950/90 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in"
+          className="fixed inset-0 z-[120] bg-slate-950/90 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in"
           onClick={() => setSubToDelete(null)}
         >
           <div

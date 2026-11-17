@@ -98,6 +98,7 @@ import {
   INITIAL_PURCHASE_ORDERS
 } from './data/initialData';
 import { POSView } from './components/POS/POSView';
+import { LowStockPushNotification, LowStockPushAlert, LowStockPushAlertItem } from './components/POS/LowStockPushNotification';
 import { InventoryView } from './components/Inventory/InventoryView';
 import { PurchasingView } from './components/Inventory/PurchasingView';
 import { PhysicalStockCountView } from './components/Inventory/PhysicalStockCountView';
@@ -223,7 +224,7 @@ import {
   mergeRecordsWithConflictDetection,
 } from './utils/syncConflicts';
 import { findRecoverableBackups, protectLargestBackup, getBackupDataByKey } from './utils/backupRecovery';
-import { isSoundEnabled, setSoundEnabled, subscribeToSoundPref, playButtonSound } from './utils/uiFeedback';
+import { isSoundEnabled, setSoundEnabled, subscribeToSoundPref, playButtonSound, playLowStockAlertSound } from './utils/uiFeedback';
 import { saveToIDB, getFromIDB } from './utils/idbStorage';
 
 const DELETED_PRODUCTS_STORAGE_KEY = 'retail_pos_deleted_products';
@@ -628,6 +629,7 @@ export default function App() {
   // Daily Automatic Email Backup Modal & Status Banner
   const [showDailyEmailBackupModal, setShowDailyEmailBackupModal] = useState<boolean>(false);
   const [backupBanner, setBackupBanner] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
+  const [lowStockPushAlerts, setLowStockPushAlerts] = useState<LowStockPushAlert[]>([]);
   const [showCategoryManagerModal, setShowCategoryManagerModal] = useState<boolean>(false);
   const [soundEffectsEnabled, setSoundEffectsEnabled] = useState<boolean>(() => isSoundEnabled());
 
@@ -2895,6 +2897,43 @@ export default function App() {
       return updated;
     });
     const soldProductIds = new Set((stampedTx.items || []).map((it) => it.product?.id || (it as any).productId));
+
+    // Detect any sold product reaching or dropping below its minimum stock limit during this sale
+    const previousStockById = new Map<string, number>(
+      products.map((p) => [p.id, p.stockQuantity])
+    );
+    const triggeredLowStockItems: LowStockPushAlertItem[] = [];
+    updatedProducts.forEach((p) => {
+      if (!soldProductIds.has(p.id)) return;
+      const minLimit = typeof p.minStockAlert === 'number' ? p.minStockAlert : 5;
+      const prevStock = previousStockById.get(p.id) ?? p.stockQuantity;
+      const remainingStock = p.stockQuantity;
+      if (remainingStock < prevStock && remainingStock <= minLimit) {
+        triggeredLowStockItems.push({
+          productId: p.id,
+          name: p.name,
+          sku: p.sku || '',
+          unit: p.unit || 'pcs',
+          previousStock: prevStock,
+          remainingStock,
+          minStockLimit: minLimit,
+          severity: remainingStock <= 0 ? 'out_of_stock' : 'low_stock',
+        });
+      }
+    });
+
+    if (triggeredLowStockItems.length > 0) {
+      const hasOutOfStock = triggeredLowStockItems.some((item) => item.severity === 'out_of_stock');
+      playLowStockAlertSound(hasOutOfStock);
+      const newAlert: LowStockPushAlert = {
+        id: `low-stock-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        receiptNumber: stampedTx.receiptNumber || stampedTx.id,
+        triggeredAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        items: triggeredLowStockItems,
+      };
+      setLowStockPushAlerts((prev) => [newAlert, ...prev].slice(0, 3));
+    }
+
     const stampedUpdatedProducts = updatedProducts.map((p) =>
       soldProductIds.has(p.id) ? { ...p, updatedAt: nowIso } : p
     );
@@ -4560,6 +4599,7 @@ export default function App() {
           isSidebarCollapsed={isSidebarCollapsed}
           onToggleSidebar={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
           onOpenCloudSync={() => setShowCloudSyncModal(true)}
+          onTriggerSync={syncPendingQueueToCloud}
           onPullFromCloud={handlePullFromCloud}
           onEmergencyRestore={handleRestoreEmergencyBackup}
           deviceFormat={deviceFormat}
@@ -4722,6 +4762,70 @@ export default function App() {
           allUsers={allUsers}
           storeName={stores.find((s) => s.id === activeStoreId)?.name || 'ROFANI ELECTRONICS AND BOUTIQUE'}
           onNotification={(msg, type) => setBackupBanner({ message: msg, type })}
+        />
+
+        {/* Multi-Store Branch Outlets & Inter-Store Stock Transfer Manager Modal (Phone Format Mode) */}
+        <StoreManagerModal
+          isOpen={showStoreManagerModal}
+          onClose={() => setShowStoreManagerModal(false)}
+          stores={stores}
+          products={products}
+          stockTransfers={stockTransfers}
+          onAddStore={handleAddStore}
+          onUpdateStore={handleUpdateStore}
+          onDeleteStore={handleDeleteStore}
+          onResetDemoStores={handleResetDemoStores}
+          activeStoreId={activeStoreId}
+          onSelectActiveStore={(id) => {
+            setActiveStoreId(id);
+            setShowStoreManagerModal(false);
+          }}
+          onTransferStock={handleTransferStock}
+          onUpdateTransferStatus={handleUpdateTransferStatus}
+        />
+
+        {/* Category & Subcategory Management Modal (Phone Format Mode) */}
+        <CategoryManagerModal
+          isOpen={showCategoryManagerModal}
+          onClose={() => setShowCategoryManagerModal(false)}
+          categories={categories}
+          products={products}
+          onAddCategory={handleAddCategory}
+          onEditCategory={handleEditCategory}
+          onDeleteCategory={handleDeleteCategory}
+          onAddSubcategory={handleAddSubcategory}
+          onEditSubcategory={handleEditSubcategory}
+          onDeleteSubcategory={handleDeleteSubcategory}
+        />
+
+        {/* Stock Alert & Daily Digest Email Notification Center Modal (Phone Format Mode) */}
+        <StockAlertNotificationModal
+          isOpen={showStockAlertModal}
+          onClose={() => setShowStockAlertModal(false)}
+          products={products}
+          onRestockClick={(p) => {
+            setShowStockAlertModal(false);
+            setActiveTab('inventory');
+            setSelectedHistoryProduct(p);
+            setShowHistoryModal(true);
+          }}
+          onViewInventoryProduct={() => {
+            setShowStockAlertModal(false);
+            setActiveTab('inventory');
+            setInventoryLowStockOnly(true);
+          }}
+        />
+
+        {/* Push-Style Low Stock Alert Notification (Phone Format Mode) */}
+        <LowStockPushNotification
+          alerts={lowStockPushAlerts}
+          onDismiss={(id) => setLowStockPushAlerts((prev) => prev.filter((a) => a.id !== id))}
+          onDismissAll={() => setLowStockPushAlerts([])}
+          onViewInventory={() => {
+            setActiveTab('inventory');
+            setInventoryLowStockOnly(true);
+          }}
+          onOpenStockDigest={() => setShowStockAlertModal(true)}
         />
 
         {/* Role Authorization Modal for Sensitive Operations in Phone Mode */}
@@ -6033,6 +6137,18 @@ export default function App() {
         onAddSubcategory={handleAddSubcategory}
         onEditSubcategory={handleEditSubcategory}
         onDeleteSubcategory={handleDeleteSubcategory}
+      />
+
+      {/* Push-Style Low Stock Alert Notification (Desktop Mode) */}
+      <LowStockPushNotification
+        alerts={lowStockPushAlerts}
+        onDismiss={(id) => setLowStockPushAlerts((prev) => prev.filter((a) => a.id !== id))}
+        onDismissAll={() => setLowStockPushAlerts([])}
+        onViewInventory={() => {
+          setActiveTab('inventory');
+          setInventoryLowStockOnly(true);
+        }}
+        onOpenStockDigest={() => setShowStockAlertModal(true)}
       />
 
       {/* Automatic Camera Authorization on App Launch */}

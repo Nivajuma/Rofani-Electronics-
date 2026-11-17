@@ -81,6 +81,7 @@ import { calculateReplenishmentPlan } from '../../utils/replenishment';
 import { AiReceiptScannerModal } from '../POS/AiReceiptScannerModal';
 import { safeGetJSON, safeSetJSON } from '../../utils/safeStorage';
 import { batchSaveProductsToCloud } from '../../lib/cloudSync';
+import { LowStockTrendsCard } from './LowStockTrendsCard';
 
 interface InventoryViewProps {
   products: Product[];
@@ -2405,6 +2406,15 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
               </div>
             </button>
           </div>
+
+          {/* Low Stock Trends Visual Dashboard */}
+          <LowStockTrendsCard
+            products={products}
+            onSelectProduct={(prod) => handleOpenEditModal(prod)}
+            onViewLowStockOnly={() => setShowLowStockOnly(true)}
+            onOpenRestockCenter={() => setShowPredictiveRestockModal(true)}
+            activeLowStockFilter={showLowStockOnly}
+          />
 
           {/* Filter & Search Bar */}
           <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl space-y-3">

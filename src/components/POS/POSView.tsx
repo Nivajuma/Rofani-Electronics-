@@ -2293,41 +2293,45 @@ export const POSView: React.FC<POSViewProps> = ({
         <div className={`lg:col-span-7 space-y-4 ${mobileTab === 'catalog' ? 'block' : 'hidden lg:block'}`}>
           {/* STICKY TOP SEARCH BAR & COMPACT TOP SELLERS CHIPS BAR */}
           <div className="sticky top-2 z-30 bg-slate-900/95 backdrop-blur-md p-3 rounded-2xl border border-slate-800 shadow-2xl space-y-2.5">
-            {/* Dedicated Full-Width Search Input Bar with Auto-Focus */}
-            <div className="relative w-full flex items-center">
-              <Search className="w-4 h-4 text-sky-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-              <input
-                type="text"
-                placeholder="Search products by Name, SKU, or Barcode..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                onKeyDown={handleSearchKeyDown}
-                className="w-full bg-slate-950 border border-slate-700/80 text-white placeholder-slate-400 text-base sm:text-xs pl-10 pr-24 py-2.5 rounded-xl focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-sky-500 transition shadow-inner font-medium"
-                autoComplete="off"
-                autoCorrect="off"
-                spellCheck={false}
-                autoFocus
-              />
-              <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1.5">
+            {/* Dedicated Full-Width Search Input Bar with Auto-Focus & Quick Scan Button */}
+            <div className="w-full flex items-center gap-2">
+              <div className="relative flex-1 min-w-0 flex items-center">
+                <Search className="w-4 h-4 text-sky-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  type="text"
+                  placeholder="Search products by Name, SKU, or Barcode..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  onKeyDown={handleSearchKeyDown}
+                  className="w-full bg-slate-950 border border-slate-700/80 text-white placeholder-slate-400 text-base sm:text-xs pl-10 pr-9 py-2.5 rounded-xl focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-sky-500 transition shadow-inner font-medium"
+                  autoComplete="off"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  autoFocus
+                />
                 {searchTerm && (
                   <button
                     type="button"
                     onClick={() => setSearchTerm('')}
-                    className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition cursor-pointer"
                     title="Clear search query"
+                    aria-label="Clear search query"
                   >
                     <X className="w-3.5 h-3.5" />
                   </button>
                 )}
-                <button
-                  type="button"
-                  onClick={() => setShowScanner(true)}
-                  className="sm:hidden p-1.5 rounded-lg bg-sky-600/30 hover:bg-sky-600/50 text-sky-400 hover:text-sky-200 border border-sky-500/30 transition flex items-center gap-1 cursor-pointer"
-                  title="Scan QR Code"
-                >
-                  <QrCode className="w-3.5 h-3.5" />
-                </button>
               </div>
+              <button
+                id="btn-pos-quick-scan"
+                type="button"
+                onClick={() => setShowScanner(true)}
+                className="bg-sky-600 hover:bg-sky-500 active:scale-95 text-white font-bold px-3.5 py-2.5 rounded-xl text-xs transition flex items-center gap-1.5 shadow-md shadow-sky-600/25 whitespace-nowrap shrink-0 cursor-pointer"
+                title="Open barcode & QR camera scanner to add items to the current transaction"
+                aria-label="Quick Scan barcode or QR code"
+              >
+                <Scan className="w-4 h-4 shrink-0" />
+                <span>Quick Scan</span>
+              </button>
             </div>
 
             {/* Compact Top Sellers Horizontal Scrollable Chips Bar right below search */}
@@ -3773,6 +3777,8 @@ export const POSView: React.FC<POSViewProps> = ({
           sampleBarcodes={products.map((p) => ({ name: `${p.name} (KSh ${p.sellingPrice.toLocaleString()})`, barcode: p.barcode }))}
           products={products}
           onSwitchToAiScanner={() => setShowAiReceiptScanner(true)}
+          title="Quick Scan — Barcode & QR Scanner"
+          subtitle="Scan any product barcode or QR code to add it directly to the current transaction"
         />
       )}
 

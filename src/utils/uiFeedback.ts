@@ -127,6 +127,26 @@ export function playBackupSuccessSound(): void {
   playButtonSound('success');
 }
 
+export function playLowStockAlertSound(isOutOfStock = false): void {
+  if (!isSoundEnabled()) return;
+  const ctx = getAudioContext();
+  if (!ctx) return;
+
+  try {
+    if (isOutOfStock) {
+      // Crisp urgent two-pulse attention chime for out-of-stock alert
+      playTone(ctx, 587.33, 523.25, 0.09, 0, 0.075, 'triangle');
+      playTone(ctx, 783.99, 659.25, 0.14, 0.11, 0.085, 'triangle');
+    } else {
+      // Distinct warm alert chime for reaching minimum stock limit
+      playTone(ctx, 523.25, 587.33, 0.08, 0, 0.065, 'sine');
+      playTone(ctx, 698.46, 659.25, 0.13, 0.09, 0.075, 'triangle');
+    }
+  } catch {
+    // Ignore audio errors on restricted browsers
+  }
+}
+
 function classifyButtonElement(el: HTMLElement): ButtonFeedbackKind {
   const explicit = el.getAttribute('data-feedback');
   if (explicit === 'backup' || explicit === 'danger' || explicit === 'success' || explicit === 'tap') {

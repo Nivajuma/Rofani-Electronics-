@@ -86,6 +86,7 @@ interface DataManagementViewProps {
   isSidebarCollapsed?: boolean;
   onToggleSidebar?: () => void;
   onOpenCloudSync?: () => void;
+  onTriggerSync?: () => Promise<any> | void;
   onPullFromCloud?: () => Promise<any>;
   onEmergencyRestore?: (sourceKey?: string) => Promise<boolean> | boolean;
   deviceFormat?: 'computer' | 'phone';
@@ -125,6 +126,7 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
   isSidebarCollapsed = false,
   onToggleSidebar,
   onOpenCloudSync,
+  onTriggerSync,
   onPullFromCloud,
   deviceFormat = 'computer',
   onChangeDeviceFormat,
@@ -575,6 +577,15 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
         isSidebarCollapsed={isSidebarCollapsed}
         onToggleSidebar={onToggleSidebar}
         onOpenCloudSync={onOpenCloudSync}
+        onTriggerSync={onTriggerSync}
+        onOpenDataManagement={() => {
+          const el = document.getElementById('data-management-section');
+          if (el) {
+            el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          }
+        }}
+        onExportFullBackup={handleExportFullDatabaseJSON}
+        onOpenEmailBackup={() => setShowEmailBackupModal(true)}
         deviceFormat={deviceFormat}
         onChangeDeviceFormat={onChangeDeviceFormat}
         requirePinOnStartup={requirePinOnStartup}
@@ -586,7 +597,7 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
         onOpenCategoryManager={onOpenCategoryManager}
       />
 
-      <div className="p-6 space-y-6 max-w-7xl mx-auto border-t border-slate-800 pt-8">
+      <div id="data-management-section" className="p-6 space-y-6 max-w-7xl mx-auto border-t border-slate-800 pt-8">
       {/* Top Banner */}
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 text-white flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-xl">
         <div className="flex items-center gap-3">

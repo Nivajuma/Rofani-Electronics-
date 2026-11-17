@@ -22,7 +22,8 @@ import {
   Sparkles,
   Trash2,
   KeyRound,
-  RefreshCw
+  RefreshCw,
+  Database
 } from 'lucide-react';
 import { Product, Customer, Supplier, Transaction, Expense, AttendanceRecord, User, StoreLocation, Role, WorkerPermissions } from '../../types';
 import { safeGetJSON, safeSetJSON } from '../../utils/safeStorage';
@@ -53,6 +54,10 @@ interface SettingsDashboardViewProps {
   isSidebarCollapsed?: boolean;
   onToggleSidebar?: () => void;
   onOpenCloudSync?: () => void;
+  onTriggerSync?: () => Promise<any> | void;
+  onOpenDataManagement?: () => void;
+  onExportFullBackup?: () => void;
+  onOpenEmailBackup?: () => void;
   deviceFormat?: 'computer' | 'phone';
   onChangeDeviceFormat?: (format: 'computer' | 'phone') => void;
   requirePinOnStartup?: boolean;
@@ -66,6 +71,7 @@ interface SettingsDashboardViewProps {
 
 type SettingCategoryKey =
   | 'general'
+  | 'data'
   | 'transaction'
   | 'print_tax'
   | 'users'
@@ -287,6 +293,11 @@ export const SettingsDashboardView: React.FC<SettingsDashboardViewProps> = ({
   onChangeDisplayTheme,
   fontScale = 'normal',
   onChangeFontScale,
+  onOpenCloudSync,
+  onTriggerSync,
+  onOpenDataManagement,
+  onExportFullBackup,
+  onOpenEmailBackup,
   requirePinOnStartup = true,
   onToggleRequirePinOnStartup,
   masterPin = '1234',
@@ -615,8 +626,16 @@ export const SettingsDashboardView: React.FC<SettingsDashboardViewProps> = ({
       icon: Building2,
       color: 'text-blue-400 bg-blue-500/10 border-blue-500/30',
       title: 'General',
-      description: 'Shop Name, Branch Location, Receipt Footer Note, Store Contact details.',
-      keywords: ['shop', 'name', 'branch', 'location', 'footer', 'contact', 'phone']
+      description: 'App Language, Currency, Theme, Register PIN, Multifirm & Data Backup Settings.',
+      keywords: ['shop', 'name', 'branch', 'location', 'footer', 'contact', 'phone', 'general', 'theme', 'pin', 'backup', 'data']
+    },
+    {
+      id: 'data' as SettingCategoryKey,
+      icon: Database,
+      color: 'text-cyan-400 bg-cyan-500/10 border-cyan-500/30',
+      title: 'Data Settings, Sync & Backups',
+      description: 'Cloud Sync, Aggressive Auto-Sync, JSON/CSV export & restore, snapshot recovery, and KRA tax profile.',
+      keywords: ['data', 'sync', 'cloud', 'backup', 'auto-sync', 'aggressive', 'export', 'import', 'restore', 'json', 'csv']
     },
     {
       id: 'transaction' as SettingCategoryKey,
@@ -736,7 +755,13 @@ export const SettingsDashboardView: React.FC<SettingsDashboardViewProps> = ({
               <button
                 key={item.id}
                 type="button"
-                onClick={() => setActiveSubPanel(item.id)}
+                onClick={() => {
+                  if (item.id === 'data' && onOpenDataManagement) {
+                    onOpenDataManagement();
+                  } else {
+                    setActiveSubPanel(item.id);
+                  }
+                }}
                 className="w-full text-left p-4 sm:p-5 flex items-center justify-between hover:bg-slate-800/60 transition group cursor-pointer"
               >
                 <div className="flex items-center gap-4">
@@ -776,6 +801,22 @@ export const SettingsDashboardView: React.FC<SettingsDashboardViewProps> = ({
           <GeneralSettingsView
             onBack={() => setActiveSubPanel(null)}
             onOpenStoreManager={onOpenStoreManager}
+            onOpenCloudSync={onOpenCloudSync}
+            onOpenDataManagement={() => {
+              setActiveSubPanel(null);
+              if (onOpenDataManagement) {
+                setTimeout(() => onOpenDataManagement(), 50);
+              }
+            }}
+            onTriggerSync={onTriggerSync}
+            onExportFullBackup={onExportFullBackup}
+            onOpenEmailBackup={onOpenEmailBackup}
+            displayTheme={displayTheme}
+            onChangeDisplayTheme={onChangeDisplayTheme}
+            requirePinOnStartup={requirePinOnStartup}
+            onToggleRequirePinOnStartup={onToggleRequirePinOnStartup}
+            masterPin={masterPin}
+            onUpdateMasterPin={onUpdateMasterPin}
           />
         </div>
       )}
@@ -787,7 +828,7 @@ export const SettingsDashboardView: React.FC<SettingsDashboardViewProps> = ({
       )}
 
       {/* Sub-Panel Modal Overlay */}
-      {activeSubPanel && activeSubPanel !== 'inventory' && activeSubPanel !== 'general' && activeSubPanel !== 'print_tax' && (
+      {activeSubPanel && activeSubPanel !== 'inventory' && activeSubPanel !== 'general' && activeSubPanel !== 'print_tax' && activeSubPanel !== 'data' && (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
             {/* Modal Header */}

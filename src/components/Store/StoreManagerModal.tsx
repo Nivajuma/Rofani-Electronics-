@@ -303,7 +303,7 @@ export const StoreManagerModal: React.FC<StoreManagerModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+    <div className="fixed inset-0 z-[110] bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
       <div className="bg-slate-900 border border-slate-700/80 rounded-3xl w-full max-w-5xl overflow-hidden shadow-2xl flex flex-col max-h-[94vh] animate-in fade-in zoom-in-95 duration-200">
         {/* Header */}
         <div className="p-4 sm:p-5 bg-gradient-to-r from-slate-950 via-slate-900 to-indigo-950/50 border-b border-slate-800 flex items-center justify-between gap-3">
@@ -1113,7 +1113,7 @@ export const StoreManagerModal: React.FC<StoreManagerModalProps> = ({
 
       {/* MODAL: DELETE STORE CONFIRMATION */}
       {storeToDelete && (
-        <div className="fixed inset-0 z-[60] bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-[120] bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 max-w-md w-full space-y-4 shadow-2xl">
             <div className="flex items-center gap-3 text-rose-400">
               <AlertTriangle className="w-6 h-6" />
@@ -1147,7 +1147,7 @@ export const StoreManagerModal: React.FC<StoreManagerModalProps> = ({
 
       {/* MODAL: RESET DEMO STORES CONFIRMATION */}
       {showResetDemoConfirm && (
-        <div className="fixed inset-0 z-[60] bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-[120] bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 max-w-md w-full space-y-4 shadow-2xl">
             <div className="flex items-center gap-3 text-amber-400">
               <RotateCcw className="w-6 h-6" />
@@ -1179,7 +1179,7 @@ export const StoreManagerModal: React.FC<StoreManagerModalProps> = ({
 
       {/* MODAL: KEEP ONLY THIS STORE CONFIRMATION */}
       {showKeepSingleConfirm && (
-        <div className="fixed inset-0 z-[60] bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-[120] bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 max-w-md w-full space-y-4 shadow-2xl">
             <div className="flex items-center gap-3 text-indigo-400">
               <Sparkles className="w-6 h-6" />

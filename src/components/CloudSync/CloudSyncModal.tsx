@@ -81,6 +81,8 @@ interface CloudSyncModalProps {
   conflictCount?: number;
   onOpenConflictAssistant?: () => void;
   firebaseUser?: { email?: string | null; emailVerified?: boolean; uid?: string } | null;
+  activeStoreId?: string;
+  activeStoreName?: string;
 }
 
 export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
@@ -107,6 +109,8 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
   conflictCount = 0,
   onOpenConflictAssistant,
   firebaseUser = null,
+  activeStoreId,
+  activeStoreName,
 }) => {
   const { isOnline, pendingCount, queuedItems, isSimulated, toggleSimulatedOffline, checkConnection } = useNetworkStatus();
   const [copied, setCopied] = useState(false);
@@ -203,7 +207,7 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
         setSyncFeedback({
           type: 'success',
           title: 'Google Cloud Account Connected',
-          details: `Signed in as ${signedInUser.email}. Cloud Firestore sync is now active across your devices.`,
+          details: `Signed in as ${signedInUser.email}. Cloud Firestore sync is now active for your isolated store.`,
           timestamp: new Date().toLocaleTimeString(),
         });
         if (onTriggerSync && pendingCount > 0) {
@@ -212,8 +216,8 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
       } else {
         setSyncFeedback({
           type: 'warning',
-          title: 'Store Owner Google Account Required',
-          details: `Signed in as ${signedInUser.email || 'unknown account'}, but Cloud Firestore access is restricted to ${OWNER_CLOUD_EMAIL}. Please switch to the store owner Google account.`,
+          title: 'Verified Google Account Required',
+          details: `Signed in as ${signedInUser.email || 'unknown account'}, please use a verified Google account to sync with Cloud Firestore.`,
           timestamp: new Date().toLocaleTimeString(),
         });
       }
@@ -281,7 +285,7 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
       setSyncFeedback({
         type: 'warning',
         title: 'Google Sign-In Required for Cloud Sync',
-        details: `Please click "Sign in with Google" below using ${OWNER_CLOUD_EMAIL} to upload your ${pendingCount} queued record(s).`,
+        details: `Please sign in with your verified Google account below to upload your ${pendingCount} queued record(s).`,
         timestamp: new Date().toLocaleTimeString(),
       });
       return;
@@ -345,7 +349,7 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
       setSyncFeedback({
         type: 'warning',
         title: 'Google Sign-In Required Before Pushing',
-        details: `Please sign in with the verified store Google account (${OWNER_CLOUD_EMAIL}) below to push records to Cloud Firestore.`,
+        details: 'Please sign in with your verified Google account below to push records to your store in Cloud Firestore.',
         timestamp: new Date().toLocaleTimeString(),
       });
       return;
@@ -462,7 +466,7 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
       setSyncFeedback({
         type: 'warning',
         title: 'Google Sign-In Required Before Pulling',
-        details: `Please sign in with the verified store Google account (${OWNER_CLOUD_EMAIL}) below to pull records from Cloud Firestore.`,
+        details: 'Please sign in with your verified Google account below to pull records from your store in Cloud Firestore.',
         timestamp: new Date().toLocaleTimeString(),
       });
       return;
@@ -732,13 +736,13 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
                   <div className="space-y-1 min-w-0">
                     <div className="text-xs font-bold text-sky-100">
                       {firebaseUser?.email
-                        ? `Signed in as ${firebaseUser.email} (Not Store Owner)`
+                        ? `Signed in as ${firebaseUser.email} (Email Verification Needed)`
                         : 'Sign in with Google to Enable Cloud Firestore Sync'}
                     </div>
                     <p className="text-[11px] text-sky-200/90 leading-relaxed">
                       {firebaseUser?.email
-                        ? `Cloud Firestore read/write access is restricted to verified store owner ${OWNER_CLOUD_EMAIL}. Switch accounts to sync across devices.`
-                        : `Your local data is safe on this device. Sign in with verified store owner account (${OWNER_CLOUD_EMAIL}) to sync inventory and sales to Cloud Firestore.`}
+                        ? 'Your Google account email must be verified before Cloud Firestore sync can proceed.'
+                        : 'Your local data is safe on this device. Sign in with your verified Google account to sync your private store across devices.'}
                     </p>
                   </div>
                 </div>
@@ -837,21 +841,37 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
               )}
             </div>
           ) : (
-            <div className="bg-emerald-950/40 border border-emerald-700/50 px-3.5 py-2.5 rounded-2xl flex items-center justify-between gap-2 text-xs">
+            <div className="bg-emerald-950/40 border border-emerald-700/50 px-3.5 py-2.5 rounded-2xl flex items-center justify-between gap-2 text-xs flex-wrap">
               <div className="flex items-center gap-2 min-w-0 text-emerald-200">
                 <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
-                <span className="truncate">
-                  Cloud Auth Verified: <strong className="text-white">{firebaseUser?.email}</strong>
-                </span>
+                <div className="min-w-0">
+                  <div className="truncate">
+                    Cloud Auth Verified: <strong className="text-white">{firebaseUser?.email}</strong>
+                  </div>
+                  {(activeStoreName || activeStoreId) && (
+                    <div className="text-[10px] text-emerald-300/80 font-mono truncate">
+                      Isolated Store: {activeStoreName ? `${activeStoreName} ` : ''}({activeStoreId || firebaseUser?.uid})
+                    </div>
+                  )}
+                </div>
               </div>
-              <button
-                type="button"
-                onClick={handleGoogleSignIn}
-                disabled={isSigningInGoogle}
-                className="text-[11px] text-emerald-300 hover:text-white font-semibold shrink-0 cursor-pointer"
-              >
-                Switch Account
-              </button>
+              <div className="flex items-center gap-2.5 shrink-0">
+                <button
+                  type="button"
+                  onClick={handleGoogleSignIn}
+                  disabled={isSigningInGoogle}
+                  className="text-[11px] text-emerald-300 hover:text-white font-semibold cursor-pointer"
+                >
+                  Switch Account
+                </button>
+                <button
+                  type="button"
+                  onClick={() => signOutFromCloud().catch(() => {})}
+                  className="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-rose-300 text-[11px] font-semibold cursor-pointer"
+                >
+                  Sign Out
+                </button>
+              </div>
             </div>
           )}
 

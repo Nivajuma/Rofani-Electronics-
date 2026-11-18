@@ -1,6 +1,7 @@
 // Safaricom M-PESA Daraja & Express STK Push Utility
 import { safeGetJSON, safeSetJSON } from './safeStorage';
 import { saveMpesaConfigToCloud } from '../lib/cloudSync';
+import { getActiveTenantStoreId, OWNER_PRIMARY_STORE_ID } from './tenantScope';
 
 export interface MpesaConfig {
   shortcode: string; // Till or Paybill number e.g. "1833804"
@@ -63,7 +64,42 @@ export const DEFAULT_MPESA_CONFIG: MpesaConfig = {
   autoSimulatePinDelaySeconds: 4,
 };
 
+/**
+ * Platform SaaS M-Pesa config used when merchants pay Rofani Electronics for monthly/annual subscriptions.
+ */
+export const PLATFORM_SUBSCRIPTION_MPESA_CONFIG: MpesaConfig = {
+  ...DEFAULT_MPESA_CONFIG,
+  shortcode: env.VITE_MPESA_SHORTCODE || env.VITE_MPESA_TILL || '1833804',
+  storeNumber: env.VITE_MPESA_STORE_NUMBER || '1365369',
+  shortcodeType: 'till',
+  storeDisplayName: 'ROFANI ELECTRONICS & BOUTIQUE',
+};
+
 export const loadMpesaConfig = (): MpesaConfig => {
+  const activeScope = getActiveTenantStoreId();
+  if (activeScope !== OWNER_PRIMARY_STORE_ID) {
+    const emptyMerchantDefault: MpesaConfig = {
+      shortcode: '',
+      storeNumber: '',
+      shortcodeType: 'till',
+      storeDisplayName: 'MY STORE POS',
+      passkey: DEFAULT_MPESA_CONFIG.passkey,
+      consumerKey: DEFAULT_MPESA_CONFIG.consumerKey,
+      consumerSecret: DEFAULT_MPESA_CONFIG.consumerSecret,
+      environment: 'production',
+      mode: 'live_daraja',
+      autoSimulatePinDelaySeconds: 4,
+    };
+    const saved = safeGetJSON<MpesaConfig>(STORAGE_KEY, emptyMerchantDefault);
+    return {
+      ...emptyMerchantDefault,
+      ...saved,
+      consumerKey: saved.consumerKey || DEFAULT_MPESA_CONFIG.consumerKey,
+      consumerSecret: saved.consumerSecret || DEFAULT_MPESA_CONFIG.consumerSecret,
+      passkey: saved.passkey || DEFAULT_MPESA_CONFIG.passkey,
+    };
+  }
+
   const saved = safeGetJSON<MpesaConfig>(STORAGE_KEY, DEFAULT_MPESA_CONFIG);
   return {
     ...saved,

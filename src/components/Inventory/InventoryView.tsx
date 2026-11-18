@@ -5,6 +5,7 @@ import {
   Plus,
   Search,
   AlertTriangle,
+  AlertCircle,
   Barcode,
   Printer,
   Edit2,
@@ -479,6 +480,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     total: 0,
   });
   const [aiIdentifyResult, setAiIdentifyResult] = useState<string | null>(null);
+  const [aiIdentifyError, setAiIdentifyError] = useState<string | null>(null);
   const [autoSaveOnCameraSnap, setAutoSaveOnCameraSnap] = useState<boolean>(true);
   const [autoAddSuccessToast, setAutoAddSuccessToast] = useState<string | null>(null);
 
@@ -766,8 +768,8 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
       return;
     }
 
-    // Downscale directly on capture to keep memory under 2MB
-    const MAX_DIM = 640;
+    // Downscale directly on capture for sharp packaging OCR while keeping payload compact
+    const MAX_DIM = 800;
     if (width > MAX_DIM || height > MAX_DIM) {
       if (width > height) {
         height = Math.round((height * MAX_DIM) / width);
@@ -843,14 +845,19 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     if (!imageDataUrl) return;
     setIsAiIdentifying(true);
     setAiIdentifyResult(null);
+    setAiIdentifyError(null);
 
     try {
       const activeSupplier = suppliers.find((s) => s.id === selectedScanSupplierId) || suppliers[0];
       const targetSupplierId = isManualInModal && targetProduct?.supplierId ? targetProduct.supplierId : (activeSupplier?.id || '');
       const targetSupplierName = isManualInModal && targetProduct?.supplierName ? targetProduct.supplierName : (activeSupplier?.name || 'Direct Wholesale');
-      const fallbackName = cleanClientFileName(sourceFileName, categories[0]?.name || 'Electronics');
+      const storeCategories = Array.from(
+        new Set([
+          ...(categories || []).map((c) => c.name),
+          ...(products || []).map((p) => p.category).filter(Boolean),
+        ])
+      );
 
-      // Core Requirement 1: Local Cache Matching
       // Send existing product catalog from local React state/IndexedDB as context (ZERO Firestore reads)
       const response = await fetch('/api/ai/identify-product', {
         method: 'POST',
@@ -858,7 +865,8 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
         body: JSON.stringify({
           imageBase64: imageDataUrl,
           fileName: sourceFileName || '',
-          hintCategory: categories[0]?.name || 'Electronics',
+          hintCategory: storeCategories[0] || 'Electronics',
+          storeCategories,
           existingProducts: products.map((p) => ({
             id: p.id,
             name: p.name,
@@ -873,46 +881,58 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
         }),
       });
 
-      let data: any = null;
-      if (response.ok) {
-        data = await response.json();
+      const data: any = await response.json().catch(() => null);
+
+      if (!response.ok || !data || !data.name) {
+        const errMsg =
+          data?.error ||
+          (response.status === 503
+            ? 'Gemini AI Vision is not configured on the server. Add GEMINI_API_KEY in Settings > Secrets (or Vercel Environment Variables).'
+            : `AI Vision could not identify this photo (HTTP ${response.status}). Ensure clear lighting or enter details manually.`);
+        setAiIdentifyError(errMsg);
+        return;
       }
 
       const current = targetProduct || editingProduct;
-      let itemName = data?.name && !/^scanned item$/i.test(data.name.trim()) 
-        ? data.name.trim() 
-        : (data?.matchedProductName || current?.name || fallbackName);
-      
-      if (!itemName || /^scanned item$/i.test(itemName)) {
-        itemName = fallbackName;
-      }
+      const itemName = String(data.name).trim();
+      const itemCategory = (data.category && String(data.category).trim()) || current?.category || storeCategories[0] || 'Electronics';
+      const itemSubcategory = (data.subcategory && String(data.subcategory).trim()) || current?.subcategory || categories[0]?.subcategories?.[0] || 'General';
+      const itemSizeCapacity = data.sizeCapacity ? String(data.sizeCapacity).trim() : (current?.sizeCapacity || '');
+      const itemUnit = data.unit ? String(data.unit).trim() : (current?.unit || 'pcs');
+      const itemBarcode = data.suggestedBarcode
+        ? String(data.suggestedBarcode).replace(/[^0-9A-Za-z\-]/g, '').trim()
+        : '';
 
-      const itemCategory = data?.category || categories[0]?.name || 'Electronics';
-      const itemSubcategory = data?.subcategory || categories[0]?.subcategories?.[0] || 'General';
-      const itemPrice = data?.suggestedPriceKSh || (itemCategory === 'Phones & Accessories' ? 1800 : itemCategory === 'Clothes (Men, Women & Kids Wear)' ? 1600 : 1200);
-      const itemCost = data?.suggestedCostKSh || Math.round(itemPrice * 0.7);
-      const itemDescription = data?.description && !/^product photo captured/i.test(data.description)
-        ? data.description
-        : `${itemName} (${itemCategory} - ${itemSubcategory}). Captured from product photo. Ready for stock entry.`;
-      const itemSku = data?.suggestedSku || `ROF-${Math.floor(1000 + Math.random() * 9000)}`;
+      const parsedPrice = Number(data.suggestedPriceKSh);
+      const itemPrice = Number.isFinite(parsedPrice) && parsedPrice > 0
+        ? Math.round(parsedPrice)
+        : (Number(current?.sellingPrice) || 0);
+
+      const parsedCost = Number(data.suggestedCostKSh);
+      const itemCost = Number.isFinite(parsedCost) && parsedCost > 0
+        ? Math.round(parsedCost)
+        : (itemPrice > 0 ? Math.round(itemPrice * 0.72) : (Number(current?.costPrice) || 0));
+
+      const itemDescription = data.description && String(data.description).trim()
+        ? String(data.description).trim()
+        : `${itemName} (${itemCategory} - ${itemSubcategory}).`;
+      const itemSku = (data.suggestedSku && String(data.suggestedSku).trim()) || `ROF-${Math.floor(1000 + Math.random() * 9000)}`;
 
       if (showAiScanModal && !isManualInModal && !showModal) {
-        // Core Requirement 2: Batched / Draft Item Creation
-        // Save new item to local draft state (draftItems) and set as active review item
         const stagedDraftItem: Product = {
           id: current?.id && !current.id.startsWith('prod-') ? current.id : `prod-draft-${Date.now()}-${Math.floor(100 + Math.random() * 900)}`,
           name: itemName,
           sku: itemSku,
-          barcode: current?.barcode || generateAutoBarcode(),
+          barcode: itemBarcode || current?.barcode || generateAutoBarcode(),
           category: itemCategory,
           subcategory: itemSubcategory,
-          sizeCapacity: current?.sizeCapacity || '',
+          sizeCapacity: itemSizeCapacity,
           description: itemDescription,
           costPrice: itemCost,
           sellingPrice: itemPrice,
           stockQuantity: current?.stockQuantity || 10,
           minStockAlert: current?.minStockAlert || 5,
-          unit: 'pcs',
+          unit: itemUnit,
           supplierId: targetSupplierId,
           supplierName: targetSupplierName,
           imageUrl: imageDataUrl,
@@ -924,25 +944,24 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
         setScannedReviewItem(stagedDraftItem);
         setEditingProduct(null);
         setAutoAddSuccessToast(
-          `✨ Identified: "${stagedDraftItem.name}" (${stagedDraftItem.category}) @ KSh ${stagedDraftItem.sellingPrice.toLocaleString()}. Review name & details below or save.`
+          `✨ Identified: "${stagedDraftItem.name}" (${stagedDraftItem.category})${stagedDraftItem.sellingPrice > 0 ? ` @ KSh ${stagedDraftItem.sellingPrice.toLocaleString()}` : ''}. Review details below or save.`
         );
         setTimeout(() => setAutoAddSuccessToast(null), 8000);
       } else {
-        // Populate fields and show modal with photo intact for review
         setEditingProduct((prev) => {
           const base = prev || current || {
             id: `prod-${Date.now()}`,
             name: itemName,
             sku: itemSku,
-            barcode: generateAutoBarcode(),
+            barcode: itemBarcode || generateAutoBarcode(),
             category: itemCategory,
             subcategory: itemSubcategory,
-            sizeCapacity: '',
+            sizeCapacity: itemSizeCapacity,
             costPrice: itemCost,
             sellingPrice: itemPrice,
             stockQuantity: 10,
             minStockAlert: 5,
-            unit: 'pcs',
+            unit: itemUnit,
             supplierId: targetSupplierId,
             supplierName: targetSupplierName,
             description: itemDescription,
@@ -955,6 +974,9 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
             name: itemName,
             category: itemCategory,
             subcategory: itemSubcategory,
+            sizeCapacity: itemSizeCapacity || base.sizeCapacity || '',
+            unit: itemUnit || base.unit || 'pcs',
+            barcode: itemBarcode || base.barcode || generateAutoBarcode(),
             sellingPrice: itemPrice,
             costPrice: itemCost,
             description: itemDescription,
@@ -966,45 +988,15 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
         });
         setShowModal(true);
         setShowAiScanModal(false);
-        setAiIdentifyResult(`✨ AI Scanned: "${itemName}" (${itemCategory}) - Est. KSh ${itemPrice.toLocaleString()}`);
+        setAiIdentifyResult(
+          `✨ AI Scanned: "${itemName}" (${itemCategory})${itemPrice > 0 ? ` - Est. KSh ${itemPrice.toLocaleString()}` : ''}`
+        );
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error running AI Camera product identification:', err);
-      const activeSupplier = suppliers.find((s) => s.id === selectedScanSupplierId) || suppliers[0];
-      const targetSupplierId = activeSupplier?.id || '';
-      const targetSupplierName = activeSupplier?.name || 'Direct Wholesale';
-      const fallbackName = cleanClientFileName(sourceFileName, categories[0]?.name || 'Electronics');
-      
-      const safeProduct: Product = {
-        id: `prod-${Date.now()}`,
-        name: fallbackName,
-        sku: `ROF-${Math.floor(1000 + Math.random() * 9000)}`,
-        barcode: generateAutoBarcode(),
-        category: categories[0]?.name || 'Electronics',
-        subcategory: categories[0]?.subcategories?.[0] || 'General',
-        sizeCapacity: '',
-        costPrice: 800,
-        sellingPrice: 1200,
-        stockQuantity: 10,
-        minStockAlert: 5,
-        unit: 'pcs',
-        supplierId: targetSupplierId,
-        supplierName: targetSupplierName,
-        description: `${fallbackName}. Product photo attached. Please verify and confirm specifications.`,
-        imageUrl: imageDataUrl,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
-
-      if (showAiScanModal && !isManualInModal && !showModal) {
-        setDraftItems((prev) => [safeProduct, ...prev]);
-        setScannedReviewItem(safeProduct);
-      } else {
-        setEditingProduct(safeProduct);
-        setShowModal(true);
-        setShowAiScanModal(false);
-      }
-      setAiIdentifyResult(`Photo attached: "${fallbackName}". Please verify and confirm details.`);
+      setAiIdentifyError(
+        err?.message || 'Unable to reach AI Vision service. Check your internet connection and GEMINI_API_KEY configuration, or enter details manually.'
+      );
     } finally {
       setIsAiIdentifying(false);
     }
@@ -1016,6 +1008,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
 
     setEditingProduct((prev) => (prev ? { ...prev, imageUrl: '' } : null));
     setAiIdentifyResult(null);
+    setAiIdentifyError(null);
     setIsAiIdentifying(false);
     setIsUploadingPhoto(false);
   };
@@ -1028,22 +1021,21 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     }
 
     setIsUploadingPhoto(true);
+    setAiIdentifyError(null);
 
     try {
-      // 1. Optimize directly with low-memory pipeline (max 640px, ~40KB JPEG)
-      const compressedDataUrl = await optimizeImageFile(file, 640, 0.8);
+      // 1. Optimize directly for crisp OCR/packaging recognition within compact payload size
+      const compressedDataUrl = await optimizeImageFile(file, 800, 0.82);
 
       if (!compressedDataUrl || compressedDataUrl.length < 50) {
         throw new Error('Image could not be compressed');
       }
 
-      const initialTitle = cleanClientFileName(file.name, categories[0]?.name || 'Electronics');
-
-      // 2. Set the compressed image preview
+      // 2. Set the compressed image preview without fabricating a placeholder product name
       setEditingProduct((prev) => {
         const base = prev || {
           id: `prod-${Date.now()}`,
-          name: initialTitle,
+          name: '',
           sku: `ROF-${Math.floor(1000 + Math.random() * 9000)}`,
           barcode: generateAutoBarcode(),
           category: categories[0]?.name || 'Electronics',
@@ -1060,7 +1052,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         };
-        return { ...base, name: base.name || initialTitle, imageUrl: compressedDataUrl };
+        return { ...base, imageUrl: compressedDataUrl };
       });
 
       setIsUploadingPhoto(false);
@@ -1092,9 +1084,18 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     e.target.value = '';
 
     setIsBatchScanning(true);
+    setAiIdentifyError(null);
     setBatchProgress({ current: 0, total: fileList.length });
 
     const newBatchDrafts: Product[] = [];
+    const storeCategories = Array.from(
+      new Set([
+        ...(categories || []).map((c) => c.name),
+        ...(products || []).map((p) => p.category).filter(Boolean),
+      ])
+    );
+    let failedCount = 0;
+    let firstErrorMessage = '';
 
     for (let i = 0; i < fileList.length; i++) {
       const file: File = fileList[i];
@@ -1105,17 +1106,17 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
       });
 
       try {
-        const compressedDataUrl = await optimizeImageFile(file, 640, 0.75);
+        const compressedDataUrl = await optimizeImageFile(file, 800, 0.8);
         if (!compressedDataUrl) continue;
 
-        // Core Requirement 1: Local Cache Matching (0 Firestore reads)
         const response = await fetch('/api/ai/identify-product', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             imageBase64: compressedDataUrl,
             fileName: file.name,
-            hintCategory: categories[0]?.name || 'Electronics',
+            hintCategory: storeCategories[0] || 'Electronics',
+            storeCategories,
             existingProducts: products.map((p) => ({
               id: p.id,
               name: p.name,
@@ -1130,44 +1131,48 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           }),
         });
 
+        const data: any = await response.json().catch(() => null);
+        if (!response.ok || !data || !data.name) {
+          failedCount++;
+          if (!firstErrorMessage) {
+            firstErrorMessage =
+              data?.error ||
+              (response.status === 503
+                ? 'Gemini AI Vision is not configured on the server. Add GEMINI_API_KEY in Settings > Secrets or Vercel Environment Variables.'
+                : `AI Vision returned HTTP ${response.status}.`);
+          }
+          continue;
+        }
+
         const activeSupplier = suppliers.find((s) => s.id === selectedScanSupplierId) || suppliers[0];
-        const fallbackName = cleanClientFileName(file.name, categories[0]?.name || 'Electronics');
-
-        let data: any = null;
-        if (response.ok) {
-          data = await response.json();
-        }
-
-        let finalName = data?.name && !/^scanned item$/i.test(data.name.trim()) 
-          ? data.name.trim() 
-          : (data?.matchedProductName || fallbackName);
-
-        if (!finalName || /^scanned item$/i.test(finalName)) {
-          finalName = fallbackName;
-        }
-
-        const autoCategory = data?.category || categories[0]?.name || 'Electronics';
-        const autoSubcategory = data?.subcategory || categories[0]?.subcategories?.[0] || 'General';
-        const autoPrice = data?.suggestedPriceKSh || (autoCategory === 'Phones & Accessories' ? 1800 : autoCategory === 'Clothes (Men, Women & Kids Wear)' ? 1600 : 1200);
-        const autoCost = data?.suggestedCostKSh || Math.round(autoPrice * 0.7);
-        const autoDesc = data?.description && !/^product photo captured/i.test(data.description)
-          ? data.description
-          : `${finalName} (${autoCategory} - ${autoSubcategory}). Auto-identified from phone photo gallery.`;
+        const finalName = String(data.name).trim();
+        const autoCategory = (data.category && String(data.category).trim()) || storeCategories[0] || 'Electronics';
+        const autoSubcategory = (data.subcategory && String(data.subcategory).trim()) || categories[0]?.subcategories?.[0] || 'General';
+        const parsedPrice = Number(data.suggestedPriceKSh);
+        const autoPrice = Number.isFinite(parsedPrice) && parsedPrice > 0 ? Math.round(parsedPrice) : 0;
+        const parsedCost = Number(data.suggestedCostKSh);
+        const autoCost = Number.isFinite(parsedCost) && parsedCost > 0
+          ? Math.round(parsedCost)
+          : (autoPrice > 0 ? Math.round(autoPrice * 0.72) : 0);
+        const autoDesc = (data.description && String(data.description).trim()) || `${finalName} (${autoCategory} - ${autoSubcategory}).`;
+        const autoBarcode = data.suggestedBarcode
+          ? String(data.suggestedBarcode).replace(/[^0-9A-Za-z\-]/g, '').trim()
+          : '';
 
         const autoProduct: Product = {
           id: `prod-draft-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
           name: finalName,
-          sku: data?.suggestedSku || `ROF-${Math.floor(1000 + Math.random() * 9000)}`,
-          barcode: generateAutoBarcode(),
+          sku: (data.suggestedSku && String(data.suggestedSku).trim()) || `ROF-${Math.floor(1000 + Math.random() * 9000)}`,
+          barcode: autoBarcode || generateAutoBarcode(),
           category: autoCategory,
           subcategory: autoSubcategory,
-          sizeCapacity: '',
+          sizeCapacity: data.sizeCapacity ? String(data.sizeCapacity).trim() : '',
           description: autoDesc,
           costPrice: autoCost,
           sellingPrice: autoPrice,
           stockQuantity: 10,
           minStockAlert: 5,
-          unit: 'pcs',
+          unit: data.unit ? String(data.unit).trim() : 'pcs',
           supplierId: activeSupplier?.id || '',
           supplierName: activeSupplier?.name || 'Direct Wholesale',
           imageUrl: compressedDataUrl,
@@ -1175,9 +1180,12 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           updatedAt: new Date().toISOString(),
         };
 
-        // Core Requirement 2: Save to local draft state - DO NOT call setDoc directly to Firestore!
         newBatchDrafts.push(autoProduct);
-      } catch (err) {
+      } catch (err: any) {
+        failedCount++;
+        if (!firstErrorMessage) {
+          firstErrorMessage = err?.message || 'Network or AI service error.';
+        }
         console.error('Error processing batch gallery file:', file.name, err);
       }
     }
@@ -1187,6 +1195,20 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     }
 
     setIsBatchScanning(false);
+
+    if (failedCount > 0) {
+      setAiIdentifyError(
+        `${failedCount} of ${fileList.length} photo(s) could not be identified: ${firstErrorMessage}`
+      );
+      if (newBatchDrafts.length > 0) {
+        setAutoAddSuccessToast(
+          `📦 Staged ${newBatchDrafts.length} identified item(s) into local drafts.`
+        );
+        setTimeout(() => setAutoAddSuccessToast(null), 8000);
+      }
+      return;
+    }
+
     setShowAiScanModal(false);
     if (newBatchDrafts.length > 0) {
       setAutoAddSuccessToast(
@@ -1707,7 +1729,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   };
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+    <div className="max-w-7xl mx-auto w-full px-1 sm:px-6 lg:px-8 py-2 sm:py-6 space-y-4 sm:space-y-6 flex-1 flex flex-col min-h-full pb-2 lg:pb-6">
       {/* Top Banner & View Mode Selector */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-slate-900 border border-slate-800 p-4 rounded-2xl shadow-lg">
         <div className="flex items-center gap-3">
@@ -3796,7 +3818,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
         </div>
       ) : (
         /* Inventory Catalog Table (Standard View) */
-        <div ref={itemListTopRef} className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
+        <div ref={itemListTopRef} className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl flex-1 flex flex-col">
         {/* Top Item List Bar with Downward Arrow Dropdown & Quick Jump (avoids scrolling down 25/50 rows) */}
         <div className="bg-slate-950/90 px-4 py-2.5 border-b border-slate-800 flex flex-wrap items-center justify-between gap-2.5 text-xs">
           <div className="flex items-center gap-2 flex-wrap relative" ref={itemListMenuRef}>
@@ -3928,7 +3950,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           </div>
         </div>
 
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto flex-1">
           <table className="w-full text-left text-xs text-slate-300">
             <thead className="bg-slate-950 text-slate-400 font-semibold uppercase tracking-wider border-b border-slate-800">
               <tr>
@@ -4973,6 +4995,20 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                       <Loader2 className="w-4 h-4 animate-spin text-sky-400 shrink-0" />
                       <span>Gemini AI Vision analyzing photo... Auto-suggesting item name, category & pricing...</span>
                     </div>
+                  ) : aiIdentifyError ? (
+                    <div className="bg-rose-950/85 border border-rose-500/60 p-2.5 rounded-xl text-xs text-rose-200 flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+                        <span>{aiIdentifyError}</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setAiIdentifyError(null)}
+                        className="text-rose-300 hover:text-white p-0.5"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   ) : aiIdentifyResult ? (
                     <div className="bg-emerald-950/80 border border-emerald-800 p-2.5 rounded-xl text-xs text-emerald-300 flex items-center justify-between gap-2">
                       <div className="flex items-center gap-2">
@@ -5745,6 +5781,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                   setShowAiScanModal(false);
                   setIsAiIdentifying(false);
                   setIsBatchScanning(false);
+                  setAiIdentifyError(null);
                 }}
                 className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl transition cursor-pointer"
               >
@@ -5792,6 +5829,25 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                   <span>Processing image file from device...</span>
                 </div>
               ) : null}
+
+              {aiIdentifyError && (
+                <div className="bg-rose-950/85 border border-rose-500/60 p-3.5 rounded-2xl text-xs text-rose-200 flex items-start justify-between gap-2.5 shadow-md">
+                  <div className="flex items-start gap-2.5">
+                    <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                    <div className="space-y-0.5">
+                      <p className="font-bold text-rose-100">AI Photo Scan Error</p>
+                      <p className="text-[11px] text-rose-200/90 leading-relaxed">{aiIdentifyError}</p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setAiIdentifyError(null)}
+                    className="text-rose-300 hover:text-white p-0.5 shrink-0 cursor-pointer"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              )}
 
               {/* Target Supplier Selection & Add New Supplier for AI Scanned Items */}
               <div className="bg-slate-950/80 border border-slate-800 p-3.5 rounded-2xl space-y-2">

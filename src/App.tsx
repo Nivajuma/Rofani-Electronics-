@@ -46,7 +46,10 @@ import {
   Truck,
   Mail,
   Volume2,
-  VolumeX
+  VolumeX,
+  LayoutDashboard,
+  Award,
+  LogOut
 } from 'lucide-react';
 import {
   Product,
@@ -74,7 +77,8 @@ import {
   BarcodeScanLog,
   SensitiveActionLog,
   SensitiveActionType,
-  PurchaseOrder
+  PurchaseOrder,
+  StoreSubscriptionProfile
 } from './types';
 import {
   INITIAL_USERS,
@@ -130,6 +134,10 @@ import { CategoryManagerModal } from './components/Inventory/CategoryManagerModa
 import { CameraStartupPrompt } from './components/Common/CameraStartupPrompt';
 import { AppMenuView } from './components/Common/AppMenuView';
 import { DailyEmailBackupModal } from './components/Settings/DailyEmailBackupModal';
+import { MerchantAuthScreen } from './components/Auth/MerchantAuthScreen';
+import { StoreOnboardingModal } from './components/Auth/StoreOnboardingModal';
+import { SubscriptionPlansModal } from './components/Subscription/SubscriptionPlansModal';
+import { SuperAdminSubscribersModal } from './components/Admin/SuperAdminSubscribersModal';
 import { getBackupSettings, saveBackupSettings, getGmailAccessToken, buildAndDispatchStoreBackup } from './lib/gmailService';
 import { formatKSh } from './utils/currency';
 import {
@@ -190,16 +198,32 @@ import {
   fetchExpensesFromCloud,
   fetchUsersFromCloud,
   subscribeToMpesaConfig,
+  fetchStoreProfile,
+  subscribeToStoreProfile,
+  ensureOwnerPrimaryStoreProfile,
+  createMerchantStoreProfile,
+  migrateLegacyRootCollectionsToRofaniStoreIfNeeded,
 } from './lib/cloudSync';
 import { loadMpesaConfig, saveMpesaConfig } from './utils/mpesa';
 import {
   auth,
   isAuthorizedCloudUser,
+  isOwnerCloudUser,
+  getStoreIdForUser,
+  OWNER_PRIMARY_STORE_ID,
   completeGoogleRedirectSignIn,
+  signOutFromCloud,
   testFirestoreConnection,
   isQuotaExceededError,
   FIREBASE_UPGRADE_URL,
 } from './lib/firebase';
+import {
+  ACTIVE_SCOPE_STORAGE_KEY,
+  VERIFIED_OWNER_CACHE_KEY,
+  setActiveTenantStoreId,
+  getActiveTenantStoreId,
+  resolveTenantStorageKey,
+} from './utils/tenantScope';
 import { safeGetJSON, safeSetJSON, checkAndRunRollingSalesArchive } from './utils/safeStorage';
 import {
   getAllProductImagesFromIndexedDB,
@@ -467,13 +491,15 @@ export default function App() {
     window.open(window.location.href, '_blank');
   };
 
-  // Role, Worker Users & PIN Security State with safe lazy initialization & immediate localStorage sync
+  // Role, Worker Users & PIN Security State with safe lazy initialization & immediate tenant-scoped sync
   const [allUsers, setAllUsersState] = useState<User[]>(() => {
     try {
-      const primary = localStorage.getItem('retail_pos_users');
-      const secondary = localStorage.getItem('pos_store_staff_users');
+      const activeScope = getActiveTenantStoreId();
+      const fallbackUsers = activeScope === OWNER_PRIMARY_STORE_ID ? INITIAL_USERS : [];
+      const primary = localStorage.getItem(resolveTenantStorageKey('retail_pos_users'));
+      const secondary = localStorage.getItem(resolveTenantStorageKey('pos_store_staff_users'));
       const saved = primary || secondary;
-      const rawUsers = saved ? JSON.parse(saved) : INITIAL_USERS;
+      const rawUsers = saved ? JSON.parse(saved) : fallbackUsers;
       const migrated = rawUsers.map((u: any) => {
         const userRoles = getUserRoles(u);
         return {
@@ -494,13 +520,13 @@ export default function App() {
           permissions: { ...DEFAULT_ROLE_WORKER_PERMISSIONS['Admin'] },
         };
         try {
-          localStorage.setItem('retail_pos_users', JSON.stringify(migrated));
-          localStorage.setItem('pos_store_staff_users', JSON.stringify(migrated));
+          safeSetJSON('retail_pos_users', migrated);
+          safeSetJSON('pos_store_staff_users', migrated);
         } catch {}
       }
       return migrated;
-    } catch (e) {
-      return INITIAL_USERS;
+    } catch {
+      return getActiveTenantStoreId() === OWNER_PRIMARY_STORE_ID ? INITIAL_USERS : [];
     }
   });
 
@@ -583,18 +609,287 @@ export default function App() {
 
   const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(() => auth.currentUser);
   const [isFirebaseAuthReady, setIsFirebaseAuthReady] = useState<boolean>(false);
+  const [allowOfflineOwnerMode, setAllowOfflineOwnerMode] = useState<boolean>(false);
+  const [storeProfile, setStoreProfile] = useState<StoreSubscriptionProfile | null>(null);
+  const [isCheckingStoreProfile, setIsCheckingStoreProfile] = useState<boolean>(false);
+  const [showPlansModal, setShowPlansModal] = useState<boolean>(false);
+  const [showSuperAdminModal, setShowSuperAdminModal] = useState<boolean>(false);
 
   useEffect(() => {
     completeGoogleRedirectSignIn().catch(() => null);
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       setFirebaseUser(user);
       setIsFirebaseAuthReady(true);
+      if (user) {
+        setAllowOfflineOwnerMode(false);
+      }
     });
     return () => unsubscribe();
   }, []);
 
+  const isOwnerAccount = isOwnerCloudUser(firebaseUser);
+  const activeCloudStoreId = getStoreIdForUser(firebaseUser);
   const isCloudAuthReady = isFirebaseAuthReady && isAuthorizedCloudUser(firebaseUser);
   const canAutoSyncCloud = () => getIsOnline() && isAuthorizedCloudUser(auth.currentUser);
+  const prevTenantScopeRef = useRef<string>(getActiveTenantStoreId());
+
+  const reloadAppStateForTenantScope = (
+    targetScope: string,
+    ownerMode: boolean,
+    profileOverride?: StoreSubscriptionProfile | null
+  ) => {
+    const isOwnerScope = targetScope === OWNER_PRIMARY_STORE_ID || ownerMode;
+    const isUnauthScope = targetScope === '__unauthenticated__';
+
+    setActiveTenantStoreId(targetScope);
+    setSyncConflicts([]);
+    resolvedConflictFingerprintsRef.current.clear();
+    userMutatedProductsRef.current = false;
+    hasHydratedProductsFromIdbRef.current = false;
+
+    if (isUnauthScope) {
+      setStoreProfile(null);
+      return;
+    }
+
+    const loadArr = <T,>(key: string, ownerFallback: T[]): T[] => {
+      try {
+        const raw = localStorage.getItem(resolveTenantStorageKey(key, targetScope));
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) return parsed as T[];
+        }
+      } catch {}
+      return isOwnerScope ? ownerFallback : [];
+    };
+
+    const nextProducts = mergeProductListsByTimestamp(
+      loadArr<Product>('retail_pos_products', INITIAL_PRODUCTS),
+      [],
+      getDeletedProductIds(),
+      getPendingProductMap()
+    );
+    productsRef.current = nextProducts;
+    setProductsState(nextProducts);
+
+    getFromIDB(resolveTenantStorageKey('retail_pos_products', targetScope))
+      .then((idbProds) => {
+        if (Array.isArray(idbProds) && idbProds.length > 0 && getActiveTenantStoreId() === targetScope) {
+          const merged = mergeProductListsByTimestamp(
+            productsRef.current,
+            idbProds,
+            getDeletedProductIds(),
+            getPendingProductMap()
+          );
+          productsRef.current = merged;
+          setProductsState(merged);
+        }
+        hasHydratedProductsFromIdbRef.current = true;
+      })
+      .catch(() => {
+        hasHydratedProductsFromIdbRef.current = true;
+      });
+
+    const nextSales = loadArr<Transaction>('retail_pos_transactions', INITIAL_TRANSACTIONS);
+    transactionsRef.current = nextSales;
+    setTransactionsState(nextSales);
+
+    const nextCustomers = loadArr<Customer>('retail_pos_customers', INITIAL_CUSTOMERS);
+    customersRef.current = nextCustomers;
+    setCustomers(nextCustomers);
+
+    const nextSuppliers = loadArr<Supplier>('retail_pos_suppliers', INITIAL_SUPPLIERS);
+    suppliersRef.current = nextSuppliers;
+    setSuppliers(nextSuppliers);
+
+    const nextExpenses = loadArr<Expense>('retail_pos_expenses', INITIAL_EXPENSES);
+    expensesRef.current = nextExpenses;
+    setExpensesState(nextExpenses);
+
+    setAttendanceRecords(loadArr<AttendanceRecord>('retail_pos_attendance', INITIAL_ATTENDANCE));
+    setCashTransactions(loadArr<CashTransaction>('retail_pos_cash_transactions', INITIAL_CASH_TRANSACTIONS));
+    setRestockRecords(loadArr<RestockRecord>('retail_pos_restock_records', INITIAL_RESTOCK_RECORDS));
+    setPurchaseOrdersState(loadArr<PurchaseOrder>('retail_pos_purchase_orders', INITIAL_PURCHASE_ORDERS));
+    setCommissionPayouts(loadArr<StaffCommissionPayout>('retail_pos_commission_payouts', INITIAL_COMMISSION_PAYOUTS));
+    setSalaryPayouts(loadArr<WorkerSalaryPayout>('retail_pos_salary_payouts', []));
+    setWorkerLoans(loadArr<WorkerLoan>('retail_pos_worker_loans', INITIAL_WORKER_LOANS));
+    setFinancingFacilities(loadArr<FinancingFacility>('retail_pos_financing_facilities', INITIAL_FINANCING_FACILITIES));
+    setOffers(loadArr<OfferDeal>('retail_pos_offers', INITIAL_OFFERS));
+    setOnlineOrders(loadArr<OnlineOrder>('retail_pos_online_orders', INITIAL_ONLINE_ORDERS));
+    setStockTransfers(loadArr<StockTransferRecord>('retail_pos_stock_transfers', INITIAL_STOCK_TRANSFERS));
+    setScanLogs(loadArr<BarcodeScanLog>('retail_pos_barcode_scan_logs', INITIAL_BARCODE_SCAN_LOGS));
+    setAuditLogs(loadAuditLogsFromStorage());
+
+    const fallbackUsers: User[] = isOwnerScope
+      ? INITIAL_USERS
+      : [
+          {
+            id: 'usr-owner',
+            name:
+              auth.currentUser?.displayName ||
+              profileOverride?.storeName ||
+              auth.currentUser?.email?.split('@')[0] ||
+              'Store Owner',
+            role: 'Admin',
+            roles: ['Admin'],
+            email: auth.currentUser?.email || '',
+            pin: '1234',
+            status: 'active',
+          },
+        ];
+
+    const loadedUsers = loadArr<User>('retail_pos_users', fallbackUsers);
+    const nextUsers = loadedUsers.length > 0 ? loadedUsers : fallbackUsers;
+    allUsersRef.current = nextUsers;
+    setAllUsersState(nextUsers);
+
+    const savedActiveUser = safeGetJSON<User | null>('retail_pos_active_user', null);
+    const nextActiveUser =
+      savedActiveUser && nextUsers.some((u) => u.id === savedActiveUser.id)
+        ? savedActiveUser
+        : nextUsers[0];
+    if (nextActiveUser) {
+      setCurrentUser(nextActiveUser);
+    }
+
+    const defaultPinReq = isOwnerScope ? true : false;
+    const savedPinReq = safeGetJSON<boolean>('retail_pos_require_pin_startup', defaultPinReq);
+    setRequirePinOnStartup(savedPinReq);
+    setMasterPin(safeGetJSON<string>('retail_pos_master_pin', '1234'));
+    setIsTerminalLocked(safeGetJSON<boolean>('retail_pos_terminal_locked', savedPinReq));
+
+    const savedStores = safeGetJSON<StoreLocation[] | null>('retail_pos_stores', null);
+    if (savedStores && Array.isArray(savedStores) && savedStores.length > 0) {
+      setStores(savedStores);
+    } else if (isOwnerScope) {
+      setStores(INITIAL_STORES);
+    } else {
+      setStores([
+        {
+          id: 'store-main',
+          name: profileOverride?.storeName || 'My Store',
+          code: 'MAIN-01',
+          city: 'Nairobi',
+          address: 'Main Branch',
+          phone: profileOverride?.phone || '',
+          isMainBranch: true,
+          active: true,
+        },
+      ]);
+    }
+    setActiveStoreId(safeGetJSON<string>('retail_pos_active_store_id', 'store-main') || 'store-main');
+  };
+
+  // Synchronize active tenant scope, reload isolated state, and bind Firestore store subscription profile
+  useEffect(() => {
+    if (!isFirebaseAuthReady) return;
+
+    let nextScope = '__unauthenticated__';
+    if (firebaseUser && isAuthorizedCloudUser(firebaseUser)) {
+      nextScope = getStoreIdForUser(firebaseUser);
+      if (isOwnerCloudUser(firebaseUser)) {
+        try {
+          localStorage.setItem(VERIFIED_OWNER_CACHE_KEY, '1');
+        } catch {}
+      }
+    } else if (allowOfflineOwnerMode && typeof window !== 'undefined' && localStorage.getItem(VERIFIED_OWNER_CACHE_KEY) === '1') {
+      nextScope = OWNER_PRIMARY_STORE_ID;
+    }
+
+    if (prevTenantScopeRef.current !== nextScope) {
+      prevTenantScopeRef.current = nextScope;
+      reloadAppStateForTenantScope(nextScope, nextScope === OWNER_PRIMARY_STORE_ID);
+    } else {
+      setActiveTenantStoreId(nextScope);
+    }
+
+    if (!firebaseUser || !isAuthorizedCloudUser(firebaseUser) || nextScope === '__unauthenticated__') {
+      setIsCheckingStoreProfile(false);
+      if (!allowOfflineOwnerMode) {
+        setStoreProfile(null);
+      }
+      return;
+    }
+
+    let cancelled = false;
+    let unsubscribeProfile: (() => void) | undefined;
+
+    const applyStoreProfileToWorkspace = (prof: StoreSubscriptionProfile | null) => {
+      if (cancelled) return;
+      setStoreProfile(prof);
+      if (prof && prof.id !== OWNER_PRIMARY_STORE_ID) {
+        setStores((prev) => {
+          if (!prev || prev.length === 0) {
+            return [
+              {
+                id: 'store-main',
+                name: prof.storeName,
+                code: 'MAIN-01',
+                city: 'Nairobi',
+                address: 'Main Branch',
+                phone: prof.phone || '',
+                isMainBranch: true,
+                active: true,
+              },
+            ];
+          }
+          const updated = prev.map((s, idx) =>
+            idx === 0 || s.id === 'store-main'
+              ? {
+                  ...s,
+                  name: prof.storeName || s.name,
+                  phone: prof.phone || s.phone,
+                }
+              : s
+          );
+          return updated;
+        });
+      }
+    };
+
+    setIsCheckingStoreProfile(true);
+
+    if (isOwnerCloudUser(firebaseUser)) {
+      ensureOwnerPrimaryStoreProfile(firebaseUser)
+        .then((prof) => {
+          applyStoreProfileToWorkspace(prof);
+          if (!cancelled) setIsCheckingStoreProfile(false);
+          migrateLegacyRootCollectionsToRofaniStoreIfNeeded().catch(() => false);
+        })
+        .catch(() => {
+          if (!cancelled) setIsCheckingStoreProfile(false);
+        });
+    } else {
+      fetchStoreProfile(nextScope)
+        .then((prof) => {
+          applyStoreProfileToWorkspace(prof);
+          if (!cancelled) setIsCheckingStoreProfile(false);
+        })
+        .catch(() => {
+          if (!cancelled) setIsCheckingStoreProfile(false);
+        });
+    }
+
+    try {
+      unsubscribeProfile = subscribeToStoreProfile(
+        nextScope,
+        (prof) => {
+          applyStoreProfileToWorkspace(prof);
+          if (!cancelled) setIsCheckingStoreProfile(false);
+        },
+        () => {
+          if (!cancelled) setIsCheckingStoreProfile(false);
+        }
+      );
+    } catch {
+      if (!cancelled) setIsCheckingStoreProfile(false);
+    }
+
+    return () => {
+      cancelled = true;
+      if (unsubscribeProfile) unsubscribeProfile();
+    };
+  }, [isFirebaseAuthReady, firebaseUser?.uid, allowOfflineOwnerMode]);
 
   const [cloudSyncStatus, setCloudSyncStatus] = useState<'synced' | 'syncing' | 'offline' | 'error' | 'quota_exceeded'>('offline');
   const [isCloudQuotaExceeded, setIsCloudQuotaExceeded] = useState<boolean>(false);
@@ -651,17 +946,19 @@ export default function App() {
   const hasHydratedProductsFromIdbRef = useRef(false);
   const userMutatedProductsRef = useRef(false);
 
-  // Application Persistent Collections State with safe lazy initialization & immediate localStorage sync
+  // Application Persistent Collections State with safe lazy initialization & tenant isolation
   const [products, setProductsState] = useState<Product[]>(() => {
     try {
       const deletedIds = getDeletedProductIds();
       const pendingMap = getPendingProductMap();
-      const saved = localStorage.getItem('retail_pos_products');
-      const parsed = saved ? JSON.parse(saved) : INITIAL_PRODUCTS;
-      const baseList = Array.isArray(parsed) ? parsed : INITIAL_PRODUCTS;
+      const isOwnerScope = getActiveTenantStoreId() === OWNER_PRIMARY_STORE_ID;
+      const fallback = isOwnerScope ? INITIAL_PRODUCTS : [];
+      const saved = localStorage.getItem(resolveTenantStorageKey('retail_pos_products'));
+      const parsed = saved ? JSON.parse(saved) : fallback;
+      const baseList = Array.isArray(parsed) ? parsed : fallback;
       return mergeProductListsByTimestamp(baseList, [], deletedIds, pendingMap);
-    } catch (e) {
-      return INITIAL_PRODUCTS;
+    } catch {
+      return getActiveTenantStoreId() === OWNER_PRIMARY_STORE_ID ? INITIAL_PRODUCTS : [];
     }
   });
 
@@ -671,7 +968,7 @@ export default function App() {
       const next = typeof newVal === 'function' ? newVal(prev) : newVal;
       safeSetJSON('retail_pos_products', next);
       try {
-        saveToIDB('retail_pos_products', next);
+        saveToIDB(resolveTenantStorageKey('retail_pos_products'), next);
       } catch {}
       return next;
     });
@@ -683,9 +980,15 @@ export default function App() {
     let isMounted = true;
 
     const restoreAndMergeFromIDB = async () => {
+      const activeScope = getActiveTenantStoreId();
+      if (!activeScope || activeScope === '__unauthenticated__') {
+        hasHydratedProductsFromIdbRef.current = true;
+        return;
+      }
       try {
-        const idbProducts = await getFromIDB('retail_pos_products');
-        if (isMounted && Array.isArray(idbProducts) && idbProducts.length > 0) {
+        const scopedIdbKey = resolveTenantStorageKey('retail_pos_products', activeScope);
+        const idbProducts = await getFromIDB(scopedIdbKey);
+        if (isMounted && Array.isArray(idbProducts) && idbProducts.length > 0 && getActiveTenantStoreId() === activeScope) {
           const deletedIds = getDeletedProductIds();
           const pendingMap = getPendingProductMap();
           setProductsState((current) => {
@@ -699,7 +1002,7 @@ export default function App() {
             if (changed) {
               safeSetJSON('retail_pos_products', merged);
               try {
-                saveToIDB('retail_pos_products', merged);
+                saveToIDB(scopedIdbKey, merged);
               } catch {}
               return merged;
             }
@@ -1090,16 +1393,21 @@ export default function App() {
     }
   };
 
-  const [customers, setCustomers] = useState<Customer[]>(() => safeGetJSON('retail_pos_customers', INITIAL_CUSTOMERS));
+  const [customers, setCustomers] = useState<Customer[]>(() =>
+    safeGetJSON('retail_pos_customers', getActiveTenantStoreId() === OWNER_PRIMARY_STORE_ID ? INITIAL_CUSTOMERS : [])
+  );
 
-  const [suppliers, setSuppliers] = useState<Supplier[]>(() => safeGetJSON('retail_pos_suppliers', INITIAL_SUPPLIERS));
+  const [suppliers, setSuppliers] = useState<Supplier[]>(() =>
+    safeGetJSON('retail_pos_suppliers', getActiveTenantStoreId() === OWNER_PRIMARY_STORE_ID ? INITIAL_SUPPLIERS : [])
+  );
 
   const [expenses, setExpensesState] = useState<Expense[]>(() => {
+    const fallback = getActiveTenantStoreId() === OWNER_PRIMARY_STORE_ID ? INITIAL_EXPENSES : [];
     try {
-      const saved = localStorage.getItem('retail_pos_expenses');
-      return saved ? JSON.parse(saved) : INITIAL_EXPENSES;
-    } catch (e) {
-      return INITIAL_EXPENSES;
+      const saved = localStorage.getItem(resolveTenantStorageKey('retail_pos_expenses'));
+      return saved ? JSON.parse(saved) : fallback;
+    } catch {
+      return fallback;
     }
   });
 
@@ -1111,12 +1419,15 @@ export default function App() {
     });
   };
 
-  const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>(() => safeGetJSON('retail_pos_attendance', INITIAL_ATTENDANCE));
+  const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>(() =>
+    safeGetJSON('retail_pos_attendance', getActiveTenantStoreId() === OWNER_PRIMARY_STORE_ID ? INITIAL_ATTENDANCE : [])
+  );
 
   const [transactions, setTransactionsState] = useState<Transaction[]>(() => {
+    const fallback = getActiveTenantStoreId() === OWNER_PRIMARY_STORE_ID ? INITIAL_TRANSACTIONS : [];
     try {
-      const primary = localStorage.getItem('retail_pos_transactions');
-      const secondary = localStorage.getItem('pos_store_sales');
+      const primary = localStorage.getItem(resolveTenantStorageKey('retail_pos_transactions'));
+      const secondary = localStorage.getItem(resolveTenantStorageKey('pos_store_sales'));
       const primaryParsed = primary ? JSON.parse(primary) : [];
       const secondaryParsed = secondary ? JSON.parse(secondary) : [];
       const combined = [...primaryParsed];
@@ -1126,12 +1437,12 @@ export default function App() {
         }
       });
       if (combined.length === 0) {
-        return INITIAL_TRANSACTIONS;
+        return fallback;
       }
       combined.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
       return checkAndRunRollingSalesArchive(combined);
-    } catch (e) {
-      return INITIAL_TRANSACTIONS;
+    } catch {
+      return fallback;
     }
   });
 
@@ -1164,12 +1475,16 @@ export default function App() {
   const allUsersRef = useRef<User[]>(allUsers);
   allUsersRef.current = allUsers;
 
-  // Post-Sleep / Focus Rehydration Effect (NEVER blindly overwrite newer state or IndexedDB with stale localStorage)
+  // Post-Sleep / Focus Rehydration Effect (strictly scoped by active tenant store)
   useEffect(() => {
     const handleFocusAndVisibility = () => {
+      const activeScope = getActiveTenantStoreId();
+      if (!activeScope || activeScope === '__unauthenticated__') return;
       if (document.visibilityState === 'visible') {
         try {
-          const freshSales = localStorage.getItem('retail_pos_transactions') || localStorage.getItem('pos_store_sales');
+          const freshSales =
+            localStorage.getItem(resolveTenantStorageKey('retail_pos_transactions', activeScope)) ||
+            localStorage.getItem(resolveTenantStorageKey('pos_store_sales', activeScope));
           if (freshSales) {
             const parsed = JSON.parse(freshSales);
             if (Array.isArray(parsed) && parsed.length > 0) {
@@ -1182,7 +1497,7 @@ export default function App() {
             }
           }
 
-          const freshProducts = localStorage.getItem('retail_pos_products');
+          const freshProducts = localStorage.getItem(resolveTenantStorageKey('retail_pos_products', activeScope));
           if (freshProducts) {
             const parsed = JSON.parse(freshProducts);
             if (Array.isArray(parsed) && parsed.length > 0) {
@@ -1201,7 +1516,9 @@ export default function App() {
             }
           }
 
-          const freshUsers = localStorage.getItem('retail_pos_users') || localStorage.getItem('pos_store_staff_users');
+          const freshUsers =
+            localStorage.getItem(resolveTenantStorageKey('retail_pos_users', activeScope)) ||
+            localStorage.getItem(resolveTenantStorageKey('pos_store_staff_users', activeScope));
           if (freshUsers) {
             const parsed = JSON.parse(freshUsers);
             if (Array.isArray(parsed) && parsed.length > 0) {
@@ -1209,7 +1526,7 @@ export default function App() {
             }
           }
 
-          const freshExpenses = localStorage.getItem('retail_pos_expenses');
+          const freshExpenses = localStorage.getItem(resolveTenantStorageKey('retail_pos_expenses', activeScope));
           if (freshExpenses) {
             const parsed = JSON.parse(freshExpenses);
             if (Array.isArray(parsed) && parsed.length > 0) {
@@ -1217,7 +1534,7 @@ export default function App() {
             }
           }
 
-          const freshPurchases = localStorage.getItem('retail_pos_purchase_orders');
+          const freshPurchases = localStorage.getItem(resolveTenantStorageKey('retail_pos_purchase_orders', activeScope));
           if (freshPurchases) {
             const parsed = JSON.parse(freshPurchases);
             if (Array.isArray(parsed) && parsed.length > 0) {
@@ -1238,13 +1555,18 @@ export default function App() {
     };
   }, []);
 
-  const [cashTransactions, setCashTransactions] = useState<CashTransaction[]>(() => safeGetJSON('retail_pos_cash_transactions', INITIAL_CASH_TRANSACTIONS));
+  const [cashTransactions, setCashTransactions] = useState<CashTransaction[]>(() =>
+    safeGetJSON('retail_pos_cash_transactions', getActiveTenantStoreId() === OWNER_PRIMARY_STORE_ID ? INITIAL_CASH_TRANSACTIONS : [])
+  );
 
-  const [restockRecords, setRestockRecords] = useState<RestockRecord[]>(() => safeGetJSON('retail_pos_restock_records', INITIAL_RESTOCK_RECORDS));
+  const [restockRecords, setRestockRecords] = useState<RestockRecord[]>(() =>
+    safeGetJSON('retail_pos_restock_records', getActiveTenantStoreId() === OWNER_PRIMARY_STORE_ID ? INITIAL_RESTOCK_RECORDS : [])
+  );
 
   const [purchaseOrders, setPurchaseOrdersState] = useState<PurchaseOrder[]>(() => {
+    const fallback = getActiveTenantStoreId() === OWNER_PRIMARY_STORE_ID ? INITIAL_PURCHASE_ORDERS : [];
     try {
-      const saved = localStorage.getItem('retail_pos_purchase_orders');
+      const saved = localStorage.getItem(resolveTenantStorageKey('retail_pos_purchase_orders'));
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) return parsed;
@@ -1252,7 +1574,7 @@ export default function App() {
     } catch (e) {
       console.error('Error loading purchases:', e);
     }
-    return INITIAL_PURCHASE_ORDERS;
+    return fallback;
   });
 
   const setPurchaseOrders = (newVal: PurchaseOrder[] | ((prev: PurchaseOrder[]) => PurchaseOrder[])) => {
@@ -1263,31 +1585,42 @@ export default function App() {
     });
   };
 
-  const [commissionPayouts, setCommissionPayouts] = useState<StaffCommissionPayout[]>(() => safeGetJSON('retail_pos_commission_payouts', INITIAL_COMMISSION_PAYOUTS));
+  const [commissionPayouts, setCommissionPayouts] = useState<StaffCommissionPayout[]>(() =>
+    safeGetJSON('retail_pos_commission_payouts', getActiveTenantStoreId() === OWNER_PRIMARY_STORE_ID ? INITIAL_COMMISSION_PAYOUTS : [])
+  );
 
   const [salaryPayouts, setSalaryPayouts] = useState<WorkerSalaryPayout[]>(() =>
     safeGetJSON<WorkerSalaryPayout[]>('retail_pos_salary_payouts', [])
   );
 
-  const [workerLoans, setWorkerLoans] = useState<WorkerLoan[]>(() => safeGetJSON('retail_pos_worker_loans', INITIAL_WORKER_LOANS));
+  const [workerLoans, setWorkerLoans] = useState<WorkerLoan[]>(() =>
+    safeGetJSON('retail_pos_worker_loans', getActiveTenantStoreId() === OWNER_PRIMARY_STORE_ID ? INITIAL_WORKER_LOANS : [])
+  );
 
   useEffect(() => {
     safeSetJSON('retail_pos_worker_loans', workerLoans);
   }, [workerLoans]);
 
-  const [financingFacilities, setFinancingFacilities] = useState<FinancingFacility[]>(() => safeGetJSON('retail_pos_financing_facilities', INITIAL_FINANCING_FACILITIES));
+  const [financingFacilities, setFinancingFacilities] = useState<FinancingFacility[]>(() =>
+    safeGetJSON('retail_pos_financing_facilities', getActiveTenantStoreId() === OWNER_PRIMARY_STORE_ID ? INITIAL_FINANCING_FACILITIES : [])
+  );
 
   useEffect(() => {
     safeSetJSON('retail_pos_financing_facilities', financingFacilities);
   }, [financingFacilities]);
 
-  // Single Store Location: Rofani Electronics
+  // Store Location scoped to active tenant
   const [stores, setStores] = useState<StoreLocation[]>(() => {
+    const isOwnerScope = getActiveTenantStoreId() === OWNER_PRIMARY_STORE_ID;
     const saved = safeGetJSON<StoreLocation[] | null>('retail_pos_stores', null);
     if (!saved || !Array.isArray(saved) || saved.length === 0) {
-      return INITIAL_STORES;
+      return isOwnerScope
+        ? INITIAL_STORES
+        : [{ id: 'store-main', name: 'My Store', code: 'MAIN-01', city: 'Nairobi', address: 'Main Branch', phone: '', isMainBranch: true, active: true }];
     }
-    // Check if user has legacy demo branches or flagship name
+    if (!isOwnerScope) {
+      return saved;
+    }
     const hasLegacyBranches = saved.some(
       (s) => s.id === 'store-westlands' || s.id === 'store-mombasa' || s.name.toLowerCase().includes('flagship')
     );
@@ -1303,7 +1636,6 @@ export default function App() {
       safeSetJSON('retail_pos_stores', [singleStore]);
       return [singleStore];
     }
-    // Cleanly rename any "flagship" or "Main Store" to "Rofani Electronics"
     return saved.map((s) => {
       if (s.name.toLowerCase().includes('flagship') || s.name === 'Main Store') {
         return { ...s, name: 'Rofani Electronics' };
@@ -1314,18 +1646,24 @@ export default function App() {
 
   const [activeStoreId, setActiveStoreId] = useState<string>(() => {
     try {
-      const saved = localStorage.getItem('retail_pos_active_store_id');
+      const saved = safeGetJSON<string>('retail_pos_active_store_id', 'store-main');
       return saved && saved !== 'all' ? saved : 'store-main';
     } catch {
       return 'store-main';
     }
   });
 
-  const [offers, setOffers] = useState<OfferDeal[]>(() => safeGetJSON('retail_pos_offers', INITIAL_OFFERS));
+  const [offers, setOffers] = useState<OfferDeal[]>(() =>
+    safeGetJSON('retail_pos_offers', getActiveTenantStoreId() === OWNER_PRIMARY_STORE_ID ? INITIAL_OFFERS : [])
+  );
 
-  const [onlineOrders, setOnlineOrders] = useState<OnlineOrder[]>(() => safeGetJSON('retail_pos_online_orders', INITIAL_ONLINE_ORDERS));
+  const [onlineOrders, setOnlineOrders] = useState<OnlineOrder[]>(() =>
+    safeGetJSON('retail_pos_online_orders', getActiveTenantStoreId() === OWNER_PRIMARY_STORE_ID ? INITIAL_ONLINE_ORDERS : [])
+  );
 
-  const [stockTransfers, setStockTransfers] = useState<StockTransferRecord[]>(() => safeGetJSON('retail_pos_stock_transfers', INITIAL_STOCK_TRANSFERS));
+  const [stockTransfers, setStockTransfers] = useState<StockTransferRecord[]>(() =>
+    safeGetJSON('retail_pos_stock_transfers', getActiveTenantStoreId() === OWNER_PRIMARY_STORE_ID ? INITIAL_STOCK_TRANSFERS : [])
+  );
 
   const [showStoreManagerModal, setShowStoreManagerModal] = useState<boolean>(() =>
     safeGetJSON<boolean>('retail_pos_show_store_modal', false, (val) => typeof val === 'boolean')
@@ -1495,8 +1833,8 @@ export default function App() {
         };
         protectLargestBackup(products, transactions, customers, suppliers, expenses, allUsers);
         try {
-          saveToIDB('rofani_pos_auto_backup', backupPayload);
-          saveToIDB('rofani_pos_last_snapshot', backupPayload);
+          saveToIDB(resolveTenantStorageKey('rofani_pos_auto_backup'), backupPayload);
+          saveToIDB(resolveTenantStorageKey('rofani_pos_last_snapshot'), backupPayload);
         } catch {}
       } catch (err) {
         console.warn('Could not save auto-backup snapshot:', err);
@@ -1605,7 +1943,7 @@ export default function App() {
             setProducts(merged);
             safeSetJSON('retail_pos_products', merged);
             try {
-              saveToIDB('retail_pos_products', merged);
+              saveToIDB(resolveTenantStorageKey('retail_pos_products'), merged);
             } catch {}
             setCloudSyncStatus('synced');
             setLastSyncedTime(new Date().toLocaleTimeString());
@@ -1642,7 +1980,7 @@ export default function App() {
           setProducts(merged);
           safeSetJSON('retail_pos_products', merged);
           try {
-            saveToIDB('retail_pos_products', merged);
+            saveToIDB(resolveTenantStorageKey('retail_pos_products'), merged);
           } catch {}
           setCloudSyncStatus('synced');
           setLastSyncedTime(new Date().toLocaleTimeString());
@@ -1660,7 +1998,6 @@ export default function App() {
   }, [isCloudAuthReady, firebaseUser?.uid]);
 
   // Real-time synchronization subscription for M-PESA & Daraja store configuration
-  // Automatically propagates keys set on Vercel, mobile, or AI Studio across all devices
   useEffect(() => {
     if (!isCloudAuthReady) return;
     let unsubscribe: (() => void) | undefined;
@@ -1675,8 +2012,8 @@ export default function App() {
               consumerKey: remoteConfig.consumerKey?.trim() || current.consumerKey || '',
               consumerSecret: remoteConfig.consumerSecret?.trim() || current.consumerSecret || '',
               passkey: remoteConfig.passkey?.trim() || current.passkey || '',
-              shortcode: remoteConfig.shortcode?.trim() || current.shortcode || '1833804',
-              storeNumber: remoteConfig.storeNumber?.trim() || current.storeNumber || '1365369',
+              shortcode: remoteConfig.shortcode?.trim() || current.shortcode || (isOwnerAccount ? '1833804' : ''),
+              storeNumber: remoteConfig.storeNumber?.trim() || current.storeNumber || (isOwnerAccount ? '1365369' : ''),
             };
             safeSetJSON('rofani_pos_mpesa_config', merged);
           }
@@ -1689,7 +2026,7 @@ export default function App() {
     return () => {
       if (unsubscribe) unsubscribe();
     };
-  }, [isCloudAuthReady, firebaseUser?.uid]);
+  }, [isCloudAuthReady, firebaseUser?.uid, isOwnerAccount]);
 
   // Real-time synchronization subscription for users & staff accounts
   useEffect(() => {
@@ -1742,7 +2079,7 @@ export default function App() {
       return {
         syncedCount: 0,
         remainingCount: initialQueue.length,
-        errorMessage: 'Sign in with your Google store account (NivaJuma@gmail.com) in Sync & Share to sync queued records.',
+        errorMessage: 'Sign in with your verified Google account in Sync & Share to sync queued records.',
       };
     }
 
@@ -1879,7 +2216,7 @@ export default function App() {
     }
     if (!isAuthorizedCloudUser(auth.currentUser)) {
       setCloudSyncStatus('offline');
-      throw new Error('Sign in with your verified Google store account (NivaJuma@gmail.com) first before pulling from Cloud Firestore.');
+      throw new Error('Sign in with your verified Google account first before pulling from Cloud Firestore.');
     }
 
     setCloudSyncStatus('syncing');
@@ -1897,7 +2234,7 @@ export default function App() {
             expenses,
             allUsers,
           };
-          localStorage.setItem('rofani_pos_pre_pull_backup', JSON.stringify(prePullSnapshot));
+          safeSetJSON('rofani_pos_pre_pull_backup', prePullSnapshot);
         }
       } catch {}
 
@@ -1943,7 +2280,7 @@ export default function App() {
         setProducts(merged);
         safeSetJSON('retail_pos_products', merged);
         try {
-          saveToIDB('retail_pos_products', merged);
+          saveToIDB(resolveTenantStorageKey('retail_pos_products'), merged);
         } catch {}
         pullConflicts.push(...conflicts);
       }
@@ -2108,7 +2445,7 @@ export default function App() {
       setProducts(nextList);
       safeSetJSON('retail_pos_products', nextList);
       try {
-        saveToIDB('retail_pos_products', nextList);
+        saveToIDB(resolveTenantStorageKey('retail_pos_products'), nextList);
       } catch {}
 
       if (shouldPushToCloud) {
@@ -2330,7 +2667,7 @@ export default function App() {
         setProducts(restoredProducts);
         safeSetJSON('retail_pos_products', restoredProducts);
         try {
-          await saveToIDB('retail_pos_products', restoredProducts);
+          await saveToIDB(resolveTenantStorageKey('retail_pos_products'), restoredProducts);
         } catch {}
         protectLargestBackup(restoredProducts, restoredSales, restoredCustomers, restoredSuppliers, restoredExpenses, restoredUsers);
       }
@@ -2338,35 +2675,35 @@ export default function App() {
         setTransactions(restoredSales);
         safeSetJSON('retail_pos_transactions', restoredSales);
         try {
-          await saveToIDB('retail_pos_transactions', restoredSales);
+          await saveToIDB(resolveTenantStorageKey('retail_pos_transactions'), restoredSales);
         } catch {}
       }
       if (restoredCustomers.length > 0) {
         setCustomers(restoredCustomers);
         safeSetJSON('retail_pos_customers', restoredCustomers);
         try {
-          await saveToIDB('retail_pos_customers', restoredCustomers);
+          await saveToIDB(resolveTenantStorageKey('retail_pos_customers'), restoredCustomers);
         } catch {}
       }
       if (restoredSuppliers.length > 0) {
         setSuppliers(restoredSuppliers);
         safeSetJSON('retail_pos_suppliers', restoredSuppliers);
         try {
-          await saveToIDB('retail_pos_suppliers', restoredSuppliers);
+          await saveToIDB(resolveTenantStorageKey('retail_pos_suppliers'), restoredSuppliers);
         } catch {}
       }
       if (restoredExpenses.length > 0) {
         setExpenses(restoredExpenses);
         safeSetJSON('retail_pos_expenses', restoredExpenses);
         try {
-          await saveToIDB('retail_pos_expenses', restoredExpenses);
+          await saveToIDB(resolveTenantStorageKey('retail_pos_expenses'), restoredExpenses);
         } catch {}
       }
       if (restoredUsers.length > 0) {
         setAllUsers(restoredUsers);
         safeSetJSON('retail_pos_users', restoredUsers);
         try {
-          await saveToIDB('retail_pos_users', restoredUsers);
+          await saveToIDB(resolveTenantStorageKey('retail_pos_users'), restoredUsers);
         } catch {}
       }
 
@@ -2467,7 +2804,7 @@ export default function App() {
 
   // Barcode Scanner Activity & Staff Scans Audit Log State
   const [scanLogs, setScanLogs] = useState<BarcodeScanLog[]>(() =>
-    safeGetJSON('retail_pos_barcode_scan_logs', INITIAL_BARCODE_SCAN_LOGS)
+    safeGetJSON('retail_pos_barcode_scan_logs', getActiveTenantStoreId() === OWNER_PRIMARY_STORE_ID ? INITIAL_BARCODE_SCAN_LOGS : [])
   );
 
   useEffect(() => {
@@ -4135,14 +4472,43 @@ export default function App() {
   };
 
   const handleResetData = () => {
-    localStorage.clear();
-    setProducts(INITIAL_PRODUCTS);
-    setCustomers(INITIAL_CUSTOMERS);
-    setSuppliers(INITIAL_SUPPLIERS);
-    setExpenses(INITIAL_EXPENSES);
-    setAttendanceRecords(INITIAL_ATTENDANCE);
-    setTransactions(INITIAL_TRANSACTIONS);
-    setCashTransactions(INITIAL_CASH_TRANSACTIONS);
+    const scope = getActiveTenantStoreId();
+    const isOwnerScope = scope === OWNER_PRIMARY_STORE_ID;
+    try {
+      if (isOwnerScope) {
+        const ownerKeys = [
+          'retail_pos_products',
+          'retail_pos_transactions',
+          'pos_store_sales',
+          'retail_pos_customers',
+          'retail_pos_suppliers',
+          'retail_pos_expenses',
+          'retail_pos_attendance',
+          'retail_pos_cash_transactions',
+          'retail_pos_restock_records',
+          'retail_pos_purchase_orders',
+          'retail_pos_commission_payouts',
+          'retail_pos_salary_payouts',
+          'retail_pos_worker_loans',
+          'retail_pos_financing_facilities',
+        ];
+        ownerKeys.forEach((k) => localStorage.removeItem(k));
+      } else {
+        const prefix = `tenant__${scope}__`;
+        Object.keys(localStorage).forEach((k) => {
+          if (k.startsWith(prefix)) {
+            localStorage.removeItem(k);
+          }
+        });
+      }
+    } catch {}
+    setProducts(isOwnerScope ? INITIAL_PRODUCTS : []);
+    setCustomers(isOwnerScope ? INITIAL_CUSTOMERS : []);
+    setSuppliers(isOwnerScope ? INITIAL_SUPPLIERS : []);
+    setExpenses(isOwnerScope ? INITIAL_EXPENSES : []);
+    setAttendanceRecords(isOwnerScope ? INITIAL_ATTENDANCE : []);
+    setTransactions(isOwnerScope ? INITIAL_TRANSACTIONS : []);
+    setCashTransactions(isOwnerScope ? INITIAL_CASH_TRANSACTIONS : []);
   };
 
   const handleImportData = (imported: any) => {
@@ -4157,7 +4523,7 @@ export default function App() {
         expenses,
         attendanceRecords,
       };
-      localStorage.setItem('rofani_pos_pre_import_backup', JSON.stringify(backupBefore));
+      safeSetJSON('rofani_pos_pre_import_backup', backupBefore);
     } catch {}
 
     if (Array.isArray(imported.products) && imported.products.length > 0) {
@@ -4631,19 +4997,137 @@ export default function App() {
           onOpenStoreManager={() => setShowStoreManagerModal(true)}
           onOpenInstallModal={() => setShowInstallModal(true)}
           onOpenEmailBackup={() => setShowDailyEmailBackupModal(true)}
+          onOpenStockAlerts={() => setShowStockAlertModal(true)}
+          onOpenAiAssistant={() => setShowAiAssistantModal(true)}
+          onOpenBarcodePrinter={() => setShowPrintBarcodesModal(true)}
+          onTriggerSync={syncPendingQueueToCloud}
           onSwitchToComputer={() => setDeviceFormat('computer')}
           lowStockCount={lowStockCount}
-          storeName={stores.find((s) => s.id === activeStoreId)?.name || 'ROFANI ELECTRONICS'}
+          storeName={stores.find((s) => s.id === activeStoreId)?.name || storeProfile?.storeName || 'Rofani Electronics'}
+          currentUser={currentUser}
+          cloudSyncStatus={cloudSyncStatus}
+          inPhoneFrame={deviceFormat === 'phone'}
+          isOwnerAccount={isOwnerAccount}
+          storeProfile={storeProfile}
+          onOpenPlansPricing={() => setShowPlansModal(true)}
+          onOpenSuperAdmin={() => setShowSuperAdminModal(true)}
+          onSignOutCloud={async () => {
+            setAllowOfflineOwnerMode(false);
+            await signOutFromCloud();
+          }}
+          cloudUserEmail={firebaseUser?.email}
         />
       )}
     </>
     );
   };
 
+  // Multi-Tenant SaaS Auth, Onboarding & Subscription Expiry Gates
+  if (!isFirebaseAuthReady) {
+    return (
+      <div className="min-h-screen bg-[#0f172a] text-slate-100 flex items-center justify-center p-6 font-sans">
+        <div className="flex flex-col items-center gap-3">
+          <RefreshCw className="w-7 h-7 text-sky-400 animate-spin" />
+          <p className="text-xs text-slate-400 font-semibold tracking-wide">
+            Connecting to Rofani POS Cloud...
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  const hasCachedOwnerAccess =
+    typeof window !== 'undefined' &&
+    localStorage.getItem(VERIFIED_OWNER_CACHE_KEY) === '1';
+
+  if (!isAuthorizedCloudUser(firebaseUser) && !allowOfflineOwnerMode) {
+    return (
+      <MerchantAuthScreen
+        hasOfflineOwnerCache={hasCachedOwnerAccess}
+        onContinueOfflineOwner={() => {
+          setActiveTenantStoreId(OWNER_PRIMARY_STORE_ID);
+          setAllowOfflineOwnerMode(true);
+        }}
+      />
+    );
+  }
+
+  if (isAuthorizedCloudUser(firebaseUser) && isCheckingStoreProfile && !storeProfile) {
+    return (
+      <div className="min-h-screen bg-[#0f172a] text-slate-100 flex items-center justify-center p-6 font-sans">
+        <div className="bg-[#1e293b] border border-slate-700/80 rounded-2xl p-6 flex flex-col items-center gap-3 shadow-xl">
+          <RefreshCw className="w-6 h-6 text-sky-400 animate-spin" />
+          <p className="text-sm font-bold text-white">Loading Your Private Store...</p>
+          <p className="text-xs text-slate-400">Isolating cloud workspace &amp; checking subscription</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (isAuthorizedCloudUser(firebaseUser) && !isOwnerAccount && !isCheckingStoreProfile && !storeProfile) {
+    return (
+      <StoreOnboardingModal
+        userEmail={firebaseUser?.email || ''}
+        userDisplayName={firebaseUser?.displayName || undefined}
+        onCreateStore={async (formData) => {
+          if (!firebaseUser?.uid || !firebaseUser?.email) {
+            throw new Error('Verified Google session is required.');
+          }
+          const created = await createMerchantStoreProfile({
+            uid: firebaseUser.uid,
+            email: firebaseUser.email,
+            displayName: firebaseUser.displayName || undefined,
+            storeName: formData.storeName,
+            phone: formData.phone,
+            kraPin: formData.kraPin,
+            mpesaShortcode: formData.mpesaShortcode,
+            mpesaShortcodeType: formData.mpesaShortcodeType,
+          });
+          setStoreProfile(created);
+          setStores([
+            {
+              id: 'store-main',
+              name: created.storeName,
+              code: 'MAIN-01',
+              city: 'Nairobi',
+              address: 'Main Branch',
+              phone: created.phone || '',
+              isMainBranch: true,
+              active: true,
+            },
+          ]);
+          setActiveStoreId('store-main');
+          setIsTerminalLocked(false);
+        }}
+      />
+    );
+  }
+
+  const isSubscriptionExpired =
+    !isOwnerAccount &&
+    Boolean(storeProfile) &&
+    (storeProfile!.subscriptionStatus === 'expired' ||
+      (Boolean(storeProfile!.expiresAt) && Date.parse(storeProfile!.expiresAt) <= Date.now()));
+
+  if (isAuthorizedCloudUser(firebaseUser) && isSubscriptionExpired && storeProfile) {
+    return (
+      <div className="min-h-screen bg-[#0f172a]">
+        <SubscriptionPlansModal
+          isOpen={true}
+          isExpiredLock={true}
+          isOwnerAccount={false}
+          storeId={activeCloudStoreId || firebaseUser!.uid}
+          storeProfile={storeProfile}
+          onSubscriptionUpdated={(updated) => setStoreProfile(updated)}
+        />
+      </div>
+    );
+  }
+
   // If Mobile Phone Format is active, render PhoneDeviceFrame view
   if (deviceFormat === 'phone') {
     return (
-      <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
+      <div className="min-h-dvh h-dvh sm:h-auto sm:min-h-dvh bg-slate-900 sm:bg-slate-950 text-slate-100 flex flex-col font-sans">
         <PhoneDeviceFrame
           activeTab={activeTab}
           onSelectTab={(tab) => {
@@ -4659,12 +5143,14 @@ export default function App() {
           onChangeModel={(model) => setPhoneModel(model)}
           onSwitchToComputer={() => setDeviceFormat('computer')}
           currentUser={currentUser}
+          storeName={stores.find((s) => s.id === activeStoreId)?.name || 'Rofani Electronics'}
           todaySales={todaySales}
           lowStockCount={lowStockCount}
           onLockTerminal={() => setIsTerminalLocked(true)}
           onOpenStaffModal={() => setShowStaffModal(true)}
           onNewSale={handleGlobalNewSale}
           onOpenCloudSync={() => setShowCloudSyncModal(true)}
+          onOpenStockAlerts={() => setShowStockAlertModal(true)}
           cloudSyncStatus={cloudSyncStatus}
           onTriggerSync={syncPendingQueueToCloud}
           conflictCount={syncConflicts.length}
@@ -4704,7 +5190,26 @@ export default function App() {
           recoveryEmail={ownerRecoveryEmail}
           emergencyKey={emergencyRecoveryKey}
           firebaseUser={firebaseUser}
+          activeStoreId={activeCloudStoreId || OWNER_PRIMARY_STORE_ID}
+          activeStoreName={stores.find((s) => s.id === activeStoreId)?.name || storeProfile?.storeName}
         />
+
+        <SubscriptionPlansModal
+          isOpen={showPlansModal}
+          onClose={() => setShowPlansModal(false)}
+          isExpiredLock={false}
+          isOwnerAccount={isOwnerAccount}
+          storeId={activeCloudStoreId || OWNER_PRIMARY_STORE_ID}
+          storeProfile={storeProfile}
+          onSubscriptionUpdated={(updated) => setStoreProfile(updated)}
+        />
+
+        {isOwnerAccount && (
+          <SuperAdminSubscribersModal
+            isOpen={showSuperAdminModal}
+            onClose={() => setShowSuperAdminModal(false)}
+          />
+        )}
 
         <ConflictResolutionModal
           isOpen={isConflictModalOpen && syncConflicts.length > 0}
@@ -4816,6 +5321,32 @@ export default function App() {
           }}
         />
 
+        {/* Batch Barcode Label Printer Utility Modal (Phone Format Mode) */}
+        <PrintBarcodesUtilityModal
+          isOpen={showPrintBarcodesModal}
+          onClose={() => setShowPrintBarcodesModal(false)}
+          scanLogs={scanLogs}
+          products={products}
+          storeName={stores.find((s) => s.id === activeStoreId)?.name || 'Rofani Electronics'}
+        />
+
+        {/* AI Worker Assistant Modal (Phone Format Mode) */}
+        <AIAssistantModal
+          isOpen={showAiAssistantModal}
+          onClose={() => setShowAiAssistantModal(false)}
+          activeStoreName={stores.find((s) => s.id === activeStoreId)?.name || 'Rofani Electronics'}
+          workerRole={currentUser.role}
+          activeTab={activeTab}
+          lowStockCount={lowStockCount}
+          totalProductsCount={products.length}
+          totalSalesToday={todaySales > 0 ? todaySales : totalGrossSales}
+          products={products}
+          transactions={transactions}
+          onOpenPredictiveRestock={() => {
+            setActiveTab('inventory');
+          }}
+        />
+
         {/* Push-Style Low Stock Alert Notification (Phone Format Mode) */}
         <LowStockPushNotification
           alerts={lowStockPushAlerts}
@@ -4837,7 +5368,7 @@ export default function App() {
   }
 
   return (
-    <div className={`flex h-screen w-full overflow-hidden font-sans ${themeContainerClass} ${fontScaleClass}`}>
+    <div className={`flex min-h-dvh h-dvh w-full overflow-hidden font-sans ${themeContainerClass} ${fontScaleClass}`}>
       {/* Mobile Drawer Overlay Backdrop */}
       {isMobileMenuOpen && (
         <div
@@ -5249,6 +5780,88 @@ export default function App() {
               </span>
             )}
           </button>
+
+          {/* Subscription Plans & Pricing Button */}
+          <button
+            type="button"
+            onClick={() => setShowPlansModal(true)}
+            title="Plans & Pricing / M-Pesa Subscription Renewal"
+            className={`w-full flex items-center ${isSidebarCollapsed ? 'justify-center px-2' : 'justify-between px-3'} py-2.5 rounded-lg transition bg-slate-800/80 hover:bg-amber-500/20 text-amber-200 border border-amber-500/40 hover:border-amber-400 shadow-sm cursor-pointer`}
+          >
+            <div className="flex items-center gap-3">
+              <Award className="w-4 h-4 shrink-0 text-amber-400" />
+              {!isSidebarCollapsed && <span className="font-bold">Plans &amp; Pricing</span>}
+            </div>
+            {!isSidebarCollapsed && (
+              <span className="text-[9px] bg-amber-500/20 text-amber-300 border border-amber-400/30 px-1.5 py-0.5 rounded-full font-bold uppercase">
+                {isOwnerAccount ? 'Owner' : storeProfile?.planType || 'Trial'}
+              </span>
+            )}
+          </button>
+
+          {/* Owner-Only Super Admin Subscribers Panel */}
+          {isOwnerAccount && (
+            <button
+              type="button"
+              id="btn-sidebar-super-admin"
+              onClick={() => setShowSuperAdminModal(true)}
+              title="Super Admin: Manage Subscribers"
+              className={`w-full flex items-center ${isSidebarCollapsed ? 'justify-center px-2' : 'justify-between px-3'} py-2.5 rounded-lg transition bg-sky-950/90 hover:bg-sky-800 text-sky-200 border border-sky-500/50 shadow-sm cursor-pointer`}
+            >
+              <div className="flex items-center gap-3">
+                <ShieldCheck className="w-4 h-4 shrink-0 text-sky-400" />
+                {!isSidebarCollapsed && <span className="font-bold">Manage Subscribers</span>}
+              </div>
+              {!isSidebarCollapsed && (
+                <span className="text-[9px] bg-sky-500/20 text-sky-300 border border-sky-400/30 px-1.5 py-0.5 rounded-full font-bold uppercase">
+                  Admin
+                </span>
+              )}
+            </button>
+          )}
+
+          {/* Switch Layout: Mobile Phone vs Desktop Version */}
+          <button
+            type="button"
+            id="btn-sidebar-switch-to-mobile"
+            onClick={() => {
+              setDeviceFormat('phone');
+              setIsMobileMenuOpen(false);
+            }}
+            title="Switch to Mobile Phone Version"
+            className={`w-full flex items-center ${isSidebarCollapsed ? 'justify-center px-2' : 'justify-between px-3'} py-2.5 rounded-lg transition bg-slate-800/90 hover:bg-blue-600 text-slate-100 border border-slate-700 hover:border-blue-400 shadow-sm cursor-pointer`}
+          >
+            <div className="flex items-center gap-3">
+              <Smartphone className="w-4 h-4 shrink-0 text-sky-400" />
+              {!isSidebarCollapsed && <span className="font-bold">Mobile Phone View</span>}
+            </div>
+            {!isSidebarCollapsed && (
+              <span className="text-[9px] bg-sky-500/20 text-sky-300 border border-sky-400/30 px-1.5 py-0.5 rounded-full font-bold uppercase">
+                Mobile
+              </span>
+            )}
+          </button>
+
+          {firebaseUser && (
+            <button
+              type="button"
+              onClick={async () => {
+                setAllowOfflineOwnerMode(false);
+                await signOutFromCloud();
+              }}
+              title="Sign Out of Cloud Account"
+              className={`w-full flex items-center ${isSidebarCollapsed ? 'justify-center px-2' : 'justify-between px-3'} py-2 rounded-lg transition bg-slate-900/80 hover:bg-rose-950/60 text-slate-300 hover:text-rose-200 border border-slate-800 hover:border-rose-500/40 cursor-pointer`}
+            >
+              <div className="flex items-center gap-3 min-w-0">
+                <LogOut className="w-4 h-4 shrink-0 text-rose-400" />
+                {!isSidebarCollapsed && (
+                  <span className="truncate text-xs font-semibold">
+                    Sign Out ({firebaseUser.email?.split('@')[0]})
+                  </span>
+                )}
+              </div>
+            </button>
+          )}
         </div>
 
         {/* User Account / Role Switcher Footer */}
@@ -5454,7 +6067,8 @@ export default function App() {
           </div>
         )}
 
-        {/* Responsive Mobile Top Header for Smartphones & Tablets on Vercel */}
+        {/* Responsive Mobile Top Header for Smartphones & Tablets (hidden on Menu tab which has its own compact header) */}
+        {activeTab !== 'menu' && (
         <div className="lg:hidden bg-slate-900 border-b border-slate-800 shrink-0 z-20 text-white">
           {/* Primary Row: Main Menu (left), Brand, and Quick Actions (right) */}
           <div className="px-3 py-2 flex items-center justify-between gap-2 overflow-hidden">
@@ -5519,6 +6133,33 @@ export default function App() {
                         : 'bg-emerald-400'
                     }`}
                   />
+                </button>
+              </div>
+
+              {/* Clear Mobile / Desktop Mode Toggle Pill */}
+              <div
+                className="flex items-center bg-slate-950 p-0.5 rounded-xl border border-slate-700/80 shrink-0"
+                role="group"
+                aria-label="Switch between Mobile and Desktop view"
+              >
+                <button
+                  type="button"
+                  id="btn-mobile-header-switch-phone"
+                  onClick={() => setDeviceFormat('phone')}
+                  title="Switch to Mobile Phone Version"
+                  className="px-2 py-1.5 rounded-lg text-[11px] font-bold text-slate-300 hover:text-white hover:bg-slate-800 flex items-center gap-1 transition cursor-pointer"
+                >
+                  <Smartphone className="w-3.5 h-3.5 text-sky-400" />
+                  <span>Mobile</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDeviceFormat('computer')}
+                  title="Desktop Version Active"
+                  className="px-2 py-1.5 rounded-lg text-[11px] font-extrabold bg-blue-600 text-white flex items-center gap-1 shadow-sm cursor-pointer"
+                >
+                  <Monitor className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Desktop</span>
                 </button>
               </div>
 
@@ -5597,6 +6238,7 @@ export default function App() {
             </button>
           </div>
         </div>
+        )}
 
         {/* Top Header Stats Bar for Desktop & Laptop Viewports */}
         <header className="hidden lg:flex min-h-16 h-auto py-2.5 lg:h-20 bg-white border-b border-slate-200 items-center justify-between px-4 xl:px-8 shrink-0 shadow-sm z-10 gap-3">
@@ -5844,23 +6486,31 @@ export default function App() {
               <span className="hidden md:inline">Install Mobile App</span>
             </button>
 
-            {/* Format Selector: Computer vs Mobile Phone Format */}
-            <div className="flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200 shrink-0">
+            {/* Format Selector: Clear Desktop vs Mobile Phone Switch */}
+            <div
+              className="flex items-center bg-slate-900 p-1 rounded-xl border border-slate-700 shadow-sm shrink-0"
+              role="group"
+              aria-label="Switch between Desktop and Mobile Phone view"
+            >
               <button
+                type="button"
+                id="btn-desktop-header-switch-computer"
                 onClick={() => setDeviceFormat('computer')}
-                className="px-3 py-1.5 rounded-lg text-xs font-extrabold transition flex items-center gap-1.5 bg-blue-600 text-white shadow-sm"
-                title="Computer Desktop Format (Full Desktop View)"
+                className="px-3 py-1.5 rounded-lg text-xs font-extrabold transition flex items-center gap-1.5 bg-blue-600 text-white shadow-sm cursor-pointer"
+                title="Desktop Computer Format (Active)"
               >
                 <Monitor className="w-3.5 h-3.5" />
-                <span className="hidden md:inline">Computer Format</span>
+                <span>Desktop</span>
               </button>
               <button
+                type="button"
+                id="btn-desktop-header-switch-phone"
                 onClick={() => setDeviceFormat('phone')}
-                className="px-3 py-1.5 rounded-lg text-xs font-extrabold transition flex items-center gap-1.5 text-slate-600 hover:text-slate-900"
-                title="Mobile Phone Format (Smartphone Device Frame)"
+                className="px-3 py-1.5 rounded-lg text-xs font-extrabold transition flex items-center gap-1.5 text-slate-300 hover:text-white hover:bg-slate-800 cursor-pointer"
+                title="Switch to Mobile Phone Version"
               >
-                <Smartphone className="w-3.5 h-3.5 text-emerald-500" />
-                <span className="hidden md:inline">Mobile Phone Format</span>
+                <Smartphone className="w-3.5 h-3.5 text-sky-400" />
+                <span>Mobile View</span>
               </button>
             </div>
 
@@ -5888,12 +6538,94 @@ export default function App() {
         </header>
 
         {/* Dynamic Workspace Canvas for Computer Format */}
-        <div className="flex-1 overflow-y-auto bg-slate-50 text-slate-900">
+        <div
+          className={`flex-1 min-h-0 overflow-y-auto pb-20 lg:pb-0 flex flex-col ${
+            activeTab === 'menu'
+              ? 'bg-[#0f172a] text-slate-100'
+              : 'bg-slate-900 text-slate-100 lg:bg-slate-50 lg:text-slate-900'
+          }`}
+        >
           {renderActiveTabContent()}
         </div>
 
-        {/* Bottom Status & Quick Action Bar */}
-        <footer className="h-12 bg-white border-t border-slate-200 flex items-center px-6 justify-between shrink-0 text-xs font-semibold text-slate-600">
+        {/* Fixed 5-Tab Dark Bottom Navigation Bar (Mobile Screens) */}
+        <nav
+          aria-label="Mobile Bottom Navigation"
+          className="lg:hidden fixed bottom-0 left-0 right-0 z-50 min-h-16 bg-slate-900 border-t border-slate-800 px-1 pt-1 pb-safe grid grid-cols-5 items-center"
+        >
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab('pos');
+              setIsMobileMenuOpen(false);
+            }}
+            className={`min-h-[44px] flex flex-col items-center justify-center py-1 rounded-xl transition cursor-pointer ${
+              activeTab === 'pos' ? 'text-[#38bdf8] font-bold' : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <ShoppingBag className="w-5 h-5 mb-0.5" />
+            <span className="text-[9px] font-bold tracking-tight whitespace-nowrap">HOME</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab('reports');
+              setIsMobileMenuOpen(false);
+            }}
+            className={`min-h-[44px] flex flex-col items-center justify-center py-1 rounded-xl transition cursor-pointer ${
+              activeTab === 'reports' ? 'text-[#38bdf8] font-bold' : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <LayoutDashboard className="w-5 h-5 mb-0.5" />
+            <span className="text-[9px] font-bold tracking-tight whitespace-nowrap">DASHBOARD</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab('inventory');
+              setIsMobileMenuOpen(false);
+            }}
+            className={`min-h-[44px] flex flex-col items-center justify-center py-1 rounded-xl transition cursor-pointer ${
+              activeTab === 'inventory' ? 'text-[#38bdf8] font-bold' : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <Package className="w-5 h-5 mb-0.5" />
+            <span className="text-[9px] font-bold tracking-tight whitespace-nowrap">ITEMS</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab('menu');
+              setIsMobileMenuOpen(false);
+            }}
+            className={`min-h-[44px] flex flex-col items-center justify-center py-1 rounded-xl transition cursor-pointer ${
+              activeTab === 'menu' ? 'text-[#38bdf8] font-bold' : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <Menu className="w-5 h-5 mb-0.5" />
+            <span className="text-[9px] font-bold tracking-tight whitespace-nowrap">MENU</span>
+          </button>
+
+          <button
+            type="button"
+            id="btn-bottom-nav-switch-mode"
+            onClick={() => {
+              setDeviceFormat('phone');
+              setIsMobileMenuOpen(false);
+            }}
+            className="min-h-[44px] flex flex-col items-center justify-center py-1 rounded-xl transition text-slate-300 hover:text-[#38bdf8] cursor-pointer"
+            title="Switch to Mobile Phone Version"
+          >
+            <Smartphone className="w-5 h-5 mb-0.5 text-[#38bdf8]" />
+            <span className="text-[9px] font-bold tracking-tight whitespace-nowrap">MOBILE VIEW</span>
+          </button>
+        </nav>
+
+        {/* Bottom Status & Quick Action Bar (Desktop Screens) */}
+        <footer className="hidden lg:flex h-12 bg-white border-t border-slate-200 items-center px-6 justify-between shrink-0 text-xs font-semibold text-slate-600">
           <div className="flex items-center gap-5">
             <button
               onClick={() => setActiveTab('reports')}
@@ -5991,7 +6723,28 @@ export default function App() {
         recoveryEmail={ownerRecoveryEmail}
         emergencyKey={emergencyRecoveryKey}
         firebaseUser={firebaseUser}
+        activeStoreId={activeCloudStoreId || OWNER_PRIMARY_STORE_ID}
+        activeStoreName={stores.find((s) => s.id === activeStoreId)?.name || storeProfile?.storeName}
       />
+
+      {/* Subscription Plans & M-Pesa Payment Modal */}
+      <SubscriptionPlansModal
+        isOpen={showPlansModal}
+        onClose={() => setShowPlansModal(false)}
+        isExpiredLock={false}
+        isOwnerAccount={isOwnerAccount}
+        storeId={activeCloudStoreId || OWNER_PRIMARY_STORE_ID}
+        storeProfile={storeProfile}
+        onSubscriptionUpdated={(updated) => setStoreProfile(updated)}
+      />
+
+      {/* Owner-Only Super Admin Subscribers Control Panel */}
+      {isOwnerAccount && (
+        <SuperAdminSubscribersModal
+          isOpen={showSuperAdminModal}
+          onClose={() => setShowSuperAdminModal(false)}
+        />
+      )}
 
       {/* Conflict Resolution Assistant Modal */}
       <ConflictResolutionModal

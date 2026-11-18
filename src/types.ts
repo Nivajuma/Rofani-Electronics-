@@ -660,3 +660,42 @@ export interface SensitiveActionLog {
   severity: 'critical' | 'high' | 'medium';
 }
 
+export type SubscriptionPlanType = 'trial' | 'monthly' | 'annual';
+export type SubscriptionStatus = 'active' | 'expired';
+
+export interface StoreSubscriptionProfile {
+  id: string; // 'rofani-pos' for owner or Firebase Auth UID for merchants
+  ownerUid: string;
+  ownerEmail: string;
+  storeName: string;
+  phone: string;
+  kraPin?: string;
+  mpesaShortcode?: string;
+  mpesaShortcodeType?: 'till' | 'paybill';
+  mpesaStoreNumber?: string;
+  planType: SubscriptionPlanType;
+  subscriptionStatus: SubscriptionStatus;
+  expiresAt: string; // ISO timestamp
+  lastPaymentRef?: string;
+  lastPaymentAmount?: number;
+  lastPaymentAt?: string;
+  lastPaymentPhone?: string;
+  lastPaymentMethod?: 'stk_push' | 'manual_receipt' | 'admin_override' | 'free_trial';
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SubscriptionPaymentRecord {
+  id: string;
+  storeId: string;
+  planType: 'monthly' | 'annual';
+  amount: number;
+  phoneNumber: string;
+  mpesaReceiptNumber: string;
+  paymentMethod: 'stk_push' | 'manual_receipt' | 'admin_override';
+  status: 'Verified' | 'Completed';
+  paidAt: string;
+  expiresAtAfter: string;
+  recordedByEmail?: string;
+}
+

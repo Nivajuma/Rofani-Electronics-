@@ -69,14 +69,25 @@ export const db: Firestore = (() => {
 export const auth: Auth = getAuth(app);
 
 export const OWNER_CLOUD_EMAIL = 'nivajuma@gmail.com';
+export const OWNER_PRIMARY_STORE_ID = 'rofani-pos';
 
-export function isAuthorizedCloudUser(user: FirebaseUser | null | undefined): boolean {
+export function isOwnerCloudUser(user: FirebaseUser | null | undefined): boolean {
   return Boolean(
     user &&
     user.emailVerified &&
     user.email &&
     user.email.toLowerCase() === OWNER_CLOUD_EMAIL
   );
+}
+
+export function isAuthorizedCloudUser(user: FirebaseUser | null | undefined): boolean {
+  return Boolean(user && user.emailVerified);
+}
+
+export function getStoreIdForUser(user: FirebaseUser | null | undefined): string | null {
+  if (!user || !user.emailVerified) return null;
+  if (isOwnerCloudUser(user)) return OWNER_PRIMARY_STORE_ID;
+  return user.uid;
 }
 
 export function getFirebaseAuthConsoleUrl(): string {

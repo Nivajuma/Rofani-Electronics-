@@ -5,6 +5,7 @@
 import React, { useState, useEffect } from 'react';
 import { saveAllProductImagesToIndexedDB } from './imageStorage';
 import { saveToIDB, getFromIDB } from './idbStorage';
+import { resolveTenantStorageKey } from './tenantScope';
 
 /**
  * Strips heavy data URLs (e.g. base64 camera or AI photos) from products before localStorage.
@@ -141,7 +142,8 @@ export function safeGetJSON<T>(key: string, defaultValue: T, validator?: (val: a
   }
 
   try {
-    const raw = localStorage.getItem(key);
+    const resolvedKey = resolveTenantStorageKey(key);
+    const raw = localStorage.getItem(resolvedKey);
     if (raw === null || raw === undefined || raw.trim() === '') {
       return defaultValue;
     }
@@ -175,10 +177,12 @@ export function safeSetJSON(key: string, value: any): boolean {
     return false;
   }
 
+  const resolvedKey = resolveTenantStorageKey(key);
+
   // If value is undefined, remove from storage
   if (value === undefined) {
     try {
-      saveToIDB(key, null);
+      saveToIDB(resolvedKey, null);
     } catch {}
     return safeRemove(key);
   }
@@ -198,7 +202,7 @@ export function safeSetJSON(key: string, value: any): boolean {
     key.startsWith('rofani_pos_')
   ) {
     try {
-      saveToIDB(key, value);
+      saveToIDB(resolvedKey, value);
     } catch {}
   }
 
@@ -231,7 +235,7 @@ export function safeSetJSON(key: string, value: any): boolean {
   }
 
   try {
-    localStorage.setItem(key, JSON.stringify(toStore));
+    localStorage.setItem(resolvedKey, JSON.stringify(toStore));
     return true;
   } catch (err: any) {
     // Quota exceeded: offload bulky duplicate snapshots to IndexedDB to free up localStorage
@@ -259,11 +263,11 @@ export function safeSetJSON(key: string, value: any): boolean {
 
     try {
       // Re-try storing full value after purging transient logs and offloading snapshots
-      localStorage.setItem(key, JSON.stringify(toStore));
+      localStorage.setItem(resolvedKey, JSON.stringify(toStore));
       return true;
     } catch {
       // Graceful fallback: IndexedDB already has the full data safely saved above!
-      console.warn(`[SafeStorage] "${key}" persisted to IndexedDB (localStorage quota reached).`);
+      console.warn(`[SafeStorage] "${resolvedKey}" persisted to IndexedDB (localStorage quota reached).`);
       return false;
     }
   }
@@ -277,7 +281,7 @@ export function safeRemove(key: string): boolean {
     return false;
   }
   try {
-    localStorage.removeItem(key);
+    localStorage.removeItem(resolveTenantStorageKey(key));
     return true;
   } catch {
     return false;

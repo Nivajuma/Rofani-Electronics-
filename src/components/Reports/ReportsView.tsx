@@ -29,6 +29,7 @@ import {
 } from 'lucide-react';
 import { Transaction, Product, Customer, Supplier, Expense, PurchaseOrder } from '../../types';
 import { KraTotComplianceCenter } from './KraTotComplianceCenter';
+import { DailyOverviewCard } from './DailyOverviewCard';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
@@ -557,8 +558,14 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
         </div>
       )}
 
-      {/* Main Content: Grouped Cards */}
+      {/* Main Content: Daily Overview & Grouped Cards */}
       <div className="max-w-4xl mx-auto px-4 py-6 space-y-6 mb-12">
+        <DailyOverviewCard
+          transactions={transactions}
+          products={products}
+          expenses={expenses}
+        />
+
         {filteredGroups.length === 0 ? (
           <div className="bg-slate-900 rounded-2xl p-12 text-center text-slate-400 shadow-sm border border-slate-800 text-xs">
             No reports found matching "{searchQuery}".

@@ -1,40 +1,20 @@
-import React, { useState } from 'react';
+import React from 'react';
 import {
-  Smartphone,
   Monitor,
-  RotateCw,
-  Wifi,
-  WifiOff,
-  Battery,
-  Signal,
   ShoppingBag,
   Package,
-  ClipboardList,
-  Landmark,
-  FileText,
+  LayoutDashboard,
   Settings,
-  X,
   Menu,
-  KeyRound,
-  Lock,
-  Search,
   Bell,
-  UserCheck,
-  DollarSign,
-  Maximize2,
-  ChevronUp,
-  Users,
-  Plus,
   Cloud,
-  RefreshCw,
   AlertTriangle,
-  ShieldAlert
+  Store
 } from 'lucide-react';
 import { User } from '../types';
 import { TabKey } from '../utils/permissions';
 import { OfflineSyncBanner } from './Network/OfflineSyncBanner';
-import { NetworkStatusBadge } from './Network/NetworkStatusBadge';
-import { useNetworkStatus, SyncRetryResult } from '../utils/offlineSync';
+import { SyncRetryResult } from '../utils/offlineSync';
 
 interface PhoneDeviceFrameProps {
   children: React.ReactNode;
@@ -47,12 +27,14 @@ interface PhoneDeviceFrameProps {
   onChangeModel: (model: 'iphone15pro' | 'galaxyS24' | 'pixel8') => void;
   onSwitchToComputer: () => void;
   currentUser: User;
+  storeName?: string;
   todaySales: number;
   lowStockCount: number;
   onLockTerminal: () => void;
   onOpenStaffModal: () => void;
   onNewSale?: () => void;
   onOpenCloudSync?: () => void;
+  onOpenStockAlerts?: () => void;
   cloudSyncStatus?: 'synced' | 'syncing' | 'offline' | 'error' | 'quota_exceeded';
   onTriggerSync?: () => Promise<SyncRetryResult | void> | void;
   conflictCount?: number;
@@ -66,491 +48,127 @@ export const PhoneDeviceFrame: React.FC<PhoneDeviceFrameProps> = ({
   onSelectStockAlertFilter,
   phoneOrientation,
   phoneModel,
-  onToggleOrientation,
-  onChangeModel,
   onSwitchToComputer,
-  currentUser,
-  todaySales,
+  storeName = 'Rofani Electronics',
   lowStockCount,
-  onLockTerminal,
-  onOpenStaffModal,
-  onNewSale,
   onOpenCloudSync,
+  onOpenStockAlerts,
   cloudSyncStatus = 'synced',
   onTriggerSync,
   conflictCount = 0,
   onOpenConflictAssistant,
 }) => {
-  const [showMobileMoreMenu, setShowMobileMoreMenu] = useState(false);
-  const [currentTime, setCurrentTime] = useState('09:41');
-  const { isOnline } = useNetworkStatus();
-
-  // Dynamic status bar time update
-  React.useEffect(() => {
-    const updateTime = () => {
-      const now = new Date();
-      const hours = now.getHours().toString().padStart(2, '0');
-      const minutes = now.getMinutes().toString().padStart(2, '0');
-      setCurrentTime(`${hours}:${minutes}`);
-    };
-    updateTime();
-    const timer = setInterval(updateTime, 30000);
-    return () => clearInterval(timer);
-  }, []);
-
-  // Frame width/height based on model and orientation
   const isLandscape = phoneOrientation === 'landscape';
 
   const getFrameDimensions = () => {
     if (phoneModel === 'galaxyS24') {
-      return isLandscape ? 'w-[840px] max-w-[96vw] h-[400px] max-h-[85vh]' : 'w-[400px] max-w-[96vw] h-[820px] max-h-[85vh]';
+      return isLandscape
+        ? 'w-full sm:w-[840px] sm:max-w-[96vw] flex-1 min-h-0 sm:flex-none sm:h-[400px] sm:max-h-[90dvh]'
+        : 'w-full sm:w-[400px] sm:max-w-[96vw] flex-1 min-h-0 sm:flex-none sm:h-[820px] sm:max-h-[94dvh]';
     }
     if (phoneModel === 'pixel8') {
-      return isLandscape ? 'w-[820px] max-w-[96vw] h-[390px] max-h-[85vh]' : 'w-[390px] max-w-[96vw] h-[800px] max-h-[85vh]';
+      return isLandscape
+        ? 'w-full sm:w-[820px] sm:max-w-[96vw] flex-1 min-h-0 sm:flex-none sm:h-[390px] sm:max-h-[90dvh]'
+        : 'w-full sm:w-[390px] sm:max-w-[96vw] flex-1 min-h-0 sm:flex-none sm:h-[800px] sm:max-h-[94dvh]';
     }
     // Default iPhone 15 Pro
-    return isLandscape ? 'w-[860px] max-w-[96vw] h-[420px] max-h-[85vh]' : 'w-[420px] max-w-[96vw] h-[850px] max-h-[85vh]';
+    return isLandscape
+      ? 'w-full sm:w-[860px] sm:max-w-[96vw] flex-1 min-h-0 sm:flex-none sm:h-[420px] sm:max-h-[90dvh]'
+      : 'w-full sm:w-[420px] sm:max-w-[96vw] flex-1 min-h-0 sm:flex-none sm:h-[850px] sm:max-h-[94dvh]';
   };
 
+  const syncDotClass =
+    cloudSyncStatus === 'quota_exceeded'
+      ? 'bg-amber-400'
+      : cloudSyncStatus === 'offline'
+      ? 'bg-slate-400'
+      : cloudSyncStatus === 'error'
+      ? 'bg-rose-400'
+      : cloudSyncStatus === 'syncing'
+      ? 'bg-sky-400 animate-pulse'
+      : 'bg-emerald-400';
+
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col items-center py-4 px-2 sm:px-4 overflow-x-hidden selection:bg-blue-600 selection:text-white relative">
-      {/* TOP CONTROL BAR TO SWITCH BETWEEN COMPUTER & MOBILE FORMAT */}
-      <div className="sticky top-2 z-50 w-full max-w-5xl bg-slate-900/95 backdrop-blur-md border border-slate-700/80 rounded-2xl p-3 mb-4 shadow-2xl flex flex-wrap items-center justify-between gap-3 shrink-0">
-        <div className="flex items-center gap-3">
-          <div className="flex items-center bg-slate-950 border border-slate-800 p-1 rounded-xl">
-            <button
-              onClick={onSwitchToComputer}
-              className="px-3.5 py-1.5 rounded-lg text-xs font-black text-slate-300 hover:text-white hover:bg-slate-800 transition flex items-center gap-1.5 cursor-pointer"
-              title="Switch to Full Computer Format (Widescreen Desktop)"
-            >
-              <Monitor className="w-4 h-4 text-blue-400" />
-              <span className="hidden sm:inline">Computer Format (Desktop)</span>
-              <span className="sm:hidden">Full PC View</span>
-            </button>
-            <button
-              className="px-3 py-1.5 rounded-lg text-xs font-extrabold bg-blue-600 text-white shadow-md flex items-center gap-1.5"
-            >
-              <Smartphone className="w-4 h-4" />
-              <span className="hidden sm:inline">Mobile Phone Format</span>
-              <span className="sm:hidden">Phone</span>
-            </button>
-          </div>
-
-          <span className="hidden md:inline-block text-slate-600">|</span>
-
-          {/* Model Selector */}
-          <div className="hidden sm:flex items-center gap-1 bg-slate-950 border border-slate-800 p-1 rounded-xl text-xs font-semibold">
-            <span className="text-[10px] text-slate-400 font-bold px-2 uppercase">Device:</span>
-            <button
-              onClick={() => onChangeModel('iphone15pro')}
-              className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition ${
-                phoneModel === 'iphone15pro'
-                  ? 'bg-slate-800 text-white border border-slate-700'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              iPhone 15 Pro
-            </button>
-            <button
-              onClick={() => onChangeModel('galaxyS24')}
-              className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition ${
-                phoneModel === 'galaxyS24'
-                  ? 'bg-slate-800 text-white border border-slate-700'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              Galaxy S24
-            </button>
-            <button
-              onClick={() => onChangeModel('pixel8')}
-              className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition ${
-                phoneModel === 'pixel8'
-                  ? 'bg-slate-800 text-white border border-slate-700'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              Pixel 8
-            </button>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2">
-          {/* Real-time Network & Offline Status Indicator */}
-          <NetworkStatusBadge onClick={onOpenCloudSync} />
-
-          {/* Cloud Sync & Multi-Phone Share Button */}
-          {onOpenCloudSync && (
-            <button
-              onClick={onOpenCloudSync}
-              className={`px-3 py-1.5 rounded-xl border transition flex items-center gap-1.5 text-xs font-bold shadow-sm cursor-pointer ${
-                cloudSyncStatus === 'quota_exceeded'
-                  ? 'bg-amber-950/90 text-amber-200 border-amber-700'
-                  : cloudSyncStatus === 'error'
-                  ? 'bg-rose-950/90 text-rose-200 border-rose-700'
-                  : 'bg-sky-950/90 text-sky-200 border-sky-600'
-              }`}
-              title="Cloud Sync & Multi-Phone Share with Workers"
-            >
-              <Cloud className={`w-3.5 h-3.5 ${
-                cloudSyncStatus === 'quota_exceeded'
-                  ? 'text-amber-400'
-                  : cloudSyncStatus === 'error'
-                  ? 'text-rose-400'
-                  : 'text-sky-400'
-              }`} />
-              <span>{cloudSyncStatus === 'error' ? 'Sync Retry' : cloudSyncStatus === 'syncing' ? 'Syncing...' : 'Share & Sync'}</span>
-              <span
-                className={`w-2 h-2 rounded-full ${
-                  cloudSyncStatus === 'quota_exceeded'
-                    ? 'bg-amber-400'
-                    : cloudSyncStatus === 'offline'
-                    ? 'bg-slate-400'
-                    : cloudSyncStatus === 'error'
-                    ? 'bg-rose-400'
-                    : cloudSyncStatus === 'syncing'
-                    ? 'bg-sky-400 animate-pulse'
-                    : 'bg-emerald-400'
-                }`}
-              />
-            </button>
-          )}
-
-          {/* Rotate Orientation Toggle */}
-          <button
-            onClick={onToggleOrientation}
-            className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5"
-            title="Rotate Phone Screen (Portrait / Landscape)"
-          >
-            <RotateCw className="w-3.5 h-3.5 text-blue-400" />
-            <span className="capitalize">{phoneOrientation}</span>
-          </button>
-
-          {/* Lock Terminal PIN Button */}
-          <button
-            onClick={onLockTerminal}
-            className="p-2 bg-amber-950/80 hover:bg-amber-900 border border-amber-800 text-amber-300 rounded-xl transition text-xs font-bold"
-            title="Lock Terminal PIN"
-          >
-            <Lock className="w-4 h-4" />
-          </button>
-
-          {/* Exit Mobile Preview: Switch to Full Version */}
-          <button
-            id="btn-top-switch-to-computer"
-            onClick={onSwitchToComputer}
-            className="bg-blue-600 hover:bg-blue-500 text-white px-3.5 py-1.5 rounded-xl text-xs font-black transition flex items-center gap-1.5 shadow-md shadow-blue-600/30 cursor-pointer active:scale-95"
-            title="Switch to Full Computer Format (Widescreen Desktop)"
-          >
-            <Monitor className="w-4 h-4" />
-            <span>Full PC View</span>
-          </button>
-        </div>
-      </div>
-
+    <div className="min-h-dvh h-dvh sm:h-auto sm:min-h-dvh bg-slate-900 sm:bg-slate-950 text-slate-100 flex flex-col items-center justify-center p-0 sm:py-4 sm:px-4 overflow-hidden sm:overflow-x-hidden selection:bg-blue-600 selection:text-white relative">
       {/* SMARTPHONE DEVICE CONTAINER FRAME */}
       <div
-        className={`relative transition-all duration-300 ease-in-out bg-slate-900 border-[10px] sm:border-[14px] border-slate-800 rounded-[48px] sm:rounded-[56px] shadow-2xl shadow-blue-900/30 overflow-hidden flex flex-col ${getFrameDimensions()}`}
+        className={`relative transition-all duration-300 ease-in-out bg-slate-900 border-0 sm:border-[12px] border-slate-800 rounded-none sm:rounded-[52px] shadow-2xl shadow-blue-900/30 overflow-hidden flex flex-col ${getFrameDimensions()}`}
         style={{
-          boxShadow: '0 25px 60px -15px rgba(0, 0, 0, 0.8), inset 0 0 0 2px rgba(255, 255, 255, 0.1)'
+          boxShadow: '0 25px 60px -15px rgba(0, 0, 0, 0.8), inset 0 0 0 2px rgba(255, 255, 255, 0.08)'
         }}
       >
-        {/* PHONE SPEAKER NOTCH / DYNAMIC ISLAND */}
-        {!isLandscape && (
-          <div className="absolute top-2 left-1/2 -translate-x-1/2 z-50 flex items-center justify-center pointer-events-none">
-            {phoneModel === 'iphone15pro' ? (
-              <div className="w-28 h-5 bg-black rounded-full border border-slate-800 flex items-center justify-between px-2.5 shadow-inner">
-                <div className="w-2.5 h-2.5 rounded-full bg-slate-900 border border-slate-800" />
-                <div className="w-2.5 h-2.5 rounded-full bg-blue-950/80 border border-blue-900" />
-              </div>
-            ) : (
-              <div className="w-3.5 h-3.5 bg-black rounded-full border border-slate-800" />
-            )}
-          </div>
-        )}
-
-        {/* PHONE STATUS BAR */}
-        <div className="h-8 bg-slate-950 text-slate-300 px-5 flex items-center justify-between shrink-0 text-[11px] font-medium tracking-tight select-none z-40 border-b border-slate-800/50">
-          <span className="font-bold text-slate-100 font-mono">{currentTime}</span>
-
-          <div className="flex items-center gap-2">
-            <Signal className="w-3 h-3 text-slate-300" />
-            <span className="text-[9px] font-bold text-slate-300 font-mono">5G</span>
-            {!isOnline ? (
-              <div className="flex items-center gap-1 text-amber-400 font-black text-[10px]" title="You are currently offline">
-                <WifiOff className="w-3 h-3 text-amber-400 animate-pulse" />
-                <span>Offline</span>
-              </div>
-            ) : (
-              <Wifi className="w-3 h-3 text-slate-300" />
-            )}
-            <Battery className="w-3.5 h-3.5 text-emerald-400 fill-emerald-400" />
-          </div>
-        </div>
-
-        {/* MOBILE HEADER BAR */}
-        <div className="bg-slate-900 border-b border-slate-800 p-2.5 flex flex-wrap items-center justify-between gap-2 shrink-0 z-30">
-          <div className="flex items-center gap-2 min-w-0 shrink">
-            <div className="w-7 h-7 rounded-lg bg-blue-600 text-white flex items-center justify-center font-black text-xs shrink-0 shadow-md">
-              R
+        {/* SINGLE COMPACT MOBILE HEADER */}
+        <header className="bg-slate-900 border-b border-slate-800 py-2 px-3 flex items-center justify-between gap-2 shrink-0 z-30">
+          <div className="flex items-center gap-2.5 min-w-0 flex-1">
+            <div className="w-8 h-8 rounded-full bg-slate-800 border border-slate-700/80 flex items-center justify-center text-sky-400 shrink-0">
+              <Store className="w-4 h-4" />
             </div>
-            <div className="min-w-0">
-              <h1 className="text-xs font-black text-slate-100 truncate">ROFANI Mobile POS</h1>
-              <p className="text-[10px] text-slate-400 truncate">
-                Sales: <strong className="text-emerald-400 font-mono">KSh {todaySales.toLocaleString()}</strong>
-              </p>
-            </div>
+            <h1 className="text-sm font-bold text-white truncate leading-tight">
+              {storeName || 'Rofani Electronics'}
+            </h1>
           </div>
 
-          <div className="flex items-center gap-1.5 flex-wrap justify-end max-w-full">
-            {/* Real-time Network & Offline Status Indicator */}
-            <NetworkStatusBadge onClick={onOpenCloudSync} />
-
-            {/* Real-Time Cloud Sync Indicator */}
+          <div className="flex items-center gap-2 shrink-0 flex-nowrap pr-0.5">
             {onOpenCloudSync && (
               <button
+                type="button"
                 onClick={onOpenCloudSync}
-                className={`p-1.5 border rounded-lg text-[10px] font-bold flex items-center gap-1 shadow-sm cursor-pointer ${
-                  cloudSyncStatus === 'quota_exceeded'
-                    ? 'bg-amber-950/80 hover:bg-amber-900 border-amber-800/80 text-amber-300'
-                    : cloudSyncStatus === 'error'
-                    ? 'bg-rose-950/80 hover:bg-rose-900 border-rose-800/80 text-rose-300'
-                    : 'bg-sky-950/80 hover:bg-sky-900 border-sky-800/80 text-sky-300'
-                }`}
+                className="w-8 h-8 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700/70 text-slate-300 hover:text-white transition relative flex items-center justify-center shrink-0 cursor-pointer"
                 title={
                   cloudSyncStatus === 'quota_exceeded'
                     ? 'Firestore Daily Quota Reached: Operating in Offline Local Storage Mode'
                     : cloudSyncStatus === 'error'
                     ? 'Last cloud sync had an error — tap to retry'
-                    : 'Live Cloud Sync: Connected across all worker phones'
+                    : 'Cloud Sync & Multi-Device Share'
                 }
+                aria-label="Cloud Sync Status"
               >
-                <Cloud className={`w-3.5 h-3.5 ${
-                  cloudSyncStatus === 'quota_exceeded'
-                    ? 'text-amber-400'
-                    : cloudSyncStatus === 'error'
-                    ? 'text-rose-400'
-                    : 'text-sky-400'
-                }`} />
-                <span className={`w-1.5 h-1.5 rounded-full ${
-                  cloudSyncStatus === 'quota_exceeded'
-                    ? 'bg-amber-400'
-                    : cloudSyncStatus === 'offline'
-                    ? 'bg-slate-400'
-                    : cloudSyncStatus === 'error'
-                    ? 'bg-rose-400'
-                    : cloudSyncStatus === 'syncing'
-                    ? 'bg-sky-400 animate-pulse'
-                    : 'bg-emerald-400'
-                }`} />
+                <Cloud
+                  className={`w-4 h-4 ${
+                    cloudSyncStatus === 'quota_exceeded'
+                      ? 'text-amber-400'
+                      : cloudSyncStatus === 'error'
+                      ? 'text-rose-400'
+                      : 'text-sky-400'
+                  }`}
+                />
+                <span className={`w-2 h-2 rounded-full absolute top-1 right-1 ${syncDotClass}`} />
               </button>
             )}
 
-            {/* Direct Switch to Full PC Version Button in Mobile Header */}
             <button
-              id="btn-header-switch-to-computer"
-              onClick={onSwitchToComputer}
-              className="px-2 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-[10px] font-black flex items-center gap-1 shadow-sm active:scale-95 transition cursor-pointer"
-              title="Switch to Full Version (Computer / Desktop View)"
-            >
-              <Monitor className="w-3 h-3 text-blue-100" />
-              <span className="hidden xs:inline">Full PC</span>
-            </button>
-
-            {/* Direct New Sale Button in Mobile Header */}
-            <button
-              id="btn-mobile-new-sale"
+              type="button"
               onClick={() => {
-                if (onNewSale) {
-                  onNewSale();
+                if (onOpenStockAlerts) {
+                  onOpenStockAlerts();
                 } else {
-                  onSelectTab('pos');
-                }
-                setShowMobileMoreMenu(false);
-              }}
-              className="px-2 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-[10px] font-extrabold flex items-center gap-1 shadow-sm active:scale-95"
-              title="Start New Sale"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>New Sale</span>
-            </button>
-
-            {lowStockCount > 0 && (
-              <button
-                onClick={() => {
                   onSelectTab('inventory');
                   if (onSelectStockAlertFilter) onSelectStockAlertFilter();
-                }}
-                className="p-1.5 bg-rose-950/80 hover:bg-rose-900 border border-rose-800 text-rose-300 rounded-lg text-[10px] font-bold flex items-center gap-1 animate-pulse shadow-sm"
-                title={`${lowStockCount} items low on stock - Click to filter inventory`}
-              >
-                <Bell className="w-3 h-3 text-rose-400" />
-                <span>{lowStockCount} Alerts</span>
-              </button>
-            )}
-
-            <button
-              onClick={() => setShowMobileMoreMenu(!showMobileMoreMenu)}
-              className="p-1.5 bg-slate-800 text-slate-300 hover:text-white rounded-lg border border-slate-700 cursor-pointer shrink-0"
-              title="Mobile Quick Menu"
-            >
-              {showMobileMoreMenu ? <X className="w-4 h-4 text-rose-400" /> : <Menu className="w-4 h-4" />}
-            </button>
-          </div>
-        </div>
-
-        {/* MOBILE EXPANDED DROPDOWN MENU */}
-        {showMobileMoreMenu && (
-          <div className="bg-slate-900 border-b border-slate-800 p-3 space-y-2 text-xs shrink-0 z-40 animate-in slide-in-from-top duration-200">
-            {/* Primary Switch to Full Version Button inside Mobile Menu */}
-            <button
-              id="btn-menu-switch-to-full"
-              onClick={() => {
-                onSwitchToComputer();
-                setShowMobileMoreMenu(false);
+                }
               }}
-              className="w-full p-2.5 rounded-xl border border-blue-500/70 bg-gradient-to-r from-blue-900 via-indigo-950 to-blue-950 text-white flex items-center justify-between font-bold shadow-md hover:border-blue-400 transition group active:scale-[0.99] cursor-pointer"
+              className="w-8 h-8 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700/70 text-slate-300 hover:text-white transition relative flex items-center justify-center shrink-0 overflow-visible cursor-pointer"
+              title="Stock Alert Notifications"
+              aria-label="Stock Alert Notifications"
             >
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center text-white shadow-sm shrink-0">
-                  <Monitor className="w-4 h-4" />
-                </div>
-                <div className="text-left">
-                  <div className="text-xs font-black text-white flex items-center gap-1.5">
-                    <span>Switch to Full Version</span>
-                    <span className="text-[9px] bg-blue-500/30 text-blue-200 border border-blue-400/40 px-1.5 py-0.2 rounded font-mono">
-                      Desktop View
-                    </span>
-                  </div>
-                  <div className="text-[10px] text-blue-200/80 font-normal">
-                    Open complete widescreen layout without phone frame
-                  </div>
-                </div>
-              </div>
-              <Maximize2 className="w-4 h-4 text-blue-300 group-hover:scale-110 transition shrink-0" />
+              <Bell className={`w-4 h-4 ${lowStockCount > 0 ? 'text-amber-400' : 'text-slate-300'}`} />
+              {lowStockCount > 0 && (
+                <span className="absolute -top-1.5 -right-1.5 min-w-[17px] h-[17px] px-1 rounded-full bg-rose-500 text-white text-[9px] font-bold font-mono tabular-nums flex items-center justify-center ring-2 ring-slate-900">
+                  {lowStockCount}
+                </span>
+              )}
             </button>
 
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                onClick={() => {
-                  onSelectTab('contacts');
-                  setShowMobileMoreMenu(false);
-                }}
-                className={`p-2.5 rounded-xl border flex items-center gap-2 font-bold ${
-                  activeTab === 'contacts'
-                    ? 'bg-sky-600 border-sky-500 text-white'
-                    : 'bg-slate-950 border-slate-800 text-slate-300 hover:bg-slate-800'
-                }`}
-              >
-                <Users className="w-4 h-4 text-sky-400" />
-                <span>Customers & Suppliers</span>
-              </button>
-
-              <button
-                onClick={() => {
-                  onSelectTab('expenses');
-                  setShowMobileMoreMenu(false);
-                }}
-                className={`p-2.5 rounded-xl border flex items-center gap-2 font-bold ${
-                  activeTab === 'expenses'
-                    ? 'bg-blue-600 border-blue-500 text-white'
-                    : 'bg-slate-950 border-slate-800 text-slate-300 hover:bg-slate-800'
-                }`}
-              >
-                <DollarSign className="w-4 h-4 text-emerald-400" />
-                <span>Expenses</span>
-              </button>
-
-              <button
-                onClick={() => {
-                  onSelectTab('attendance');
-                  setShowMobileMoreMenu(false);
-                }}
-                className={`p-2.5 rounded-xl border flex items-center gap-2 font-bold ${
-                  activeTab === 'attendance'
-                    ? 'bg-blue-600 border-blue-500 text-white'
-                    : 'bg-slate-950 border-slate-800 text-slate-300 hover:bg-slate-800'
-                }`}
-              >
-                <UserCheck className="w-4 h-4 text-sky-400" />
-                <span>Attendance</span>
-              </button>
-
-              <button
-                onClick={() => {
-                  onSelectTab('reports');
-                  setShowMobileMoreMenu(false);
-                }}
-                className={`p-2.5 rounded-xl border flex items-center gap-2 font-bold ${
-                  activeTab === 'reports'
-                    ? 'bg-blue-600 border-blue-500 text-white'
-                    : 'bg-slate-950 border-slate-800 text-slate-300 hover:bg-slate-800'
-                }`}
-              >
-                <FileText className="w-4 h-4 text-amber-400" />
-                <span>Reports & Analytics</span>
-              </button>
-
-              <button
-                onClick={() => {
-                  onSelectTab('settings');
-                  setShowMobileMoreMenu(false);
-                }}
-                className={`p-2.5 rounded-xl border flex items-center gap-2 font-bold ${
-                  activeTab === 'settings'
-                    ? 'bg-blue-600 border-blue-500 text-white'
-                    : 'bg-slate-950 border-slate-800 text-slate-300 hover:bg-slate-800'
-                }`}
-              >
-                <Settings className="w-4 h-4 text-purple-400" />
-                <span>KRA Settings</span>
-              </button>
-
-              <button
-                onClick={() => {
-                  onSelectTab('auditlogs');
-                  setShowMobileMoreMenu(false);
-                }}
-                className={`col-span-2 p-2.5 rounded-xl border flex items-center gap-2 font-bold ${
-                  activeTab === 'auditlogs'
-                    ? 'bg-purple-600 border-purple-500 text-white'
-                    : 'bg-slate-950 border-purple-800/60 text-purple-300 hover:bg-slate-800'
-                }`}
-              >
-                <ShieldAlert className="w-4 h-4 text-purple-400" />
-                <span>Role Authorization Audit Trail</span>
-              </button>
-
-              {onOpenCloudSync && (
-                <button
-                  onClick={() => {
-                    onOpenCloudSync();
-                    setShowMobileMoreMenu(false);
-                  }}
-                  className="col-span-2 p-2.5 rounded-xl border border-sky-700/60 bg-gradient-to-r from-sky-950 to-blue-950 text-sky-200 flex items-center justify-between font-bold"
-                >
-                  <div className="flex items-center gap-2">
-                    <Cloud className="w-4 h-4 text-sky-400" />
-                    <span>Real-Time Cloud Phone Sync</span>
-                  </div>
-                  <span className="text-[9px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-2 py-0.5 rounded-full font-mono">
-                    Multi-Device Active
-                  </span>
-                </button>
-              )}
-            </div>
-
-            <div className="pt-2 border-t border-slate-800 flex items-center justify-between text-[11px] text-slate-400">
-              <span>User: <strong className="text-slate-200">{currentUser.name}</strong> ({currentUser.role})</span>
-              <button
-                onClick={onOpenStaffModal}
-                className="text-purple-400 font-bold hover:underline flex items-center gap-1"
-              >
-                <Users className="w-3 h-3" />
-                Manage Workers
-              </button>
-            </div>
+            <button
+              type="button"
+              onClick={() => onSelectTab('settings')}
+              className="w-8 h-8 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700/70 text-slate-300 hover:text-white transition flex items-center justify-center shrink-0 cursor-pointer"
+              title="Settings"
+              aria-label="Settings"
+            >
+              <Settings className="w-4 h-4 text-slate-300" />
+            </button>
           </div>
-        )}
+        </header>
 
         {/* Firestore Quota Notice for Mobile Workers */}
         {cloudSyncStatus === 'quota_exceeded' && onOpenCloudSync && (
@@ -567,8 +185,8 @@ export const PhoneDeviceFrame: React.FC<PhoneDeviceFrameProps> = ({
           </div>
         )}
 
-        {/* Pinned Sticky Offline Notification Banner in Mobile Phone Screen */}
-        <div className="bg-slate-950 px-2 pt-1.5 shrink-0 z-20">
+        {/* Sticky Offline Notification Banner (only renders space when offline/pending) */}
+        <div className="empty:hidden bg-slate-950 px-3 pt-1.5 shrink-0 z-20">
           <OfflineSyncBanner
             compact
             onTriggerSync={onTriggerSync}
@@ -579,90 +197,82 @@ export const PhoneDeviceFrame: React.FC<PhoneDeviceFrameProps> = ({
         </div>
 
         {/* MOBILE MAIN VIEWPORT CONTENT CONTAINER */}
-        <div className="flex-1 overflow-y-auto bg-slate-950 text-slate-100 p-2 sm:p-3 space-y-3 scrollbar-thin scrollbar-thumb-slate-800">
+        <div className="flex-1 min-h-0 overflow-y-auto bg-[#0f172a] text-slate-100 p-3 sm:p-4 pb-20 flex flex-col scrollbar-thin scrollbar-thumb-slate-800">
           {children}
         </div>
 
-        {/* TOUCH-OPTIMIZED MOBILE BOTTOM NAVIGATION BAR */}
-        <div className="h-16 bg-slate-900 border-t border-slate-800 px-2 flex items-center justify-around shrink-0 z-30">
+        {/* TOUCH-OPTIMIZED 5-TAB DARK MOBILE BOTTOM NAVIGATION BAR */}
+        <nav
+          aria-label="Mobile Bottom Navigation"
+          className="absolute bottom-0 left-0 right-0 z-50 min-h-16 bg-slate-900/95 backdrop-blur-md border-t border-slate-800 px-1 pt-1 pb-safe grid grid-cols-5 items-center shrink-0"
+        >
           <button
-            onClick={() => {
-              onSelectTab('pos');
-              setShowMobileMoreMenu(false);
-            }}
-            className={`flex flex-col items-center justify-center w-14 py-1 rounded-xl transition ${
-              activeTab === 'pos' ? 'text-blue-400 font-black' : 'text-slate-400 hover:text-slate-200'
+            type="button"
+            onClick={() => onSelectTab('pos')}
+            className={`min-h-[44px] flex flex-col items-center justify-center py-1 rounded-xl transition cursor-pointer ${
+              activeTab === 'pos' ? 'text-[#38bdf8] font-bold' : 'text-slate-400 hover:text-slate-200'
             }`}
           >
             <ShoppingBag className="w-5 h-5 mb-0.5" />
-            <span className="text-[10px] font-bold">Home</span>
+            <span className="text-[9px] font-bold tracking-tight whitespace-nowrap">HOME</span>
           </button>
 
           <button
-            onClick={() => {
-              onSelectTab('reports');
-              setShowMobileMoreMenu(false);
-            }}
-            className={`flex flex-col items-center justify-center w-14 py-1 rounded-xl transition ${
-              activeTab === 'reports' ? 'text-blue-400 font-black' : 'text-slate-400 hover:text-slate-200'
+            type="button"
+            onClick={() => onSelectTab('reports')}
+            className={`min-h-[44px] flex flex-col items-center justify-center py-1 rounded-xl transition cursor-pointer ${
+              activeTab === 'reports' ? 'text-[#38bdf8] font-bold' : 'text-slate-400 hover:text-slate-200'
             }`}
           >
-            <FileText className="w-5 h-5 mb-0.5" />
-            <span className="text-[10px] font-bold">Dashboard</span>
+            <LayoutDashboard className="w-5 h-5 mb-0.5" />
+            <span className="text-[9px] font-bold tracking-tight whitespace-nowrap">DASHBOARD</span>
           </button>
 
           <button
-            onClick={() => {
-              onSelectTab('inventory');
-              setShowMobileMoreMenu(false);
-            }}
-            className={`flex flex-col items-center justify-center w-14 py-1 rounded-xl transition ${
-              activeTab === 'inventory' ? 'text-blue-400 font-black' : 'text-slate-400 hover:text-slate-200'
+            type="button"
+            onClick={() => onSelectTab('inventory')}
+            className={`min-h-[44px] flex flex-col items-center justify-center py-1 rounded-xl transition cursor-pointer ${
+              activeTab === 'inventory' ? 'text-[#38bdf8] font-bold' : 'text-slate-400 hover:text-slate-200'
             }`}
           >
             <Package className="w-5 h-5 mb-0.5" />
-            <span className="text-[10px] font-bold">Items</span>
+            <span className="text-[9px] font-bold tracking-tight whitespace-nowrap">ITEMS</span>
           </button>
 
           <button
-            onClick={() => {
-              onSelectTab('menu' as any);
-              setShowMobileMoreMenu(false);
-            }}
-            className={`flex flex-col items-center justify-center w-14 py-1 rounded-xl transition ${
-              activeTab === ('menu' as any) ? 'text-blue-400 font-black' : 'text-slate-400 hover:text-slate-200'
+            type="button"
+            onClick={() => onSelectTab('menu' as any)}
+            className={`min-h-[44px] flex flex-col items-center justify-center py-1 rounded-xl transition cursor-pointer ${
+              activeTab === ('menu' as any) ? 'text-[#38bdf8] font-bold' : 'text-slate-400 hover:text-slate-200'
             }`}
           >
             <Menu className="w-5 h-5 mb-0.5" />
-            <span className="text-[10px] font-bold">Menu</span>
+            <span className="text-[9px] font-bold tracking-tight whitespace-nowrap">MENU</span>
           </button>
 
           <button
+            type="button"
             onClick={onSwitchToComputer}
-            className="flex flex-col items-center justify-center w-14 py-1 rounded-xl transition text-slate-400 hover:text-slate-200 cursor-pointer"
+            className="min-h-[44px] flex flex-col items-center justify-center py-1 rounded-xl transition text-slate-400 hover:text-[#38bdf8] cursor-pointer"
             title="Get Desktop Billing Software"
           >
-            <Monitor className="w-5 h-5 mb-0.5 text-blue-400" />
-            <span className="text-[10px] font-bold">Desktop</span>
+            <Monitor className="w-5 h-5 mb-0.5 text-[#38bdf8]" />
+            <span className="text-[9px] font-bold tracking-tight whitespace-nowrap">GET DESKTOP</span>
           </button>
-        </div>
-
-        {/* HOME INDICATOR BAR AT BOTTOM OF PHONE */}
-        <div className="h-4 bg-slate-900 flex items-center justify-center shrink-0">
-          <div className="w-32 h-1 bg-slate-600 rounded-full" />
-        </div>
+        </nav>
       </div>
 
-      {/* FLOATING QUICK-SWITCH BUTTON: Always visible in mobile mode on any screen/device */}
-      <div className="fixed bottom-5 right-5 z-50">
+      {/* FLOATING QUICK-SWITCH BUTTON ON DESKTOP SIMULATOR VIEWPORTS */}
+      <div className="hidden sm:block fixed bottom-5 right-5 z-50">
         <button
+          type="button"
           id="btn-floating-switch-to-computer"
           onClick={onSwitchToComputer}
           className="px-4 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-xs font-black rounded-full shadow-2xl shadow-blue-900/80 border border-blue-400/50 flex items-center gap-2 transition-all transform active:scale-95 hover:scale-105 cursor-pointer ring-2 ring-blue-500/40"
-          title="Exit phone mode and return to full PC version"
+          title="Switch to Desktop Version"
         >
           <Monitor className="w-4 h-4 text-blue-100" />
-          <span>Switch to Full Version</span>
+          <span>Switch to Desktop</span>
         </button>
       </div>
     </div>

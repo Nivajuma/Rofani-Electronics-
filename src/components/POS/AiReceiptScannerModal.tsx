@@ -25,6 +25,7 @@ import {
   ArrowRight
 } from 'lucide-react';
 import { Product } from '../../types';
+import { optimizeImageFile } from '../../utils/imageOptimizer';
 
 export interface ScannedNewItem {
   id: string;
@@ -78,6 +79,7 @@ export const AiReceiptScannerModal: React.FC<AiReceiptScannerModalProps> = ({
   const [detectedItems, setDetectedItems] = useState<DetectedItem[]>([]);
   const [scannedNewItems, setScannedNewItems] = useState<ScannedNewItem[]>([]);
   const [summaryNote, setSummaryNote] = useState<string | null>(null);
+  const [scanError, setScanError] = useState<string | null>(null);
   const [autoAddDirectly, setAutoAddDirectly] = useState(true);
   const [addedSuccessMessage, setAddedSuccessMessage] = useState<string | null>(null);
   const [showManualNewItemForm, setShowManualNewItemForm] = useState(false);
@@ -233,9 +235,21 @@ export const AiReceiptScannerModal: React.FC<AiReceiptScannerModalProps> = ({
   };
 
   // Handle uploaded/picked photo
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    e.target.value = '';
     if (!file) return;
+
+    try {
+      const optimized = await optimizeImageFile(file, 1024, 0.82);
+      if (optimized) {
+        setCapturedImage(optimized);
+        analyzeImageWithAi(optimized);
+        return;
+      }
+    } catch (_) {
+      // Fallback to direct read if canvas optimization fails
+    }
 
     const reader = new FileReader();
     reader.onload = (event) => {
@@ -246,7 +260,6 @@ export const AiReceiptScannerModal: React.FC<AiReceiptScannerModalProps> = ({
       }
     };
     reader.readAsDataURL(file);
-    e.target.value = '';
   };
 
   // Call Gemini multimodal vision endpoint to identify items and match catalog
@@ -255,11 +268,13 @@ export const AiReceiptScannerModal: React.FC<AiReceiptScannerModalProps> = ({
     setDetectedItems([]);
     setScannedNewItems([]);
     setSummaryNote(null);
+    setScanError(null);
     setAddedSuccessMessage(null);
 
     try {
       const payload = {
         imageBase64: base64Image,
+        storeCategories: availableCategories,
         productsCatalog: products.map((p) => ({
           id: p.id,
           name: p.name,
@@ -278,11 +293,16 @@ export const AiReceiptScannerModal: React.FC<AiReceiptScannerModalProps> = ({
         body: JSON.stringify(payload),
       });
 
-      if (!res.ok) {
-        throw new Error(`Server returned ${res.status}`);
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data) {
+        throw new Error(
+          data?.error ||
+            (res.status === 503
+              ? 'Gemini AI Vision is not configured on the server. Add GEMINI_API_KEY in Settings > Secrets or Vercel Environment Variables.'
+              : `Server returned HTTP ${res.status}`)
+        );
       }
 
-      const data = await res.json();
       const rawMatches: any[] = data.matchedItems || [];
       const rawUnmatched: any[] = data.unmatchedItems || [];
 
@@ -301,45 +321,44 @@ export const AiReceiptScannerModal: React.FC<AiReceiptScannerModalProps> = ({
       });
 
       // 2. Parse unmatched items as new items ready to be added into inventory & receipt
-      const newItemsParsed: ScannedNewItem[] = rawUnmatched.map((u: any, idx: number) => {
-        const estPrice = Math.max(1, Number(u.suggestedPriceKSh) || 1200);
-        const estCost = Math.max(0, Number(u.suggestedCostKSh) || Math.round(estPrice * 0.7));
-        const detectedQty = Math.max(1, Number(u.quantity) || 1);
-        const category = u.category || 'Electronics';
-        const catPrefix = category.slice(0, 3).toUpperCase().replace(/[^A-Z]/g, 'GEN');
-        const sku = (u.suggestedSku || `ROF-${catPrefix}-${Math.floor(1000 + Math.random() * 9000)}`).toUpperCase();
-        const barcode = (u.suggestedBarcode || `${Math.floor(6164000000000 + Math.random() * 900000000000)}`).replace(/\D/g, '');
+      const newItemsParsed: ScannedNewItem[] = rawUnmatched
+        .filter((u: any) => (u?.detectedName || u?.name || '').trim().length > 0)
+        .map((u: any, idx: number) => {
+          const parsedPrice = Number(u.suggestedPriceKSh);
+          const estPrice = Number.isFinite(parsedPrice) && parsedPrice > 0 ? Math.round(parsedPrice) : 0;
+          const parsedCost = Number(u.suggestedCostKSh);
+          const estCost = Number.isFinite(parsedCost) && parsedCost > 0
+            ? Math.round(parsedCost)
+            : (estPrice > 0 ? Math.round(estPrice * 0.72) : 0);
+          const detectedQty = Math.max(1, Number(u.quantity) || 1);
+          const category = (u.category && String(u.category).trim()) || availableCategories[0] || 'Electronics';
+          const catPrefix = category.slice(0, 3).toUpperCase().replace(/[^A-Z]/g, 'GEN');
+          const sku = (u.suggestedSku || `ROF-${catPrefix}-${Math.floor(1000 + Math.random() * 9000)}`).toUpperCase();
+          const barcode = (u.suggestedBarcode || `${Math.floor(6164000000000 + Math.random() * 900000000000)}`).replace(/[^0-9A-Za-z\-]/g, '');
 
-        let cleanName = (u.detectedName || u.name || '').trim();
-        if (!cleanName || /^scanned\s*item/i.test(cleanName) || /^unknown\s*product/i.test(cleanName)) {
-          cleanName = `${category} Product #${idx + 1}`;
-        }
+          const cleanName = (u.detectedName || u.name || '').trim();
+          const cleanDesc = (u.description || '').trim() || `${cleanName} (${category} - ${u.subcategory || 'General'}).`;
 
-        let cleanDesc = (u.description || '').trim();
-        if (!cleanDesc || /^product\s*photo\s*captured/i.test(cleanDesc) || cleanDesc.toLowerCase() === cleanName.toLowerCase()) {
-          cleanDesc = `${cleanName} (${category} - ${u.subcategory || 'General'}). Scanned from photo/receipt on ${new Date().toLocaleDateString()}.`;
-        }
-
-        return {
-          id: `new_scanned_${Date.now()}_${idx}`,
-          detectedName: cleanName,
-          quantity: detectedQty,
-          suggestedPriceKSh: estPrice,
-          suggestedCostKSh: estCost,
-          category,
-          subcategory: u.subcategory || 'General',
-          sizeCapacity: u.sizeCapacity || 'Standard',
-          unit: u.unit || 'pcs',
-          suggestedSku: sku,
-          suggestedBarcode: barcode,
-          description: cleanDesc,
-          imageUrl: base64Image || capturedImage || '',
-          selected: true,
-          isEditing: false,
-          stockToAdd: Math.max(detectedQty * 5, 10),
-          isAdded: false,
-        };
-      });
+          return {
+            id: `new_scanned_${Date.now()}_${idx}`,
+            detectedName: cleanName,
+            quantity: detectedQty,
+            suggestedPriceKSh: estPrice,
+            suggestedCostKSh: estCost,
+            category,
+            subcategory: u.subcategory || 'General',
+            sizeCapacity: u.sizeCapacity || 'Standard',
+            unit: u.unit || 'pcs',
+            suggestedSku: sku,
+            suggestedBarcode: barcode,
+            description: cleanDesc,
+            imageUrl: base64Image || capturedImage || '',
+            selected: true,
+            isEditing: false,
+            stockToAdd: Math.max(detectedQty * 5, 10),
+            isAdded: false,
+          };
+        });
 
       setDetectedItems(matchedWithProducts);
       setScannedNewItems(newItemsParsed);
@@ -369,7 +388,7 @@ export const AiReceiptScannerModal: React.FC<AiReceiptScannerModalProps> = ({
       }
     } catch (err: any) {
       console.error('AI receipt scan error:', err);
-      setSummaryNote('Could not identify items. Please ensure good lighting and try again.');
+      setScanError(err?.message || 'Could not identify items. Please ensure good lighting and try again.');
     } finally {
       setIsAnalyzing(false);
     }
@@ -552,6 +571,7 @@ export const AiReceiptScannerModal: React.FC<AiReceiptScannerModalProps> = ({
     setDetectedItems([]);
     setScannedNewItems([]);
     setSummaryNote(null);
+    setScanError(null);
     setAddedSuccessMessage(null);
     setShowManualNewItemForm(false);
     startCamera();
@@ -740,6 +760,17 @@ export const AiReceiptScannerModal: React.FC<AiReceiptScannerModalProps> = ({
           {/* Results Section */}
           {capturedImage && !isAnalyzing && (
             <div className="space-y-4 pt-1">
+              {/* Error Notice */}
+              {scanError && (
+                <div className="bg-rose-950/85 border border-rose-500/60 p-3 rounded-xl text-xs text-rose-200 flex items-start gap-2.5 shadow-sm">
+                  <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                  <div className="space-y-0.5">
+                    <p className="font-bold text-rose-100">AI Receipt Scan Notice</p>
+                    <p className="text-[11px] leading-relaxed text-rose-200/90">{scanError}</p>
+                  </div>
+                </div>
+              )}
+
               {/* Summary note */}
               {summaryNote && (
                 <div className="bg-slate-950/70 border border-slate-800 p-2.5 rounded-xl text-xs text-slate-300 flex items-start gap-2">

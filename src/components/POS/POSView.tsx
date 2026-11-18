@@ -1678,7 +1678,7 @@ export const POSView: React.FC<POSViewProps> = ({
       </div>
 
       {/* Cart Itemized List */}
-      <div className="space-y-2 max-h-64 sm:max-h-96 overflow-y-auto pr-1">
+      <div className="space-y-2 lg:max-h-96 lg:overflow-y-auto pr-1">
         {cart.length === 0 ? (
           <div className="text-center py-10 space-y-3 border-2 border-dashed border-slate-800 rounded-2xl">
             <ShoppingBag className="w-8 h-8 text-slate-600 mx-auto" />
@@ -2206,7 +2206,7 @@ export const POSView: React.FC<POSViewProps> = ({
   };
 
   return (
-    <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6 space-y-4 pb-28 lg:pb-6">
+    <div className="max-w-7xl mx-auto w-full px-1 sm:px-6 lg:px-8 py-2 sm:py-6 space-y-4 flex-1 flex flex-col min-h-full pb-2 lg:pb-6">
       {/* Toast Notice Banner (New Sale / Feedback) */}
       {posNotice && (
         <div
@@ -2288,9 +2288,9 @@ export const POSView: React.FC<POSViewProps> = ({
         </button>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+      <div className="flex flex-col flex-1 lg:grid lg:grid-cols-12 gap-4 lg:gap-6 lg:items-start">
         {/* LEFT 7 COLS: PRODUCT CATALOG & SEARCH */}
-        <div className={`lg:col-span-7 space-y-4 ${mobileTab === 'catalog' ? 'block' : 'hidden lg:block'}`}>
+        <div className={`lg:col-span-7 space-y-4 ${mobileTab === 'catalog' ? 'flex flex-col flex-1 min-h-0' : 'hidden lg:block'}`}>
           {/* STICKY TOP SEARCH BAR & COMPACT TOP SELLERS CHIPS BAR */}
           <div className="sticky top-2 z-30 bg-slate-900/95 backdrop-blur-md p-3 rounded-2xl border border-slate-800 shadow-2xl space-y-2.5">
             {/* Dedicated Full-Width Search Input Bar with Auto-Focus & Quick Scan Button */}
@@ -3066,7 +3066,7 @@ export const POSView: React.FC<POSViewProps> = ({
           {/* Product Items Display (List Form vs Grid) */}
           {viewMode === 'list' ? (
             /* High-density Tabular List Form for 300+ items */
-            <div ref={posItemListRef} className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-lg max-h-[calc(100vh-280px)] overflow-y-auto">
+            <div ref={posItemListRef} className="bg-slate-900 border border-slate-800 rounded-2xl overflow-x-auto shadow-lg flex-1 min-h-0 lg:max-h-[calc(100vh-280px)] lg:overflow-y-auto">
               <table className="w-full text-left text-xs text-slate-300">
                 <thead className="bg-slate-950 text-slate-400 font-semibold uppercase tracking-wider border-b border-slate-800 sticky top-0 z-10">
                   <tr>
@@ -3215,7 +3215,7 @@ export const POSView: React.FC<POSViewProps> = ({
             </div>
           ) : (
             /* Product Cards Grid */
-            <div ref={posItemListRef} className="grid grid-cols-2 sm:grid-cols-3 gap-3 max-h-[calc(100vh-280px)] overflow-y-auto pr-1">
+            <div ref={posItemListRef} className="grid grid-cols-2 sm:grid-cols-3 gap-3 flex-1 content-start lg:max-h-[calc(100vh-280px)] lg:overflow-y-auto lg:pr-1">
               {filteredProducts.length === 0 ? (
                 <div className="col-span-full py-10 text-center text-slate-500 bg-slate-950/40 rounded-2xl border border-dashed border-slate-800 p-6 space-y-2">
                   <Search className="w-7 h-7 text-slate-600 mx-auto" />

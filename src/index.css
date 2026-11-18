@@ -66,3 +66,6 @@
   animation: btnFlashDanger 0.38s cubic-bezier(0.22, 1, 0.36, 1) !important;
 }
 
+.pb-safe {
+  padding-bottom: max(0.375rem, env(safe-area-inset-bottom, 0px));
+}

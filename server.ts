@@ -37,8 +37,8 @@ async function startServer() {
       config?: any;
     }
   ) => {
-    // Try recommended gemini-3.8-flash first, then fallback to gemini-3.1-flash-lite and gemini-flash-latest
-    const candidateModels = ['gemini-3.8-flash', 'gemini-3.1-flash-lite', 'gemini-flash-latest'];
+    // Try recommended gemini-4-hydrogen first, then fallback to gemini-3.1-flash-lite
+    const candidateModels = ['gemini-4-hydrogen', 'gemini-3.1-flash-lite'];
     let lastError: any = null;
 
     for (const model of candidateModels) {
@@ -163,7 +163,7 @@ async function startServer() {
   // API Endpoint: AI Multimodal Product Camera Identification with Local Catalog Context Matching (0 Firestore Reads)
   app.post('/api/ai/identify-product', async (req, res) => {
     try {
-      const { imageBase64, existingProducts, fileName, hintCategory } = req.body;
+      const { imageBase64, existingProducts, fileName, storeCategories } = req.body || {};
 
       if (!imageBase64 || typeof imageBase64 !== 'string') {
         res.status(400).json({ error: 'imageBase64 is required' });
@@ -171,23 +171,10 @@ async function startServer() {
       }
 
       const ai = getGeminiClient();
-      const extractedFallback = cleanProductNameFromContext(fileName, hintCategory || 'Electronics');
-
       if (!ai) {
-        // Fallback response when GEMINI_API_KEY is not set: use smart context extraction
-        res.json({
-          name: extractedFallback.name,
-          category: extractedFallback.category,
-          subcategory: extractedFallback.subcategory,
-          suggestedPriceKSh: extractedFallback.price,
-          suggestedCostKSh: extractedFallback.cost,
-          description: extractedFallback.description,
-          suggestedSku: `SKU-${Math.floor(1000 + Math.random() * 9000)}`,
-          confidenceScore: 0.85,
-          isExistingMatch: false,
-          matchedProductId: null,
-          needsNameReview: extractedFallback.needsNameReview,
-          note: 'Smart visual context processed (Offline mode active).'
+        res.status(503).json({
+          error:
+            'GEMINI_API_KEY is not configured on the server. Add GEMINI_API_KEY in Settings > Secrets or your deployment environment variables to identify products from photos.',
         });
         return;
       }
@@ -199,12 +186,17 @@ async function startServer() {
       if (imageBase64.startsWith('http://') || imageBase64.startsWith('https://')) {
         try {
           const imgFetch = await fetch(imageBase64);
+          if (!imgFetch.ok) {
+            res.status(400).json({ error: `Could not fetch image URL (HTTP ${imgFetch.status}).` });
+            return;
+          }
           const buffer = await imgFetch.arrayBuffer();
           const contentType = imgFetch.headers.get('content-type') || 'image/jpeg';
           mimeType = contentType;
           cleanData = Buffer.from(buffer).toString('base64');
-        } catch (fetchErr) {
-          console.warn('Could not fetch external image URL, using fallback:', fetchErr);
+        } catch (fetchErr: any) {
+          res.status(400).json({ error: `Could not fetch image URL: ${fetchErr?.message || 'Invalid URL'}` });
+          return;
         }
       } else if (imageBase64.includes(';base64,')) {
         const parts = imageBase64.split(';base64,');
@@ -214,40 +206,56 @@ async function startServer() {
         cleanData = imageBase64.trim();
       }
 
+      if (!cleanData || cleanData.length < 32) {
+        res.status(400).json({ error: 'Uploaded image data is empty or invalid.' });
+        return;
+      }
+
+      const defaultCats = [
+        'Electronics',
+        'Phones & Accessories',
+        'Household',
+        'Clothes (Men, Women & Kids Wear)',
+        'Shoes',
+        'Beauty Products',
+        'Hardware Products',
+      ];
+      const allowedCategories: string[] =
+        Array.isArray(storeCategories) && storeCategories.length > 0
+          ? storeCategories.map((c: any) => String(c)).filter(Boolean)
+          : defaultCats;
+
       // Prepare local catalog context if provided (Zero Firestore reads)
       let catalogContextStr = '';
       if (Array.isArray(existingProducts) && existingProducts.length > 0) {
-        const sample = existingProducts.slice(0, 60).map((p: any) => 
+        const sample = existingProducts.slice(0, 60).map((p: any) =>
           `- ID: ${p.id} | Name: "${p.name}" | Category: ${p.category} | SKU: ${p.sku} | Barcode: ${p.barcode || 'N/A'} | Price: KSh ${p.sellingPrice}`
         ).join('\n');
-        catalogContextStr = `\nExisting Local Product Catalog Context (Total: ${existingProducts.length} items):\n${sample}\n\nTask: First compare the photo against the above local catalog items. If the photographed item matches an existing item, set "isExistingMatch": true and "matchedProductId" to that item's ID. Otherwise set "isExistingMatch": false and "matchedProductId": null.\n`;
+        catalogContextStr = `\nExisting Local Product Catalog (Total: ${existingProducts.length} items):\n${sample}\n\nIf the photographed item clearly matches an existing item above, set "isExistingMatch": true, "matchedProductId" to its ID, and match its exact name/price unless a new price sticker is visible.\n`;
       }
 
-      const prompt = `Analyze this camera photo of a product taken in a Kenya retail store (Rofani Electronics & Boutique).
-Identify the product accurately and provide stock entry data. Select "category" strictly from one of these exact store categories:
-- Household
-- Electronics
-- Beauty Products
-- Hardware Products
-- Phones & Accessories
-- Clothes (Men, Women & Kids Wear)
-- Shoes
+      const prompt = `Inspect this product photo carefully for a retail shop in Kenya ("Rofani Electronics & Boutique").
+Read EVERY visible word, brand logo, model number, size/volume/wattage/capacity label, barcode digits, and price sticker in the image.
+
+Select "category" strictly from this store category list:
+${allowedCategories.map((c) => `- ${c}`).join('\n')}
 ${catalogContextStr}
-${fileName ? `Original file/photo label hint: "${fileName}"\n` : ''}
+${fileName && !/^(Camera_Product|IMG|PXL|PHOTO|Screenshot)/i.test(fileName) ? `Original file/photo label hint: "${fileName}"\n` : ''}
 CRITICAL REQUIREMENTS:
-1. "name": You MUST identify the specific product brand, model, device, apparel type, or packaging text visible in the photo.
-   NEVER under any circumstances return "Scanned Item", "Unknown Product", or "Item".
-   Examples of expected accurate names: "Oraimo 20W Fast Charger with Type-C Cable", "Samsung Galaxy A15 128GB - Blue", "Men Cotton Chino Trousers - Khaki", "Stainless Steel Cordless Electric Kettle 2.2L", "Ladies Platform Wedge Sandals - Nude".
-   If brand text is unreadable, describe the specific physical product clearly (e.g. "Braided Nylon Fast Charging USB-C Cable 1M", "Double Wall Insulated Thermal Flask 500ml", "Women Floral Wrap Summer Dress").
-2. "category": Must be one of the exact categories above.
-3. "subcategory": Specific subcategory matching the category.
-4. "suggestedPriceKSh": Realistic retail selling price in Kenya Shillings (numeric integer).
-5. "suggestedCostKSh": Realistic wholesale/buying cost in Kenya Shillings (numeric integer, approximately 65-75% of selling price).
-6. "description": Informative 1-2 sentence specification or description detailing brand, material, color, capacity, or key features. NEVER return generic placeholders.
-7. "suggestedSku": A short clean stock code (e.g. "ROF-8821").
-8. "confidenceScore": Confidence score between 0.0 and 1.0.
-9. "isExistingMatch": Boolean indicating if it matches an item from the local catalog context.
-10. "matchedProductId": String ID of the matched product if isExistingMatch is true, otherwise null.`;
+1. "name": Exact, specific product name including brand, model, variant, color, or capacity visible in the photo (e.g. "Samsung 25W USB-C Super Fast Wall Charger", "Oraimo FreePods 4 ANC Earbuds - Black", "Nivea Perfect & Radiant Body Lotion 400ml", "Ramtons RM/329 Cordless Kettle 1.7L", "Men Slim Fit Stretch Jeans - Dark Blue").
+   NEVER return vague labels like "Household Product", "New Household Product", "Scanned Item", "Unknown Product", or "Item".
+2. "category": Must be one exact category from the store category list above matching what is actually shown in the photo.
+3. "subcategory": Specific subcategory matching the category (e.g. "Audio & Earbuds", "Chargers & Cables", "Skincare & Lotions", "Kitchen Appliances", "Footwear").
+4. "sizeCapacity": Exact size, capacity, wattage, storage, volume, or apparel/shoe size visible or standard for the item (e.g. "400ml", "1.7L", "25W", "128GB", "Size 42", "Standard").
+5. "unit": Retail selling unit (e.g. "pcs", "pack", "bottle", "pair", "box").
+6. "suggestedPriceKSh": If a price tag/sticker is visible in the photo, use that exact number. Otherwise estimate a realistic Kenyan retail selling price in KSh specifically for THIS exact item and brand (e.g. USB cable ~350, lotion ~650, electric kettle ~2500, smartphone ~18500 — DO NOT default everything to 1200). Must be a positive integer.
+7. "suggestedCostKSh": Realistic wholesale/buying cost in KSh (roughly 65-75% of suggestedPriceKSh). Must be a positive integer.
+8. "description": 1-2 concrete sentences detailing the visible product specifications, brand/model, material, color, capacity/size, and usage based strictly on what is seen in the image.
+9. "suggestedSku": Clean uppercase stock SKU code tailored to the product (e.g. "ROF-SAM-25W").
+10. "suggestedBarcode": Exact numeric barcode if clearly readable in the photo, otherwise "".
+11. "confidenceScore": Confidence score between 0.0 and 1.0.
+12. "isExistingMatch": Boolean indicating if it matches an item from the local catalog context.
+13. "matchedProductId": String ID of the matched product if isExistingMatch is true, otherwise "".`;
 
       const response = await generateContentWithFallback(ai, {
         contents: {
@@ -271,64 +279,61 @@ CRITICAL REQUIREMENTS:
               name: { type: Type.STRING },
               category: { type: Type.STRING },
               subcategory: { type: Type.STRING },
+              sizeCapacity: { type: Type.STRING },
+              unit: { type: Type.STRING },
               suggestedPriceKSh: { type: Type.NUMBER },
               suggestedCostKSh: { type: Type.NUMBER },
               description: { type: Type.STRING },
               suggestedSku: { type: Type.STRING },
+              suggestedBarcode: { type: Type.STRING },
               confidenceScore: { type: Type.NUMBER },
               isExistingMatch: { type: Type.BOOLEAN },
               matchedProductId: { type: Type.STRING },
             },
-            required: ['name', 'category', 'suggestedPriceKSh', 'suggestedCostKSh', 'description', 'suggestedSku'],
+            required: [
+              'name',
+              'category',
+              'subcategory',
+              'suggestedPriceKSh',
+              'suggestedCostKSh',
+              'description',
+              'suggestedSku',
+            ],
           },
         },
       });
 
-      const replyText = response.text || '{}';
-      try {
-        const parsed = JSON.parse(replyText);
-        let finalName = (parsed.name || '').trim();
-        // Guard against any generic fallback strings
-        if (!finalName || /^scanned item$/i.test(finalName) || /^unknown product$/i.test(finalName) || /^item$/i.test(finalName)) {
-          finalName = extractedFallback.name;
-        }
-        parsed.name = finalName;
-        if (!parsed.description || /^product photo captured/i.test(parsed.description) || /^scanned/i.test(parsed.description)) {
-          parsed.description = extractedFallback.description;
-        }
-        parsed.needsNameReview = finalName.startsWith('New ') || finalName.startsWith('Retail Item');
-        res.json(parsed);
-      } catch (parseErr) {
-        res.json({
-          name: extractedFallback.name,
-          category: extractedFallback.category,
-          subcategory: extractedFallback.subcategory,
-          suggestedPriceKSh: extractedFallback.price,
-          suggestedCostKSh: extractedFallback.cost,
-          description: extractedFallback.description,
-          suggestedSku: `SKU-${Math.floor(1000 + Math.random() * 9000)}`,
-          isExistingMatch: false,
-          matchedProductId: null,
-          needsNameReview: extractedFallback.needsNameReview,
-        });
+      const replyText = (response.text || '').trim();
+      if (!replyText) {
+        res.status(502).json({ error: 'Gemini AI returned an empty response. Please capture a clearer product photo.' });
+        return;
       }
-    } catch (err: any) {
-      console.warn('Gemini Product Vision notice (safe fallback applied):', err?.message || err);
-      const { fileName, hintCategory } = req.body || {};
-      const fallback = cleanProductNameFromContext(fileName, hintCategory || 'Electronics');
+
+      const parsed = JSON.parse(replyText);
+      const finalName = String(parsed.name || '').trim();
+      if (!finalName || /^(new\s+household\s+product|scanned\s+item|unknown\s+product|item)$/i.test(finalName)) {
+        res.status(422).json({
+          error: 'Could not clearly identify the product from this photo. Please retake with better lighting or label focus.',
+        });
+        return;
+      }
+
+      const sellingPrice = Math.max(1, Math.round(Number(parsed.suggestedPriceKSh) || 0));
+      const costPrice = Math.max(1, Math.round(Number(parsed.suggestedCostKSh) || Math.round(sellingPrice * 0.7)));
+
       res.json({
-        name: fallback.name,
-        category: fallback.category,
-        subcategory: fallback.subcategory,
-        suggestedPriceKSh: fallback.price,
-        suggestedCostKSh: fallback.cost,
-        description: fallback.description,
-        suggestedSku: `SKU-${Math.floor(1000 + Math.random() * 9000)}`,
-        confidenceScore: 0.6,
-        isExistingMatch: false,
-        matchedProductId: null,
-        needsNameReview: fallback.needsNameReview,
-        note: 'Product photo processed. Please verify and confirm specifications.'
+        ...parsed,
+        name: finalName,
+        suggestedPriceKSh: sellingPrice,
+        suggestedCostKSh: costPrice,
+        matchedProductId: parsed.isExistingMatch && parsed.matchedProductId ? parsed.matchedProductId : null,
+        needsNameReview: false,
+      });
+    } catch (err: any) {
+      console.error('Gemini Product Vision error:', err?.message || err);
+      const status = err?.status === 429 ? 429 : err?.status === 403 ? 403 : 502;
+      res.status(status).json({
+        error: err?.message || 'AI product vision failed to analyze the photo. Please retry.',
       });
     }
   });
@@ -370,33 +375,9 @@ CRITICAL REQUIREMENTS:
       }));
 
       if (!ai) {
-        // Fallback matching if GEMINI_API_KEY is not configured
-        const sampleMatches = catalogSummary.slice(0, 2).map((item: any) => ({
-          productId: item.id,
-          matchedProductName: item.name,
-          quantity: 1,
-          confidence: 0.9,
-          reason: 'Matched product from active store catalog (offline mode).',
-        }));
-        const sampleUnmatched = [
-          {
-            detectedName: 'Type-C Super Fast 65W Charging Adapter',
-            quantity: 1,
-            suggestedPriceKSh: 1950,
-            suggestedCostKSh: 1300,
-            category: 'Electronics',
-            subcategory: 'Power & Cables',
-            sizeCapacity: '65W',
-            unit: 'pcs',
-            suggestedSku: `ROF-PWR-${Math.floor(1000 + Math.random() * 9000)}`,
-            suggestedBarcode: `616400${Math.floor(1000000 + Math.random() * 9000000)}`,
-            description: 'Ultra-fast USB-C wall charger with Power Delivery for phones and laptops.',
-          },
-        ];
-        res.json({
-          matchedItems: sampleMatches,
-          unmatchedItems: sampleUnmatched,
-          summaryNote: `Offline mode: auto-matched ${sampleMatches.length} catalog item(s) and detected ${sampleUnmatched.length} new item ready to add.`,
+        res.status(503).json({
+          error:
+            'GEMINI_API_KEY is not configured on the server. Add GEMINI_API_KEY in AI Studio Secrets or Vercel Environment Variables to use AI photo scanning.',
         });
         return;
       }
@@ -491,42 +472,19 @@ TASK:
         },
       });
 
-      const replyText = response.text || '{}';
-      try {
-        const parsed = JSON.parse(replyText);
-        if (Array.isArray(parsed.unmatchedItems)) {
-          parsed.unmatchedItems = parsed.unmatchedItems.map((u: any, idx: number) => {
-            const cat = u.category || 'General';
-            let name = (u.detectedName || u.name || '').trim();
-            if (!name || /^scanned\s*item/i.test(name) || /^unknown\s*product/i.test(name)) {
-              name = `${cat} Item #${idx + 1}`;
-            }
-            let desc = (u.description || '').trim();
-            if (!desc || /^product\s*photo\s*captured/i.test(desc) || desc.toLowerCase() === name.toLowerCase()) {
-              desc = `${name} (${cat}). Verified specifications and product details.`;
-            }
-            return {
-              ...u,
-              detectedName: name,
-              description: desc,
-            };
-          });
-        }
-        res.json(parsed);
-      } catch (parseErr) {
-        console.warn('Could not parse Gemini vision JSON response:', parseErr);
-        res.json({
-          matchedItems: [],
-          unmatchedItems: [],
-          summaryNote: 'AI analyzed photo but could not parse items. Please retry with clearer lighting.',
-        });
+      const replyText = (response.text || '').trim();
+      if (!replyText) {
+        res.status(502).json({ error: 'Gemini AI returned an empty response. Please try a clearer photo.' });
+        return;
       }
+
+      const parsed = JSON.parse(replyText);
+      res.json(parsed);
     } catch (err: any) {
-      console.warn('Gemini Receipt Vision Scanner fallback:', err?.message || err);
-      res.json({
-        matchedItems: [],
-        unmatchedItems: [],
-        summaryNote: 'AI service temporarily busy. Please retry or scan barcode directly.',
+      console.error('Gemini Receipt Vision Scanner error:', err?.message || err);
+      const status = err?.status === 429 ? 429 : err?.status === 403 ? 403 : 502;
+      res.status(status).json({
+        error: err?.message || 'AI vision service could not analyze the photo. Please retry.',
       });
     }
   });
@@ -621,7 +579,6 @@ Style Guidelines:
         contents: prompt,
         config: {
           systemInstruction,
-          temperature: 0.7,
         },
       });
 

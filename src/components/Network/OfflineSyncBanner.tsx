@@ -13,6 +13,7 @@ import {
   UploadCloud,
   CheckCircle2,
   GitCompareArrows,
+  Receipt,
 } from 'lucide-react';
 import {
   useNetworkStatus,
@@ -51,6 +52,7 @@ export const OfflineSyncBanner: React.FC<OfflineSyncBannerProps> = ({
   const [isRetryingSync, setIsRetryingSync] = useState<boolean>(false);
   const [isDismissed, setIsDismissed] = useState<boolean>(false);
   const [showQueueDetails, setShowQueueDetails] = useState<boolean>(false);
+  const [syncBatchTotalSales, setSyncBatchTotalSales] = useState<number>(0);
   const [retryFeedback, setRetryFeedback] = useState<{
     type: 'success' | 'error';
     message: string;
@@ -161,6 +163,135 @@ export const OfflineSyncBanner: React.FC<OfflineSyncBannerProps> = ({
       .join(', ');
   }, [queuedItems]);
 
+  // Specifically track pending sale transactions queued for Cloud Firestore sync
+  const pendingSaleItems = React.useMemo(
+    () => queuedItems.filter((item) => item.type === 'sale'),
+    [queuedItems]
+  );
+  const pendingSalesCount = pendingSaleItems.length;
+  const pendingSalesTotalAmount = React.useMemo(
+    () =>
+      pendingSaleItems.reduce(
+        (sum, item) => sum + (Number(item.data?.grandTotal ?? item.data?.totalAmount) || 0),
+        0
+      ),
+    [pendingSaleItems]
+  );
+
+  // Track peak queued sales in the current sync batch so progress animates live as sales upload
+  useEffect(() => {
+    if (pendingSalesCount > syncBatchTotalSales) {
+      setSyncBatchTotalSales(pendingSalesCount);
+    } else if (pendingSalesCount === 0 && !isRetryingSync) {
+      setSyncBatchTotalSales(0);
+    }
+  }, [pendingSalesCount, syncBatchTotalSales, isRetryingSync]);
+
+  const batchTotalSales = Math.max(syncBatchTotalSales, pendingSalesCount);
+  const syncedSalesInBatch = Math.max(0, batchTotalSales - pendingSalesCount);
+  const salesSyncPercent =
+    batchTotalSales > 0
+      ? Math.round((syncedSalesInBatch / batchTotalSales) * 100)
+      : 0;
+
+  const renderPendingSalesProgress = (variant: 'online-queued' | 'offline') => {
+    const isOfflineMode = variant === 'offline';
+    const hasPendingSales = pendingSalesCount > 0;
+    const isSyncingNow = isRetryingSync && hasPendingSales;
+
+    return (
+      <div
+        className={`mt-2 rounded-xl px-3 py-2 border ${
+          isOfflineMode
+            ? 'bg-slate-950/90 border-amber-700/40 text-slate-100'
+            : 'bg-slate-950/90 border-orange-700/40 text-slate-100'
+        }`}
+      >
+        <div className="flex items-center justify-between gap-2 flex-wrap text-[11px]">
+          <div className="flex items-center gap-1.5 font-bold text-slate-100">
+            <Receipt className={`w-3.5 h-3.5 shrink-0 ${hasPendingSales ? 'text-sky-400' : 'text-emerald-400'}`} />
+            <span>
+              Pending Sale Transactions:{' '}
+              <strong className="font-mono tabular-nums text-amber-300">
+                {pendingSalesCount}
+              </strong>{' '}
+              queued
+            </span>
+            {hasPendingSales && pendingSalesTotalAmount > 0 && (
+              <span className="text-[10px] font-mono tabular-nums text-emerald-300 bg-emerald-950/70 border border-emerald-700/50 px-1.5 py-0.5 rounded">
+                KSh {pendingSalesTotalAmount.toLocaleString()}
+              </span>
+            )}
+          </div>
+
+          <span className="font-mono tabular-nums text-[10px] font-bold text-slate-300">
+            {hasPendingSales
+              ? isSyncingNow || syncedSalesInBatch > 0
+                ? `${syncedSalesInBatch}/${batchTotalSales} synced (${salesSyncPercent}%)`
+                : isOfflineMode
+                ? `${pendingSalesCount} waiting for network`
+                : `${pendingSalesCount} awaiting cloud upload`
+              : '0 sales pending'}
+          </span>
+        </div>
+
+        <div
+          role="progressbar"
+          aria-label="Pending sale transactions queued for cloud sync"
+          aria-valuemin={0}
+          aria-valuemax={Math.max(batchTotalSales, 1)}
+          aria-valuenow={syncedSalesInBatch}
+          className="mt-1.5 w-full h-2 rounded-full bg-slate-800 border border-slate-700/80 overflow-hidden"
+        >
+          <svg
+            className="w-full h-full block"
+            viewBox="0 0 100 8"
+            preserveAspectRatio="none"
+            aria-hidden="true"
+          >
+            {hasPendingSales && syncedSalesInBatch === 0 ? (
+              <rect
+                x="0"
+                y="0"
+                width="100"
+                height="8"
+                rx="4"
+                className={`${
+                  isSyncingNow
+                    ? 'fill-sky-400 animate-pulse'
+                    : isOfflineMode
+                    ? 'fill-amber-400/80'
+                    : 'fill-orange-400/85'
+                }`}
+              />
+            ) : (
+              <>
+                {hasPendingSales && (
+                  <rect
+                    x="0"
+                    y="0"
+                    width="100"
+                    height="8"
+                    rx="4"
+                    className="fill-amber-500/25"
+                  />
+                )}
+                <rect
+                  x="0"
+                  y="0"
+                  width={hasPendingSales ? Math.max(salesSyncPercent, 6) : 100}
+                  height="8"
+                  rx="4"
+                  className={hasPendingSales ? 'fill-sky-400 transition-all duration-300' : 'fill-emerald-400'}
+                />
+              </>
+            )}
+          </svg>
+        </div>
+      </div>
+    );
+  };
+
   // Proactive alert when millisecond-tie conflicts were deferred via "Resolve Later"
   const renderConflictStrip = () => {
     if (!conflictCount || conflictCount <= 0 || !onOpenConflictAssistant) return null;
@@ -227,11 +358,30 @@ export const OfflineSyncBanner: React.FC<OfflineSyncBannerProps> = ({
           title="You have unsynced local records waiting to upload. Click to expand."
         >
           <UploadCloud className="w-4 h-4 text-orange-400 shrink-0 animate-pulse" />
-          <div className="flex flex-col text-left">
-            <span className="text-[11px] font-black text-orange-300 uppercase tracking-wider">
-              {pendingCount} Unsynced Record{pendingCount === 1 ? '' : 's'}
+          <div className="flex flex-col text-left min-w-[140px]">
+            <span className="text-[11px] font-black text-orange-300 uppercase tracking-wider flex items-center gap-1.5">
+              <span>{pendingCount} Unsynced Record{pendingCount === 1 ? '' : 's'}</span>
+              {pendingSalesCount > 0 && (
+                <span className="bg-sky-500/20 text-sky-300 border border-sky-500/40 px-1.5 py-0.2 rounded font-mono text-[9px]">
+                  {pendingSalesCount} {pendingSalesCount === 1 ? 'sale' : 'sales'}
+                </span>
+              )}
             </span>
             <span className="text-[10px] text-slate-300 font-medium">Tap to Retry All Pending Syncs</span>
+            {pendingSalesCount > 0 && (
+              <div className="mt-1 w-full h-1.5 rounded-full bg-slate-800 overflow-hidden">
+                <svg className="w-full h-full block" viewBox="0 0 100 6" preserveAspectRatio="none" aria-hidden="true">
+                  <rect
+                    x="0"
+                    y="0"
+                    width={syncedSalesInBatch > 0 ? Math.max(salesSyncPercent, 8) : 100}
+                    height="6"
+                    rx="3"
+                    className={syncedSalesInBatch > 0 ? 'fill-sky-400' : 'fill-orange-400/85'}
+                  />
+                </svg>
+              </div>
+            )}
           </div>
           <Maximize2 className="w-3.5 h-3.5 text-orange-400 ml-1 shrink-0" />
         </div>
@@ -263,6 +413,11 @@ export const OfflineSyncBanner: React.FC<OfflineSyncBannerProps> = ({
                   {pendingCount} unsynced local record{pendingCount === 1 ? '' : 's'} waiting for Cloud upload
                 </h2>
 
+                <span className="inline-flex items-center gap-1 bg-slate-950 text-sky-300 px-2 py-0.5 rounded-md text-[11px] font-bold font-mono tabular-nums border border-sky-400/40 shadow-sm">
+                  <Receipt className="w-3 h-3 text-sky-400" />
+                  {pendingSalesCount} Pending Sale{pendingSalesCount === 1 ? '' : 's'}
+                </span>
+
                 {queueBreakdownText && (
                   <span className="inline-flex items-center gap-1 bg-slate-950/15 text-slate-950 px-2 py-0.5 rounded-md text-[11px] font-bold border border-slate-950/20">
                     {queueBreakdownText}
@@ -275,6 +430,8 @@ export const OfflineSyncBanner: React.FC<OfflineSyncBannerProps> = ({
                   ? 'Your connection is online, and these changes are safely saved on this device—sync them now so they appear across all worker phones and devices.'
                   : 'Battery & Mobile Data Saver is active (Aggressive Auto-Sync is off). Your changes stay safely on this device until you tap "Retry All Pending Syncs".'}
               </p>
+
+              {renderPendingSalesProgress('online-queued')}
 
               {retryFeedback && (
                 <div
@@ -427,7 +584,11 @@ export const OfflineSyncBanner: React.FC<OfflineSyncBannerProps> = ({
         </div>
         <div className="flex flex-col text-left">
           <span className="text-[11px] font-black text-amber-300 uppercase tracking-wider">Currently Offline</span>
-          <span className="text-[10px] text-amber-200/90 font-medium">Actions will sync once re-connected</span>
+          <span className="text-[10px] text-amber-200/90 font-medium">
+            {pendingSalesCount > 0
+              ? `${pendingSalesCount} pending sale${pendingSalesCount === 1 ? '' : 's'} queued for sync`
+              : 'Actions will sync once re-connected'}
+          </span>
         </div>
         {pendingCount > 0 && (
           <span className="bg-amber-500 text-slate-950 text-[10px] font-black px-2 py-0.5 rounded-full font-mono ml-1">
@@ -483,6 +644,11 @@ export const OfflineSyncBanner: React.FC<OfflineSyncBannerProps> = ({
                 </button>
               )}
 
+              <span className="inline-flex items-center gap-1 bg-slate-950 text-sky-300 px-2 py-0.5 rounded-md text-[11px] font-bold font-mono tabular-nums border border-sky-400/40 shadow-sm">
+                <Receipt className="w-3 h-3 text-sky-400" />
+                {pendingSalesCount} Pending Sale{pendingSalesCount === 1 ? '' : 's'}
+              </span>
+
               {isSimulated && (
                 <span className="bg-purple-950 text-purple-200 px-2 py-0.5 rounded-md text-[10px] font-bold">
                   Simulated
@@ -493,6 +659,8 @@ export const OfflineSyncBanner: React.FC<OfflineSyncBannerProps> = ({
             <p className="text-xs sm:text-xs font-semibold text-slate-950 mt-1 leading-snug">
               Any actions performed (sales, inventory edits, customer updates, expenses) will only sync once a stable connection is re-established.
             </p>
+
+            {(pendingSalesCount > 0 || pendingCount > 0) && renderPendingSalesProgress('offline')}
           </div>
         </div>
 

@@ -1,5 +1,51 @@
 {
   "entities": {
+    "StoreProfile": {
+      "title": "StoreProfile",
+      "description": "Multi-tenant store workspace profile and SaaS subscription state",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerUid": { "type": "string", "maxLength": 128 },
+        "ownerEmail": { "type": "string", "maxLength": 200 },
+        "storeName": { "type": "string", "maxLength": 200 },
+        "phone": { "type": "string", "maxLength": 64 },
+        "kraPin": { "type": "string", "maxLength": 64 },
+        "mpesaShortcode": { "type": "string", "maxLength": 64 },
+        "mpesaShortcodeType": { "type": "string", "enum": ["till", "paybill"] },
+        "mpesaStoreNumber": { "type": "string", "maxLength": 64 },
+        "planType": { "type": "string", "enum": ["trial", "monthly", "annual"] },
+        "subscriptionStatus": { "type": "string", "enum": ["active", "expired"] },
+        "expiresAt": { "type": "string", "maxLength": 64 },
+        "lastPaymentRef": { "type": "string", "maxLength": 128 },
+        "lastPaymentAmount": { "type": "number" },
+        "lastPaymentAt": { "type": "string", "maxLength": 64 },
+        "lastPaymentPhone": { "type": "string", "maxLength": 64 },
+        "lastPaymentMethod": { "type": "string", "enum": ["stk_push", "manual_receipt", "admin_override", "free_trial"] },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "ownerUid", "ownerEmail", "storeName", "planType", "subscriptionStatus", "expiresAt"]
+    },
+    "SubscriptionPayment": {
+      "title": "SubscriptionPayment",
+      "description": "Recorded M-Pesa subscription payment or manual receipt for a tenant store",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "storeId": { "type": "string", "maxLength": 128 },
+        "planType": { "type": "string", "enum": ["monthly", "annual"] },
+        "amount": { "type": "number" },
+        "phoneNumber": { "type": "string", "maxLength": 64 },
+        "mpesaReceiptNumber": { "type": "string", "maxLength": 128 },
+        "paymentMethod": { "type": "string", "enum": ["stk_push", "manual_receipt", "admin_override"] },
+        "status": { "type": "string", "enum": ["Completed", "Pending", "Failed"] },
+        "paidAt": { "type": "string", "maxLength": 64 },
+        "expiresAtAfter": { "type": "string", "maxLength": 64 },
+        "recordedByEmail": { "type": "string", "maxLength": 200 }
+      },
+      "required": ["id", "storeId", "planType", "amount", "mpesaReceiptNumber", "paidAt"]
+    },
     "Product": {
       "title": "Product",
       "description": "Inventory product item",
@@ -126,41 +172,85 @@
     }
   },
   "firestore": {
+    "/stores/{storeId}": {
+      "schema": { "$ref": "#/entities/StoreProfile" },
+      "description": "Tenant store workspace metadata and SaaS subscription profile"
+    },
+    "/stores/{storeId}/subscription_payments/{paymentId}": {
+      "schema": { "$ref": "#/entities/SubscriptionPayment" },
+      "description": "Tenant subscription payment receipts (M-Pesa STK or manual confirmation)"
+    },
+    "/stores/{storeId}/products/{productId}": {
+      "schema": { "$ref": "#/entities/Product" },
+      "description": "Tenant-isolated products catalog"
+    },
+    "/stores/{storeId}/transactions/{transactionId}": {
+      "schema": { "$ref": "#/entities/Transaction" },
+      "description": "Tenant-isolated sales transactions"
+    },
+    "/stores/{storeId}/customers/{customerId}": {
+      "schema": { "$ref": "#/entities/Customer" },
+      "description": "Tenant-isolated customer profiles"
+    },
+    "/stores/{storeId}/suppliers/{supplierId}": {
+      "schema": { "$ref": "#/entities/Supplier" },
+      "description": "Tenant-isolated supplier profiles"
+    },
+    "/stores/{storeId}/expenses/{expenseId}": {
+      "schema": { "$ref": "#/entities/Expense" },
+      "description": "Tenant-isolated store expenses"
+    },
+    "/stores/{storeId}/users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "Tenant-isolated staff user profiles"
+    },
+    "/stores/{storeId}/restock_records/{recordId}": {
+      "schema": { "$ref": "#/entities/RestockRecord" },
+      "description": "Tenant-isolated inventory restock batches"
+    },
+    "/stores/{storeId}/sensitive_action_logs/{logId}": {
+      "schema": { "$ref": "#/entities/SensitiveActionLog" },
+      "description": "Tenant-isolated immutable audit logs"
+    },
+    "/stores/{storeId}/store_settings/{settingId}": {
+      "schema": { "$ref": "#/entities/StoreSetting" },
+      "description": "Tenant-isolated store security and M-Pesa configuration documents"
+    },
     "/products/{productId}": {
       "schema": { "$ref": "#/entities/Product" },
-      "description": "Products collection"
+      "description": "Legacy owner root products collection"
     },
     "/transactions/{transactionId}": {
       "schema": { "$ref": "#/entities/Transaction" },
-      "description": "Transactions collection"
+      "description": "Legacy owner root transactions collection"
     },
     "/customers/{customerId}": {
       "schema": { "$ref": "#/entities/Customer" },
-      "description": "Customers collection"
+      "description": "Legacy owner root customers collection"
     },
     "/suppliers/{supplierId}": {
       "schema": { "$ref": "#/entities/Supplier" },
-      "description": "Suppliers collection"
+      "description": "Legacy owner root suppliers collection"
     },
     "/expenses/{expenseId}": {
       "schema": { "$ref": "#/entities/Expense" },
-      "description": "Expenses collection"
+      "description": "Legacy owner root expenses collection"
     },
     "/users/{userId}": {
       "schema": { "$ref": "#/entities/User" },
-      "description": "Users collection"
+      "description": "Legacy owner root users collection"
     },
     "/restock_records/{recordId}": {
       "schema": { "$ref": "#/entities/RestockRecord" },
-      "description": "Restock records collection"
+      "description": "Legacy owner root restock records collection"
     },
     "/sensitive_action_logs/{logId}": {
       "schema": { "$ref": "#/entities/SensitiveActionLog" },
-      "description": "Immutable audit logs collection"
+      "description": "Legacy owner root immutable audit logs collection"
     },
     "/store_settings/{settingId}": {
       "schema": { "$ref": "#/entities/StoreSetting" },
-      "description": "Store security and M-Pesa configuration documents"
+      "description": "Legacy owner root store settings collection"
     }
   }
 }

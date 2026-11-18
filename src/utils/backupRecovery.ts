@@ -1,6 +1,7 @@
 import { Product, Transaction, Customer, Supplier, Expense, User } from '../types';
 import { safeGetJSON, safeSetJSON } from './safeStorage';
 import { saveToIDB, getFromIDB } from './idbStorage';
+import { getActiveTenantStoreId, OWNER_PRIMARY_STORE_ID, resolveTenantStorageKey } from './tenantScope';
 
 export interface RecoverableBackup {
   key: string;
@@ -33,20 +34,25 @@ const BACKUP_STORAGE_KEYS = [
 ];
 
 /**
- * Inspects browser localStorage to find any historical backups containing products.
+ * Inspects browser localStorage to find historical backups belonging ONLY to the active store.
  * Returns backups sorted with highest product count first.
  */
 export function findRecoverableBackups(): RecoverableBackup[] {
   if (typeof window === 'undefined' || !window.localStorage) return [];
 
+  const activeScope = getActiveTenantStoreId();
+  const isOwnerScope = activeScope === OWNER_PRIMARY_STORE_ID;
+  const tenantPrefix = `tenant__${activeScope}__`;
+
   const found: RecoverableBackup[] = [];
   const checkedKeys = new Set<string>();
 
-  // Check known backup keys first
+  // Check known backup keys first (strictly scoped to the active tenant)
   for (const item of BACKUP_STORAGE_KEYS) {
-    checkedKeys.add(item.key);
+    const scopedKey = resolveTenantStorageKey(item.key);
+    checkedKeys.add(scopedKey);
     try {
-      const raw = localStorage.getItem(item.key);
+      const raw = localStorage.getItem(scopedKey);
       if (!raw) continue;
       const parsed = JSON.parse(raw);
       if (!parsed) continue;
@@ -88,16 +94,19 @@ export function findRecoverableBackups(): RecoverableBackup[] {
           },
         });
       }
-    } catch (e) {
+    } catch {
       // Ignore unparseable keys
     }
   }
 
-  // Scan localStorage for any other key that might have been saved by previous versions
+  // Scan localStorage for any other key belonging ONLY to this tenant scope
   try {
     for (let i = 0; i < localStorage.length; i++) {
       const k = localStorage.key(i);
       if (!k || checkedKeys.has(k)) continue;
+      if (isOwnerScope && k.startsWith('tenant__')) continue;
+      if (!isOwnerScope && !k.startsWith(tenantPrefix)) continue;
+
       if (k.includes('backup') || k.includes('snapshot') || k.includes('products_archive')) {
         try {
           const raw = localStorage.getItem(k);
@@ -133,16 +142,13 @@ export function findRecoverableBackups(): RecoverableBackup[] {
     }
   } catch {}
 
-  // Sort with highest product count first
   found.sort((a, b) => b.productsCount - a.productsCount);
   return found;
 }
 
 /**
- * Safely saves to 'rofani_pos_largest_backup' only if current products count is
- * greater than or equal to any previously recorded largest backup.
- * This guarantees that pulling a smaller cloud database (e.g. 29 items) will NEVER
- * overwrite a 500+ item local backup.
+ * Safely saves to 'rofani_pos_largest_backup' (scoped by active store) only if current products
+ * count is greater than or equal to any previously recorded largest backup for that store.
  */
 export function protectLargestBackup(
   currentProducts: Product[],
@@ -158,7 +164,6 @@ export function protectLargestBackup(
     const existing = safeGetJSON<any>('rofani_pos_largest_backup', null);
     const existingCount = existing?.products?.length || 0;
 
-    // Only update if current catalog is at least as large as the existing largest backup
     if (currentProducts.length >= existingCount) {
       const payload = {
         timestamp: Date.now(),
@@ -170,9 +175,8 @@ export function protectLargestBackup(
         expenses: currentExpenses,
         allUsers: currentUsers,
       };
-      // Save to IndexedDB (primary durable store without 5MB limits)
       try {
-        saveToIDB('rofani_pos_largest_backup', payload);
+        saveToIDB(resolveTenantStorageKey('rofani_pos_largest_backup'), payload);
       } catch {}
       safeSetJSON('rofani_pos_largest_backup', payload);
     }
@@ -185,15 +189,16 @@ export function protectLargestBackup(
  * Retrieves full backup data by key, checking persistent IndexedDB first, then localStorage.
  */
 export async function getBackupDataByKey(key: string): Promise<any> {
+  const scopedKey = resolveTenantStorageKey(key);
   try {
-    const idbData = await getFromIDB(key);
+    const idbData = await getFromIDB(scopedKey);
     if (idbData && (idbData.products || idbData.transactions || Array.isArray(idbData))) {
       return idbData;
     }
   } catch {}
 
   try {
-    const raw = localStorage.getItem(key);
+    const raw = localStorage.getItem(scopedKey);
     if (raw) {
       return JSON.parse(raw);
     }

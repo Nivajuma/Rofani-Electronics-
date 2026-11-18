@@ -2124,7 +2124,7 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
               {/* Printable Slip Box */}
               <div className="bg-white text-slate-900 p-5 rounded-2xl space-y-3 font-mono text-center shadow-inner border border-slate-200">
                 <div className="border-b pb-2 border-slate-300">
-                  <div className="font-black text-sm uppercase tracking-wider text-slate-900">ROFANI RETAIL POS</div>
+                  <div className="font-black text-sm uppercase tracking-wider text-slate-900">ROFANI POS</div>
                   <div className="text-[10px] text-slate-500 font-sans">STAFF TERMINAL ACCESS CARD</div>
                 </div>
 

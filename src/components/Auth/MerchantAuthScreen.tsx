@@ -227,7 +227,7 @@ export const MerchantAuthScreen: React.FC<MerchantAuthScreenProps> = ({
               onClick={onContinueOfflineOwner}
               className="w-full py-2 text-[11px] font-semibold text-slate-400 hover:text-sky-300 underline underline-offset-4 transition cursor-pointer"
             >
-              Continue with cached Rofani Electronics offline terminal
+              Continue with cached Rofani POS offline terminal
             </button>
           )}
         </div>

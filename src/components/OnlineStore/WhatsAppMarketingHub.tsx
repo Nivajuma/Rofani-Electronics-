@@ -67,7 +67,7 @@ export const WhatsAppMarketingHub: React.FC<WhatsAppMarketingHubProps> = ({
 
   // Initial generated message
   const generateInitialMessage = () => {
-    const storeName = activeStore.name || 'ROFANI Electronics & Boutique';
+    const storeName = activeStore.name || 'Rofani POS';
     const storeLink = 'https://rofani-store.co.ke';
 
     if (templateType === 'offer_promo' && selectedOffer) {
@@ -119,7 +119,7 @@ export const WhatsAppMarketingHub: React.FC<WhatsAppMarketingHubProps> = ({
     const offerIdToUse = newOfferId || selectedOfferId;
     const offerObj = offers.find((o) => o.id === offerIdToUse);
 
-    const storeName = activeStore.name || 'ROFANI Electronics & Boutique';
+    const storeName = activeStore.name || 'Rofani POS';
     const storeLink = 'https://rofani-store.co.ke';
 
     let msg = '';

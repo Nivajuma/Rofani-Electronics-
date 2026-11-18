@@ -60,7 +60,7 @@ export const PinLoginModal: React.FC<PinLoginModalProps> = ({
   onClose,
   isMandatory = false,
   masterPin = '1234',
-  storeName = 'ROFANI POS SYSTEM',
+  storeName = 'Rofani POS',
   recoveryEmail = 'NivaJuma@gmail.com',
   emergencyKey = 'ROFANI-RESET-2026',
   onResetAdminPin,

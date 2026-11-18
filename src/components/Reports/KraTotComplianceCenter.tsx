@@ -246,11 +246,17 @@ export const KraTotComplianceCenter: React.FC<KraTotComplianceCenterProps> = ({
 
   // Export Official PDF Return
   const handleExportPdf = (monthItem: (typeof monthlyData)[0]) => {
+    const customShop = safeGetJSON<string>('rofani_settings_shop_name', '');
+    const legacyNames = ['rofani electronics', 'rofani electronics & boutique', 'rofani electronics and boutique'];
+    const resolvedStore =
+      customShop && !legacyNames.includes(customShop.trim().toLowerCase())
+        ? customShop.trim()
+        : 'Rofani POS';
     exportKRATaxReportPDF(monthItem.transactions, monthItem.monthLabel, {
       totRate,
       kraPin: storeKraPin,
       prnNumber: monthItem.prnNumber,
-      storeName: 'ROFANI ELECTRONICS & BOUTIQUE',
+      storeName: resolvedStore,
     });
     showToast(`Generated official PDF return for ${monthItem.monthLabel}!`);
   };

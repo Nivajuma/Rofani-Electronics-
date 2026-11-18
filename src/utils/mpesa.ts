@@ -55,7 +55,7 @@ export const DEFAULT_MPESA_CONFIG: MpesaConfig = {
   shortcode: env.VITE_MPESA_SHORTCODE || env.VITE_MPESA_TILL || '1833804',
   storeNumber: env.VITE_MPESA_STORE_NUMBER || '1365369',
   shortcodeType: (env.VITE_MPESA_SHORTCODE_TYPE as any) || 'till',
-  storeDisplayName: env.VITE_STORE_NAME || 'ROFANI ELECTRONICS & BOUTIQUE',
+  storeDisplayName: env.VITE_STORE_NAME || 'Rofani POS',
   passkey: env.VITE_MPESA_PASSKEY || env.VITE_DARAJA_PASSKEY || 'bfb279f9aa9bdbcf158e97dd71a467cd2e0c893059b10f78e6b72ada1ed2c919',
   consumerKey: env.VITE_MPESA_CONSUMER_KEY || env.VITE_DARAJA_CONSUMER_KEY || env.MPESA_CONSUMER_KEY || '',
   consumerSecret: env.VITE_MPESA_CONSUMER_SECRET || env.VITE_DARAJA_CONSUMER_SECRET || env.MPESA_CONSUMER_SECRET || '',
@@ -65,14 +65,14 @@ export const DEFAULT_MPESA_CONFIG: MpesaConfig = {
 };
 
 /**
- * Platform SaaS M-Pesa config used when merchants pay Rofani Electronics for monthly/annual subscriptions.
+ * Platform SaaS M-Pesa config used when merchants pay Rofani POS for monthly/annual subscriptions.
  */
 export const PLATFORM_SUBSCRIPTION_MPESA_CONFIG: MpesaConfig = {
   ...DEFAULT_MPESA_CONFIG,
   shortcode: env.VITE_MPESA_SHORTCODE || env.VITE_MPESA_TILL || '1833804',
   storeNumber: env.VITE_MPESA_STORE_NUMBER || '1365369',
   shortcodeType: 'till',
-  storeDisplayName: 'ROFANI ELECTRONICS & BOUTIQUE',
+  storeDisplayName: 'Rofani POS',
 };
 
 export const loadMpesaConfig = (): MpesaConfig => {

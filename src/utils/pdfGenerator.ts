@@ -5,14 +5,14 @@ import { Transaction, Product, Customer, Supplier, Expense, StaffCommissionPayou
 /**
  * Common Header styling for reports
  */
-const addReportHeader = (doc: jsPDF, title: string, subtitle: string) => {
+const addReportHeader = (doc: jsPDF, title: string, subtitle: string, storeName?: string) => {
   doc.setFillColor(15, 23, 42); // Dark slate header
   doc.rect(0, 0, 210, 28, 'F');
 
   doc.setTextColor(255, 255, 255);
   doc.setFontSize(14);
   doc.setFont('helvetica', 'bold');
-  doc.text('ROFANI ELECTRONICS AND BOUTIQUE', 14, 12);
+  doc.text((storeName || 'Rofani POS').toUpperCase(), 14, 12);
 
   doc.setFontSize(11);
   doc.setFont('helvetica', 'normal');
@@ -294,7 +294,7 @@ export const exportKRATaxReportPDF = (
   const doc = new jsPDF();
   const rate = options?.totRate ?? 1.5;
   const pin = options?.kraPin || 'P051234567X';
-  const storeName = options?.storeName || 'ROFANI ELECTRONICS & BOUTIQUE';
+  const storeName = options?.storeName || 'Rofani POS';
   const prn = options?.prnNumber;
 
   addReportHeader(doc, 'KENYA REVENUE AUTHORITY (KRA) TURNOVER TAX RETURN', `Tax Filing Period: ${monthLabel}`);
@@ -353,20 +353,21 @@ export const exportKRATaxReportPDF = (
 /**
  * 7. Export Sales Receipt PDF
  */
-export const exportReceiptPDF = (tx: Transaction) => {
+export const exportReceiptPDF = (tx: Transaction, options?: { storeName?: string }) => {
   const doc = new jsPDF({
     unit: 'mm',
     format: [80, 175 + tx.items.length * 10] // Thermal receipt style dimensions (80mm width)
   });
 
+  const receiptTitle = (options?.storeName || 'Rofani POS').toUpperCase();
   doc.setFontSize(10);
   doc.setFont('helvetica', 'bold');
-  doc.text('ROFANI ELECTRONICS & BOUTIQUE', 40, 10, { align: 'center' });
+  doc.text(receiptTitle, 40, 10, { align: 'center' });
 
   doc.setFontSize(8);
   doc.setFont('helvetica', 'normal');
-  doc.text('Main Mall, Nairobi, Kenya', 40, 15, { align: 'center' });
-  doc.text('Tel: +254 700 000 000 | KRA PIN: P051234567X', 40, 19, { align: 'center' });
+  doc.text('Official Customer Receipt', 40, 15, { align: 'center' });
+  doc.text('KRA Tax Compliant POS Terminal', 40, 19, { align: 'center' });
 
   doc.text('----------------------------------------------------', 40, 24, { align: 'center' });
   doc.setFont('helvetica', 'bold');
@@ -728,7 +729,7 @@ export const exportItemAuditReportPDF = (params: {
     product,
     restockRecords,
     transactions,
-    storeName = 'ROFANI ELECTRONICS AND BOUTIQUE',
+    storeName = 'Rofani POS',
     auditorName = 'Store Manager',
     qrDataUrl,
   } = params;

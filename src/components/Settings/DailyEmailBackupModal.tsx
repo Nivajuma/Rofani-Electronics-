@@ -57,7 +57,7 @@ export const DailyEmailBackupModal: React.FC<DailyEmailBackupModalProps> = ({
   expenses,
   allUsers = [],
   cashTransactions = [],
-  storeName = 'ROFANI ELECTRONICS AND BOUTIQUE',
+  storeName = 'Rofani POS',
   onNotification,
 }) => {
   const [settings, setSettings] = useState<BackupSettings>(getBackupSettings);
@@ -136,7 +136,7 @@ export const DailyEmailBackupModal: React.FC<DailyEmailBackupModalProps> = ({
   const compileBackupPayload = () => {
     const timestamp = new Date().toISOString();
     return {
-      storeName: 'ROFANI ELECTRONICS AND BOUTIQUE',
+      storeName: storeName || 'Rofani POS',
       backupGeneratedAt: timestamp,
       systemVersion: '2.5.0',
       databaseId: 'ai-studio-retailstockmanag-35779e9e-08d0-4311-8158-8be055847014',
@@ -210,7 +210,7 @@ export const DailyEmailBackupModal: React.FC<DailyEmailBackupModalProps> = ({
         <div class="container">
           <div class="header">
             <span class="badge">Daily Automated Backup</span>
-            <h1 class="title">ROFANI ELECTRONICS & BOUTIQUE</h1>
+            <h1 class="title">${(storeName || 'Rofani POS').toUpperCase()}</h1>
             <p class="subtitle">Official Daily Store Database Snapshot • ${todayStr}</p>
           </div>
 

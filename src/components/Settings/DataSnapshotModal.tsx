@@ -58,7 +58,7 @@ export const DataSnapshotModal: React.FC<DataSnapshotModalProps> = ({
   attendanceRecords = [],
   allUsers = [],
   stores = [],
-  storeName = 'ROFANI ELECTRONICS & BOUTIQUE',
+  storeName = 'Rofani POS',
   masterPin = '1234',
   onRestoreSnapshot,
 }) => {

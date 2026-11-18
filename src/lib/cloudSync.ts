@@ -17,6 +17,7 @@ import {
   isQuotaExceededError,
   getStoreIdForUser,
   OWNER_PRIMARY_STORE_ID,
+  OWNER_CLOUD_EMAIL,
   isOwnerCloudUser,
 } from './firebase';
 import { getActiveTenantStoreId } from '../utils/tenantScope';
@@ -1295,7 +1296,7 @@ export async function fetchStoreProfile(storeId: string): Promise<StoreSubscript
     const snap = await withFirestoreTimeout(
       getDoc(doc(db, 'stores', storeId)),
       `fetching store profile ${storeId}`,
-      12000
+      3000
     );
     if (!snap.exists()) return null;
     return { id: snap.id, ...snap.data() } as StoreSubscriptionProfile;
@@ -1333,51 +1334,62 @@ export async function ensureOwnerPrimaryStoreProfile(user: {
   email?: string | null;
   displayName?: string | null;
 }): Promise<StoreSubscriptionProfile> {
+  const targetStoreId = user.uid;
   const nowIso = new Date().toISOString();
-  const existing = await fetchStoreProfile(OWNER_PRIMARY_STORE_ID).catch(() => null);
+  const existing = await fetchStoreProfile(targetStoreId).catch(() => null);
   if (existing) {
     if (existing.subscriptionStatus !== 'active' || existing.planType !== 'annual') {
       const updated: StoreSubscriptionProfile = {
         ...existing,
         planType: 'annual',
         subscriptionStatus: 'active',
-        expiresAt: existing.expiresAt && Date.parse(existing.expiresAt) > Date.now() + 365 * 86400000
-          ? existing.expiresAt
-          : new Date(Date.now() + 10 * 365 * 86400000).toISOString(),
+        expiresAt:
+          existing.expiresAt && Date.parse(existing.expiresAt) > Date.now() + 365 * 86400000
+            ? existing.expiresAt
+            : new Date(Date.now() + 10 * 365 * 86400000).toISOString(),
         updatedAt: nowIso,
       };
-      await setDoc(doc(db, 'stores', OWNER_PRIMARY_STORE_ID), cleanForFirestore(updated), { merge: true });
+      await withFirestoreTimeout(
+        setDoc(doc(db, 'stores', targetStoreId), cleanForFirestore(updated), { merge: true }),
+        'updating primary owner store profile',
+        3000
+      ).catch(() => {});
       return updated;
     }
     return existing;
   }
 
+  // Fallback: inherit existing primary profile from legacy stores/rofani-pos if present
+  const legacyProfile = await fetchStoreProfile(OWNER_PRIMARY_STORE_ID).catch(() => null);
+
   const profile: StoreSubscriptionProfile = {
-    id: OWNER_PRIMARY_STORE_ID,
+    ...(legacyProfile || {}),
+    id: targetStoreId,
     ownerUid: user.uid,
     ownerEmail: (user.email || 'nivajuma@gmail.com').toLowerCase(),
-    storeName: 'Rofani Electronics & Boutique',
-    phone: '0700000000',
-    kraPin: '',
-    mpesaShortcode: '1833804',
-    mpesaShortcodeType: 'till',
-    mpesaStoreNumber: '1365369',
+    storeName: legacyProfile?.storeName || 'Rofani POS',
+    phone: legacyProfile?.phone || '0700000000',
+    kraPin: legacyProfile?.kraPin || '',
+    mpesaShortcode: legacyProfile?.mpesaShortcode || '1833804',
+    mpesaShortcodeType: legacyProfile?.mpesaShortcodeType || 'till',
+    mpesaStoreNumber: legacyProfile?.mpesaStoreNumber || '1365369',
     planType: 'annual',
     subscriptionStatus: 'active',
     expiresAt: new Date(Date.now() + 10 * 365 * 86400000).toISOString(),
-    lastPaymentRef: 'OWNER-MASTER',
+    lastPaymentRef: legacyProfile?.lastPaymentRef || 'OWNER-MASTER',
     lastPaymentMethod: 'admin_override',
-    createdAt: nowIso,
+    createdAt: legacyProfile?.createdAt || nowIso,
     updatedAt: nowIso,
   };
 
   try {
     await withFirestoreTimeout(
-      setDoc(doc(db, 'stores', OWNER_PRIMARY_STORE_ID), cleanForFirestore(profile), { merge: true }),
-      'initializing Rofani primary store profile'
+      setDoc(doc(db, 'stores', targetStoreId), cleanForFirestore(profile), { merge: true }),
+      'initializing Rofani primary store profile',
+      3000
     );
   } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, `stores/${OWNER_PRIMARY_STORE_ID}`);
+    handleFirestoreError(error, OperationType.WRITE, `stores/${targetStoreId}`);
   }
   return profile;
 }
@@ -1605,7 +1617,11 @@ export async function superAdminUpdateStoreSubscription(
   if (!isOwnerCloudUser(auth.currentUser)) {
     throw new Error('Only the app owner can modify subscriber access.');
   }
-  if (storeId === OWNER_PRIMARY_STORE_ID && action === 'suspend') {
+  const isOwnerTarget =
+    storeId === OWNER_PRIMARY_STORE_ID ||
+    currentProfile?.ownerEmail?.toLowerCase() === OWNER_CLOUD_EMAIL ||
+    (auth.currentUser?.uid && storeId === auth.currentUser.uid);
+  if (isOwnerTarget && action === 'suspend') {
     throw new Error('Cannot suspend the primary owner store.');
   }
 
@@ -1653,27 +1669,114 @@ export async function superAdminUpdateStoreSubscription(
   }
 }
 
-// ---------------- LEGACY ROOT DATA MIGRATION FOR ROFANI-POS ----------------
+// ---------------- AUTOMATIC ONE-TIME LEGACY DATA BRIDGE (stores/{userId}) ----------------
 
 /**
- * Ensures NivaJuma@gmail.com's existing root Firestore data (`products`, `transactions`, etc.)
- * is seamlessly copied into `stores/rofani-pos/...` if `stores/rofani-pos/products` is empty.
+ * Checks `stores/{userId}` first when NivaJuma@gmail.com connects.
+ * If `stores/{userId}` is empty or missing, automatically reads existing products, sales,
+ * store_settings, and supporting collections from the original root Firestore collections
+ * (with fallback to legacy `stores/rofani-pos`) and copies them into `stores/{userId}`.
  */
-export async function migrateLegacyRootCollectionsToRofaniStoreIfNeeded(): Promise<boolean> {
+export async function migrateLegacyRootCollectionsToOwnerStoreIfNeeded(
+  targetUserId?: string
+): Promise<boolean> {
   if (!isOwnerCloudUser(auth.currentUser)) return false;
+  const userId = (targetUserId || auth.currentUser?.uid || '').trim();
+  if (!userId) return false;
+
+  const migrationFlagKey = `rofani_pos_migrated_uid_${userId}`;
+  try {
+    if (typeof window !== 'undefined' && window.localStorage?.getItem(migrationFlagKey) === '1') {
+      return false;
+    }
+  } catch {}
 
   try {
-    const scopedProducts = await fetchProductsFromCloud(OWNER_PRIMARY_STORE_ID).catch(() => []);
-    if (scopedProducts.length > 0) {
-      return false; // Already migrated or populated
+    const [scopedProducts, scopedSales] = await Promise.all([
+      fetchProductsFromCloud(userId).catch(() => []),
+      fetchTransactionsFromCloud(userId).catch(() => []),
+    ]);
+
+    if (scopedProducts.length > 0 || scopedSales.length > 0) {
+      try {
+        localStorage.setItem(migrationFlagKey, '1');
+      } catch {}
+      return false; // stores/{userId} is already populated
     }
 
-    const legacyProducts = await fetchCollectionWithFallback<Product>('products', 'checking legacy root products').catch(() => []);
-    const legacySales = await fetchCollectionWithFallback<Transaction>('transactions', 'checking legacy root sales').catch(() => []);
-    const legacyCustomers = await fetchCollectionWithFallback<Customer>('customers', 'checking legacy root customers').catch(() => []);
-    const legacySuppliers = await fetchCollectionWithFallback<Supplier>('suppliers', 'checking legacy root suppliers').catch(() => []);
-    const legacyExpenses = await fetchCollectionWithFallback<Expense>('expenses', 'checking legacy root expenses').catch(() => []);
-    const legacyUsers = await fetchCollectionWithFallback<User>('users', 'checking legacy root staff').catch(() => []);
+    // 1. Read original root Firestore collections and store_settings documents
+    let [
+      legacyProducts,
+      legacySales,
+      legacyCustomers,
+      legacySuppliers,
+      legacyExpenses,
+      legacyUsers,
+      legacyRestocks,
+      legacyAuditLogs,
+      legacyStoreSettings,
+    ] = await Promise.all([
+      fetchCollectionWithFallback<Product>('products', 'reading root products').catch(() => []),
+      fetchCollectionWithFallback<Transaction>('transactions', 'reading root sales').catch(() => []),
+      fetchCollectionWithFallback<Customer>('customers', 'reading root customers').catch(() => []),
+      fetchCollectionWithFallback<Supplier>('suppliers', 'reading root suppliers').catch(() => []),
+      fetchCollectionWithFallback<Expense>('expenses', 'reading root expenses').catch(() => []),
+      fetchCollectionWithFallback<User>('users', 'reading root staff').catch(() => []),
+      fetchCollectionWithFallback<RestockRecord>('restock_records', 'reading root restocks').catch(() => []),
+      fetchCollectionWithFallback<SensitiveActionLog>('sensitive_action_logs', 'reading root audit logs').catch(() => []),
+      fetchCollectionWithFallback<any>('store_settings', 'reading root store settings').catch(() => []),
+    ]);
+
+    // 2. Secondary fallback: if root collections were empty, check legacy `stores/rofani-pos`
+    if (
+      legacyProducts.length === 0 &&
+      legacySales.length === 0 &&
+      legacyCustomers.length === 0 &&
+      legacySuppliers.length === 0 &&
+      legacyExpenses.length === 0 &&
+      legacyUsers.length === 0 &&
+      legacyStoreSettings.length === 0
+    ) {
+      [
+        legacyProducts,
+        legacySales,
+        legacyCustomers,
+        legacySuppliers,
+        legacyExpenses,
+        legacyUsers,
+        legacyRestocks,
+        legacyAuditLogs,
+        legacyStoreSettings,
+      ] = await Promise.all([
+        fetchProductsFromCloud(OWNER_PRIMARY_STORE_ID).catch(() => []),
+        fetchTransactionsFromCloud(OWNER_PRIMARY_STORE_ID).catch(() => []),
+        fetchCollectionWithFallback<Customer>(
+          getScopedCollectionPath('customers', OWNER_PRIMARY_STORE_ID),
+          'reading legacy rofani-pos customers'
+        ).catch(() => []),
+        fetchCollectionWithFallback<Supplier>(
+          getScopedCollectionPath('suppliers', OWNER_PRIMARY_STORE_ID),
+          'reading legacy rofani-pos suppliers'
+        ).catch(() => []),
+        fetchCollectionWithFallback<Expense>(
+          getScopedCollectionPath('expenses', OWNER_PRIMARY_STORE_ID),
+          'reading legacy rofani-pos expenses'
+        ).catch(() => []),
+        fetchUsersFromCloud(OWNER_PRIMARY_STORE_ID).catch(() => []),
+        fetchCollectionWithFallback<RestockRecord>(
+          getScopedCollectionPath('restock_records', OWNER_PRIMARY_STORE_ID),
+          'reading legacy rofani-pos restocks'
+        ).catch(() => []),
+        fetchCollectionWithFallback<SensitiveActionLog>(
+          getScopedCollectionPath('sensitive_action_logs', OWNER_PRIMARY_STORE_ID),
+          'reading legacy rofani-pos audit logs'
+        ).catch(() => []),
+        fetchCollectionWithFallback<any>(
+          getScopedCollectionPath('store_settings', OWNER_PRIMARY_STORE_ID),
+          'reading legacy rofani-pos settings'
+        ).catch(() => []),
+      ]);
+    }
 
     if (
       legacyProducts.length === 0 &&
@@ -1681,23 +1784,49 @@ export async function migrateLegacyRootCollectionsToRofaniStoreIfNeeded(): Promi
       legacyCustomers.length === 0 &&
       legacySuppliers.length === 0 &&
       legacyExpenses.length === 0 &&
-      legacyUsers.length === 0
+      legacyUsers.length === 0 &&
+      legacyRestocks.length === 0 &&
+      legacyAuditLogs.length === 0 &&
+      legacyStoreSettings.length === 0
     ) {
       return false;
     }
 
     await Promise.all([
-      legacyProducts.length > 0 ? batchSaveProductsToCloud(legacyProducts, undefined, OWNER_PRIMARY_STORE_ID) : Promise.resolve(0),
-      legacySales.length > 0 ? batchSaveTransactionsToCloud(legacySales, undefined, OWNER_PRIMARY_STORE_ID) : Promise.resolve(0),
-      legacyCustomers.length > 0 ? batchSaveCustomersToCloud(legacyCustomers, undefined, OWNER_PRIMARY_STORE_ID) : Promise.resolve(0),
-      legacySuppliers.length > 0 ? batchSaveSuppliersToCloud(legacySuppliers, undefined, OWNER_PRIMARY_STORE_ID) : Promise.resolve(0),
-      legacyExpenses.length > 0 ? batchSaveExpensesToCloud(legacyExpenses, undefined, OWNER_PRIMARY_STORE_ID) : Promise.resolve(0),
-      legacyUsers.length > 0 ? bulkUploadUsersToCloud(legacyUsers, OWNER_PRIMARY_STORE_ID) : Promise.resolve(0),
+      legacyProducts.length > 0 ? batchSaveProductsToCloud(legacyProducts, undefined, userId) : Promise.resolve(0),
+      legacySales.length > 0 ? batchSaveTransactionsToCloud(legacySales, undefined, userId) : Promise.resolve(0),
+      legacyCustomers.length > 0 ? batchSaveCustomersToCloud(legacyCustomers, undefined, userId) : Promise.resolve(0),
+      legacySuppliers.length > 0 ? batchSaveSuppliersToCloud(legacySuppliers, undefined, userId) : Promise.resolve(0),
+      legacyExpenses.length > 0 ? batchSaveExpensesToCloud(legacyExpenses, undefined, userId) : Promise.resolve(0),
+      legacyUsers.length > 0 ? bulkUploadUsersToCloud(legacyUsers, userId) : Promise.resolve(0),
+      legacyRestocks.length > 0
+        ? batchSaveCollectionToCloud('restock_records', legacyRestocks, (r) => cleanForFirestore(r), undefined, userId)
+        : Promise.resolve(0),
+      legacyAuditLogs.length > 0
+        ? batchSaveCollectionToCloud('sensitive_action_logs', legacyAuditLogs, (l) => cleanForFirestore(l), undefined, userId)
+        : Promise.resolve(0),
+      ...legacyStoreSettings.map((settingDoc: any) => {
+        if (!settingDoc?.id) return Promise.resolve();
+        const { id: settingId, ...rest } = settingDoc;
+        return setDoc(
+          getScopedDocRef('store_settings', String(settingId), userId),
+          cleanForFirestore({ ...rest, migratedAt: new Date().toISOString() }),
+          { merge: true }
+        ).catch(() => {});
+      }),
     ]);
+
+    try {
+      localStorage.setItem(migrationFlagKey, '1');
+    } catch {}
 
     return true;
   } catch (err) {
-    console.warn('[Legacy Store Migration] Notice:', err);
+    console.warn('[Legacy Store Bridge] Notice:', err);
     return false;
   }
+}
+
+export async function migrateLegacyRootCollectionsToRofaniStoreIfNeeded(): Promise<boolean> {
+  return migrateLegacyRootCollectionsToOwnerStoreIfNeeded(auth.currentUser?.uid);
 }

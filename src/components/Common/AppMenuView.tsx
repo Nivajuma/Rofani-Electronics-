@@ -35,7 +35,8 @@ import {
   ShieldCheck,
   MessageCircle,
   ExternalLink,
-  LogOut
+  LogOut,
+  Plus
 } from 'lucide-react';
 import { TabKey } from '../../utils/permissions';
 import { User, StoreSubscriptionProfile } from '../../types';
@@ -83,7 +84,7 @@ export const AppMenuView: React.FC<AppMenuViewProps> = ({
   onTriggerSync,
   onSwitchToComputer,
   lowStockCount,
-  storeName = 'Rofani Electronics',
+  storeName = 'Rofani POS',
   currentUser,
   cloudSyncStatus = 'synced',
   inPhoneFrame = false,
@@ -142,7 +143,7 @@ export const AppMenuView: React.FC<AppMenuViewProps> = ({
     typeof window !== 'undefined' ? window.location.origin : 'https://rofani-pos.vercel.app';
 
   const handleCopyShareInstructions = () => {
-    const text = `Rofani Electronics POS — Live Web App:\n${liveAppUrl}\n\nWorker Sign-In: Open link, sign in with your store PIN or Google account, and tap Cloud Sync to stay synced across devices.`;
+    const text = `Rofani POS — Live Web App:\n${liveAppUrl}\n\nWorker Sign-In: Open link, sign in with your store PIN or Google account, and tap Cloud Sync to stay synced across devices.`;
     if (typeof navigator !== 'undefined' && navigator.clipboard) {
       navigator.clipboard.writeText(text).catch(() => {});
     }
@@ -150,7 +151,7 @@ export const AppMenuView: React.FC<AppMenuViewProps> = ({
     setTimeout(() => setCopiedShareLink(false), 2500);
   };
 
-  const displayName = storeName || 'Rofani Electronics';
+  const displayName = storeName || 'Rofani POS';
 
   const syncDotClass =
     cloudSyncStatus === 'quota_exceeded'
@@ -242,6 +243,27 @@ export const AppMenuView: React.FC<AppMenuViewProps> = ({
 
       {/* 2. Scrollable Grouped Dark Cards */}
       <div className={`max-w-xl mx-auto ${inPhoneFrame ? 'pb-4' : 'px-3 sm:px-4 pb-4'} space-y-3 text-xs`}>
+        {/* Instant Mobile Make Sale Shortcut */}
+        <button
+          type="button"
+          id="btn-menu-make-sale-shortcut"
+          onClick={() => onSelectTab('pos')}
+          className="w-full bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 active:scale-[0.99] text-white rounded-2xl px-4 py-3.5 flex items-center justify-between shadow-lg shadow-emerald-950/40 border border-emerald-400/30 transition cursor-pointer"
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-white/15 flex items-center justify-center shrink-0">
+              <Plus className="w-5 h-5 text-white" />
+            </div>
+            <div className="text-left">
+              <div className="text-sm font-extrabold tracking-tight">Make Sale</div>
+              <div className="text-[11px] text-emerald-100/90 font-medium">
+                Jump straight to POS checkout &amp; M-Pesa Push
+              </div>
+            </div>
+          </div>
+          <ChevronRight className="w-5 h-5 text-white/90 shrink-0" />
+        </button>
+
         {/* Card 1: My Business */}
         <section className="bg-[#1e293b] rounded-2xl border border-slate-700/70 overflow-hidden divide-y divide-slate-700/70">
           <div className="px-4 py-3 text-xs font-bold text-slate-300 tracking-wide">
@@ -862,10 +884,10 @@ export const AppMenuView: React.FC<AppMenuViewProps> = ({
               R
             </div>
             <div className="text-sm font-bold text-white tracking-tight">
-              Rofani Electronics
+              Rofani POS
             </div>
             <p className="text-[11px] text-slate-400 italic">
-              Crafted for Rofani Electronics &amp; Boutique
+              Crafted for Modern Retail &amp; Wholesale Businesses
             </p>
           </div>
         </div>
@@ -1040,7 +1062,7 @@ export const AppMenuView: React.FC<AppMenuViewProps> = ({
                     <Check className="w-7 h-7 text-emerald-400 mx-auto" />
                     <p className="text-sm font-bold text-white">Thank you for your feedback!</p>
                     <p className="text-xs text-slate-400">
-                      Your {ratingStars}-star rating helps improve Rofani Electronics POS.
+                      Your {ratingStars}-star rating helps improve Rofani POS.
                     </p>
                   </div>
                 ) : (
@@ -1100,7 +1122,7 @@ export const AppMenuView: React.FC<AppMenuViewProps> = ({
                 </div>
                 <div className="bg-[#0f172a] border border-slate-700/70 rounded-xl p-3.5 text-xs text-slate-300 space-y-2 leading-relaxed">
                   <p>
-                    Rofani Electronics &amp; Boutique POS stores catalog items, transactions, and customer balances locally for offline continuity and syncs strictly to your authenticated Firebase Firestore workspace.
+                    Rofani POS stores catalog items, transactions, and customer balances locally for offline continuity and syncs strictly to your authenticated Firebase Firestore workspace.
                   </p>
                   <p className="text-slate-400">
                     Access is protected by authenticated Google sign-in and staff terminal PIN permissions.

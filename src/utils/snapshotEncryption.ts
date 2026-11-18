@@ -216,9 +216,9 @@ export const generateConsolidatedCsvSnapshot = (snapshot: FullDataSnapshotPayloa
 
   // Section 1: Snapshot Header Info
   parts.push(`# ========================================================`);
-  parts.push(`# ROFANI ENTERPRISE POS - FULL DATA SNAPSHOT`);
+  parts.push(`# ROFANI POS - FULL DATA SNAPSHOT`);
   parts.push(`# Exported At: ${snapshot.exportedAt}`);
-  parts.push(`# Store: ${snapshot.metadata.storeName || 'ROFANI ELECTRONICS & BOUTIQUE'}`);
+  parts.push(`# Store: ${snapshot.metadata.storeName || 'Rofani POS'}`);
   parts.push(`# Total Products: ${snapshot.metadata.totalProducts}`);
   parts.push(`# Total Transactions: ${snapshot.metadata.totalTransactions}`);
   parts.push(`# Total Customers: ${snapshot.metadata.totalCustomers}`);

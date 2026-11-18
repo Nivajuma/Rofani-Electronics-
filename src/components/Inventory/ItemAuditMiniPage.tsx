@@ -66,7 +66,7 @@ export const ItemAuditMiniPage: React.FC<ItemAuditMiniPageProps> = ({
   product,
   restockRecords,
   transactions,
-  storeName = 'Rofani Electronics',
+  storeName = 'Rofani POS',
   currentUser,
   onBack,
   onAddRestock,

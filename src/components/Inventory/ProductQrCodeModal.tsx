@@ -99,7 +99,7 @@ export const ProductQrCodeModal: React.FC<ProductQrCodeModalProps> = ({
   isOpen,
   onClose,
   product,
-  storeName = 'Rofani Electronics',
+  storeName = 'Rofani POS',
   onOpenMiniPage,
   initialMode = 'qr_price',
 }) => {

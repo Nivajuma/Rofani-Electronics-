@@ -134,7 +134,7 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
             <div>
               <h1 className="font-bold text-sm sm:text-base text-slate-100 leading-tight">
-                ROFANI <span className="text-sky-400 font-semibold">ELECTRONICS & BOUTIQUE</span>
+                Rofani <span className="text-sky-400 font-semibold">POS</span>
               </h1>
               <p className="text-[10px] text-slate-400 hidden sm:block">POS, Stock, KRA 1.5% Tax & Attendance</p>
             </div>
@@ -353,7 +353,7 @@ export const Header: React.FC<HeaderProps> = ({
                 <div className="text-left hidden md:block">
                   <div className="text-[10px] text-indigo-400 uppercase font-mono leading-none">Store</div>
                   <div className="text-xs font-bold text-white truncate max-w-[130px]">
-                    {stores.find((s) => s.id === activeStoreId)?.name || 'Rofani Electronics'}
+                    {stores.find((s) => s.id === activeStoreId)?.name || 'Rofani POS'}
                   </div>
                 </div>
                 {stores.length > 1 && (

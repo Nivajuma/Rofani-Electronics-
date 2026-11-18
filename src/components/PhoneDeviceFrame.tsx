@@ -39,6 +39,7 @@ interface PhoneDeviceFrameProps {
   onTriggerSync?: () => Promise<SyncRetryResult | void> | void;
   conflictCount?: number;
   onOpenConflictAssistant?: () => void;
+  hideBottomNav?: boolean;
 }
 
 export const PhoneDeviceFrame: React.FC<PhoneDeviceFrameProps> = ({
@@ -49,16 +50,30 @@ export const PhoneDeviceFrame: React.FC<PhoneDeviceFrameProps> = ({
   phoneOrientation,
   phoneModel,
   onSwitchToComputer,
-  storeName = 'Rofani Electronics',
+  storeName = 'Rofani POS',
   lowStockCount,
+  onLockTerminal: _onLockTerminal,
+  onOpenStaffModal: _onOpenStaffModal,
+  onNewSale,
   onOpenCloudSync,
   onOpenStockAlerts,
   cloudSyncStatus = 'synced',
   onTriggerSync,
   conflictCount = 0,
   onOpenConflictAssistant,
+  hideBottomNav = false,
 }) => {
   const isLandscape = phoneOrientation === 'landscape';
+
+  const handleMakeSaleShortcut = () => {
+    if (activeTab !== 'pos') {
+      onSelectTab('pos');
+    } else if (onNewSale) {
+      onNewSale();
+    } else {
+      onSelectTab('pos');
+    }
+  };
 
   const getFrameDimensions = () => {
     if (phoneModel === 'galaxyS24') {
@@ -88,6 +103,17 @@ export const PhoneDeviceFrame: React.FC<PhoneDeviceFrameProps> = ({
       ? 'bg-sky-400 animate-pulse'
       : 'bg-emerald-400';
 
+  const normalizedCustomStore =
+    storeName &&
+    ![
+      'rofani pos',
+      'rofani electronics',
+      'rofani electronics & boutique',
+      'rofani electronics and boutique',
+    ].includes(storeName.trim().toLowerCase())
+      ? storeName.trim()
+      : '';
+
   return (
     <div className="min-h-dvh h-dvh sm:h-auto sm:min-h-dvh bg-slate-900 sm:bg-slate-950 text-slate-100 flex flex-col items-center justify-center p-0 sm:py-4 sm:px-4 overflow-hidden sm:overflow-x-hidden selection:bg-blue-600 selection:text-white relative">
       {/* SMARTPHONE DEVICE CONTAINER FRAME */}
@@ -103,9 +129,16 @@ export const PhoneDeviceFrame: React.FC<PhoneDeviceFrameProps> = ({
             <div className="w-8 h-8 rounded-full bg-slate-800 border border-slate-700/80 flex items-center justify-center text-sky-400 shrink-0">
               <Store className="w-4 h-4" />
             </div>
-            <h1 className="text-sm font-bold text-white truncate leading-tight">
-              {storeName || 'Rofani Electronics'}
-            </h1>
+            <div className="min-w-0 flex-1">
+              <h1 className="text-sm font-bold text-white truncate leading-tight">
+                Rofani POS
+              </h1>
+              {normalizedCustomStore && (
+                <p className="text-[10px] text-slate-400 truncate leading-tight">
+                  {normalizedCustomStore}
+                </p>
+              )}
+            </div>
           </div>
 
           <div className="flex items-center gap-2 shrink-0 flex-nowrap pr-0.5">
@@ -197,11 +230,33 @@ export const PhoneDeviceFrame: React.FC<PhoneDeviceFrameProps> = ({
         </div>
 
         {/* MOBILE MAIN VIEWPORT CONTENT CONTAINER */}
-        <div className="flex-1 min-h-0 overflow-y-auto bg-[#0f172a] text-slate-100 p-3 sm:p-4 pb-20 flex flex-col scrollbar-thin scrollbar-thumb-slate-800">
+        <div
+          className={`flex-1 min-h-0 overflow-y-auto bg-[#0f172a] text-slate-100 p-3 sm:p-4 scrollbar-thin scrollbar-thumb-slate-800 ${
+            hideBottomNav ? 'pb-6' : 'pb-24'
+          }`}
+        >
           {children}
         </div>
 
+        {/* FLOATING 1-TAP MAKE SALE SHORTCUT (Shown on non-POS tabs for instant mobile checkout access) */}
+        {activeTab !== 'pos' && !hideBottomNav && (
+          <button
+            type="button"
+            id="btn-phone-fab-make-sale"
+            onClick={handleMakeSaleShortcut}
+            title="Make Sale — Jump straight to POS Checkout"
+            className="absolute bottom-20 right-3 z-40 h-11 px-4 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 active:scale-95 text-white text-xs font-extrabold flex items-center gap-1.5 shadow-xl shadow-emerald-950/70 border border-emerald-400/40 transition cursor-pointer"
+          >
+            <ShoppingBag className="w-4 h-4 shrink-0" />
+            <span>Make Sale</span>
+          </button>
+        )}
+
+        {/* PORTAL ROOT FOR POS FLOATING CART PILL & SLIDE-UP DRAWER */}
+        <div id="phone-frame-overlay-root" className="pointer-events-none absolute inset-0 z-[105]" />
+
         {/* TOUCH-OPTIMIZED 5-TAB DARK MOBILE BOTTOM NAVIGATION BAR */}
+        {!hideBottomNav && (
         <nav
           aria-label="Mobile Bottom Navigation"
           className="absolute bottom-0 left-0 right-0 z-50 min-h-16 bg-slate-900/95 backdrop-blur-md border-t border-slate-800 px-1 pt-1 pb-safe grid grid-cols-5 items-center shrink-0"
@@ -260,6 +315,7 @@ export const PhoneDeviceFrame: React.FC<PhoneDeviceFrameProps> = ({
             <span className="text-[9px] font-bold tracking-tight whitespace-nowrap">GET DESKTOP</span>
           </button>
         </nav>
+        )}
       </div>
 
       {/* FLOATING QUICK-SWITCH BUTTON ON DESKTOP SIMULATOR VIEWPORTS */}

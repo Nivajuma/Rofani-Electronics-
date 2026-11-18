@@ -1948,7 +1948,7 @@ export const StaffCommissionView: React.FC<StaffCommissionViewProps> = ({
               <div className="bg-white text-slate-900 rounded-xl p-6 shadow-xl font-mono text-xs max-w-sm mx-auto space-y-3 border border-slate-200">
                 {/* Header */}
                 <div className="text-center space-y-1 pb-3 border-b border-dashed border-slate-300">
-                  <div className="font-bold text-sm font-sans">ROFANI ELECTRONICS AND BOUTIQUE</div>
+                  <div className="font-bold text-sm font-sans">ROFANI POS</div>
                   <div className="text-[10px] text-slate-500">OFFICIAL COMMISSION VOUCHER</div>
                   <div className="text-[9px] text-slate-400">Voucher Ref: {activeVoucher.id}</div>
                 </div>

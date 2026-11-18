@@ -264,7 +264,7 @@ export const exportConsolidatedArchiveToCSV = (
   const stamp = new Date().toLocaleString();
 
   // Document metadata header
-  lines.push(`ROFANI ELECTRONICS AND BOUTIQUE - MASTER CONSOLIDATED ARCHIVE`);
+  lines.push(`ROFANI POS - MASTER CONSOLIDATED ARCHIVE`);
   lines.push(`Generated On: ${stamp}`);
   lines.push(`Summary: ${transactions.length} Sales Receipts | ${products.length} Inventory Products | ${expenses.length} Expense Logs`);
   lines.push('');

@@ -48,7 +48,14 @@ import { CameraPermissionsCard } from './CameraPermissionsCard';
 import { SettingsDashboardView } from './SettingsDashboardView';
 import { safeGetJSON, safeSetJSON, getLocalStorageUsageStats } from '../../utils/safeStorage';
 import { findRecoverableBackups } from '../../utils/backupRecovery';
-import { getIsOnline, useAggressiveAutoSync, useNetworkStatus } from '../../utils/offlineSync';
+import {
+  getIsOnline,
+  useAggressiveAutoSync,
+  useNetworkStatus,
+  useSyncHistory,
+  addSyncHistoryEntry,
+  SyncHistoryEntry,
+} from '../../utils/offlineSync';
 import { playBackupSuccessSound, playButtonSound } from '../../utils/uiFeedback';
 import {
   batchSaveProductsToCloud,
@@ -148,6 +155,9 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [aggressiveAutoSync, setAggressiveAutoSync] = useAggressiveAutoSync();
   const { pendingCount } = useNetworkStatus();
+  const { history: syncHistory, clearHistory: clearCloudSyncHistory } = useSyncHistory();
+  const [showSyncHistoryModal, setShowSyncHistoryModal] = useState(false);
+  const [syncHistoryFilter, setSyncHistoryFilter] = useState<'all' | 'success' | 'failed'>('all');
   const [isCloudSyncing, setIsCloudSyncing] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<{ label: string; percent: number } | null>(null);
   const [cloudSyncFeedback, setCloudSyncFeedback] = useState<{
@@ -170,10 +180,19 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
 
   const handleUploadLocalDataToCloud = async () => {
     if (!getIsOnline()) {
+      const offlineMsg = 'Your internet connection appears offline. Local changes are safely stored on this device. Reconnect and click "Sync Local Data to Cloud".';
+      addSyncHistoryEntry({
+        operation: 'full_upload',
+        status: 'failed',
+        syncedCount: 0,
+        failedCount: 1,
+        summary: 'Manual Cloud Upload skipped — device offline',
+        errorDetails: offlineMsg,
+      });
       setCloudSyncFeedback({
         type: 'error',
         title: 'Sync Did Not Run — Device Offline',
-        details: 'Your internet connection appears offline. Local changes are safely stored on this device. Reconnect and click "Sync Local Data to Cloud".',
+        details: offlineMsg,
         timestamp: new Date().toLocaleTimeString(),
       });
       return;
@@ -257,6 +276,14 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
       if (expensesCount > 0) summaryParts.push(`${expensesCount} expenses`);
 
       const summaryMsg = `Successfully synced ${summaryParts.join(', ')} to Cloud Firestore.`;
+      const totalUploaded = prodCount + usersCount + salesCount + customersCount + suppliersCount + expensesCount;
+      addSyncHistoryEntry({
+        operation: 'full_upload',
+        status: 'success',
+        syncedCount: totalUploaded,
+        failedCount: 0,
+        summary: summaryMsg,
+      });
       setCloudSyncFeedback({
         type: 'success',
         title: 'Cloud Sync Confirmed & Completed',
@@ -268,6 +295,14 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
     } catch (err: any) {
       if (onCloudSyncError) onCloudSyncError();
       const errMsg = err?.message || 'Failed to sync local data to cloud. Check network connection and retry.';
+      addSyncHistoryEntry({
+        operation: 'full_upload',
+        status: 'failed',
+        syncedCount: 0,
+        failedCount: 1,
+        summary: 'Manual full upload to Cloud Firestore failed',
+        errorDetails: errMsg,
+      });
       setCloudSyncFeedback({
         type: 'error',
         title: 'Cloud Sync Failed or Timed Out',
@@ -373,7 +408,7 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
 
   // Business settings state stored in local state for header/receipt customization
   const [storeName, setStoreName] = useState(() =>
-    safeGetJSON<string>('retail_pos_store_name', 'ROFANI ELECTRONICS & BOUTIQUE', (val) => typeof val === 'string' && val.trim().length > 0)
+    safeGetJSON<string>('retail_pos_store_name', 'Rofani POS', (val) => typeof val === 'string' && val.trim().length > 0)
   );
   useEffect(() => {
     safeSetJSON('retail_pos_store_name', storeName);
@@ -796,6 +831,53 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
             </div>
           </div>
         )}
+
+        {/* Cloud Sync History & Reliability Overview Strip */}
+        {(() => {
+          const successOps = syncHistory.filter((e) => e.status === 'success').length;
+          const failedOps = syncHistory.filter((e) => e.status !== 'success').length;
+          const latestEntry: SyncHistoryEntry | undefined = syncHistory[0];
+
+          return (
+            <div className="pt-4 border-t border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-start gap-3 min-w-0">
+                <div className="w-10 h-10 rounded-xl bg-indigo-500/15 text-indigo-400 border border-indigo-500/35 flex items-center justify-center shrink-0">
+                  <History className="w-5 h-5" />
+                </div>
+                <div className="min-w-0 space-y-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h4 className="font-bold text-sm text-slate-100">Cloud Sync History &amp; Reliability Log</h4>
+                    <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+                      {successOps} Succeeded
+                    </span>
+                    <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-full border ${
+                      failedOps > 0
+                        ? 'bg-rose-500/15 text-rose-300 border-rose-500/40'
+                        : 'bg-slate-800 text-slate-400 border-slate-700'
+                    }`}>
+                      {failedOps} Failed
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-400 truncate">
+                    {latestEntry
+                      ? `Latest (${new Date(latestEntry.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}): ${latestEntry.summary}`
+                      : 'No sync events recorded yet. Operations will appear here automatically as sales and edits sync.'}
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                id="btn-open-cloud-sync-history"
+                onClick={() => setShowSyncHistoryModal(true)}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-sky-300 hover:text-white border border-sky-500/40 rounded-xl text-xs font-bold flex items-center gap-2 transition shrink-0 cursor-pointer self-end sm:self-center"
+              >
+                <History className="w-4 h-4" />
+                <span>View Sync History ({syncHistory.length})</span>
+              </button>
+            </div>
+          );
+        })()}
 
         {/* Aggressive Auto-Sync Toggle (Battery & Mobile Data Optimization) */}
         <div className="pt-4 border-t border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -1617,7 +1699,7 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
 
             <p className="text-xs text-slate-300 leading-relaxed bg-slate-950 p-3 rounded-xl border border-slate-800">
               {confirmModal === 'reset' &&
-                'This will replace your current store inventory, transactions, customers, and expenses with the default Kenyan electronics & boutique sample dataset.'}
+                'This will replace your current store inventory, transactions, customers, and expenses with the default Rofani POS retail & wholesale sample dataset.'}
               {confirmModal === 'clear_tx' &&
                 `Are you sure you want to delete all ${transactions.length} sales transactions? Your inventory product stock counts will remain intact.`}
               {confirmModal === 'clear_exp' &&
@@ -1683,6 +1765,257 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
         allUsers={allUsers}
         storeName={storeName}
       />
+
+      {/* CLOUD SYNC HISTORY & RELIABILITY MODAL */}
+      {showSyncHistoryModal && (() => {
+        const totalOps = syncHistory.length;
+        const successOps = syncHistory.filter((e) => e.status === 'success').length;
+        const failedOps = syncHistory.filter((e) => e.status !== 'success').length;
+        const reliabilityPct = totalOps > 0 ? Math.round((successOps / totalOps) * 100) : 100;
+
+        const visibleEntries = syncHistory.filter((e) => {
+          if (syncHistoryFilter === 'success') return e.status === 'success';
+          if (syncHistoryFilter === 'failed') return e.status !== 'success';
+          return true;
+        });
+
+        const getOpLabel = (op: SyncHistoryEntry['operation']) => {
+          switch (op) {
+            case 'realtime_sale':
+              return 'Live Sale Sync';
+            case 'queue_flush':
+              return 'Offline Queue Sync';
+            case 'full_upload':
+              return 'Full Cloud Upload';
+            case 'cloud_pull':
+              return 'Cloud Pull / Restore';
+            default:
+              return 'Cloud Sync';
+          }
+        };
+
+        return (
+          <div
+            className="fixed inset-0 z-[130] bg-slate-950/85 backdrop-blur-sm flex items-start sm:items-center justify-center p-3 sm:p-4 overflow-y-auto"
+            onClick={() => setShowSyncHistoryModal(false)}
+          >
+            <div
+              className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden text-slate-100 flex flex-col max-h-[88vh] my-auto"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Modal Header */}
+              <div className="p-4 sm:p-5 border-b border-slate-800 bg-slate-950/70 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-10 h-10 rounded-xl bg-sky-500/15 border border-sky-500/35 text-sky-400 flex items-center justify-center shrink-0">
+                    <History className="w-5 h-5" />
+                  </div>
+                  <div className="min-w-0">
+                    <h3 className="font-bold text-base text-white truncate">
+                      Cloud Sync History &amp; Reliability
+                    </h3>
+                    <p className="text-xs text-slate-400">
+                      Recent successful Firestore syncs and failed attempts
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowSyncHistoryModal(false)}
+                  className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition cursor-pointer shrink-0"
+                  aria-label="Close Sync History"
+                >
+                  <span className="text-xs font-bold px-1">✕</span>
+                </button>
+              </div>
+
+              {/* KPI Summary Strip */}
+              <div className="grid grid-cols-3 gap-2.5 p-4 bg-slate-950/40 border-b border-slate-800">
+                <div className="bg-slate-950 border border-slate-800 rounded-xl p-3">
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                    Successful Syncs
+                  </div>
+                  <div className="text-lg font-black font-mono tabular-nums text-emerald-400 mt-0.5">
+                    {successOps}
+                  </div>
+                </div>
+                <div className="bg-slate-950 border border-slate-800 rounded-xl p-3">
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                    Failed / Partial
+                  </div>
+                  <div className={`text-lg font-black font-mono tabular-nums mt-0.5 ${failedOps > 0 ? 'text-rose-400' : 'text-slate-300'}`}>
+                    {failedOps}
+                  </div>
+                </div>
+                <div className="bg-slate-950 border border-slate-800 rounded-xl p-3">
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                    Sync Reliability
+                  </div>
+                  <div className={`text-lg font-black font-mono tabular-nums mt-0.5 ${
+                    reliabilityPct >= 90 ? 'text-sky-400' : reliabilityPct >= 60 ? 'text-amber-400' : 'text-rose-400'
+                  }`}>
+                    {totalOps > 0 ? `${reliabilityPct}%` : '—'}
+                  </div>
+                </div>
+              </div>
+
+              {/* Filter Tabs & Quick Actions */}
+              <div className="px-4 py-2.5 border-b border-slate-800 flex flex-wrap items-center justify-between gap-2 bg-slate-900">
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setSyncHistoryFilter('all')}
+                    className={`px-3 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
+                      syncHistoryFilter === 'all'
+                        ? 'bg-sky-600 text-white'
+                        : 'bg-slate-800 text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    All ({totalOps})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSyncHistoryFilter('success')}
+                    className={`px-3 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
+                      syncHistoryFilter === 'success'
+                        ? 'bg-emerald-600 text-white'
+                        : 'bg-slate-800 text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    Succeeded ({successOps})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSyncHistoryFilter('failed')}
+                    className={`px-3 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
+                      syncHistoryFilter === 'failed'
+                        ? 'bg-rose-600 text-white'
+                        : 'bg-slate-800 text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    Failed ({failedOps})
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  {onTriggerSync && (
+                    <button
+                      type="button"
+                      onClick={() => Promise.resolve(onTriggerSync()).catch(() => {})}
+                      className="px-2.5 py-1 bg-sky-500/20 hover:bg-sky-500/30 border border-sky-500/40 text-sky-300 rounded-lg text-xs font-bold flex items-center gap-1 cursor-pointer transition"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5" />
+                      <span>Run Sync Now</span>
+                    </button>
+                  )}
+                  {totalOps > 0 && (
+                    <button
+                      type="button"
+                      onClick={clearCloudSyncHistory}
+                      className="px-2.5 py-1 bg-slate-800 hover:bg-rose-950/70 border border-slate-700 hover:border-rose-700/60 text-slate-300 hover:text-rose-300 rounded-lg text-xs font-bold flex items-center gap-1 cursor-pointer transition"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>Clear</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Chronological Log List */}
+              <div className="p-4 overflow-y-auto flex-1 space-y-2.5 text-xs">
+                {visibleEntries.length === 0 ? (
+                  <div className="py-10 text-center space-y-2 border-2 border-dashed border-slate-800 rounded-2xl text-slate-400">
+                    <Cloud className="w-8 h-8 text-slate-600 mx-auto" />
+                    <p className="font-bold text-slate-200">No matching sync logs yet</p>
+                    <p className="text-[11px] text-slate-500 max-w-sm mx-auto">
+                      Cloud uploads, pulls, live POS sales, and offline queue retries will automatically appear here with full status details.
+                    </p>
+                  </div>
+                ) : (
+                  visibleEntries.map((entry) => {
+                    const isOk = entry.status === 'success';
+                    const isPartial = entry.status === 'partial';
+                    return (
+                      <div
+                        key={entry.id}
+                        className={`p-3 rounded-xl border space-y-1.5 ${
+                          isOk
+                            ? 'bg-slate-950/80 border-emerald-500/30'
+                            : isPartial
+                            ? 'bg-amber-950/25 border-amber-500/40'
+                            : 'bg-rose-950/25 border-rose-500/40'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-2 flex-wrap">
+                          <div className="flex items-center gap-2">
+                            {isOk ? (
+                              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                            ) : (
+                              <AlertTriangle
+                                className={`w-4 h-4 shrink-0 ${
+                                  isPartial ? 'text-amber-400' : 'text-rose-400'
+                                }`}
+                              />
+                            )}
+                            <span className="font-bold text-slate-100">{getOpLabel(entry.operation)}</span>
+                            <span
+                              className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full border ${
+                                isOk
+                                  ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40'
+                                  : isPartial
+                                  ? 'bg-amber-500/15 text-amber-300 border-amber-500/40'
+                                  : 'bg-rose-500/15 text-rose-300 border-rose-500/40'
+                              }`}
+                            >
+                              {isOk ? 'Success' : isPartial ? 'Partial' : 'Failed'}
+                            </span>
+                          </div>
+
+                          <div className="flex items-center gap-2 font-mono text-[10px] text-slate-400">
+                            {entry.syncedCount > 0 && (
+                              <span className="text-emerald-400 font-bold">+{entry.syncedCount} synced</span>
+                            )}
+                            {entry.failedCount > 0 && (
+                              <span className="text-rose-400 font-bold">{entry.failedCount} failed</span>
+                            )}
+                            <span>
+                              {new Date(entry.timestamp).toLocaleString([], {
+                                month: 'short',
+                                day: 'numeric',
+                                hour: '2-digit',
+                                minute: '2-digit',
+                                second: '2-digit',
+                              })}
+                            </span>
+                          </div>
+                        </div>
+
+                        <p className="text-slate-200 leading-snug">{entry.summary}</p>
+
+                        {entry.errorDetails && (
+                          <div className="bg-slate-950 border border-rose-900/60 text-rose-300 px-2.5 py-1.5 rounded-lg font-mono text-[11px] break-words">
+                            {entry.errorDetails}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+
+              {/* Modal Footer */}
+              <div className="p-3.5 border-t border-slate-800 bg-slate-950/70 flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => setShowSyncHistoryModal(false)}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-bold cursor-pointer transition"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   </div>
 );

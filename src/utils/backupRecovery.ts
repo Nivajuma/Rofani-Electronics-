@@ -73,17 +73,42 @@ export function findRecoverableBackups(): RecoverableBackup[] {
       const custs: Customer[] = parsed.customers || parsed.data?.customers || [];
       const exps: Expense[] = parsed.expenses || parsed.data?.expenses || [];
 
-      if (prods.length > 0 || sales.length > 0) {
+      const prodsCount =
+        prods.length > 0
+          ? prods.length
+          : typeof parsed.productsCount === 'number'
+          ? parsed.productsCount
+          : 0;
+      const salesCount =
+        sales.length > 0
+          ? sales.length
+          : typeof parsed.salesCount === 'number'
+          ? parsed.salesCount
+          : 0;
+      const customersCount =
+        custs.length > 0
+          ? custs.length
+          : typeof parsed.customersCount === 'number'
+          ? parsed.customersCount
+          : 0;
+      const expensesCount =
+        exps.length > 0
+          ? exps.length
+          : typeof parsed.expensesCount === 'number'
+          ? parsed.expensesCount
+          : 0;
+
+      if (prodsCount > 0 || salesCount > 0) {
         const ts = parsed.timestamp || parsed.date || Date.now();
         found.push({
           key: item.key,
           label: item.label,
           timestamp: typeof ts === 'number' ? ts : new Date(ts).getTime() || Date.now(),
           formattedDate: new Date(typeof ts === 'number' ? ts : Date.now()).toLocaleString(),
-          productsCount: prods.length,
-          salesCount: sales.length,
-          customersCount: custs.length,
-          expensesCount: exps.length,
+          productsCount: prodsCount,
+          salesCount,
+          customersCount,
+          expensesCount,
           data: {
             products: prods,
             transactions: sales,
@@ -118,17 +143,29 @@ export function findRecoverableBackups(): RecoverableBackup[] {
             parsed.products ||
             (Array.isArray(parsed) && parsed.length > 0 && parsed[0]?.sku ? parsed : []) ||
             [];
+          const prodsCount =
+            prods.length > 0
+              ? prods.length
+              : typeof parsed.productsCount === 'number'
+              ? parsed.productsCount
+              : 0;
 
-          if (prods.length > 0) {
+          if (prodsCount > 0) {
             found.push({
               key: k,
               label: `LocalStorage Snapshot (${k})`,
               timestamp: parsed.timestamp || Date.now(),
               formattedDate: new Date(parsed.timestamp || Date.now()).toLocaleString(),
-              productsCount: prods.length,
-              salesCount: (parsed.transactions || parsed.sales || []).length,
-              customersCount: (parsed.customers || []).length,
-              expensesCount: (parsed.expenses || []).length,
+              productsCount: prodsCount,
+              salesCount:
+                (parsed.transactions || parsed.sales || []).length ||
+                (typeof parsed.salesCount === 'number' ? parsed.salesCount : 0),
+              customersCount:
+                (parsed.customers || []).length ||
+                (typeof parsed.customersCount === 'number' ? parsed.customersCount : 0),
+              expensesCount:
+                (parsed.expenses || []).length ||
+                (typeof parsed.expensesCount === 'number' ? parsed.expensesCount : 0),
               data: {
                 products: prods,
                 transactions: parsed.transactions || parsed.sales || [],
@@ -162,7 +199,7 @@ export function protectLargestBackup(
 
   try {
     const existing = safeGetJSON<any>('rofani_pos_largest_backup', null);
-    const existingCount = existing?.products?.length || 0;
+    const existingCount = existing?.productsCount || existing?.products?.length || 0;
 
     if (currentProducts.length >= existingCount) {
       const payload = {

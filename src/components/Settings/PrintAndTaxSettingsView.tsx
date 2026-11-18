@@ -41,7 +41,7 @@ export const PRINT_AND_TAX_SETTINGS_DEFAULT: PrintAndTaxSettingsState = {
   paperSize: '58mm',
   showStoreLogo: true,
   printAddressContact: true,
-  customHeaderNote: 'Rofani Electronics & Boutique - Kengeleni, Mombasa',
+  customHeaderNote: 'Rofani POS - Official Receipt',
   customFooterNote: 'Thank you for shopping with us! Goods once sold are not returnable after 7 days.',
   showBarcodeQR: true,
   enableKraTot: true,
@@ -220,7 +220,7 @@ export const PrintAndTaxSettingsView: React.FC<PrintAndTaxSettingsViewProps> = (
                 value={settings.customHeaderNote}
                 onChange={(e) => updateSetting('customHeaderNote', e.target.value)}
                 className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 font-medium focus:outline-none focus:ring-2 focus:ring-purple-500"
-                placeholder="E.g. Rofani Electronics - Main Branch"
+                placeholder="E.g. Rofani POS - Main Branch"
               />
             </div>
 

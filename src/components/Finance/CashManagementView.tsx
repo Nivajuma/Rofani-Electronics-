@@ -1582,7 +1582,7 @@ export const CashManagementView: React.FC<CashManagementViewProps> = ({
             {/* PRINTABLE VOUCHER CONTENT */}
             <div className="bg-slate-950 p-6 rounded-2xl border border-slate-800 font-mono text-xs space-y-4 text-slate-300">
               <div className="text-center border-b border-slate-800 pb-3 space-y-1">
-                <h4 className="text-base font-black text-slate-100 tracking-wider">ROFANI ELECTRONICS & BOUTIQUE</h4>
+                <h4 className="text-base font-black text-slate-100 tracking-wider">ROFANI POS</h4>
                 <p className="text-[11px] text-slate-400 font-sans font-bold">
                   {selectedTxForVoucher.type === 'CASH_IN' ? 'OFFICIAL CASH RECEIPT VOUCHER' : 'OFFICIAL PAYMENT VOUCHER'}
                 </p>

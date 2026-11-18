@@ -411,7 +411,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   };
 
   const handleShareWhatsApp = async () => {
-    const rawText = `📊 Rofani Electronics - ${selectedReport?.title}\nPeriod: ${datePreset.toUpperCase()}\nRevenue: KSh ${reportData?.totalRev.toLocaleString()}`;
+    const rawText = `📊 Rofani POS - ${selectedReport?.title}\nPeriod: ${datePreset.toUpperCase()}\nRevenue: KSh ${reportData?.totalRev.toLocaleString()}`;
     if (typeof navigator !== 'undefined' && navigator.share) {
       try {
         await navigator.share({ title: selectedReport?.title || 'Sales Report', text: rawText });
@@ -451,7 +451,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
       const items = getAggregatedSaleDateItems(dateGroup);
       const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
       doc.setFontSize(14);
-      doc.text(`Rofani Electronics - Sales Report (${dateGroup.dateStr})`, 14, 16);
+      doc.text(`Rofani POS - Sales Report (${dateGroup.dateStr})`, 14, 16);
       doc.setFontSize(10);
       doc.text(`Receipts: ${dateGroup.transactions.length}   |   Total Sales: KSh ${totalDateRevenue.toLocaleString()}`, 14, 23);
 
@@ -504,7 +504,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   };
 
   const handleShareDailySales = async (dateGroup: { dateStr: string; transactions: Transaction[] }, totalDateRevenue: number) => {
-    const rawText = `📊 Rofani Electronics - Sales on ${dateGroup.dateStr}\nTotal Sales: KSh ${totalDateRevenue.toLocaleString()}\nTransactions: ${dateGroup.transactions.length}`;
+    const rawText = `📊 Rofani POS - Sales on ${dateGroup.dateStr}\nTotal Sales: KSh ${totalDateRevenue.toLocaleString()}\nTransactions: ${dateGroup.transactions.length}`;
     if (typeof navigator !== 'undefined' && navigator.share) {
       try {
         await navigator.share({ title: `Sales on ${dateGroup.dateStr}`, text: rawText });
@@ -533,7 +533,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
           )}
           <div>
             <h1 className="font-bold text-base sm:text-lg tracking-tight">Reports & Business Analytics</h1>
-            <p className="text-[10px] text-slate-400">Rofani Electronics & Boutique • Tap any report to view specialized views</p>
+            <p className="text-[10px] text-slate-400">Rofani POS • Tap any report to view specialized views</p>
           </div>
         </div>
 
@@ -1371,7 +1371,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                 <div className="flex items-start justify-between border-b border-slate-200 pb-2">
                   <div>
                     <span className="font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded">Stock Initialized</span>
-                    <p className="text-slate-600 mt-1">Catalog catalogued into Rofani Electronics inventory.</p>
+                    <p className="text-slate-600 mt-1">Catalog catalogued into Rofani POS inventory.</p>
                   </div>
                   <span className="text-[10px] text-slate-400 font-mono">Active</span>
                 </div>
@@ -1575,7 +1575,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                   {selectedMetricDetail === 'discounts' && 'Promotional Discounts & Markdowns'}
                   {selectedMetricDetail === 'netprofit' && 'Net Profit & Operating Summary'}
                 </h3>
-                <p className="text-[11px] text-slate-400">Rofani Electronics Analytics Drill-Down</p>
+                <p className="text-[11px] text-slate-400">Rofani POS Analytics Drill-Down</p>
               </div>
             </div>
             <button

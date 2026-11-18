@@ -71,7 +71,7 @@ export const CustomerDetailsModal: React.FC<CustomerDetailsModalProps> = ({
     }
     const cleanPhone = customer.phone.replace(/[^0-9]/g, '');
     const message = encodeURIComponent(
-      `Hello ${customer.name},\n\nThis is a friendly statement from *ROFANI Electronics & Boutique*.\n\n` +
+      `Hello ${customer.name},\n\nThis is a friendly statement from *Rofani POS*.\n\n` +
       `Your current outstanding balance is: *${formatKSh(balanceDue, { showDecimals: true })}*.\n` +
       `Total Lifetime Purchases: ${formatKSh(totalSpent)}.\n\n` +
       `You may settle via:\n• *M-Pesa Buy Goods Till:* 789012\n• *Paybill:* 247247 (Acc: 0180293)\n\n` +

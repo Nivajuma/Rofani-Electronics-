@@ -2,6 +2,9 @@ import { initializeApp, getApps, getApp } from 'firebase/app';
 import {
   initializeFirestore,
   getFirestore,
+  persistentLocalCache,
+  persistentSingleTabManager,
+  enableNetwork,
   doc,
   getDoc,
   getDocFromServer,
@@ -47,8 +50,9 @@ try {
 // Initialize Firebase App instance safely
 export const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 
-// Initialize Firestore database with ignoreUndefinedProperties and experimentalForceLongPolling
-// so restricted mobile, proxy, and iframe networks never hang on WebChannel streams.
+// Initialize Firestore with single-tab IndexedDB persistent local cache (survives phone sleep,
+// tab discard & offline drops WITHOUT writing sequence numbers/client state to 5MB localStorage)
+// plus ignoreUndefinedProperties and experimentalForceLongPolling for restricted mobile/proxy networks.
 export const db: Firestore = (() => {
   try {
     return initializeFirestore(
@@ -56,14 +60,41 @@ export const db: Firestore = (() => {
       {
         ignoreUndefinedProperties: true,
         experimentalForceLongPolling: true,
+        localCache: persistentLocalCache({
+          tabManager: persistentSingleTabManager({ forceOwnership: true }),
+        }),
       },
       firebaseConfig.firestoreDatabaseId
     );
   } catch {
-    // If already initialized in hot reload or previous instance, fallback to getFirestore
-    return getFirestore(app, firebaseConfig.firestoreDatabaseId);
+    try {
+      return initializeFirestore(
+        app,
+        {
+          ignoreUndefinedProperties: true,
+          experimentalForceLongPolling: true,
+        },
+        firebaseConfig.firestoreDatabaseId
+      );
+    } catch {
+      // If already initialized in hot reload or previous instance, fallback to getFirestore
+      return getFirestore(app, firebaseConfig.firestoreDatabaseId);
+    }
   }
 })();
+
+// Silently re-enable and refresh the Firestore network stream when the phone wakes from sleep/background
+export async function refreshFirestoreConnection(): Promise<boolean> {
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    return false;
+  }
+  try {
+    await enableNetwork(db);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 // Initialize Firebase Auth
 export const auth: Auth = getAuth(app);
@@ -86,7 +117,6 @@ export function isAuthorizedCloudUser(user: FirebaseUser | null | undefined): bo
 
 export function getStoreIdForUser(user: FirebaseUser | null | undefined): string | null {
   if (!user || !user.emailVerified) return null;
-  if (isOwnerCloudUser(user)) return OWNER_PRIMARY_STORE_ID;
   return user.uid;
 }
 
@@ -151,15 +181,16 @@ export async function signOutFromCloud(): Promise<void> {
   await signOut(auth);
 }
 
-// Connection test helper: verifies live Firestore connectivity against the server
+// Connection test helper: verifies live Firestore connectivity against the server within 3s
 export async function testFirestoreConnection(): Promise<boolean> {
   if (!auth.currentUser || !auth.currentUser.emailVerified) {
     return false;
   }
+  const storeId = getStoreIdForUser(auth.currentUser) || auth.currentUser.uid;
   try {
-    const fetchDoc = getDocFromServer(doc(db, 'test', 'connection'));
+    const fetchDoc = getDocFromServer(doc(db, 'stores', storeId));
     const timeout = new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error('Connection check timeout')), 8000)
+      setTimeout(() => reject(new Error('Connection check timeout')), 3000)
     );
     await Promise.race([fetchDoc, timeout]);
     return true;

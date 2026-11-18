@@ -59,7 +59,7 @@ const QUICK_QUESTIONS = [
   {
     icon: Sparkles,
     label: 'Customer Promotions & SMS Campaign Ideas',
-    prompt: 'Give me high-converting promotional campaign ideas and WhatsApp/SMS copy to boost store sales this week for our electronics and boutique fashion shoppers in Kenya.'
+    prompt: 'Give me high-converting promotional campaign ideas and WhatsApp/SMS copy to boost store sales this week for our retail and wholesale customers in Kenya.'
   },
   {
     icon: CreditCard,
@@ -74,12 +74,12 @@ const QUICK_QUESTIONS = [
   {
     icon: ArrowRightLeft,
     label: 'Inter-branch stock transfer?',
-    prompt: 'How do I transfer stock inventory from Rofani Electronics to another branch outlet?'
+    prompt: 'How do I transfer stock inventory from Rofani POS to another branch outlet?'
   },
   {
     icon: Barcode,
     label: 'Adding items & barcode tags?',
-    prompt: 'How do I add new electronics or boutique products and print barcode labels?'
+    prompt: 'How do I add new products and print barcode labels?'
   },
   {
     icon: HelpCircle,
@@ -113,7 +113,7 @@ export const AIAssistantModal: React.FC<AIAssistantModalProps> = ({
         {
           id: 'init-1',
           sender: 'assistant',
-          text: `Hujambo! 👋 Welcome to **ROFANI Electronics & Boutique**.\n\nI am your **Gemini AI Staff Co-Pilot & Inventory Strategist**. I analyze real-time sales velocity across customer transactions to give you **predictive inventory replenishment suggestions**, stockout forecasts, and step-by-step guides for POS sales, KRA tax invoices, and branch transfers.\n\nClick any quick topic below or ask me any question!`,
+          text: `Hujambo! 👋 Welcome to **Rofani POS**.\n\nI am your **Gemini AI Staff Co-Pilot & Inventory Strategist**. I analyze real-time sales velocity across customer transactions to give you **predictive inventory replenishment suggestions**, stockout forecasts, and step-by-step guides for POS sales, KRA tax invoices, and branch transfers.\n\nClick any quick topic below or ask me any question!`,
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
         }
       ],

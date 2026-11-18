@@ -6,12 +6,13 @@
     <meta name="theme-color" content="#0284c7" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Rofani POS" />
     <meta name="mobile-web-app-capable" content="yes" />
     <link rel="manifest" href="/manifest.json" />
-    <title>ROFANI ELECTRONICS AND BOUTIQUE</title>
-    <meta name="description" content="Comprehensive point of sale, inventory tracking, worker sales commission engine, financing & cash in/out management, attendance, expenses, and PDF reports system." />
-    <meta property="og:title" content="ROFANI ELECTRONICS AND BOUTIQUE" />
-    <meta property="og:description" content="Comprehensive point of sale, inventory tracking, worker sales commission engine, financing & cash in/out management, attendance, expenses, and PDF reports system." />
+    <title>Rofani POS</title>
+    <meta name="description" content="Rofani POS — Multi-store point of sale, inventory tracking, M-Pesa STK push, worker sales commission, expenses, and KRA tax reports." />
+    <meta property="og:title" content="Rofani POS" />
+    <meta property="og:description" content="Rofani POS — Multi-store point of sale, inventory tracking, M-Pesa STK push, worker sales commission, expenses, and KRA tax reports." />
   </head>
   <body>
     <div id="root"></div>
@@ -23,7 +24,7 @@
             var keysToRemove = [];
             for (var i = 0; i < localStorage.length; i++) {
               var k = localStorage.key(i);
-              if (k && (k.indexOf('firestore_clients_') === 0 || k.indexOf('__sak') === 0 || k.indexOf('firebase:firestore:') === 0)) {
+              if (k && (k.indexOf('firestore_sequence_number_') === 0 || k.indexOf('firestore_clients_') === 0 || k.indexOf('__sak') === 0 || k.indexOf('firebase:firestore:') === 0)) {
                 keysToRemove.push(k);
               }
             }
@@ -46,13 +47,13 @@
                 }
               } catch(e) {}
             }
-            // Auto-migrate stores to single store: Rofani Electronics
+            // Auto-migrate stores to default store: Rofani POS
             var storesJson = localStorage.getItem('retail_pos_stores');
             if (storesJson && (storesJson.indexOf('Flagship') !== -1 || storesJson.indexOf('store-westlands') !== -1)) {
               try {
                 var singleStore = [{
                   id: 'store-main',
-                  name: 'Rofani Electronics',
+                  name: 'Rofani POS',
                   code: 'HQ-CBD',
                   city: 'Nairobi',
                   address: 'Kenyatta Avenue, City Center, Nairobi',

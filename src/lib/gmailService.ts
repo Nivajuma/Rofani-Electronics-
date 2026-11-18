@@ -245,7 +245,7 @@ export const buildAndDispatchStoreBackup = async ({
   expenses,
   cashTransactions = [],
   allUsers = [],
-  storeName = 'ROFANI ELECTRONICS AND BOUTIQUE',
+  storeName = 'Rofani POS',
 }: BuildBackupParams): Promise<{
   success: boolean;
   messageId?: string;
@@ -271,7 +271,7 @@ export const buildAndDispatchStoreBackup = async ({
     );
 
     const payload = {
-      app: 'ROFANI ELECTRONICS AND BOUTIQUE POS',
+      app: 'Rofani POS',
       version: '2.5.0',
       exportType: 'daily_email_auto_backup',
       storeName,

@@ -443,7 +443,7 @@ export const StoreManagerModal: React.FC<StoreManagerModalProps> = ({
                           value={editName}
                           onChange={(e) => setEditName(e.target.value)}
                           className="w-full bg-slate-900 border border-slate-700 focus:border-indigo-500 rounded-xl px-3 py-2 text-white font-bold outline-none"
-                          placeholder="e.g. Rofani Electronics CBD"
+                          placeholder="e.g. Rofani POS CBD"
                         />
                       </div>
 
@@ -1154,7 +1154,7 @@ export const StoreManagerModal: React.FC<StoreManagerModalProps> = ({
               <h3 className="text-base font-black text-white">Reset Demo Store Outlets?</h3>
             </div>
             <p className="text-xs text-slate-300 leading-relaxed">
-              This will restore the default single store outlet for Rofani Electronics.
+              This will restore the default single store outlet for Rofani POS.
             </p>
             <div className="flex justify-end gap-2 pt-2">
               <button

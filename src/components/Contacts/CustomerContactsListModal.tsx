@@ -226,7 +226,7 @@ export const CustomerContactsListModal: React.FC<CustomerContactsListModalProps>
 
   const handleWhatsApp = (phone: string, contactName: string) => {
     const clean = phone.replace(/[^0-9]/g, '');
-    const msg = encodeURIComponent(`Hello ${contactName}, contacting you from ROFANI Electronics & Boutique regarding your customer account.`);
+    const msg = encodeURIComponent(`Hello ${contactName}, contacting you from Rofani POS regarding your customer account.`);
     window.open(`https://wa.me/${clean}?text=${msg}`, '_blank');
   };
 

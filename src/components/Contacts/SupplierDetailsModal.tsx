@@ -78,7 +78,7 @@ export const SupplierDetailsModal: React.FC<SupplierDetailsModalProps> = ({
 
     const message = encodeURIComponent(
       `Hello ${supplier.contactPerson || supplier.name},\n\n` +
-      `This is *ROFANI Electronics & Boutique* placing an inquiry / restock purchase order for the following items:\n\n` +
+      `This is *Rofani POS* placing an inquiry / restock purchase order for the following items:\n\n` +
       `${itemsText}\n\n` +
       `Please send us the proforma invoice and estimated delivery schedule.\n\nThank you!`
     );

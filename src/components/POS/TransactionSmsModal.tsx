@@ -35,7 +35,7 @@ export const TransactionSmsModal: React.FC<TransactionSmsModalProps> = ({
   isOpen,
   onClose,
   transaction,
-  storeName = 'ROFANI',
+  storeName = 'Rofani POS',
   onSmsSent,
 }) => {
   const initialPhone = transaction.customerPhone && transaction.customerPhone !== 'N/A'
@@ -99,7 +99,7 @@ export const TransactionSmsModal: React.FC<TransactionSmsModalProps> = ({
       const res = await sendTransactionSummarySms(transaction, phoneInfo.normalized, {
         storeName,
         customMessage: messageBody,
-        senderId: 'ROFANI',
+        senderId: storeName || 'Rofani POS',
       });
 
       setDeliveryResult(res.record);
@@ -296,7 +296,7 @@ export const TransactionSmsModal: React.FC<TransactionSmsModalProps> = ({
                 <Smartphone className="w-3.5 h-3.5 text-indigo-400" /> Customer Handset SMS Preview
               </span>
               <span className="font-mono text-[10px] text-indigo-300">
-                Sender ID: <strong>ROFANI</strong>
+                Sender ID: <strong>{storeName || 'Rofani POS'}</strong>
               </span>
             </div>
 

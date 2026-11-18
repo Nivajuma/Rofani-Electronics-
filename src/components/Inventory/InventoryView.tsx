@@ -140,7 +140,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   scanLogs = [],
   onRecordScanLog = () => {},
   onClearScanLogs = () => {},
-  storeName = 'Rofani Electronics',
+  storeName = 'Rofani POS',
   onOpenAiAssistantWithPrompt,
   restockRecords = [],
   onAddRestock,

@@ -202,7 +202,7 @@ import {
   subscribeToStoreProfile,
   ensureOwnerPrimaryStoreProfile,
   createMerchantStoreProfile,
-  migrateLegacyRootCollectionsToRofaniStoreIfNeeded,
+  migrateLegacyRootCollectionsToOwnerStoreIfNeeded,
 } from './lib/cloudSync';
 import { loadMpesaConfig, saveMpesaConfig } from './utils/mpesa';
 import {
@@ -214,6 +214,7 @@ import {
   completeGoogleRedirectSignIn,
   signOutFromCloud,
   testFirestoreConnection,
+  refreshFirestoreConnection,
   isQuotaExceededError,
   FIREBASE_UPGRADE_URL,
 } from './lib/firebase';
@@ -239,6 +240,7 @@ import {
   getPendingSyncCount,
   removePendingSyncItem,
   getAggressiveAutoSync,
+  addSyncHistoryEntry,
   SyncRetryResult,
 } from './utils/offlineSync';
 import {
@@ -607,28 +609,58 @@ export default function App() {
     safeSetJSON('retail_pos_show_print_modal', showPrintBarcodesModal);
   }, [showPrintBarcodesModal]);
 
+  const CACHED_CLOUD_SESSION_KEY = 'rofani_pos_cached_cloud_session';
+  const [cachedCloudSession, setCachedCloudSession] = useState<{
+    uid: string;
+    email?: string | null;
+    isOwner?: boolean;
+  } | null>(() => safeGetJSON(CACHED_CLOUD_SESSION_KEY, null));
   const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(() => auth.currentUser);
-  const [isFirebaseAuthReady, setIsFirebaseAuthReady] = useState<boolean>(false);
+  const [isFirebaseAuthReady, setIsFirebaseAuthReady] = useState<boolean>(() => Boolean(auth.currentUser));
   const [allowOfflineOwnerMode, setAllowOfflineOwnerMode] = useState<boolean>(false);
-  const [storeProfile, setStoreProfile] = useState<StoreSubscriptionProfile | null>(null);
+  const [storeProfile, setStoreProfile] = useState<StoreSubscriptionProfile | null>(() =>
+    safeGetJSON<StoreSubscriptionProfile | null>('rofani_pos_store_profile', null)
+  );
   const [isCheckingStoreProfile, setIsCheckingStoreProfile] = useState<boolean>(false);
   const [showPlansModal, setShowPlansModal] = useState<boolean>(false);
   const [showSuperAdminModal, setShowSuperAdminModal] = useState<boolean>(false);
 
   useEffect(() => {
     completeGoogleRedirectSignIn().catch(() => null);
+    // Strict 3-second failsafe so slow/offline networks never hang the startup gate
+    const authTimeoutId = setTimeout(() => {
+      setIsFirebaseAuthReady(true);
+    }, 3000);
+
     const unsubscribe = onAuthStateChanged(auth, (user) => {
+      clearTimeout(authTimeoutId);
       setFirebaseUser(user);
       setIsFirebaseAuthReady(true);
-      if (user) {
+      if (user && isAuthorizedCloudUser(user)) {
+        const sessionSnapshot = {
+          uid: user.uid,
+          email: user.email,
+          isOwner: isOwnerCloudUser(user),
+        };
+        setCachedCloudSession(sessionSnapshot);
+        safeSetJSON(CACHED_CLOUD_SESSION_KEY, sessionSnapshot);
         setAllowOfflineOwnerMode(false);
+      } else if (user === null) {
+        setCachedCloudSession(null);
+        safeSetJSON(CACHED_CLOUD_SESSION_KEY, undefined);
       }
     });
-    return () => unsubscribe();
+    return () => {
+      clearTimeout(authTimeoutId);
+      unsubscribe();
+    };
   }, []);
 
-  const isOwnerAccount = isOwnerCloudUser(firebaseUser);
-  const activeCloudStoreId = getStoreIdForUser(firebaseUser);
+  const isOwnerAccount =
+    isOwnerCloudUser(firebaseUser) ||
+    (!isFirebaseAuthReady && Boolean(cachedCloudSession?.isOwner)) ||
+    (allowOfflineOwnerMode && typeof window !== 'undefined' && localStorage.getItem(VERIFIED_OWNER_CACHE_KEY) === '1');
+  const activeCloudStoreId = getStoreIdForUser(firebaseUser) || cachedCloudSession?.uid || null;
   const isCloudAuthReady = isFirebaseAuthReady && isAuthorizedCloudUser(firebaseUser);
   const canAutoSyncCloud = () => getIsOnline() && isAuthorizedCloudUser(auth.currentUser);
   const prevTenantScopeRef = useRef<string>(getActiveTenantStoreId());
@@ -780,33 +812,43 @@ export default function App() {
     setActiveStoreId(safeGetJSON<string>('retail_pos_active_store_id', 'store-main') || 'store-main');
   };
 
-  // Synchronize active tenant scope, reload isolated state, and bind Firestore store subscription profile
+  // Synchronize active tenant scope, reload isolated state, and bind Firestore stores/{userId}
   useEffect(() => {
     if (!isFirebaseAuthReady) return;
 
-    let nextScope = '__unauthenticated__';
+    let nextLocalScope = '__unauthenticated__';
+    const nextCloudStoreId =
+      firebaseUser && isAuthorizedCloudUser(firebaseUser) ? getStoreIdForUser(firebaseUser) : null;
+
     if (firebaseUser && isAuthorizedCloudUser(firebaseUser)) {
-      nextScope = getStoreIdForUser(firebaseUser);
+      nextLocalScope = isOwnerCloudUser(firebaseUser)
+        ? OWNER_PRIMARY_STORE_ID
+        : (nextCloudStoreId || firebaseUser.uid);
       if (isOwnerCloudUser(firebaseUser)) {
         try {
           localStorage.setItem(VERIFIED_OWNER_CACHE_KEY, '1');
         } catch {}
       }
-    } else if (allowOfflineOwnerMode && typeof window !== 'undefined' && localStorage.getItem(VERIFIED_OWNER_CACHE_KEY) === '1') {
-      nextScope = OWNER_PRIMARY_STORE_ID;
+    } else if (
+      allowOfflineOwnerMode &&
+      typeof window !== 'undefined' &&
+      localStorage.getItem(VERIFIED_OWNER_CACHE_KEY) === '1'
+    ) {
+      nextLocalScope = OWNER_PRIMARY_STORE_ID;
     }
 
-    if (prevTenantScopeRef.current !== nextScope) {
-      prevTenantScopeRef.current = nextScope;
-      reloadAppStateForTenantScope(nextScope, nextScope === OWNER_PRIMARY_STORE_ID);
+    if (prevTenantScopeRef.current !== nextLocalScope) {
+      prevTenantScopeRef.current = nextLocalScope;
+      reloadAppStateForTenantScope(nextLocalScope, nextLocalScope === OWNER_PRIMARY_STORE_ID);
     } else {
-      setActiveTenantStoreId(nextScope);
+      setActiveTenantStoreId(nextLocalScope);
     }
 
-    if (!firebaseUser || !isAuthorizedCloudUser(firebaseUser) || nextScope === '__unauthenticated__') {
+    if (!firebaseUser || !isAuthorizedCloudUser(firebaseUser) || !nextCloudStoreId || nextLocalScope === '__unauthenticated__') {
       setIsCheckingStoreProfile(false);
       if (!allowOfflineOwnerMode) {
         setStoreProfile(null);
+        safeSetJSON('rofani_pos_store_profile', undefined);
       }
       return;
     }
@@ -817,7 +859,10 @@ export default function App() {
     const applyStoreProfileToWorkspace = (prof: StoreSubscriptionProfile | null) => {
       if (cancelled) return;
       setStoreProfile(prof);
-      if (prof && prof.id !== OWNER_PRIMARY_STORE_ID) {
+      if (prof) {
+        safeSetJSON('rofani_pos_store_profile', prof);
+      }
+      if (prof && !isOwnerCloudUser(firebaseUser)) {
         setStores((prev) => {
           if (!prev || prev.length === 0) {
             return [
@@ -847,20 +892,68 @@ export default function App() {
       }
     };
 
-    setIsCheckingStoreProfile(true);
+    // Only block UI for profile check when there is no cached profile and user is not the owner
+    const cachedProfile = safeGetJSON<StoreSubscriptionProfile | null>('rofani_pos_store_profile', null);
+    if (!isOwnerCloudUser(firebaseUser) && !cachedProfile) {
+      setIsCheckingStoreProfile(true);
+    }
+
+    // Strict 3-second maximum timeout on startup profile check
+    const profileTimeoutId = setTimeout(() => {
+      if (!cancelled) setIsCheckingStoreProfile(false);
+    }, 3000);
 
     if (isOwnerCloudUser(firebaseUser)) {
       ensureOwnerPrimaryStoreProfile(firebaseUser)
         .then((prof) => {
           applyStoreProfileToWorkspace(prof);
           if (!cancelled) setIsCheckingStoreProfile(false);
-          migrateLegacyRootCollectionsToRofaniStoreIfNeeded().catch(() => false);
+          // Automatic One-Time Data Bridge: checks stores/{userId} first and copies root/legacy data if empty
+          migrateLegacyRootCollectionsToOwnerStoreIfNeeded(firebaseUser.uid)
+            .then((migrated) => {
+              if (!migrated || cancelled) return;
+              Promise.all([
+                fetchProductsFromCloud(firebaseUser.uid).catch(() => []),
+                fetchTransactionsFromCloud(firebaseUser.uid).catch(() => []),
+              ]).then(([migratedProducts, migratedSales]) => {
+                if (cancelled) return;
+                if (migratedProducts.length > 0) {
+                  const { merged } = mergeRecordsWithConflictDetection<Product>({
+                    recordType: 'product',
+                    localRecords: productsRef.current,
+                    incomingRecords: migratedProducts,
+                    deletedIds: getDeletedProductIds(),
+                    pendingMap: getPendingProductMap(),
+                    resolvedFingerprints: resolvedConflictFingerprintsRef.current,
+                    sourceLabel: 'Legacy Root Data Bridge',
+                  });
+                  productsRef.current = merged;
+                  setProducts(merged);
+                  safeSetJSON('retail_pos_products', merged);
+                }
+                if (migratedSales.length > 0) {
+                  const { merged: mergedSales } = mergeRecordsWithConflictDetection<Transaction>({
+                    recordType: 'transaction',
+                    localRecords: transactionsRef.current,
+                    incomingRecords: migratedSales,
+                    pendingMap: getPendingRecordMap<Transaction>('sale'),
+                    resolvedFingerprints: resolvedConflictFingerprintsRef.current,
+                    sourceLabel: 'Legacy Root Sales Bridge',
+                  });
+                  mergedSales.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+                  transactionsRef.current = mergedSales;
+                  setTransactions(mergedSales);
+                  safeSetJSON('retail_pos_transactions', mergedSales);
+                }
+              });
+            })
+            .catch(() => false);
         })
         .catch(() => {
           if (!cancelled) setIsCheckingStoreProfile(false);
         });
     } else {
-      fetchStoreProfile(nextScope)
+      fetchStoreProfile(nextCloudStoreId)
         .then((prof) => {
           applyStoreProfileToWorkspace(prof);
           if (!cancelled) setIsCheckingStoreProfile(false);
@@ -872,7 +965,7 @@ export default function App() {
 
     try {
       unsubscribeProfile = subscribeToStoreProfile(
-        nextScope,
+        nextCloudStoreId,
         (prof) => {
           applyStoreProfileToWorkspace(prof);
           if (!cancelled) setIsCheckingStoreProfile(false);
@@ -887,11 +980,26 @@ export default function App() {
 
     return () => {
       cancelled = true;
+      clearTimeout(profileTimeoutId);
       if (unsubscribeProfile) unsubscribeProfile();
     };
   }, [isFirebaseAuthReady, firebaseUser?.uid, allowOfflineOwnerMode]);
 
   const [cloudSyncStatus, setCloudSyncStatus] = useState<'synced' | 'syncing' | 'offline' | 'error' | 'quota_exceeded'>('offline');
+  // Strict 3-second maximum cap on any active cloud sync indicator
+  useEffect(() => {
+    if (cloudSyncStatus !== 'syncing') return;
+    const syncSpinnerTimeout = setTimeout(() => {
+      setCloudSyncStatus((prev) =>
+        prev === 'syncing'
+          ? typeof navigator !== 'undefined' && !navigator.onLine
+            ? 'offline'
+            : 'synced'
+          : prev
+      );
+    }, 3000);
+    return () => clearTimeout(syncSpinnerTimeout);
+  }, [cloudSyncStatus]);
   const [isCloudQuotaExceeded, setIsCloudQuotaExceeded] = useState<boolean>(false);
   const [showQuotaBanner, setShowQuotaBanner] = useState<boolean>(true);
   const [lastSyncedTime, setLastSyncedTime] = useState<string | null>(null);
@@ -1629,7 +1737,7 @@ export default function App() {
       const singleStore: StoreLocation = {
         ...main,
         id: 'store-main',
-        name: 'Rofani Electronics',
+        name: 'Rofani POS',
         isMainBranch: true,
         active: true
       };
@@ -1637,8 +1745,15 @@ export default function App() {
       return [singleStore];
     }
     return saved.map((s) => {
-      if (s.name.toLowerCase().includes('flagship') || s.name === 'Main Store') {
-        return { ...s, name: 'Rofani Electronics' };
+      const lower = (s.name || '').trim().toLowerCase();
+      if (
+        lower.includes('flagship') ||
+        s.name === 'Main Store' ||
+        lower === 'rofani electronics' ||
+        lower === 'rofani electronics & boutique' ||
+        lower === 'rofani electronics and boutique'
+      ) {
+        return { ...s, name: 'Rofani POS' };
       }
       return s;
     });
@@ -1683,6 +1798,7 @@ export default function App() {
 
   // New Sale global trigger counter
   const [newSaleTrigger, setNewSaleTrigger] = useState(0);
+  const [isMobileSearchActive, setIsMobileSearchActive] = useState(false);
 
   const handleGlobalNewSale = () => {
     setActiveTab('pos');
@@ -1690,9 +1806,12 @@ export default function App() {
     setNewSaleTrigger((prev) => prev + 1);
   };
 
-  // Close mobile drawer whenever active tab changes
+  // Close mobile drawer whenever active tab changes & reset POS search focus state
   useEffect(() => {
     setIsMobileMenuOpen(false);
+    if (activeTab !== 'pos') {
+      setIsMobileSearchActive(false);
+    }
   }, [activeTab]);
 
   // Selected product for Restock & Sales History audit modal
@@ -1843,7 +1962,25 @@ export default function App() {
 
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'hidden') {
+        try {
+          safeSetJSON('retail_pos_active_tab', activeTab);
+          safeSetJSON('retail_pos_products', products);
+          safeSetJSON('retail_pos_transactions', transactions);
+          safeSetJSON('retail_pos_customers', customers);
+          safeSetJSON('retail_pos_suppliers', suppliers);
+          safeSetJSON('retail_pos_expenses', expenses);
+          safeSetJSON('retail_pos_users', allUsers);
+        } catch {}
         handleBackupSnapshot();
+      } else if (document.visibilityState === 'visible') {
+        // Silently refresh Firestore network connection on wake without wiping local cart/draft state
+        refreshFirestoreConnection()
+          .then((ok) => {
+            if (ok && getIsOnline() && isAuthorizedCloudUser(auth.currentUser) && getPendingSyncCount() > 0) {
+              syncPendingQueueToCloud().catch(() => {});
+            }
+          })
+          .catch(() => {});
       }
     };
 
@@ -1856,7 +1993,7 @@ export default function App() {
       window.removeEventListener('pagehide', handleBackupSnapshot);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [transactions, allUsers, products, expenses, activeStoreId, requirePinOnStartup, masterPin, ownerRecoveryEmail]);
+  }, [activeTab, transactions, allUsers, products, customers, suppliers, expenses, activeStoreId, requirePinOnStartup, masterPin, ownerRecoveryEmail]);
 
   // Real-time synchronization subscription for transactions with conflict detection
   useEffect(() => {
@@ -2068,18 +2205,40 @@ export default function App() {
     const initialQueue = getPendingSyncQueue();
     if (!getIsOnline() || (typeof navigator !== 'undefined' && !navigator.onLine)) {
       setCloudSyncStatus('offline');
+      const errMsg = 'Device is offline. Connect to Wi-Fi or mobile data and try again.';
+      if (initialQueue.length > 0) {
+        addSyncHistoryEntry({
+          operation: 'queue_flush',
+          status: 'failed',
+          syncedCount: 0,
+          failedCount: initialQueue.length,
+          summary: `Queue sync paused (${initialQueue.length} queued record${initialQueue.length === 1 ? '' : 's'})`,
+          errorDetails: errMsg,
+        });
+      }
       return {
         syncedCount: 0,
         remainingCount: initialQueue.length,
-        errorMessage: 'Device is offline. Connect to Wi-Fi or mobile data and try again.',
+        errorMessage: errMsg,
       };
     }
     if (!isAuthorizedCloudUser(auth.currentUser)) {
       setCloudSyncStatus('offline');
+      const errMsg = 'Sign in with your verified Google account in Sync & Share to sync queued records.';
+      if (initialQueue.length > 0) {
+        addSyncHistoryEntry({
+          operation: 'queue_flush',
+          status: 'failed',
+          syncedCount: 0,
+          failedCount: initialQueue.length,
+          summary: `Queue sync blocked — authentication required (${initialQueue.length} queued)`,
+          errorDetails: errMsg,
+        });
+      }
       return {
         syncedCount: 0,
         remainingCount: initialQueue.length,
-        errorMessage: 'Sign in with your verified Google account in Sync & Share to sync queued records.',
+        errorMessage: errMsg,
       };
     }
 
@@ -2170,9 +2329,32 @@ export default function App() {
       const remainingCount = getPendingSyncCount();
       if (hadError || remainingCount > 0) {
         setCloudSyncStatus(typeof navigator !== 'undefined' && !navigator.onLine ? 'offline' : 'error');
+        addSyncHistoryEntry({
+          operation: 'queue_flush',
+          status: syncedCount > 0 ? 'partial' : 'failed',
+          syncedCount,
+          failedCount: Math.max(remainingCount, 1),
+          summary:
+            syncedCount > 0
+              ? `Synced ${syncedCount} queued record(s); ${remainingCount} remaining`
+              : `Failed to sync ${remainingCount} queued record(s)`,
+          errorDetails: lastErrorMessage || 'Could not reach Cloud Firestore.',
+        });
       } else {
         setLastSyncedTime(new Date().toLocaleTimeString());
         setCloudSyncStatus('synced');
+        if (syncedCount > 0 || initialQueue.length > 0) {
+          addSyncHistoryEntry({
+            operation: 'queue_flush',
+            status: 'success',
+            syncedCount,
+            failedCount: 0,
+            summary:
+              syncedCount > 0
+                ? `Uploaded ${syncedCount} queued offline record${syncedCount === 1 ? '' : 's'} to Cloud Firestore`
+                : 'Verified local sales & offline queue in sync with Cloud Firestore',
+          });
+        }
       }
 
       return {
@@ -2190,6 +2372,14 @@ export default function App() {
       } else {
         setCloudSyncStatus('error');
       }
+      addSyncHistoryEntry({
+        operation: 'queue_flush',
+        status: syncedCount > 0 ? 'partial' : 'failed',
+        syncedCount,
+        failedCount: Math.max(getPendingSyncCount(), 1),
+        summary: 'Cloud queue sync encountered an unexpected error',
+        errorDetails: msg,
+      });
       console.warn('[Sync Queue] Unexpected sync failure:', err);
       return {
         syncedCount,
@@ -2372,6 +2562,27 @@ export default function App() {
       setCloudSyncStatus('synced');
       setLastSyncedTime(new Date().toLocaleTimeString());
 
+      const totalPulled =
+        cloudProducts.length +
+        cloudSales.length +
+        cloudCustomers.length +
+        cloudSuppliers.length +
+        cloudExpenses.length +
+        cloudUsers.length;
+      addSyncHistoryEntry({
+        operation: 'cloud_pull',
+        status: failedCollections > 0 ? 'partial' : 'success',
+        syncedCount: totalPulled,
+        failedCount: failedCollections,
+        summary: `Pulled ${cloudProducts.length} products, ${cloudSales.length} sales, ${cloudCustomers.length} customers from Cloud Firestore`,
+        errorDetails:
+          failedCollections > 0 && lastFetchError
+            ? lastFetchError instanceof Error
+              ? lastFetchError.message
+              : String(lastFetchError)
+            : undefined,
+      });
+
       return {
         productsCount: cloudProducts.length,
         salesCount: cloudSales.length,
@@ -2389,6 +2600,14 @@ export default function App() {
       } else {
         setCloudSyncStatus('error');
       }
+      addSyncHistoryEntry({
+        operation: 'cloud_pull',
+        status: 'failed',
+        syncedCount: 0,
+        failedCount: 1,
+        summary: 'Failed to pull data from Cloud Firestore',
+        errorDetails: err instanceof Error ? err.message : String(err),
+      });
       throw err;
     }
   };
@@ -3010,7 +3229,7 @@ export default function App() {
           }
 
           console.log('[Daily Email Backup] Scheduled closing hour reached, generating and dispatching daily store backup via Gmail...');
-          const currentStore = stores.find((s) => s.id === activeStoreId)?.name || 'ROFANI ELECTRONICS AND BOUTIQUE';
+          const currentStore = stores.find((s) => s.id === activeStoreId)?.name || storeProfile?.storeName || 'Rofani POS';
 
           const result = await buildAndDispatchStoreBackup({
             accessToken: token,
@@ -3308,13 +3527,31 @@ export default function App() {
     } else {
       // Real-Time Atomic Cloud Sync via SINGLE writeBatch() (Zero quota waste)
       const customerToUpdate = stampedUpdatedCustomers.find((c) => c.id === stampedTx.customerId);
-      commitSaleToCloudBatch(stampedTx, productsToSync, customerToUpdate).catch((err) => {
-        if (isQuotaExceededError(err)) {
-          setIsCloudQuotaExceeded(true);
-          setCloudSyncStatus('quota_exceeded');
-        } else {
-          console.warn('[Sale Cloud Sync Notice] Offline fallback queued:', err);
-        }
+      commitSaleToCloudBatch(stampedTx, productsToSync, customerToUpdate)
+        .then(() => {
+          addSyncHistoryEntry({
+            operation: 'realtime_sale',
+            status: 'success',
+            syncedCount: 1,
+            failedCount: 0,
+            summary: `Live synced Sale #${stampedTx.receiptNumber} (KSh ${stampedTx.grandTotal.toLocaleString()})`,
+          });
+        })
+        .catch((err) => {
+          if (isQuotaExceededError(err)) {
+            setIsCloudQuotaExceeded(true);
+            setCloudSyncStatus('quota_exceeded');
+          } else {
+            console.warn('[Sale Cloud Sync Notice] Offline fallback queued:', err);
+          }
+          addSyncHistoryEntry({
+            operation: 'realtime_sale',
+            status: 'failed',
+            syncedCount: 0,
+            failedCount: 1,
+            summary: `Sale #${stampedTx.receiptNumber} queued offline after cloud write failure`,
+            errorDetails: err instanceof Error ? err.message : String(err),
+          });
         // Graceful offline fallback queue so sale completes smoothly with 0 interruption
         addPendingSyncItem({
           type: 'sale',
@@ -4746,6 +4983,9 @@ export default function App() {
           newSaleTrigger={newSaleTrigger}
           onSaveProduct={handleSaveProduct}
           onBatchImportProducts={handleBatchImportProducts}
+          inPhoneFrame={deviceFormat === 'phone'}
+          onMobileSearchActiveChange={setIsMobileSearchActive}
+          storeName={stores.find((s) => s.id === activeStoreId)?.name || storeProfile?.storeName || 'Rofani POS'}
         />
       )}
 
@@ -4770,7 +5010,7 @@ export default function App() {
           scanLogs={scanLogs}
           onRecordScanLog={handleRecordScanLog}
           onClearScanLogs={handleClearScanLogs}
-          storeName={stores.find((s) => s.id === activeStoreId)?.name || 'Rofani Electronics'}
+          storeName={stores.find((s) => s.id === activeStoreId)?.name || storeProfile?.storeName || 'Rofani POS'}
           onOpenAiAssistantWithPrompt={(_prompt) => {
             setShowAiAssistantModal(true);
           }}
@@ -5003,7 +5243,7 @@ export default function App() {
           onTriggerSync={syncPendingQueueToCloud}
           onSwitchToComputer={() => setDeviceFormat('computer')}
           lowStockCount={lowStockCount}
-          storeName={stores.find((s) => s.id === activeStoreId)?.name || storeProfile?.storeName || 'Rofani Electronics'}
+          storeName={stores.find((s) => s.id === activeStoreId)?.name || storeProfile?.storeName || 'Rofani POS'}
           currentUser={currentUser}
           cloudSyncStatus={cloudSyncStatus}
           inPhoneFrame={deviceFormat === 'phone'}
@@ -5022,8 +5262,15 @@ export default function App() {
     );
   };
 
-  // Multi-Tenant SaaS Auth, Onboarding & Subscription Expiry Gates
-  if (!isFirebaseAuthReady) {
+  const hasCachedOwnerAccess =
+    typeof window !== 'undefined' &&
+    localStorage.getItem(VERIFIED_OWNER_CACHE_KEY) === '1';
+  const hasCachedVerifiedSession =
+    hasCachedOwnerAccess || Boolean(cachedCloudSession?.uid) || Boolean(storeProfile);
+
+  // Instant Local-First Startup: if a cached verified session exists, open the POS immediately (<100ms)
+  // while Firebase Auth & Firestore connect quietly in the background (max 3s check for new users).
+  if (!isFirebaseAuthReady && !hasCachedVerifiedSession) {
     return (
       <div className="min-h-screen bg-[#0f172a] text-slate-100 flex items-center justify-center p-6 font-sans">
         <div className="flex flex-col items-center gap-3">
@@ -5036,11 +5283,11 @@ export default function App() {
     );
   }
 
-  const hasCachedOwnerAccess =
-    typeof window !== 'undefined' &&
-    localStorage.getItem(VERIFIED_OWNER_CACHE_KEY) === '1';
-
-  if (!isAuthorizedCloudUser(firebaseUser) && !allowOfflineOwnerMode) {
+  if (
+    isFirebaseAuthReady &&
+    !isAuthorizedCloudUser(firebaseUser) &&
+    !allowOfflineOwnerMode
+  ) {
     return (
       <MerchantAuthScreen
         hasOfflineOwnerCache={hasCachedOwnerAccess}
@@ -5052,13 +5299,13 @@ export default function App() {
     );
   }
 
-  if (isAuthorizedCloudUser(firebaseUser) && isCheckingStoreProfile && !storeProfile) {
+  if (isAuthorizedCloudUser(firebaseUser) && !isOwnerAccount && isCheckingStoreProfile && !storeProfile) {
     return (
       <div className="min-h-screen bg-[#0f172a] text-slate-100 flex items-center justify-center p-6 font-sans">
         <div className="bg-[#1e293b] border border-slate-700/80 rounded-2xl p-6 flex flex-col items-center gap-3 shadow-xl">
           <RefreshCw className="w-6 h-6 text-sky-400 animate-spin" />
-          <p className="text-sm font-bold text-white">Loading Your Private Store...</p>
-          <p className="text-xs text-slate-400">Isolating cloud workspace &amp; checking subscription</p>
+          <p className="text-sm font-bold text-white">Setting Up Store Workspace...</p>
+          <p className="text-xs text-slate-400">Checking your cloud store profile</p>
         </div>
       </div>
     );
@@ -5143,7 +5390,7 @@ export default function App() {
           onChangeModel={(model) => setPhoneModel(model)}
           onSwitchToComputer={() => setDeviceFormat('computer')}
           currentUser={currentUser}
-          storeName={stores.find((s) => s.id === activeStoreId)?.name || 'Rofani Electronics'}
+          storeName={stores.find((s) => s.id === activeStoreId)?.name || storeProfile?.storeName || 'Rofani POS'}
           todaySales={todaySales}
           lowStockCount={lowStockCount}
           onLockTerminal={() => setIsTerminalLocked(true)}
@@ -5155,6 +5402,7 @@ export default function App() {
           onTriggerSync={syncPendingQueueToCloud}
           conflictCount={syncConflicts.length}
           onOpenConflictAssistant={() => setIsConflictModalOpen(true)}
+          hideBottomNav={activeTab === 'pos' && isMobileSearchActive}
         >
           {renderActiveTabContent()}
         </PhoneDeviceFrame>
@@ -5265,7 +5513,7 @@ export default function App() {
           expenses={expenses}
           cashTransactions={cashTransactions}
           allUsers={allUsers}
-          storeName={stores.find((s) => s.id === activeStoreId)?.name || 'ROFANI ELECTRONICS AND BOUTIQUE'}
+          storeName={stores.find((s) => s.id === activeStoreId)?.name || storeProfile?.storeName || 'Rofani POS'}
           onNotification={(msg, type) => setBackupBanner({ message: msg, type })}
         />
 
@@ -5327,14 +5575,14 @@ export default function App() {
           onClose={() => setShowPrintBarcodesModal(false)}
           scanLogs={scanLogs}
           products={products}
-          storeName={stores.find((s) => s.id === activeStoreId)?.name || 'Rofani Electronics'}
+          storeName={stores.find((s) => s.id === activeStoreId)?.name || storeProfile?.storeName || 'Rofani POS'}
         />
 
         {/* AI Worker Assistant Modal (Phone Format Mode) */}
         <AIAssistantModal
           isOpen={showAiAssistantModal}
           onClose={() => setShowAiAssistantModal(false)}
-          activeStoreName={stores.find((s) => s.id === activeStoreId)?.name || 'Rofani Electronics'}
+          activeStoreName={stores.find((s) => s.id === activeStoreId)?.name || storeProfile?.storeName || 'Rofani POS'}
           workerRole={currentUser.role}
           activeTab={activeTab}
           lowStockCount={lowStockCount}
@@ -5395,9 +5643,16 @@ export default function App() {
               </div>
               <div className="truncate">
                 <span className="text-sm font-extrabold text-white tracking-wider block leading-tight">
-                  ROFANI
+                  Rofani POS
                 </span>
-                <span className="text-[10px] text-slate-400 font-mono block truncate">ELECTRONICS & BOUTIQUE</span>
+                <span className="text-[10px] text-slate-400 font-mono block truncate">
+                  {(() => {
+                    const activeName = stores.find((s) => s.id === activeStoreId)?.name || storeProfile?.storeName || '';
+                    return activeName && !['rofani pos', 'rofani electronics', 'rofani electronics & boutique', 'rofani electronics and boutique'].includes(activeName.trim().toLowerCase())
+                      ? activeName
+                      : 'RETAIL & WHOLESALE';
+                  })()}
+                </span>
               </div>
             </div>
           )}
@@ -6087,9 +6342,14 @@ export default function App() {
                   R
                 </div>
                 <div className="min-w-0 flex-1">
-                  <span className="font-black text-xs tracking-wider block leading-none truncate">ROFANI POS</span>
+                  <span className="font-black text-xs tracking-wider block leading-none truncate">Rofani POS</span>
                   <span className="text-[9px] text-slate-400 font-mono block truncate">
-                    {stores.find((s) => s.id === activeStoreId)?.name || 'Rofani Electronics'}
+                    {(() => {
+                      const activeName = stores.find((s) => s.id === activeStoreId)?.name || storeProfile?.storeName || '';
+                      return activeName && !['rofani pos', 'rofani electronics', 'rofani electronics & boutique', 'rofani electronics and boutique'].includes(activeName.trim().toLowerCase())
+                        ? activeName
+                        : 'Retail & Wholesale POS';
+                    })()}
                   </span>
                 </div>
               </div>
@@ -6162,16 +6422,6 @@ export default function App() {
                   <span className="hidden sm:inline">Desktop</span>
                 </button>
               </div>
-
-              <button
-                type="button"
-                onClick={handleGlobalNewSale}
-                title="Create New POS Sale"
-                className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-black flex items-center gap-1 shadow-sm active:scale-95 cursor-pointer"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                <span>Sale</span>
-              </button>
 
               <button
                 type="button"
@@ -6423,7 +6673,7 @@ export default function App() {
             >
               <Building2 className="w-4 h-4 text-indigo-600 shrink-0" />
               <span className="hidden xl:inline max-w-[120px] truncate">
-                {stores.find((s) => s.id === activeStoreId)?.name || 'Rofani Electronics'}
+                {stores.find((s) => s.id === activeStoreId)?.name || storeProfile?.storeName || 'Rofani POS'}
               </span>
             </button>
 
@@ -6539,7 +6789,9 @@ export default function App() {
 
         {/* Dynamic Workspace Canvas for Computer Format */}
         <div
-          className={`flex-1 min-h-0 overflow-y-auto pb-20 lg:pb-0 flex flex-col ${
+          className={`flex-1 min-h-0 overflow-y-auto ${
+            activeTab === 'pos' && isMobileSearchActive ? 'pb-4 lg:pb-0' : 'pb-24 lg:pb-0'
+          } ${
             activeTab === 'menu'
               ? 'bg-[#0f172a] text-slate-100'
               : 'bg-slate-900 text-slate-100 lg:bg-slate-50 lg:text-slate-900'
@@ -6548,7 +6800,22 @@ export default function App() {
           {renderActiveTabContent()}
         </div>
 
-        {/* Fixed 5-Tab Dark Bottom Navigation Bar (Mobile Screens) */}
+        {/* Floating 1-Tap Make Sale Shortcut on Responsive Mobile Screens (non-POS tabs) */}
+        {activeTab !== 'pos' && (
+          <button
+            type="button"
+            id="btn-mobile-responsive-fab-make-sale"
+            onClick={() => setActiveTab('pos')}
+            title="Make Sale — Jump straight to POS Checkout"
+            className="lg:hidden fixed bottom-20 right-3 z-40 h-11 px-4 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 active:scale-95 text-white text-xs font-extrabold flex items-center gap-1.5 shadow-xl shadow-emerald-950/70 border border-emerald-400/40 transition cursor-pointer"
+          >
+            <ShoppingBag className="w-4 h-4 shrink-0" />
+            <span>Make Sale</span>
+          </button>
+        )}
+
+        {/* Fixed 5-Tab Dark Bottom Navigation Bar (Mobile Screens — hidden when POS search keyboard is active) */}
+        {!(activeTab === 'pos' && isMobileSearchActive) && (
         <nav
           aria-label="Mobile Bottom Navigation"
           className="lg:hidden fixed bottom-0 left-0 right-0 z-50 min-h-16 bg-slate-900 border-t border-slate-800 px-1 pt-1 pb-safe grid grid-cols-5 items-center"
@@ -6623,6 +6890,7 @@ export default function App() {
             <span className="text-[9px] font-bold tracking-tight whitespace-nowrap">MOBILE VIEW</span>
           </button>
         </nav>
+        )}
 
         {/* Bottom Status & Quick Action Bar (Desktop Screens) */}
         <footer className="hidden lg:flex h-12 bg-white border-t border-slate-200 items-center px-6 justify-between shrink-0 text-xs font-semibold text-slate-600">
@@ -6797,7 +7065,7 @@ export default function App() {
         onClose={() => setShowPrintBarcodesModal(false)}
         scanLogs={scanLogs}
         products={products}
-        storeName={stores.find((s) => s.id === activeStoreId)?.name || 'Rofani Electronics'}
+        storeName={stores.find((s) => s.id === activeStoreId)?.name || storeProfile?.storeName || 'Rofani POS'}
       />
 
       {/* Store Manager Dedicated Item Audit Mini-Page Terminal (Scanned via QR Code or Opened Directly) */}
@@ -6807,7 +7075,7 @@ export default function App() {
             product={auditUrlProduct}
             restockRecords={restockRecords}
             transactions={transactions}
-            storeName={stores.find((s) => s.id === activeStoreId)?.name || 'Rofani Electronics'}
+            storeName={stores.find((s) => s.id === activeStoreId)?.name || storeProfile?.storeName || 'Rofani POS'}
             currentUser={currentUser}
             onBack={() => {
               setAuditUrlProduct(null);
@@ -6830,7 +7098,7 @@ export default function App() {
       <AIAssistantModal
         isOpen={showAiAssistantModal}
         onClose={() => setShowAiAssistantModal(false)}
-        activeStoreName={stores.find((s) => s.id === activeStoreId)?.name || 'Rofani Electronics'}
+        activeStoreName={stores.find((s) => s.id === activeStoreId)?.name || storeProfile?.storeName || 'Rofani POS'}
         workerRole={currentUser.role}
         activeTab={activeTab}
         lowStockCount={lowStockCount}
@@ -6874,7 +7142,7 @@ export default function App() {
         expenses={expenses}
         cashTransactions={cashTransactions}
         allUsers={allUsers}
-        storeName={stores.find((s) => s.id === activeStoreId)?.name || 'ROFANI ELECTRONICS AND BOUTIQUE'}
+        storeName={stores.find((s) => s.id === activeStoreId)?.name || storeProfile?.storeName || 'Rofani POS'}
         onNotification={(msg, type) => setBackupBanner({ message: msg, type })}
       />
 

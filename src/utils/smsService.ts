@@ -16,7 +16,7 @@ export interface SmsDeliveryRecord {
   carrier?: 'SAFARICOM' | 'AIRTEL' | 'TELKOM' | 'OTHER';
   cost: number; // e.g. 0.80 KES
   segments: number; // 1 or 2 SMS credits
-  senderId: string; // e.g. "ROFANI"
+  senderId: string; // e.g. "Rofani POS"
   deliveryDetails?: string;
 }
 
@@ -71,7 +71,7 @@ export const saveSmsDeliveryLog = (record: SmsDeliveryRecord): void => {
  */
 export const formatTransactionSummarySms = (
   tx: Transaction,
-  storeName: string = 'ROFANI',
+  storeName: string = 'Rofani POS',
   options?: { includeItemsList?: boolean; customNote?: string }
 ): string => {
   const custName = tx.customerName && tx.customerName !== 'Walk-in Customer'
@@ -127,8 +127,8 @@ export const sendTransactionSummarySms = async (
   targetPhone: string,
   options: SendTransactionSmsOptions = {}
 ): Promise<{ success: boolean; record: SmsDeliveryRecord; message: string }> => {
-  const storeName = options.storeName || 'ROFANI';
-  const senderId = options.senderId || 'ROFANI';
+  const storeName = options.storeName || 'Rofani POS';
+  const senderId = options.senderId || 'Rofani POS';
   const { normalized, isValid, displayFormatted } = normalizeKenyanPhone(targetPhone);
 
   if (!isValid && !normalized) {

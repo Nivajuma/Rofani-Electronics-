@@ -279,3 +279,72 @@ export function useAggressiveAutoSync(): [boolean, (enabled: boolean) => void] {
   return [enabled, updateSetting];
 }
 
+export interface SyncHistoryEntry {
+  id: string;
+  timestamp: string;
+  operation: 'queue_flush' | 'full_upload' | 'cloud_pull' | 'realtime_sale';
+  status: 'success' | 'partial' | 'failed';
+  syncedCount: number;
+  failedCount: number;
+  summary: string;
+  errorDetails?: string;
+}
+
+const SYNC_HISTORY_KEY = 'retail_pos_cloud_sync_history';
+const SYNC_HISTORY_EVENT = 'retail_pos_cloud_sync_history_changed';
+const MAX_SYNC_HISTORY_ENTRIES = 60;
+
+export function getSyncHistory(): SyncHistoryEntry[] {
+  return safeGetJSON<SyncHistoryEntry[]>(SYNC_HISTORY_KEY, []);
+}
+
+export function addSyncHistoryEntry(
+  entry: Omit<SyncHistoryEntry, 'id' | 'timestamp'>
+): SyncHistoryEntry {
+  const newEntry: SyncHistoryEntry = {
+    ...entry,
+    id: `synclog-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    timestamp: new Date().toISOString(),
+  };
+
+  const current = getSyncHistory();
+  const updated = [newEntry, ...current].slice(0, MAX_SYNC_HISTORY_ENTRIES);
+  safeSetJSON(SYNC_HISTORY_KEY, updated);
+
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent(SYNC_HISTORY_EVENT, { detail: updated }));
+  }
+
+  return newEntry;
+}
+
+export function clearSyncHistory(): void {
+  safeSetJSON(SYNC_HISTORY_KEY, []);
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent(SYNC_HISTORY_EVENT, { detail: [] }));
+  }
+}
+
+export function useSyncHistory(): {
+  history: SyncHistoryEntry[];
+  clearHistory: () => void;
+} {
+  const [history, setHistory] = useState<SyncHistoryEntry[]>(() => getSyncHistory());
+
+  useEffect(() => {
+    const refresh = () => setHistory(getSyncHistory());
+    window.addEventListener(SYNC_HISTORY_EVENT, refresh);
+    window.addEventListener('storage', refresh);
+    return () => {
+      window.removeEventListener(SYNC_HISTORY_EVENT, refresh);
+      window.removeEventListener('storage', refresh);
+    };
+  }, []);
+
+  const clearHistory = useCallback(() => {
+    clearSyncHistory();
+    setHistory([]);
+  }, []);
+
+  return { history, clearHistory };
+}

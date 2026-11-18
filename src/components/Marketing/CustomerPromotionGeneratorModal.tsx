@@ -72,7 +72,7 @@ export const CustomerPromotionGeneratorModal: React.FC<CustomerPromotionGenerato
   customers,
   products,
   initialCustomer = null,
-  storeName = 'ROFANI Electronics & Boutique',
+  storeName = 'Rofani POS',
   storePhone = '0700 000 000',
   currentUser
 }) => {

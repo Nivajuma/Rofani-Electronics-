@@ -24,31 +24,115 @@ function stripLargeMediaFromProducts(products: any[]): any[] {
   });
 }
 
+function stripLargeMediaFromCartItems(cart: any[]): any[] {
+  if (!Array.isArray(cart)) return cart;
+  return cart.map((item) => {
+    if (item && typeof item === 'object' && item.product && typeof item.product === 'object') {
+      const img = item.product.imageUrl;
+      if (typeof img === 'string' && (img.startsWith('data:') || img.length > 200)) {
+        return { ...item, product: { ...item.product, imageUrl: '' } };
+      }
+    }
+    return item;
+  });
+}
+
+const BULKY_BACKUP_KEY_BASES = [
+  'rofani_pos_largest_backup',
+  'rofani_pos_pre_pull_backup',
+  'rofani_pos_auto_backup',
+  'rofani_pos_last_snapshot',
+  'rofani_pos_pre_import_backup',
+];
+
+function isBulkyBackupKey(key: string): boolean {
+  return BULKY_BACKUP_KEY_BASES.some((base) => key === base || key.endsWith(`__${base}`));
+}
+
+function buildCompactBackupMetadata(value: any) {
+  if (!value || typeof value !== 'object') return value;
+  const productsCount = Array.isArray(value.products)
+    ? value.products.length
+    : typeof value.productsCount === 'number'
+    ? value.productsCount
+    : 0;
+  const salesCount = Array.isArray(value.transactions)
+    ? value.transactions.length
+    : Array.isArray(value.sales)
+    ? value.sales.length
+    : typeof value.salesCount === 'number'
+    ? value.salesCount
+    : 0;
+  const customersCount = Array.isArray(value.customers)
+    ? value.customers.length
+    : typeof value.customersCount === 'number'
+    ? value.customersCount
+    : 0;
+  const expensesCount = Array.isArray(value.expenses)
+    ? value.expenses.length
+    : typeof value.expensesCount === 'number'
+    ? value.expensesCount
+    : 0;
+
+  return {
+    timestamp: value.timestamp || Date.now(),
+    productsCount,
+    salesCount,
+    customersCount,
+    expensesCount,
+    storedInIndexedDB: true,
+  };
+}
+
 /**
  * Scans localStorage and cleans up heavy bloat, stale firestore client states,
- * and oversized log arrays to prevent QuotaExceededError.
+ * and oversized backup/log arrays to prevent QuotaExceededError.
  */
 export function cleanupLocalStorageQuota(aggressive = false): void {
   if (typeof window === 'undefined' || !window.localStorage) return;
 
   try {
-    // 1. Clean up stale or leaked firestore multi-tab synchronization keys
+    // 1. Always purge stale or leaked firestore WebStorage synchronization keys (no longer used by single-tab IndexedDB cache)
+    // and offload bulky backup snapshots (>15KB) from localStorage to IndexedDB.
     const keysToRemove: string[] = [];
+    const bulkyBackupKeysToOffload: string[] = [];
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i);
+      if (!key) continue;
       if (
-        key &&
-        (key.startsWith('firestore_clients_') ||
-          key.startsWith('__sak') ||
-          key.startsWith('firebase:firestore:'))
+        key.startsWith('firestore_sequence_number_') ||
+        key.startsWith('firestore_clients_') ||
+        key.startsWith('firestore_online_state_') ||
+        key.startsWith('firestore_mutations_') ||
+        key.startsWith('__sak') ||
+        key.startsWith('firebase:firestore:')
       ) {
         keysToRemove.push(key);
+      } else if (isBulkyBackupKey(key)) {
+        bulkyBackupKeysToOffload.push(key);
       }
     }
     keysToRemove.forEach((k) => {
       try {
         localStorage.removeItem(k);
       } catch {}
+    });
+
+    bulkyBackupKeysToOffload.forEach((bk) => {
+      try {
+        const rawBk = localStorage.getItem(bk);
+        if (rawBk && rawBk.length > 15000) {
+          const parsedBk = JSON.parse(rawBk);
+          try {
+            saveToIDB(bk, parsedBk);
+          } catch {}
+          localStorage.setItem(bk, JSON.stringify(buildCompactBackupMetadata(parsedBk)));
+        }
+      } catch {
+        try {
+          localStorage.removeItem(bk);
+        } catch {}
+      }
     });
 
     // 2. Strip embedded base64 images from retail_pos_products if previously saved
@@ -199,6 +283,8 @@ export function safeSetJSON(key: string, value: any): boolean {
     key === 'retail_pos_suppliers' ||
     key === 'retail_pos_expenses' ||
     key === 'retail_pos_users' ||
+    key === 'retail_pos_active_sale_draft' ||
+    key === 'retail_pos_active_cart' ||
     key.startsWith('rofani_pos_')
   ) {
     try {
@@ -217,6 +303,15 @@ export function safeSetJSON(key: string, value: any): boolean {
     if (typeof value.imageUrl === 'string' && (value.imageUrl.startsWith('data:') || value.imageUrl.length > 200)) {
       toStore = { ...value, imageUrl: '' };
     }
+  } else if (key === 'retail_pos_active_cart' && Array.isArray(value)) {
+    toStore = stripLargeMediaFromCartItems(value);
+  } else if (key === 'retail_pos_active_sale_draft' && value && typeof value === 'object') {
+    if (Array.isArray(value.cart)) {
+      toStore = { ...value, cart: stripLargeMediaFromCartItems(value.cart) };
+    }
+  } else if (isBulkyBackupKey(key) && value && typeof value === 'object') {
+    // Full backup payload is already saved to IndexedDB above; keep only lightweight metadata in localStorage
+    toStore = buildCompactBackupMetadata(value);
   }
 
   // Pre-emptively cap transient and log arrays (NEVER business records like products, transactions, customers, expenses)
@@ -238,31 +333,12 @@ export function safeSetJSON(key: string, value: any): boolean {
     localStorage.setItem(resolvedKey, JSON.stringify(toStore));
     return true;
   } catch (err: any) {
-    // Quota exceeded: offload bulky duplicate snapshots to IndexedDB to free up localStorage
+    // Quota exceeded: offload bulky duplicate snapshots to IndexedDB and purge transient logs
     try {
-      const bulkyBackupKeys = [
-        'rofani_pos_largest_backup',
-        'rofani_pos_pre_pull_backup',
-        'rofani_pos_auto_backup',
-        'rofani_pos_last_snapshot',
-        'rofani_pos_pre_import_backup',
-      ];
-      bulkyBackupKeys.forEach((bk) => {
-        try {
-          const rawBk = localStorage.getItem(bk);
-          if (rawBk && rawBk.length > 30000) {
-            try {
-              saveToIDB(bk, JSON.parse(rawBk));
-            } catch {}
-            localStorage.removeItem(bk);
-          }
-        } catch {}
-      });
       cleanupLocalStorageQuota(true);
     } catch {}
 
     try {
-      // Re-try storing full value after purging transient logs and offloading snapshots
       localStorage.setItem(resolvedKey, JSON.stringify(toStore));
       return true;
     } catch {

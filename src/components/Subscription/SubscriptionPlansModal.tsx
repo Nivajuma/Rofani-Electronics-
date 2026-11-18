@@ -143,7 +143,7 @@ export const SubscriptionPlansModal: React.FC<SubscriptionPlansModalProps> = ({
           amount: plan.price,
           accountReference: `SAAS-${selectedPlan.toUpperCase()}`,
           transactionDesc: `Rofani POS ${plan.name}`,
-          storeName: 'ROFANI ELECTRONICS & BOUTIQUE',
+          storeName: 'Rofani POS',
         },
         PLATFORM_SUBSCRIPTION_MPESA_CONFIG
       );
@@ -517,7 +517,7 @@ export const SubscriptionPlansModal: React.FC<SubscriptionPlansModalProps> = ({
           </div>
 
           <p className="text-[11px] text-slate-400 leading-relaxed">
-            Paid manually via Lipa na M-Pesa Till <strong className="text-slate-200">1833804</strong> (Rofani Electronics)? Paste your M-Pesa confirmation code or SMS below to activate immediately:
+            Paid manually via Lipa na M-Pesa Till <strong className="text-slate-200">1833804</strong> (Rofani POS)? Paste your M-Pesa confirmation code or SMS below to activate immediately:
           </p>
 
           <div className="flex flex-col sm:flex-row gap-2.5">

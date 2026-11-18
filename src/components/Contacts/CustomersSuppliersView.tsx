@@ -508,15 +508,15 @@ export const CustomersSuppliersView: React.FC<CustomersSuppliersViewProps> = ({
     const clean = c.phone.replace(/[^0-9]/g, '');
     const debt = c.currentBalanceDue || 0;
     const msg = debt > 0
-      ? encodeURIComponent(`Hello ${c.name}, greeting from ROFANI Electronics & Boutique. Reminder of your pending balance: KSh ${debt.toLocaleString()}. Paybill 247247 Acc 0180293. Thank you!`)
-      : encodeURIComponent(`Hello ${c.name}, thank you for choosing ROFANI Electronics & Boutique! Let us know if you need any new electronics or boutique arrivals.`);
+      ? encodeURIComponent(`Hello ${c.name}, greeting from Rofani POS. Reminder of your pending balance: KSh ${debt.toLocaleString()}. Paybill 247247 Acc 0180293. Thank you!`)
+      : encodeURIComponent(`Hello ${c.name}, thank you for choosing Rofani POS! Let us know if you need any new arrivals.`);
     window.open(`https://wa.me/${clean}?text=${msg}`, '_blank');
   };
 
   const handleQuickWhatsAppSupplier = (s: Supplier) => {
     if (!s.phone || s.phone === 'N/A') return;
     const clean = s.phone.replace(/[^0-9]/g, '');
-    const msg = encodeURIComponent(`Hello ${s.contactPerson || s.name}, this is ROFANI Electronics & Boutique regarding product supply and catalog restock.`);
+    const msg = encodeURIComponent(`Hello ${s.contactPerson || s.name}, this is Rofani POS regarding product supply and catalog restock.`);
     window.open(`https://wa.me/${clean}?text=${msg}`, '_blank');
   };
 

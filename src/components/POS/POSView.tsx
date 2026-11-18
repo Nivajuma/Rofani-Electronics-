@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Search,
   Scan,
@@ -62,7 +63,29 @@ import { computeProductsPerformance, ProductPerformanceInfo } from '../../utils/
 import { hasWorkerPermission } from '../../utils/permissions';
 import { isContactPickerSupported, pickFromDevicePhonebook, parseContactFile } from '../../utils/phoneContacts';
 import { useNetworkStatus } from '../../utils/offlineSync';
-import { safeGetJSON, safeSetJSON } from '../../utils/safeStorage';
+import { safeGetJSON, safeSetJSON, safeRemove } from '../../utils/safeStorage';
+import { refreshFirestoreConnection } from '../../lib/firebase';
+import { POSProductListRow, POSProductGridCard } from './POSProductItem';
+
+const SEARCH_RESULT_PAGE_SIZE = 25;
+const ACTIVE_SALE_DRAFT_KEY = 'retail_pos_active_sale_draft';
+
+interface ActiveSaleDraft {
+  cart: CartItem[];
+  selectedCustomer: Customer | null;
+  selectedCartItemId: string | null;
+  mobileTab: 'catalog' | 'cart';
+  discountAmount: number;
+  discountMode: 'fixed' | 'percentage';
+  discountInputVal: string;
+  saleMarkupAmount: number;
+  saleMarkupInputVal: string;
+  taxRate: number;
+  saleNotes: string;
+  saleDate: string;
+  selectedSalesRepId: string;
+  updatedAt: number;
+}
 
 interface POSViewProps {
   products: Product[];
@@ -78,6 +101,9 @@ interface POSViewProps {
   onNewSaleStarted?: () => void;
   onSaveProduct?: (product: Product) => void;
   onBatchImportProducts?: (products: Product[], replaceExisting: boolean) => void;
+  inPhoneFrame?: boolean;
+  onMobileSearchActiveChange?: (active: boolean) => void;
+  storeName?: string;
 }
 
 export const POSView: React.FC<POSViewProps> = ({
@@ -94,17 +120,44 @@ export const POSView: React.FC<POSViewProps> = ({
   onNewSaleStarted,
   onSaveProduct,
   onBatchImportProducts,
+  inPhoneFrame = false,
+  onMobileSearchActiveChange,
+  storeName = 'Rofani POS',
 }) => {
+  const customSettingsShopName = safeGetJSON<string>('rofani_settings_shop_name', '');
+  const resolvedStoreName = (() => {
+    const legacy = ['rofani electronics', 'rofani electronics & boutique', 'rofani electronics and boutique'];
+    if (customSettingsShopName && !legacy.includes(customSettingsShopName.trim().toLowerCase()) && customSettingsShopName.trim().toLowerCase() !== 'rofani pos') {
+      return customSettingsShopName.trim();
+    }
+    if (storeName && !legacy.includes(storeName.trim().toLowerCase())) {
+      return storeName.trim();
+    }
+    return 'Rofani POS';
+  })();
   // Network Connectivity Status
   const { isOnline } = useNetworkStatus();
 
-  // Search & Filter State
+  // Search & Filter State (Immediate input text + 200ms debounced catalog query)
   const [searchTerm, setSearchTerm] = useState(() =>
     safeGetJSON<string>('retail_pos_pos_search', '', (val) => typeof val === 'string')
   );
+  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState<string>(searchTerm);
+
   useEffect(() => {
-    safeSetJSON('retail_pos_pos_search', searchTerm);
+    if (searchTerm === '') {
+      setDebouncedSearchTerm('');
+      return;
+    }
+    const timer = setTimeout(() => {
+      setDebouncedSearchTerm(searchTerm);
+    }, 200);
+    return () => clearTimeout(timer);
   }, [searchTerm]);
+
+  useEffect(() => {
+    safeSetJSON('retail_pos_pos_search', debouncedSearchTerm);
+  }, [debouncedSearchTerm]);
 
   const [selectedCategory, setSelectedCategory] = useState<string>(() =>
     safeGetJSON<string>('retail_pos_pos_category', 'All', (val) => typeof val === 'string')
@@ -127,18 +180,118 @@ export const POSView: React.FC<POSViewProps> = ({
     safeSetJSON('retail_pos_pos_perf_filter', performanceFilter);
   }, [performanceFilter]);
 
+  const initialSavedDraftRef = useRef<ActiveSaleDraft | null>(null);
+  if (initialSavedDraftRef.current === null) {
+    initialSavedDraftRef.current = safeGetJSON<ActiveSaleDraft | null>(
+      ACTIVE_SALE_DRAFT_KEY,
+      null,
+      (val) => Boolean(val && typeof val === 'object' && Array.isArray(val.cart))
+    ) || {
+      cart: safeGetJSON<CartItem[]>('retail_pos_active_cart', [], (val) => Array.isArray(val)),
+      selectedCustomer: safeGetJSON<Customer | null>('retail_pos_active_pos_customer', null, (val) => Boolean(val && val.id)),
+      selectedCartItemId: null,
+      mobileTab: safeGetJSON<'catalog' | 'cart'>('retail_pos_pos_mobile_tab', 'catalog', (val) => val === 'catalog' || val === 'cart'),
+      discountAmount: safeGetJSON<number>('retail_pos_pos_discount_amount', 0, (val) => typeof val === 'number'),
+      discountMode: safeGetJSON<'fixed' | 'percentage'>('retail_pos_pos_discount_mode', 'fixed', (val) => val === 'fixed' || val === 'percentage'),
+      discountInputVal: safeGetJSON<string>('retail_pos_pos_discount_input', '', (val) => typeof val === 'string'),
+      saleMarkupAmount: safeGetJSON<number>('retail_pos_pos_markup_amount', 0, (val) => typeof val === 'number'),
+      saleMarkupInputVal: safeGetJSON<string>('retail_pos_pos_markup_input', '', (val) => typeof val === 'string'),
+      taxRate: safeGetJSON<number>('retail_pos_pos_tax_rate', 0, (val) => typeof val === 'number'),
+      saleNotes: safeGetJSON<string>('retail_pos_pos_sale_notes', '', (val) => typeof val === 'string'),
+      saleDate: '',
+      selectedSalesRepId: safeGetJSON<string>('retail_pos_pos_sales_rep_id', currentUser.id, (val) => typeof val === 'string'),
+      updatedAt: Date.now(),
+    };
+  }
+
   // Mobile responsive view mode ('catalog' or 'cart') for effortless mobile POS operation
   const [mobileTab, setMobileTab] = useState<'catalog' | 'cart'>(() =>
-    safeGetJSON<'catalog' | 'cart'>('retail_pos_pos_mobile_tab', 'catalog', (val) => val === 'catalog' || val === 'cart')
+    initialSavedDraftRef.current?.mobileTab === 'cart' ? 'cart' : 'catalog'
   );
   useEffect(() => {
     safeSetJSON('retail_pos_pos_mobile_tab', mobileTab);
   }, [mobileTab]);
 
   const [isKeyboardActive, setIsKeyboardActive] = useState<boolean>(false);
+  const [isSearchFocused, setIsSearchFocused] = useState<boolean>(false);
+  const [visibleResultsLimit, setVisibleResultsLimit] = useState<number>(SEARCH_RESULT_PAGE_SIZE);
+  const [phoneOverlayRoot, setPhoneOverlayRoot] = useState<HTMLElement | null>(null);
+  const searchBarContainerRef = useRef<HTMLDivElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const hasAutoScrolledOnFocusRef = useRef<boolean>(false);
   const [showSalesInfo, setShowSalesInfo] = useState<boolean>(false);
   const [showRepModal, setShowRepModal] = useState<boolean>(false);
   const [showTopRightMenu, setShowTopRightMenu] = useState<boolean>(false);
+
+  const isMobileSearchActive = isSearchFocused || searchTerm.trim().length > 0;
+
+  useEffect(() => {
+    onMobileSearchActiveChange?.(isMobileSearchActive);
+  }, [isMobileSearchActive, onMobileSearchActiveChange]);
+
+  useEffect(() => {
+    return () => {
+      onMobileSearchActiveChange?.(false);
+    };
+  }, [onMobileSearchActiveChange]);
+
+  useLayoutEffect(() => {
+    if (inPhoneFrame && typeof document !== 'undefined') {
+      setPhoneOverlayRoot(document.getElementById('phone-frame-overlay-root'));
+    } else {
+      setPhoneOverlayRoot(null);
+    }
+  }, [inPhoneFrame]);
+
+  // Trigger scrollIntoView only ONCE when the input first receives focus, and only if not already scrolled to the top
+  const handleSearchFocus = () => {
+    setIsSearchFocused(true);
+    setIsKeyboardActive(true);
+    if (hasAutoScrolledOnFocusRef.current) return;
+    hasAutoScrolledOnFocusRef.current = true;
+
+    setTimeout(() => {
+      const target = searchBarContainerRef.current;
+      if (!target) return;
+
+      let scrollParent: HTMLElement | null = target.parentElement;
+      while (scrollParent) {
+        const style = window.getComputedStyle(scrollParent);
+        const canScrollY =
+          (style.overflowY === 'auto' || style.overflowY === 'scroll') &&
+          scrollParent.scrollHeight > scrollParent.clientHeight;
+        if (canScrollY) break;
+        scrollParent = scrollParent.parentElement;
+      }
+
+      if (scrollParent) {
+        if (scrollParent.scrollTop <= 12) return;
+      } else if (window.scrollY <= 12) {
+        return;
+      }
+
+      target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 60);
+  };
+
+  const handleSearchBlur = () => {
+    setIsKeyboardActive(false);
+    setTimeout(() => {
+      if (document.activeElement !== searchInputRef.current) {
+        setIsSearchFocused(false);
+        hasAutoScrolledOnFocusRef.current = false;
+      }
+    }, 140);
+  };
+
+  const handleClearSearch = () => {
+    setSearchTerm('');
+    setDebouncedSearchTerm('');
+    setIsSearchFocused(false);
+    setIsKeyboardActive(false);
+    hasAutoScrolledOnFocusRef.current = false;
+    searchInputRef.current?.blur();
+  };
 
   const [selectedSupplier, setSelectedSupplier] = useState<string>(() =>
     safeGetJSON<string>('retail_pos_pos_supplier', 'All', (val) => typeof val === 'string')
@@ -292,19 +445,21 @@ export const POSView: React.FC<POSViewProps> = ({
     safeSetJSON('retail_pos_pos_fav_view', favoritesSectionView);
   }, [favoritesSectionView]);
 
-  // Cart State - Persisted to LocalStorage so active order is never lost on refresh
+  // Cart State - Restored from unified active sale draft / localStorage so active order & custom prices survive sleep
   const [cart, setCart] = useState<CartItem[]>(() =>
-    safeGetJSON<CartItem[]>('retail_pos_active_cart', [], (val) => Array.isArray(val))
+    Array.isArray(initialSavedDraftRef.current?.cart) ? initialSavedDraftRef.current.cart : []
   );
   useEffect(() => {
     safeSetJSON('retail_pos_active_cart', cart);
   }, [cart]);
 
   // Selected item ID during sale for visual highlight & auditory cue
-  const [selectedCartItemId, setSelectedCartItemId] = useState<string | null>(null);
+  const [selectedCartItemId, setSelectedCartItemId] = useState<string | null>(
+    () => initialSavedDraftRef.current?.selectedCartItemId || null
+  );
 
   // Subtle audio cue whenever an item is selected or added during sales
-  const playItemSelectAudioCue = () => {
+  const playItemSelectAudioCue = React.useCallback(() => {
     try {
       const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
       if (AudioCtx) {
@@ -339,7 +494,7 @@ export const POSView: React.FC<POSViewProps> = ({
         navigator.vibrate(20);
       } catch (_) {}
     }
-  };
+  }, []);
 
   // Sync selectedCartItemId if item is no longer in cart
   useEffect(() => {
@@ -352,8 +507,8 @@ export const POSView: React.FC<POSViewProps> = ({
 
   const [selectedCustomer, setSelectedCustomer] = useState<Customer>(() => {
     const defaultCust = customers[0] || { id: 'cust-1', name: 'Walk-in Customer', phone: 'N/A', totalPurchases: 0, currentBalanceDue: 0 };
-    const saved = safeGetJSON<Customer | null>('retail_pos_active_pos_customer', null, (val) => Boolean(val && val.id));
-    if (saved) {
+    const saved = initialSavedDraftRef.current?.selectedCustomer;
+    if (saved && saved.id) {
       const fresh = customers.find((c) => c.id === saved.id);
       return fresh || saved;
     }
@@ -363,43 +518,43 @@ export const POSView: React.FC<POSViewProps> = ({
     safeSetJSON('retail_pos_active_pos_customer', selectedCustomer);
   }, [selectedCustomer]);
 
-  const [discountAmount, setDiscountAmount] = useState<number>(() =>
-    safeGetJSON<number>('retail_pos_pos_discount_amount', 0, (val) => typeof val === 'number')
+  const [discountAmount, setDiscountAmount] = useState<number>(
+    () => initialSavedDraftRef.current?.discountAmount ?? 0
   );
   useEffect(() => {
     safeSetJSON('retail_pos_pos_discount_amount', discountAmount);
   }, [discountAmount]);
 
-  const [discountMode, setDiscountMode] = useState<'fixed' | 'percentage'>(() =>
-    safeGetJSON<'fixed' | 'percentage'>('retail_pos_pos_discount_mode', 'fixed', (val) => val === 'fixed' || val === 'percentage')
+  const [discountMode, setDiscountMode] = useState<'fixed' | 'percentage'>(
+    () => initialSavedDraftRef.current?.discountMode ?? 'fixed'
   );
   useEffect(() => {
     safeSetJSON('retail_pos_pos_discount_mode', discountMode);
   }, [discountMode]);
 
-  const [discountInputVal, setDiscountInputVal] = useState<string>(() =>
-    safeGetJSON<string>('retail_pos_pos_discount_input', '', (val) => typeof val === 'string')
+  const [discountInputVal, setDiscountInputVal] = useState<string>(
+    () => initialSavedDraftRef.current?.discountInputVal ?? ''
   );
   useEffect(() => {
     safeSetJSON('retail_pos_pos_discount_input', discountInputVal);
   }, [discountInputVal]);
 
-  const [saleMarkupInputVal, setSaleMarkupInputVal] = useState<string>(() =>
-    safeGetJSON<string>('retail_pos_pos_markup_input', '', (val) => typeof val === 'string')
+  const [saleMarkupInputVal, setSaleMarkupInputVal] = useState<string>(
+    () => initialSavedDraftRef.current?.saleMarkupInputVal ?? ''
   );
   useEffect(() => {
     safeSetJSON('retail_pos_pos_markup_input', saleMarkupInputVal);
   }, [saleMarkupInputVal]);
 
-  const [saleMarkupAmount, setSaleMarkupAmount] = useState<number>(() =>
-    safeGetJSON<number>('retail_pos_pos_markup_amount', 0, (val) => typeof val === 'number')
+  const [saleMarkupAmount, setSaleMarkupAmount] = useState<number>(
+    () => initialSavedDraftRef.current?.saleMarkupAmount ?? 0
   );
   useEffect(() => {
     safeSetJSON('retail_pos_pos_markup_amount', saleMarkupAmount);
   }, [saleMarkupAmount]);
 
-  const [taxRate, setTaxRate] = useState<number>(() =>
-    safeGetJSON<number>('retail_pos_pos_tax_rate', 0, (val) => typeof val === 'number')
+  const [taxRate, setTaxRate] = useState<number>(
+    () => initialSavedDraftRef.current?.taxRate ?? 0
   );
   useEffect(() => {
     safeSetJSON('retail_pos_pos_tax_rate', taxRate);
@@ -423,8 +578,8 @@ export const POSView: React.FC<POSViewProps> = ({
   const [tempDiscountVal, setTempDiscountVal] = useState<number>(100);
 
   // Sales Representative Attributed to this Sale (defaults to current logged-in user)
-  const [selectedSalesRepId, setSelectedSalesRepId] = useState<string>(() =>
-    safeGetJSON<string>('retail_pos_pos_sales_rep_id', currentUser.id, (val) => typeof val === 'string')
+  const [selectedSalesRepId, setSelectedSalesRepId] = useState<string>(
+    () => initialSavedDraftRef.current?.selectedSalesRepId || currentUser.id
   );
   useEffect(() => {
     safeSetJSON('retail_pos_pos_sales_rep_id', selectedSalesRepId);
@@ -683,6 +838,7 @@ export const POSView: React.FC<POSViewProps> = ({
       setDiscountAuthorizedBy(null);
     }
     setSearchTerm('');
+    setIsSearchFocused(false);
     setSelectedCategory('All');
     setShowCheckoutModal(false);
     setShowMpesaPromptModal(false);
@@ -691,6 +847,7 @@ export const POSView: React.FC<POSViewProps> = ({
     setSaleNotes('');
     setSaleDate(getLocalDateString());
     setMobileTab('catalog');
+    safeRemove(ACTIVE_SALE_DRAFT_KEY);
     setPosNotice({ message: 'New sale initialized! Register is fresh and ready for items.', type: 'success' });
     setTimeout(() => {
       setPosNotice(null);
@@ -784,8 +941,8 @@ export const POSView: React.FC<POSViewProps> = ({
     safeSetJSON('retail_pos_pos_payment_entries', paymentEntries);
   }, [paymentEntries]);
 
-  const [saleNotes, setSaleNotes] = useState<string>(() =>
-    safeGetJSON<string>('retail_pos_pos_sale_notes', '', (val) => typeof val === 'string')
+  const [saleNotes, setSaleNotes] = useState<string>(
+    () => initialSavedDraftRef.current?.saleNotes ?? ''
   );
   useEffect(() => {
     safeSetJSON('retail_pos_pos_sale_notes', saleNotes);
@@ -798,16 +955,140 @@ export const POSView: React.FC<POSViewProps> = ({
     return `${year}-${month}-${day}`;
   };
 
-  const [saleDate, setSaleDate] = useState<string>(() =>
-    safeGetJSON<string>(
-      'retail_pos_pos_sale_date',
-      getLocalDateString(),
-      (val) => typeof val === 'string' && val.length === 10
-    ) || getLocalDateString()
-  );
+  const [saleDate, setSaleDate] = useState<string>(() => {
+    const draftDate = initialSavedDraftRef.current?.saleDate;
+    if (typeof draftDate === 'string' && draftDate.length === 10) return draftDate;
+    return (
+      safeGetJSON<string>(
+        'retail_pos_pos_sale_date',
+        getLocalDateString(),
+        (val) => typeof val === 'string' && val.length === 10
+      ) || getLocalDateString()
+    );
+  });
   useEffect(() => {
     safeSetJSON('retail_pos_pos_sale_date', saleDate);
   }, [saleDate]);
+
+  // Unified Sale Draft Auto-Save & Visibility Change Recovery (prevents loss on mobile sleep/background)
+  const cartRef = useRef<CartItem[]>(cart);
+  cartRef.current = cart;
+
+  const latestDraftRef = useRef<ActiveSaleDraft>({
+    cart,
+    selectedCustomer,
+    selectedCartItemId,
+    mobileTab,
+    discountAmount,
+    discountMode,
+    discountInputVal,
+    saleMarkupAmount,
+    saleMarkupInputVal,
+    taxRate,
+    saleNotes,
+    saleDate,
+    selectedSalesRepId,
+    updatedAt: Date.now(),
+  });
+  latestDraftRef.current = {
+    cart,
+    selectedCustomer,
+    selectedCartItemId,
+    mobileTab,
+    discountAmount,
+    discountMode,
+    discountInputVal,
+    saleMarkupAmount,
+    saleMarkupInputVal,
+    taxRate,
+    saleNotes,
+    saleDate,
+    selectedSalesRepId,
+    updatedAt: Date.now(),
+  };
+
+  // Persist unified draft immediately whenever any cart item, custom price, customer, or active tab state changes
+  useEffect(() => {
+    safeSetJSON(ACTIVE_SALE_DRAFT_KEY, {
+      cart,
+      selectedCustomer,
+      selectedCartItemId,
+      mobileTab,
+      discountAmount,
+      discountMode,
+      discountInputVal,
+      saleMarkupAmount,
+      saleMarkupInputVal,
+      taxRate,
+      saleNotes,
+      saleDate,
+      selectedSalesRepId,
+      updatedAt: Date.now(),
+    } satisfies ActiveSaleDraft);
+  }, [
+    cart,
+    selectedCustomer,
+    selectedCartItemId,
+    mobileTab,
+    discountAmount,
+    discountMode,
+    discountInputVal,
+    saleMarkupAmount,
+    saleMarkupInputVal,
+    taxRate,
+    saleNotes,
+    saleDate,
+    selectedSalesRepId,
+  ]);
+
+  // Flush unsaved draft on sleep/background (`visibilityState === 'hidden'`) & refresh Firestore on wake (`visible`)
+  useEffect(() => {
+    const flushActiveDraftToStorage = () => {
+      try {
+        const snapshot = {
+          ...latestDraftRef.current,
+          updatedAt: Date.now(),
+        };
+        safeSetJSON(ACTIVE_SALE_DRAFT_KEY, snapshot);
+        safeSetJSON('retail_pos_active_cart', snapshot.cart);
+        safeSetJSON('retail_pos_active_pos_customer', snapshot.selectedCustomer);
+        safeSetJSON('retail_pos_pos_mobile_tab', snapshot.mobileTab);
+      } catch {}
+    };
+
+    const handlePosVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        flushActiveDraftToStorage();
+      } else if (document.visibilityState === 'visible') {
+        // Guard: if browser somehow suspended and dropped in-memory cart while saved draft exists, restore without wiping
+        if (cartRef.current.length === 0) {
+          const savedDraft = safeGetJSON<ActiveSaleDraft | null>(
+            ACTIVE_SALE_DRAFT_KEY,
+            null,
+            (val) => Boolean(val && Array.isArray(val.cart) && val.cart.length > 0)
+          );
+          if (savedDraft && savedDraft.cart.length > 0) {
+            setCart(savedDraft.cart);
+            if (savedDraft.selectedCustomer) {
+              setSelectedCustomer(savedDraft.selectedCustomer);
+            }
+            if (savedDraft.mobileTab) {
+              setMobileTab(savedDraft.mobileTab);
+            }
+          }
+        }
+        // Silently wake Firestore network channel without touching local cart state
+        refreshFirestoreConnection().catch(() => {});
+      }
+    };
+
+    document.addEventListener('visibilitychange', handlePosVisibilityChange);
+    window.addEventListener('pagehide', flushActiveDraftToStorage);
+    return () => {
+      document.removeEventListener('visibilitychange', handlePosVisibilityChange);
+      window.removeEventListener('pagehide', flushActiveDraftToStorage);
+    };
+  }, []);
 
   const mainDateInputRef = useRef<HTMLInputElement>(null);
   const modalDateInputRef = useRef<HTMLInputElement>(null);
@@ -860,107 +1141,144 @@ export const POSView: React.FC<POSViewProps> = ({
     return Array.from(namesSet).sort((a, b) => a.localeCompare(b));
   }, [categories, products]);
 
-  // Filtered Products
-  const filteredProducts = products.filter((p) => {
-    const matchesSearch =
-      p.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      p.sku.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      p.barcode.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      p.category.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (p.supplierName && p.supplierName.toLowerCase().includes(searchTerm.toLowerCase()));
+  // Reset pagination cap to top 25 whenever search query or catalog filters change
+  useEffect(() => {
+    setVisibleResultsLimit(SEARCH_RESULT_PAGE_SIZE);
+  }, [debouncedSearchTerm, selectedCategory, selectedSupplier, priceRange, productAge, performanceFilter]);
 
-    const matchesCat =
-      selectedCategory === 'All'
-        ? true
-        : selectedCategory === 'Favorites'
-        ? favoriteProductIds.has(p.id)
-        : selectedCategory === 'Recently Added'
-        ? recentlyAddedProductIds.has(p.id)
-        : p.category === selectedCategory;
+  // Memoized Filtered Products using 200ms debounced search query
+  const filteredProducts = React.useMemo(() => {
+    const normalizedQuery = debouncedSearchTerm.trim().toLowerCase();
+    return products.filter((p) => {
+      const matchesSearch =
+        !normalizedQuery ||
+        p.name.toLowerCase().includes(normalizedQuery) ||
+        p.sku.toLowerCase().includes(normalizedQuery) ||
+        p.barcode.toLowerCase().includes(normalizedQuery) ||
+        p.category.toLowerCase().includes(normalizedQuery) ||
+        (p.supplierName && p.supplierName.toLowerCase().includes(normalizedQuery));
 
-    const matchesSupplier =
-      selectedSupplier === 'All' || (p.supplierName && p.supplierName.trim() === selectedSupplier.trim());
+      const matchesCat =
+        selectedCategory === 'All'
+          ? true
+          : selectedCategory === 'Favorites'
+          ? favoriteProductIds.has(p.id)
+          : selectedCategory === 'Recently Added'
+          ? recentlyAddedProductIds.has(p.id)
+          : p.category === selectedCategory;
 
-    let matchesPrice = true;
-    if (priceRange === 'under_500') matchesPrice = p.sellingPrice < 500;
-    else if (priceRange === '500_2000') matchesPrice = p.sellingPrice >= 500 && p.sellingPrice <= 2000;
-    else if (priceRange === '2000_10000') matchesPrice = p.sellingPrice > 2000 && p.sellingPrice <= 10000;
-    else if (priceRange === 'over_10000') matchesPrice = p.sellingPrice > 10000;
+      const matchesSupplier =
+        selectedSupplier === 'All' || (p.supplierName && p.supplierName.trim() === selectedSupplier.trim());
 
-    let matchesAge = true;
-    if (productAge !== 'all' && p.createdAt) {
-      const createdTime = new Date(p.createdAt).getTime();
-      const diffMs = Date.now() - createdTime;
-      const diffDays = diffMs / (1000 * 60 * 60 * 24);
-      if (productAge === 'today') matchesAge = diffDays <= 1;
-      else if (productAge === '7_days') matchesAge = diffDays <= 7;
-      else if (productAge === '30_days') matchesAge = diffDays <= 30;
-      else if (productAge === '90_days') matchesAge = diffDays <= 90;
-      else if (productAge === 'older_90') matchesAge = diffDays > 90;
-    }
+      let matchesPrice = true;
+      if (priceRange === 'under_500') matchesPrice = p.sellingPrice < 500;
+      else if (priceRange === '500_2000') matchesPrice = p.sellingPrice >= 500 && p.sellingPrice <= 2000;
+      else if (priceRange === '2000_10000') matchesPrice = p.sellingPrice > 2000 && p.sellingPrice <= 10000;
+      else if (priceRange === 'over_10000') matchesPrice = p.sellingPrice > 10000;
 
-    let matchesPerf = true;
-    const perf = performanceMap[p.id];
-    if (performanceFilter === 'high_sales_high_profit') {
-      matchesPerf = perf?.tier === 'high_sales_high_profit';
-    } else if (performanceFilter === 'low_sales') {
-      matchesPerf = perf?.tier === 'low_sales_low_profit' || perf?.tier === 'low_sales_high_profit';
-    } else if (performanceFilter === 'high_sales_low_profit') {
-      matchesPerf = perf?.tier === 'high_sales_low_profit';
-    } else if (performanceFilter === 'low_sales_high_profit') {
-      matchesPerf = perf?.tier === 'low_sales_high_profit';
-    }
-
-    return matchesSearch && matchesCat && matchesSupplier && matchesPrice && matchesAge && matchesPerf;
-  });
-
-  // Add Item to Cart
-  const handleAddToCart = (product: Product) => {
-    if (product.stockQuantity <= 0) {
-      setPosNotice({
-        type: 'info',
-        message: `Out of stock: ${product.name} currently has 0 items available.`
-      });
-      return;
-    }
-
-    // Highlight selected item during sale and play subtle auditory indicator
-    setSelectedCartItemId(product.id);
-    playItemSelectAudioCue();
-
-    setCart((prev) => {
-      const existingIndex = prev.findIndex((item) => item.product.id === product.id);
-      if (existingIndex > -1) {
-        const existing = prev[existingIndex];
-        if (existing.quantity >= product.stockQuantity) {
-          setPosNotice({
-            type: 'info',
-            message: `Stock limit reached: Only ${product.stockQuantity} ${product.unit} available for ${product.name}.`
-          });
-          return prev;
-        }
-        const updated = [...prev];
-        const newQty = existing.quantity + 1;
-        updated[existingIndex] = {
-          ...existing,
-          quantity: newQty,
-          total: (existing.unitPrice - existing.discount) * newQty
-        };
-        return updated;
-      } else {
-        return [
-          ...prev,
-          {
-            product,
-            quantity: 1,
-            unitPrice: product.sellingPrice,
-            discount: 0,
-            total: product.sellingPrice
-          }
-        ];
+      let matchesAge = true;
+      if (productAge !== 'all' && p.createdAt) {
+        const createdTime = new Date(p.createdAt).getTime();
+        const diffMs = Date.now() - createdTime;
+        const diffDays = diffMs / (1000 * 60 * 60 * 24);
+        if (productAge === 'today') matchesAge = diffDays <= 1;
+        else if (productAge === '7_days') matchesAge = diffDays <= 7;
+        else if (productAge === '30_days') matchesAge = diffDays <= 30;
+        else if (productAge === '90_days') matchesAge = diffDays <= 90;
+        else if (productAge === 'older_90') matchesAge = diffDays > 90;
       }
+
+      let matchesPerf = true;
+      const perf = performanceMap[p.id];
+      if (performanceFilter === 'high_sales_high_profit') {
+        matchesPerf = perf?.tier === 'high_sales_high_profit';
+      } else if (performanceFilter === 'low_sales') {
+        matchesPerf = perf?.tier === 'low_sales_low_profit' || perf?.tier === 'low_sales_high_profit';
+      } else if (performanceFilter === 'high_sales_low_profit') {
+        matchesPerf = perf?.tier === 'high_sales_low_profit';
+      } else if (performanceFilter === 'low_sales_high_profit') {
+        matchesPerf = perf?.tier === 'low_sales_high_profit';
+      }
+
+      return matchesSearch && matchesCat && matchesSupplier && matchesPrice && matchesAge && matchesPerf;
     });
-  };
+  }, [
+    products,
+    debouncedSearchTerm,
+    selectedCategory,
+    favoriteProductIds,
+    recentlyAddedProductIds,
+    selectedSupplier,
+    priceRange,
+    productAge,
+    performanceFilter,
+    performanceMap,
+  ]);
+
+  // Cap rendered DOM nodes to top 25 items (+ Show more) for instant mobile rendering
+  const visibleProducts = React.useMemo(
+    () => filteredProducts.slice(0, visibleResultsLimit),
+    [filteredProducts, visibleResultsLimit]
+  );
+
+  // O(1) lookup map so React.memo product rows only re-render when their own quantity changes
+  const cartQtyMap = React.useMemo(() => {
+    const map = new Map<string, number>();
+    for (const item of cart) {
+      map.set(item.product.id, item.quantity);
+    }
+    return map;
+  }, [cart]);
+
+  // Add Item to Cart (stable callback identity so React.memo rows skip re-renders while typing)
+  const handleAddToCart = React.useCallback(
+    (product: Product) => {
+      if (product.stockQuantity <= 0) {
+        setPosNotice({
+          type: 'info',
+          message: `Out of stock: ${product.name} currently has 0 items available.`,
+        });
+        return;
+      }
+
+      setSelectedCartItemId(product.id);
+      playItemSelectAudioCue();
+
+      setCart((prev) => {
+        const existingIndex = prev.findIndex((item) => item.product.id === product.id);
+        if (existingIndex > -1) {
+          const existing = prev[existingIndex];
+          if (existing.quantity >= product.stockQuantity) {
+            setPosNotice({
+              type: 'info',
+              message: `Stock limit reached: Only ${product.stockQuantity} ${product.unit} available for ${product.name}.`,
+            });
+            return prev;
+          }
+          const updated = [...prev];
+          const newQty = existing.quantity + 1;
+          updated[existingIndex] = {
+            ...existing,
+            quantity: newQty,
+            total: (existing.unitPrice - existing.discount) * newQty,
+          };
+          return updated;
+        } else {
+          return [
+            ...prev,
+            {
+              product,
+              quantity: 1,
+              unitPrice: product.sellingPrice,
+              discount: 0,
+              total: product.sellingPrice,
+            },
+          ];
+        }
+      });
+    },
+    [playItemSelectAudioCue]
+  );
 
   // Barcode Scanned Handler with smart normalization (trim, leading zeros, UPC/EAN, and QR audit links)
   const handleBarcodeScan = (barcodeRaw: string) => {
@@ -1029,10 +1347,10 @@ export const POSView: React.FC<POSViewProps> = ({
     }
   };
 
-  // Quick Enter key handler in search input: auto-adds if exact barcode/SKU or single filtered match
+  // Quick Enter key handler in search input: auto-adds if exact barcode/SKU or single match (bypasses 200ms debounce for barcode guns)
   const handleSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
-      const trimmed = searchTerm.trim().toLowerCase();
+      const trimmed = e.currentTarget.value.trim().toLowerCase();
       if (!trimmed) return;
 
       const exactMatch = products.find(
@@ -1041,12 +1359,20 @@ export const POSView: React.FC<POSViewProps> = ({
       if (exactMatch) {
         handleAddToCart(exactMatch);
         setSearchTerm('');
+        setDebouncedSearchTerm('');
         return;
       }
 
-      if (filteredProducts.length === 1) {
-        handleAddToCart(filteredProducts[0]);
+      const instantMatches = products.filter(
+        (p) =>
+          p.name.toLowerCase().includes(trimmed) ||
+          p.sku.toLowerCase().includes(trimmed) ||
+          p.barcode.toLowerCase().includes(trimmed)
+      );
+      if (instantMatches.length === 1) {
+        handleAddToCart(instantMatches[0]);
         setSearchTerm('');
+        setDebouncedSearchTerm('');
       }
     }
   };
@@ -1319,7 +1645,7 @@ export const POSView: React.FC<POSViewProps> = ({
     // Automated Transaction Summary SMS Notification via Mock Gateway
     const targetPhone = phone || selectedCustomer.phone;
     if (autoSmsSummary && targetPhone && targetPhone !== 'N/A') {
-      sendTransactionSummarySms(newTx, targetPhone, { storeName: 'ROFANI' })
+      sendTransactionSummarySms(newTx, targetPhone, { storeName: resolvedStoreName })
         .then((res) => {
           setPosNotice({
             type: 'success',
@@ -1332,8 +1658,10 @@ export const POSView: React.FC<POSViewProps> = ({
     }
 
     setShowCheckoutModal(false);
+    setMobileTab('catalog');
     setCart([]);
     setDiscountAmount(0);
+    safeRemove(ACTIVE_SALE_DRAFT_KEY);
     if (!hasWorkerPermission(currentUser, 'canGiveDiscounts')) {
       setDiscountAuthorizedBy(null);
     }
@@ -1378,8 +1706,8 @@ export const POSView: React.FC<POSViewProps> = ({
     }
   };
 
-  // Process Final Sale
-  const handleFinalizeSale = () => {
+  // Process Final Sale (supports optional direct override payments e.g. 1-tap Mobile Cash checkout)
+  const handleFinalizeSale = (overridePayments?: PaymentBreakdown[] | unknown) => {
     if (!cart || cart.length === 0) {
       console.error('Sale finalization failed: Cart is empty.');
       alert('Cannot complete sale: Receipt cart is empty. Please add items first.');
@@ -1387,9 +1715,13 @@ export const POSView: React.FC<POSViewProps> = ({
       return;
     }
 
+    const activePayments = Array.isArray(overridePayments)
+      ? (overridePayments as PaymentBreakdown[])
+      : paymentEntries;
+
     console.log('Finalizing sale with cart items:', cart.length, 'Grand Total:', grandTotal);
 
-    const totalPaid = paymentEntries.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+    const totalPaid = activePayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
     const balanceDue = Math.max(0, grandTotal - totalPaid);
     let paymentStatus: 'Paid' | 'Partial' | 'Unpaid' = 'Paid';
 
@@ -1419,6 +1751,9 @@ export const POSView: React.FC<POSViewProps> = ({
       totTotal: grandTotal * 0.015,
     };
 
+    const effectiveCustomerName = selectedCustomer.name;
+    const effectiveCustomerPhone = selectedCustomer.phone;
+
     const newTx: Transaction = {
       id: `tx-${Date.now()}`,
       receiptNumber: receiptNo,
@@ -1434,13 +1769,13 @@ export const POSView: React.FC<POSViewProps> = ({
       amountPaid: totalPaid,
       balanceDue,
       paymentStatus,
-      payments: paymentEntries
+      payments: activePayments
         .map((p) => ({ ...p, amount: Number(p.amount) || 0 }))
         .filter((p) => p.amount > 0),
-      paymentMethod: paymentEntries[0]?.method || 'cash',
+      paymentMethod: activePayments[0]?.method || 'cash',
       customerId: selectedCustomer.id,
-      customerName: selectedCustomer.name,
-      customerPhone: selectedCustomer.phone,
+      customerName: effectiveCustomerName,
+      customerPhone: effectiveCustomerPhone,
       cashierName: currentUser.name,
       cashierId: currentUser.id,
       salesRepId: selectedSalesRep.id,
@@ -1502,7 +1837,7 @@ export const POSView: React.FC<POSViewProps> = ({
 
     // Automated Transaction Summary SMS Notification via Mock Gateway
     if (autoSmsSummary && newTx.customerPhone && newTx.customerPhone !== 'N/A') {
-      sendTransactionSummarySms(newTx, newTx.customerPhone, { storeName: 'ROFANI' })
+      sendTransactionSummarySms(newTx, newTx.customerPhone, { storeName: resolvedStoreName })
         .then((res) => {
           setPosNotice({
             type: 'success',
@@ -1515,8 +1850,10 @@ export const POSView: React.FC<POSViewProps> = ({
     }
 
     setShowCheckoutModal(false);
+    setMobileTab('catalog');
     setCart([]);
     setDiscountAmount(0);
+    safeRemove(ACTIVE_SALE_DRAFT_KEY);
     if (!hasWorkerPermission(currentUser, 'canGiveDiscounts')) {
       setDiscountAuthorizedBy(null);
     }
@@ -1553,24 +1890,36 @@ export const POSView: React.FC<POSViewProps> = ({
 
   const renderCartPanel = () => (
     <div className="space-y-4">
-      {/* Mobile Back to Catalog Button & Quick Reset */}
-      <div className="lg:hidden flex items-center justify-between pb-2 border-b border-slate-800">
+      {/* Single Consolidated Top Cart Header Row (Mobile Drawer & Compact Viewports) */}
+      <div className={`${inPhoneFrame ? 'flex' : 'lg:hidden flex'} items-center justify-between gap-2 pb-2.5 border-b border-slate-800`}>
         <button
           type="button"
           onClick={() => setMobileTab('catalog')}
-          className="text-xs font-bold text-sky-400 hover:text-sky-300 flex items-center gap-1.5 py-1 px-2.5 rounded-lg bg-sky-950/60 border border-sky-900/60 cursor-pointer"
+          className="text-xs font-bold text-sky-400 hover:text-sky-300 flex items-center gap-1.5 py-1.5 px-2.5 rounded-lg bg-sky-950/60 border border-sky-900/60 cursor-pointer shrink-0"
         >
-          <ArrowLeft className="w-3.5 h-3.5" />
-          <span>← Back to Catalog</span>
+          <ArrowLeft className="w-3.5 h-3.5 shrink-0" />
+          <span>Back to Catalog</span>
         </button>
-        <button
-          type="button"
-          onClick={handleTriggerNewSale}
-          className="text-xs font-bold text-emerald-400 hover:text-emerald-300 flex items-center gap-1 py-1 px-2.5 rounded-lg bg-emerald-950/60 border border-emerald-900/60 cursor-pointer"
-        >
-          <RotateCcw className="w-3.5 h-3.5" />
-          <span>Reset / New Sale</span>
-        </button>
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={handleTriggerNewSale}
+            className="text-xs font-bold text-emerald-400 hover:text-emerald-300 flex items-center gap-1 py-1.5 px-2.5 rounded-lg bg-emerald-950/60 border border-emerald-900/60 cursor-pointer"
+          >
+            <RotateCcw className="w-3.5 h-3.5 shrink-0" />
+            <span>Reset / New Sale</span>
+          </button>
+          <button
+            type="button"
+            id="btn-mobile-drawer-minimize"
+            onClick={() => setMobileTab('catalog')}
+            className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 hover:text-white transition cursor-pointer"
+            title="Minimize / Close Cart"
+            aria-label="Close Cart Drawer"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
       </div>
 
       {/* Header & Customer Picker */}
@@ -1678,7 +2027,7 @@ export const POSView: React.FC<POSViewProps> = ({
       </div>
 
       {/* Cart Itemized List */}
-      <div className="space-y-2 lg:max-h-96 lg:overflow-y-auto pr-1">
+      <div className={`space-y-2 ${inPhoneFrame ? '' : 'lg:max-h-96 lg:overflow-y-auto'} pr-1`}>
         {cart.length === 0 ? (
           <div className="text-center py-10 space-y-3 border-2 border-dashed border-slate-800 rounded-2xl">
             <ShoppingBag className="w-8 h-8 text-slate-600 mx-auto" />
@@ -2038,20 +2387,21 @@ export const POSView: React.FC<POSViewProps> = ({
             type="button"
             disabled={cart.length === 0 || !hasWorkerPermission(currentUser, 'canMakeSales')}
             onClick={handleOpenMpesaStkPushDirect}
-            className="bg-emerald-600 hover:bg-emerald-500 active:scale-95 disabled:opacity-40 text-white font-semibold py-2.5 px-3 rounded-xl shadow-sm transition flex items-center justify-center gap-1.5 text-xs sm:text-sm border border-emerald-400/40 cursor-pointer"
+            className="bg-emerald-600 hover:bg-emerald-500 active:scale-95 disabled:opacity-40 text-white font-bold py-2.5 px-3 rounded-xl shadow-sm transition flex items-center justify-center gap-1.5 text-xs sm:text-sm border border-emerald-400/40 cursor-pointer"
           >
-            <Smartphone className="w-4 h-4" />
-            <span className="truncate">M-PESA STK</span>
+            <Smartphone className="w-4 h-4 shrink-0" />
+            <span className="truncate">M-Pesa Push</span>
           </button>
 
           <button
             id="btn-pos-checkout"
+            type="button"
             disabled={cart.length === 0 || !hasWorkerPermission(currentUser, 'canMakeSales')}
             onClick={handleOpenCheckout}
-            className="bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-500 hover:to-indigo-500 active:scale-95 disabled:opacity-50 text-white font-semibold py-2.5 px-3 rounded-xl shadow-sm transition flex items-center justify-center gap-1.5 text-xs sm:text-sm cursor-pointer"
+            className="bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-500 hover:to-indigo-500 active:scale-95 disabled:opacity-50 text-white font-bold py-2.5 px-3 rounded-xl shadow-sm transition flex items-center justify-center gap-1.5 text-xs sm:text-sm cursor-pointer"
           >
-            <CreditCard className="w-4 h-4" />
-            <span className="truncate">Make Sale</span>
+            <CreditCard className="w-4 h-4 shrink-0" />
+            <span className="truncate">Complete Sale</span>
           </button>
         </div>
       </div>
@@ -2206,7 +2556,7 @@ export const POSView: React.FC<POSViewProps> = ({
   };
 
   return (
-    <div className="max-w-7xl mx-auto w-full px-1 sm:px-6 lg:px-8 py-2 sm:py-6 space-y-4 flex-1 flex flex-col min-h-full pb-2 lg:pb-6">
+    <div className="max-w-7xl mx-auto w-full px-1 sm:px-6 lg:px-8 py-2 sm:py-6 space-y-3 lg:space-y-4 flex flex-col pb-4 lg:pb-6">
       {/* Toast Notice Banner (New Sale / Feedback) */}
       {posNotice && (
         <div
@@ -2252,13 +2602,14 @@ export const POSView: React.FC<POSViewProps> = ({
         </div>
       )}
 
-      {/* MOBILE SEGMENTED VIEW SWITCHER: CATALOG VS CART/CHECKOUT (Visible only on mobile screens) */}
-      <div className="lg:hidden flex items-center p-1 bg-slate-900 border border-slate-800 rounded-xl gap-1 shadow-sm">
+      {/* MOBILE SEGMENTED VIEW SWITCHER: CATALOG VS CART/CHECKOUT (Hidden while compact mobile search is active) */}
+      {!isMobileSearchActive && (
+      <div className={`${inPhoneFrame ? 'flex' : 'lg:hidden flex'} items-center p-1 bg-slate-900 border border-slate-800 rounded-xl gap-1 shadow-sm`}>
         <button
           type="button"
           id="btn-mobile-tab-catalog"
           onClick={() => setMobileTab('catalog')}
-          className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 ${
+          className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
             mobileTab === 'catalog'
               ? 'bg-sky-600 text-white shadow-md'
               : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
@@ -2272,7 +2623,7 @@ export const POSView: React.FC<POSViewProps> = ({
           type="button"
           id="btn-mobile-tab-cart"
           onClick={() => setMobileTab('cart')}
-          className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 relative ${
+          className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 relative cursor-pointer ${
             mobileTab === 'cart'
               ? 'bg-sky-600 text-white shadow-md'
               : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
@@ -2287,34 +2638,49 @@ export const POSView: React.FC<POSViewProps> = ({
           )}
         </button>
       </div>
+      )}
 
-      <div className="flex flex-col flex-1 lg:grid lg:grid-cols-12 gap-4 lg:gap-6 lg:items-start">
+      <div className={inPhoneFrame ? 'flex flex-col gap-3' : 'flex flex-col lg:grid lg:grid-cols-12 gap-3 lg:gap-6 lg:items-start'}>
         {/* LEFT 7 COLS: PRODUCT CATALOG & SEARCH */}
-        <div className={`lg:col-span-7 space-y-4 ${mobileTab === 'catalog' ? 'flex flex-col flex-1 min-h-0' : 'hidden lg:block'}`}>
-          {/* STICKY TOP SEARCH BAR & COMPACT TOP SELLERS CHIPS BAR */}
-          <div className="sticky top-2 z-30 bg-slate-900/95 backdrop-blur-md p-3 rounded-2xl border border-slate-800 shadow-2xl space-y-2.5">
-            {/* Dedicated Full-Width Search Input Bar with Auto-Focus & Quick Scan Button */}
+        <div
+          className={
+            inPhoneFrame
+              ? 'space-y-3 flex flex-col'
+              : `lg:col-span-7 space-y-3 lg:space-y-4 ${mobileTab === 'catalog' ? 'flex flex-col' : 'hidden lg:flex lg:flex-col'}`
+          }
+        >
+          {/* SEARCH BAR, STATUS BAR, & COMPACT ACTION ROW */}
+          <div
+            ref={searchBarContainerRef}
+            className={`order-1 relative shrink-0 overflow-visible z-30 bg-slate-900/95 backdrop-blur-md p-2.5 sm:p-3 rounded-2xl border border-slate-800 shadow-2xl space-y-2.5 ${
+              inPhoneFrame ? '' : 'lg:sticky lg:top-2'
+            }`}
+          >
+            {/* Dedicated Full-Width Search Input Bar with Scroll-to-Top Focus & Quick Scan Button */}
             <div className="w-full flex items-center gap-2">
               <div className="relative flex-1 min-w-0 flex items-center">
                 <Search className="w-4 h-4 text-sky-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                 <input
+                  ref={searchInputRef}
                   type="text"
                   placeholder="Search products by Name, SKU, or Barcode..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
+                  onFocus={handleSearchFocus}
+                  onBlur={handleSearchBlur}
                   onKeyDown={handleSearchKeyDown}
                   className="w-full bg-slate-950 border border-slate-700/80 text-white placeholder-slate-400 text-base sm:text-xs pl-10 pr-9 py-2.5 rounded-xl focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-sky-500 transition shadow-inner font-medium"
                   autoComplete="off"
                   autoCorrect="off"
                   spellCheck={false}
-                  autoFocus
                 />
-                {searchTerm && (
+                {(searchTerm || isSearchFocused) && (
                   <button
                     type="button"
-                    onClick={() => setSearchTerm('')}
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={handleClearSearch}
                     className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition cursor-pointer"
-                    title="Clear search query"
+                    title="Clear search & close keyboard"
                     aria-label="Clear search query"
                   >
                     <X className="w-3.5 h-3.5" />
@@ -2334,9 +2700,129 @@ export const POSView: React.FC<POSViewProps> = ({
               </button>
             </div>
 
-            {/* Compact Top Sellers Horizontal Scrollable Chips Bar right below search */}
+            {/* Active search pill right below search bar — full height, zero clipping */}
+            {searchTerm && (
+              <div className="flex items-center justify-between gap-2 text-xs bg-sky-950/70 border border-sky-700/60 px-3 py-2 rounded-xl text-sky-300 shrink-0 overflow-visible">
+                <div className="flex items-center gap-1.5 min-w-0 flex-1 flex-wrap">
+                  <Search className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+                  <span className="text-slate-300 text-[11px] shrink-0">Searching:</span>
+                  <span className="font-bold text-white truncate max-w-[140px] sm:max-w-xs">"{searchTerm}"</span>
+                  <span className="text-sky-300 font-mono font-bold text-[11px] shrink-0">
+                    ({filteredProducts.length} {filteredProducts.length === 1 ? 'item' : 'items'})
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  {cart.length > 0 && (
+                    <button
+                      type="button"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => {
+                        handleClearSearch();
+                        setMobileTab('cart');
+                      }}
+                      className="text-[11px] font-bold text-emerald-300 hover:text-white flex items-center gap-1 bg-emerald-950/90 px-2.5 py-1 rounded-lg border border-emerald-600/60 cursor-pointer"
+                    >
+                      <span>Cart ({cart.reduce((s, i) => s + i.quantity, 0)})</span>
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={handleClearSearch}
+                    className="text-[11px] font-bold text-sky-300 hover:text-white flex items-center gap-1 bg-slate-900 px-2.5 py-1 rounded-lg border border-slate-700 cursor-pointer"
+                  >
+                    <X className="w-3 h-3" />
+                    <span>Clear</span>
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Single compact action row right below the search bar: + New Sale & AI Scan to Receipt (hidden during mobile compact search) */}
+            <div
+              className={`items-center justify-between gap-1.5 flex-nowrap overflow-x-auto no-scrollbar shrink-0 ${
+                isMobileSearchActive ? (inPhoneFrame ? 'hidden' : 'hidden lg:flex') : 'flex'
+              }`}
+            >
+              <div className="flex items-center gap-1.5 flex-nowrap min-w-0">
+                {/* Prominent New Sale Button */}
+                <button
+                  id="btn-pos-new-sale-catalog"
+                  onClick={handleTriggerNewSale}
+                  className="bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white font-extrabold px-2.5 sm:px-3 py-1.5 rounded-xl text-xs transition flex items-center gap-1 shadow-md shadow-emerald-600/25 whitespace-nowrap shrink-0 cursor-pointer"
+                  title="Start a fresh new sale (clears cart)"
+                >
+                  <Plus className="w-3.5 h-3.5 shrink-0" />
+                  <span>New Sale</span>
+                </button>
+
+                {/* AI Camera Scan to Receipt Button */}
+                <button
+                  id="btn-pos-ai-scan-receipt"
+                  type="button"
+                  onClick={() => setShowAiReceiptScanner(true)}
+                  className="bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 active:scale-95 text-white font-extrabold px-2.5 sm:px-3 py-1.5 rounded-xl text-xs transition flex items-center gap-1 shadow-md shadow-purple-600/25 whitespace-nowrap shrink-0 cursor-pointer"
+                  title="AI Visual Scanner: Point camera at counter items or order sheet to automatically add to receipt"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-amber-300 animate-pulse shrink-0" />
+                  <span>AI Scan to Receipt</span>
+                </button>
+
+                {/* Scan QR Code (Tablet/Desktop) */}
+                <button
+                  id="btn-pos-scan-barcode"
+                  onClick={() => setShowScanner(true)}
+                  className="hidden sm:flex bg-sky-600 hover:bg-sky-500 text-white font-semibold px-3 py-1.5 rounded-xl text-xs transition items-center gap-1.5 shadow-md shadow-sky-600/20 whitespace-nowrap shrink-0 cursor-pointer"
+                  title="Scan QR Code"
+                >
+                  <QrCode className="w-3.5 h-3.5" />
+                  <span>Scan QR</span>
+                </button>
+
+                {/* Transaction SMS Logs Button */}
+                <button
+                  id="btn-pos-view-sms-logs"
+                  onClick={() => setShowSmsLogsModal(true)}
+                  className="bg-indigo-950/80 hover:bg-indigo-900 border border-indigo-800 text-indigo-300 font-bold px-2 sm:px-2.5 py-1.5 rounded-xl text-xs transition flex items-center gap-1 shrink-0 shadow-sm cursor-pointer"
+                  title="View Automated Transaction Summary SMS Delivery Logs"
+                >
+                  <Smartphone className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                  <span className="hidden sm:inline">SMS Logs</span>
+                </button>
+              </div>
+
+              {/* Grid / List View Toggle */}
+              <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800 shrink-0 ml-auto">
+                <button
+                  type="button"
+                  onClick={() => setViewMode('list')}
+                  title="List Form View (Compact table for 300+ items)"
+                  className={`p-1.5 rounded-lg transition cursor-pointer ${
+                    viewMode === 'list' ? 'bg-sky-600 text-white shadow-sm' : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <List className="w-4 h-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setViewMode('grid')}
+                  title="Grid Cards View"
+                  className={`p-1.5 rounded-lg transition cursor-pointer ${
+                    viewMode === 'grid' ? 'bg-sky-600 text-white shadow-sm' : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <LayoutGrid className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
+            {/* Compact Top Sellers Horizontal Scrollable Chips Bar (hidden during mobile compact search) */}
             {favoriteProducts.length > 0 && (
-              <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 pt-1 no-scrollbar text-xs">
+              <div
+                className={`items-center gap-1.5 overflow-x-auto pb-0.5 pt-0.5 no-scrollbar text-xs shrink-0 ${
+                  isMobileSearchActive ? (inPhoneFrame ? 'hidden' : 'hidden lg:flex') : 'flex'
+                }`}
+              >
                 <span className="text-[10px] font-extrabold text-amber-400 shrink-0 flex items-center gap-1 bg-amber-950/70 border border-amber-800 px-2 py-1 rounded-xl">
                   <Flame className="w-3 h-3 text-amber-400" /> Top Sellers:
                 </span>
@@ -2375,30 +2861,13 @@ export const POSView: React.FC<POSViewProps> = ({
                 })}
               </div>
             )}
-          </div>
 
-            {/* Active search pill for instant mobile visibility */}
-            {searchTerm && (
-              <div className="flex items-center justify-between text-xs bg-sky-950/60 border border-sky-800/60 px-3 py-1.5 rounded-xl text-sky-300">
-                <div className="flex items-center gap-1.5 truncate">
-                  <Search className="w-3.5 h-3.5 text-sky-400 shrink-0" />
-                  <span className="text-slate-400 text-[11px]">Searching:</span>
-                  <span className="font-bold text-white truncate max-w-[160px] sm:max-w-xs">"{searchTerm}"</span>
-                  <span className="text-sky-300 font-mono font-bold text-[11px]">({filteredProducts.length} {filteredProducts.length === 1 ? 'item' : 'items'})</span>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setSearchTerm('')}
-                  className="text-[11px] font-bold text-sky-400 hover:text-white flex items-center gap-0.5 shrink-0 ml-2 bg-slate-900 px-2 py-0.5 rounded-lg border border-slate-700"
-                >
-                  <X className="w-3 h-3" />
-                  <span>Clear</span>
-                </button>
-              </div>
-            )}
-
-            {/* Advanced Filters Toggle & Collapsible Panel */}
-            <div className="pt-1">
+            {/* Advanced Filters Toggle & Collapsible Panel (hidden during mobile compact search) */}
+            <div
+              className={`pt-0.5 shrink-0 ${
+                isMobileSearchActive ? (inPhoneFrame ? 'hidden' : 'hidden lg:block') : ''
+              }`}
+            >
               <div className="flex items-center justify-between">
                 <button
                   type="button"
@@ -2493,82 +2962,14 @@ export const POSView: React.FC<POSViewProps> = ({
                 </div>
               )}
             </div>
-
-            {/* Quick action tools row */}
-            <div className="flex items-center justify-between gap-2 flex-wrap sm:flex-nowrap">
-              <div className="flex items-center gap-2 flex-wrap min-w-0">
-                {/* Prominent New Sale Button */}
-                <button
-                  id="btn-pos-new-sale-catalog"
-                  onClick={handleTriggerNewSale}
-                  className="bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white font-extrabold px-3 py-1.5 rounded-xl text-xs transition flex items-center gap-1.5 shadow-md shadow-emerald-600/25 shrink-0"
-                  title="Start a fresh new sale (clears cart)"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  <span>New Sale</span>
-                </button>
-
-                {/* AI Camera Scan to Receipt Button */}
-                <button
-                  id="btn-pos-ai-scan-receipt"
-                  type="button"
-                  onClick={() => setShowAiReceiptScanner(true)}
-                  className="bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 active:scale-95 text-white font-extrabold px-3 py-1.5 rounded-xl text-xs transition flex items-center gap-1.5 shadow-md shadow-purple-600/25 shrink-0 cursor-pointer"
-                  title="AI Visual Scanner: Point camera at counter items or order sheet to automatically add to receipt"
-                >
-                  <Sparkles className="w-3.5 h-3.5 text-amber-300 animate-pulse" />
-                  <span>AI Scan to Receipt</span>
-                </button>
-
-                {/* Scan QR Code (Tablet/Desktop) */}
-                <button
-                  id="btn-pos-scan-barcode"
-                  onClick={() => setShowScanner(true)}
-                  className="hidden sm:flex bg-sky-600 hover:bg-sky-500 text-white font-semibold px-3 py-1.5 rounded-xl text-xs transition items-center gap-1.5 shadow-md shadow-sky-600/20 shrink-0 cursor-pointer"
-                  title="Scan QR Code"
-                >
-                  <QrCode className="w-3.5 h-3.5" />
-                  <span>Scan QR</span>
-                </button>
-
-                {/* Transaction SMS Logs Button */}
-                <button
-                  id="btn-pos-view-sms-logs"
-                  onClick={() => setShowSmsLogsModal(true)}
-                  className="bg-indigo-950/80 hover:bg-indigo-900 border border-indigo-800 text-indigo-300 font-bold px-2.5 py-1.5 rounded-xl text-xs transition flex items-center gap-1.5 shrink-0 shadow-sm"
-                  title="View Automated Transaction Summary SMS Delivery Logs"
-                >
-                  <Smartphone className="w-3.5 h-3.5 text-indigo-400" />
-                  <span className="hidden sm:inline">SMS Logs</span>
-                </button>
-              </div>
-
-              {/* Grid / List View Toggle */}
-              <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800 shrink-0 ml-auto">
-                <button
-                  type="button"
-                  onClick={() => setViewMode('list')}
-                  title="List Form View (Compact table for 300+ items)"
-                  className={`p-1.5 rounded-lg transition ${
-                    viewMode === 'list' ? 'bg-sky-600 text-white shadow-sm' : 'text-slate-400 hover:text-white'
-                  }`}
-                >
-                  <List className="w-4 h-4" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setViewMode('grid')}
-                  title="Grid Cards View"
-                  className={`p-1.5 rounded-lg transition ${
-                    viewMode === 'grid' ? 'bg-sky-600 text-white shadow-sm' : 'text-slate-400 hover:text-white'
-                  }`}
-                >
-                  <LayoutGrid className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
           </div>
 
+          {/* Velocity Filters, Category Pills & Favorites & Quick Access (hidden on mobile during compact search so results snap directly under search bar) */}
+          <div
+            className={`${searchTerm.trim() ? 'order-3' : 'order-2'} space-y-3 shrink-0 ${
+              isMobileSearchActive ? (inPhoneFrame ? 'hidden' : 'hidden lg:block') : ''
+            }`}
+          >
           {/* Sales & Profit Velocity Performance Filter Pills */}
           <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar text-xs">
             <span className="text-[11px] font-bold text-slate-400 mr-1 shrink-0 flex items-center gap-1">
@@ -3026,11 +3427,18 @@ export const POSView: React.FC<POSViewProps> = ({
             </div>
           )}
 
+          </div>
+
+          {/* Item List / Search Results Section (appears immediately below search bar when searching) */}
+          <div className={`${searchTerm.trim() ? 'order-2' : 'order-3'} space-y-3`}>
           {/* Item List Quick Downward-Arrow Navigation Bar */}
           <div className="bg-slate-900/90 border border-slate-800 px-3 py-2 rounded-xl flex items-center justify-between gap-2 text-xs">
             <div className="flex items-center gap-2 text-slate-300 font-bold">
               <Package className="w-3.5 h-3.5 text-sky-400" />
-              <span>Item List ({filteredProducts.length})</span>
+              <span>
+                Item List ({filteredProducts.length}
+                {filteredProducts.length > visibleProducts.length ? ` • showing top ${visibleProducts.length}` : ''})
+              </span>
             </div>
             <div className="flex items-center gap-1.5">
               <button
@@ -3063,10 +3471,9 @@ export const POSView: React.FC<POSViewProps> = ({
             </div>
           </div>
 
-          {/* Product Items Display (List Form vs Grid) */}
+          {/* Product Items Display (List Form vs Grid) — Capped to 25 rendered nodes + Show more */}
           {viewMode === 'list' ? (
-            /* High-density Tabular List Form for 300+ items */
-            <div ref={posItemListRef} className="bg-slate-900 border border-slate-800 rounded-2xl overflow-x-auto shadow-lg flex-1 min-h-0 lg:max-h-[calc(100vh-280px)] lg:overflow-y-auto">
+            <div ref={posItemListRef} className="bg-slate-900 border border-slate-800 rounded-2xl overflow-x-auto shadow-lg lg:flex-1 lg:min-h-0 lg:max-h-[calc(100vh-280px)] lg:overflow-y-auto">
               <table className="w-full text-left text-xs text-slate-300">
                 <thead className="bg-slate-950 text-slate-400 font-semibold uppercase tracking-wider border-b border-slate-800 sticky top-0 z-10">
                   <tr>
@@ -3078,153 +3485,67 @@ export const POSView: React.FC<POSViewProps> = ({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/60">
-                  {filteredProducts.length === 0 ? (
+                  {visibleProducts.length === 0 ? (
                     <tr>
                       <td colSpan={5} className="p-6 text-center text-slate-500">
-                        No items matching "{searchTerm}".
+                        {debouncedSearchTerm !== searchTerm
+                          ? `Searching "${searchTerm}"...`
+                          : `No items matching "${debouncedSearchTerm}".`}
                       </td>
                     </tr>
                   ) : (
-                    filteredProducts.map((p) => {
-                      const isLowStock = p.stockQuantity <= p.minStockAlert;
-                      const isOutOfStock = p.stockQuantity <= 0;
-                      const perf = performanceMap[p.id];
-                      const cartItem = cart.find((item) => item.product.id === p.id);
-                      const inCartQty = cartItem ? cartItem.quantity : 0;
-                      const isInCart = inCartQty > 0;
-                      const isSelected = selectedCartItemId === p.id;
-
-                      return (
-                        <tr
-                          key={p.id}
-                          onClick={() => handleAddToCart(p)}
-                          className={`transition cursor-pointer group ${
-                            isSelected
-                              ? 'bg-sky-950/70 ring-2 ring-inset ring-sky-400 border-l-4 border-l-sky-400 shadow-md'
-                              : isInCart
-                              ? 'bg-emerald-950/25 border-l-4 border-l-emerald-500 hover:bg-emerald-950/40'
-                              : 'hover:bg-slate-800/70'
-                          } ${perf ? perf.accentBorderLeft : ''} ${perf && !isSelected && !isInCart ? perf.tableRowHighlight : ''}`}
-                        >
-                          <td className="p-3">
-                            <div className="flex items-center gap-2.5">
-                              {p.imageUrl ? (
-                                <img
-                                  src={p.imageUrl}
-                                  alt={p.name}
-                                  referrerPolicy="no-referrer"
-                                  className="w-10 h-10 rounded-xl object-cover border border-slate-700 shrink-0 shadow-sm"
-                                  onError={(e) => { e.currentTarget.style.display = 'none'; }}
-                                />
-                              ) : (
-                                <div className="w-10 h-10 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-center text-slate-600 shrink-0">
-                                  <Package className="w-5 h-5 text-slate-600" />
-                                </div>
-                              )}
-                              <div className="space-y-0.5">
-                                <div className="flex items-center gap-2 flex-wrap">
-                                  <span className={`font-bold transition text-xs ${isSelected ? 'text-sky-300 font-black' : 'text-slate-100 group-hover:text-sky-300'}`}>
-                                    {p.name}
-                                  </span>
-
-                                  {/* In-Cart / Active Selection Badge */}
-                                  {isSelected && (
-                                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-black bg-sky-500 text-slate-950 shadow-sm animate-pulse shrink-0">
-                                      ● Selected ({inCartQty})
-                                    </span>
-                                  )}
-                                  {!isSelected && isInCart && (
-                                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shrink-0">
-                                      ✓ In Cart ({inCartQty})
-                                    </span>
-                                  )}
-
-                                  {/* Performance Velocity & Margin Badge */}
-                                  {perf && perf.tier !== 'unranked_no_sales' && (
-                                    <span
-                                      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-black border shadow-sm ${perf.badgeBg} ${perf.badgeText} ${perf.badgeBorder}`}
-                                      title={perf.description}
-                                    >
-                                      {perf.tier === 'high_sales_high_profit' && <Star className="w-3 h-3 fill-emerald-400 text-emerald-400 shrink-0" />}
-                                      {perf.tier === 'low_sales_low_profit' && <AlertTriangle className="w-3 h-3 text-amber-400 shrink-0" />}
-                                      {perf.tier === 'high_sales_low_profit' && <Zap className="w-3 h-3 text-sky-400 shrink-0" />}
-                                      {perf.tier === 'low_sales_high_profit' && <Gem className="w-3 h-3 text-purple-400 shrink-0" />}
-                                      <span>{perf.tierLabel}</span>
-                                      <span className="font-mono opacity-85">({perf.unitsSold} sold • {perf.marginPercent.toFixed(0)}% profit)</span>
-                                    </span>
-                                  )}
-                                  {perf && perf.tier === 'unranked_no_sales' && (
-                                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] bg-slate-800/80 text-slate-400 border border-slate-700">
-                                      0 sold
-                                    </span>
-                                  )}
-                                </div>
-                                <div className="text-[10px] text-slate-400 font-mono">
-                                  SKU: {p.sku} | Barcode: {p.barcode}
-                                </div>
-                              </div>
-                            </div>
-                          </td>
-
-                          <td className="p-3">
-                            <div className="text-sky-400 font-semibold text-[11px]">{p.category}</div>
-                            {p.sizeCapacity && (
-                              <span className="text-[10px] bg-slate-950 border border-slate-800 text-slate-300 px-1.5 py-0.2 rounded font-mono">
-                                {p.sizeCapacity}
-                              </span>
-                            )}
-                          </td>
-
-                          <td className="p-3 text-right font-mono font-bold text-white text-sm">
-                            KSh {p.sellingPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                          </td>
-
-                          <td className="p-3 text-center font-mono">
-                            <span
-                              className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
-                                isOutOfStock
-                                  ? 'bg-red-950 text-red-400 border border-red-800'
-                                  : isLowStock
-                                  ? 'bg-amber-950 text-amber-400 border border-amber-800'
-                                  : 'bg-emerald-950 text-emerald-400 border border-emerald-800'
-                              }`}
-                            >
-                              {isOutOfStock ? '0 stock' : `${p.stockQuantity} ${p.unit}`}
-                            </span>
-                          </td>
-
-                          <td className="p-3 text-right">
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleAddToCart(p);
-                              }}
-                              disabled={isOutOfStock}
-                              className="bg-sky-600 hover:bg-sky-500 disabled:opacity-40 text-white font-bold px-3 py-1.5 rounded-lg text-xs transition flex items-center gap-1 ml-auto"
-                            >
-                              <Plus className="w-3.5 h-3.5" /> Add
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })
+                    visibleProducts.map((p) => (
+                      <POSProductListRow
+                        key={p.id}
+                        product={p}
+                        perf={performanceMap[p.id]}
+                        inCartQty={cartQtyMap.get(p.id) || 0}
+                        isSelected={selectedCartItemId === p.id}
+                        onAddToCart={handleAddToCart}
+                      />
+                    ))
                   )}
                 </tbody>
               </table>
+
+              {filteredProducts.length > visibleProducts.length && (
+                <div className="flex flex-col sm:flex-row items-center justify-between gap-2 px-3 py-2.5 bg-slate-950/90 border-t border-slate-800 text-xs">
+                  <span className="text-slate-400 font-mono text-[11px]">
+                    Showing <span className="text-white font-bold">{visibleProducts.length}</span> of{' '}
+                    <span className="text-sky-400 font-bold">{filteredProducts.length}</span> matching items
+                  </span>
+                  <button
+                    type="button"
+                    id="btn-pos-show-more-results"
+                    onClick={() => setVisibleResultsLimit((prev) => prev + SEARCH_RESULT_PAGE_SIZE)}
+                    className="w-full sm:w-auto px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 active:scale-95 text-white font-bold text-xs transition flex items-center justify-center gap-1.5 shadow-sm cursor-pointer"
+                  >
+                    <span>
+                      Show more ({Math.min(SEARCH_RESULT_PAGE_SIZE, filteredProducts.length - visibleProducts.length)} more)
+                    </span>
+                    <ChevronDown className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              )}
             </div>
           ) : (
             /* Product Cards Grid */
-            <div ref={posItemListRef} className="grid grid-cols-2 sm:grid-cols-3 gap-3 flex-1 content-start lg:max-h-[calc(100vh-280px)] lg:overflow-y-auto lg:pr-1">
-              {filteredProducts.length === 0 ? (
+            <div ref={posItemListRef} className="grid grid-cols-2 sm:grid-cols-3 gap-3 content-start lg:flex-1 lg:max-h-[calc(100vh-280px)] lg:overflow-y-auto lg:pr-1">
+              {visibleProducts.length === 0 ? (
                 <div className="col-span-full py-10 text-center text-slate-500 bg-slate-950/40 rounded-2xl border border-dashed border-slate-800 p-6 space-y-2">
                   <Search className="w-7 h-7 text-slate-600 mx-auto" />
-                  <p className="text-sm font-semibold text-slate-300">No items matching "{searchTerm}"</p>
-                  <p className="text-xs text-slate-500">Check spelling or try searching by SKU or Barcode</p>
+                  <p className="text-sm font-semibold text-slate-300">
+                    {debouncedSearchTerm !== searchTerm
+                      ? `Searching "${searchTerm}"...`
+                      : `No items matching "${debouncedSearchTerm}"`}
+                  </p>
+                  {debouncedSearchTerm === searchTerm && (
+                    <p className="text-xs text-slate-500">Check spelling or try searching by SKU or Barcode</p>
+                  )}
                   {searchTerm && (
                     <button
                       type="button"
-                      onClick={() => setSearchTerm('')}
+                      onClick={handleClearSearch}
                       className="mt-2 inline-flex items-center gap-1 text-xs font-bold text-sky-400 hover:text-sky-300 bg-sky-950/60 border border-sky-900/60 px-3 py-1 rounded-lg"
                     >
                       <X className="w-3 h-3" />
@@ -3233,177 +3554,137 @@ export const POSView: React.FC<POSViewProps> = ({
                   )}
                 </div>
               ) : (
-                filteredProducts.map((p) => {
-                const isLowStock = p.stockQuantity <= p.minStockAlert;
-                const isOutOfStock = p.stockQuantity <= 0;
-                const perf = performanceMap[p.id];
-                const cartItem = cart.find((item) => item.product.id === p.id);
-                const inCartQty = cartItem ? cartItem.quantity : 0;
-                const isInCart = inCartQty > 0;
-                const isSelected = selectedCartItemId === p.id;
+                <>
+                  {visibleProducts.map((p) => (
+                    <POSProductGridCard
+                      key={p.id}
+                      product={p}
+                      perf={performanceMap[p.id]}
+                      inCartQty={cartQtyMap.get(p.id) || 0}
+                      isSelected={selectedCartItemId === p.id}
+                      onAddToCart={handleAddToCart}
+                    />
+                  ))}
 
-                return (
-                  <div
-                    key={p.id}
-                    onClick={() => handleAddToCart(p)}
-                    className={`group border rounded-2xl p-3 transition flex flex-col justify-between cursor-pointer relative overflow-hidden ${
-                      isSelected
-                        ? 'border-2 border-sky-400 ring-2 ring-sky-400/70 shadow-lg shadow-sky-500/25 bg-sky-950/45 scale-[1.01]'
-                        : isInCart
-                        ? 'border-2 border-emerald-500 shadow-md shadow-emerald-500/20 bg-emerald-950/35 ring-1 ring-emerald-400/40'
-                        : perf
-                        ? perf.cardBorder
-                        : 'border-slate-800'
-                    } ${perf && !isInCart && !isSelected ? perf.cardGlow : ''} ${
-                      isOutOfStock
-                        ? 'opacity-60 bg-slate-950/40'
-                        : isLowStock
-                        ? 'bg-slate-900/90'
-                        : isSelected
-                        ? 'bg-sky-950/45'
-                        : isInCart
-                        ? 'bg-emerald-950/35'
-                        : 'bg-slate-900 hover:bg-slate-800/80'
-                    }`}
-                  >
-                    {/* In-Cart / Active Selection Badge */}
-                    {isSelected ? (
-                      <div className="absolute top-2 right-2 z-10">
-                        <span className="text-[10px] font-mono font-black px-2 py-0.5 rounded-full bg-sky-400 text-slate-950 shadow-md border border-sky-200 flex items-center gap-1 animate-pulse">
-                          ● Selected ({inCartQty})
-                        </span>
-                      </div>
-                    ) : isInCart ? (
-                      <div className="absolute top-2 right-2 z-10">
-                        <span className="text-[10px] font-mono font-black px-2 py-0.5 rounded-full bg-emerald-500 text-slate-950 shadow-md border border-emerald-300 flex items-center gap-1">
-                          ✓ In Cart ({inCartQty})
-                        </span>
-                      </div>
-                    ) : null}
-
-                    <div>
-                      {/* Performance Velocity & Margin Ribbon */}
-                      {perf && !isInCart && (
-                        <div className="flex items-center justify-between gap-1 mb-2">
-                          <span
-                            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-black border tracking-wide shadow-sm ${perf.badgeBg} ${perf.badgeText} ${perf.badgeBorder}`}
-                            title={perf.description}
-                          >
-                            {perf.tier === 'high_sales_high_profit' && <Star className="w-2.5 h-2.5 fill-emerald-400 text-emerald-400 shrink-0" />}
-                            {perf.tier === 'low_sales_low_profit' && <AlertTriangle className="w-2.5 h-2.5 text-amber-400 shrink-0" />}
-                            {perf.tier === 'high_sales_low_profit' && <Zap className="w-2.5 h-2.5 text-sky-400 shrink-0" />}
-                            {perf.tier === 'low_sales_high_profit' && <Gem className="w-2.5 h-2.5 text-purple-400 shrink-0" />}
-                            {perf.tier === 'unranked_no_sales' && <Package className="w-2.5 h-2.5 text-slate-400 shrink-0" />}
-                            <span>{perf.tierShortLabel}</span>
-                          </span>
-
-                          <span className="text-[9px] font-mono font-bold text-slate-400">
-                            {perf.unitsSold > 0 ? `${perf.unitsSold} sold` : '0 sold'}
-                          </span>
-                        </div>
-                      )}
-
-                      {/* Product Image Thumbnail */}
-                      <div className="w-full h-24 mb-2 rounded-xl overflow-hidden bg-slate-950 border border-slate-800 flex items-center justify-center">
-                        {p.imageUrl ? (
-                          <img
-                            src={p.imageUrl}
-                            alt={p.name}
-                            referrerPolicy="no-referrer"
-                            className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
-                            onError={(e) => {
-                              e.currentTarget.style.display = 'none';
-                            }}
-                          />
-                        ) : (
-                          <div className="flex flex-col items-center justify-center text-slate-600 gap-1">
-                            <Package className="w-6 h-6 text-slate-600 group-hover:text-sky-400 transition" />
-                            <span className="text-[9px] font-mono text-slate-500">{p.unit}</span>
-                          </div>
-                        )}
-                      </div>
-
-                      <div className="flex items-center justify-between gap-1 mb-1">
-                        <span className="text-[10px] text-sky-400 font-mono uppercase font-semibold truncate">
-                          {p.category}
-                        </span>
-                        {p.sizeCapacity && (
-                          <span className="bg-slate-800 text-slate-300 text-[9px] px-1.5 py-0.5 rounded font-mono">
-                            {p.sizeCapacity}
-                          </span>
-                        )}
-                      </div>
-
-                      <h4 className="font-semibold text-xs text-slate-100 group-hover:text-sky-300 transition line-clamp-2">
-                        {p.name}
-                      </h4>
-
-                      <div className="text-[10px] text-slate-400 font-mono mt-1">
-                        SKU: {p.sku}
-                      </div>
-                    </div>
-
-                    <div className="mt-3 pt-2 border-t border-slate-800/80 flex items-center justify-between">
-                      <span className="text-sm font-extrabold text-white">
-                        KSh {p.sellingPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  {filteredProducts.length > visibleProducts.length && (
+                    <div className="col-span-full flex flex-col sm:flex-row items-center justify-between gap-2 px-3 py-2.5 bg-slate-900 border border-slate-800 rounded-2xl text-xs">
+                      <span className="text-slate-400 font-mono text-[11px]">
+                        Showing <span className="text-white font-bold">{visibleProducts.length}</span> of{' '}
+                        <span className="text-sky-400 font-bold">{filteredProducts.length}</span> matching items
                       </span>
-
-                      <span
-                        className={`text-[10px] px-2 py-0.5 rounded-full font-bold font-mono ${
-                          isOutOfStock
-                            ? 'bg-red-950 text-red-400 border border-red-800'
-                            : isLowStock
-                            ? 'bg-amber-950 text-amber-400 border border-amber-800'
-                            : 'bg-emerald-950 text-emerald-400 border border-emerald-800'
-                        }`}
+                      <button
+                        type="button"
+                        id="btn-pos-show-more-results-grid"
+                        onClick={() => setVisibleResultsLimit((prev) => prev + SEARCH_RESULT_PAGE_SIZE)}
+                        className="w-full sm:w-auto px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 active:scale-95 text-white font-bold text-xs transition flex items-center justify-center gap-1.5 shadow-sm cursor-pointer"
                       >
-                        {isOutOfStock ? '0 in stock' : `${p.stockQuantity} ${p.unit}`}
-                      </span>
+                        <span>
+                          Show more ({Math.min(SEARCH_RESULT_PAGE_SIZE, filteredProducts.length - visibleProducts.length)} more)
+                        </span>
+                        <ChevronDown className="w-3.5 h-3.5" />
+                      </button>
                     </div>
-                  </div>
-                );
-              }))}
+                  )}
+                </>
+              )}
             </div>
           )}
+          </div>
+
         </div>
 
-        {/* RIGHT 5 COLS: POS RECEIPT CART & CHECKOUT PANEL (DESKTOP) */}
-        <div className="lg:col-span-5 bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-xl space-y-4 hidden lg:block">
+        {/* RIGHT 5 COLS: POS RECEIPT CART & CHECKOUT PANEL (DESKTOP ONLY) */}
+        <div
+          className={
+            inPhoneFrame
+              ? 'hidden'
+              : 'lg:col-span-5 bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-xl space-y-4 hidden lg:block'
+          }
+        >
           {renderCartPanel()}
         </div>
+      </div>
 
-        {/* MOBILE FULL-SCREEN CART & CHECKOUT OVERLAY DRAWER */}
-        {mobileTab === 'cart' && (
-          <div className="fixed inset-0 z-50 bg-slate-950/95 backdrop-blur-md lg:hidden flex flex-col p-4 overflow-y-auto animate-fade-in space-y-4">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
-              <button
-                type="button"
-                onClick={() => setMobileTab('catalog')}
-                className="text-xs font-extrabold text-sky-400 hover:text-sky-300 flex items-center gap-1.5 py-1.5 px-3 rounded-xl bg-sky-950/80 border border-sky-800 shadow-sm cursor-pointer"
-              >
-                <ArrowLeft className="w-4 h-4" />
-                <span>← Back to Catalog</span>
-              </button>
+      {/* COMPACT FLOATING CART PILL (COLLAPSED STATE): Hidden when cart is empty OR during active mobile search */}
+      {(() => {
+        if (cart.length === 0 || isMobileSearchActive || mobileTab === 'cart') return null;
+        const totalUnits = cart.reduce((sum, item) => sum + item.quantity, 0);
+        const pillMarkup = (
+          <div
+            className={
+              inPhoneFrame
+                ? 'pointer-events-auto absolute bottom-[4.25rem] left-3 right-3 z-40'
+                : 'lg:hidden fixed bottom-[4.25rem] left-3 right-3 z-40'
+            }
+          >
+            <button
+              type="button"
+              id="btn-mobile-floating-cart-pill"
+              onClick={() => setMobileTab('cart')}
+              className="w-full bg-slate-800/95 hover:bg-slate-800 backdrop-blur-md border border-slate-700 hover:border-sky-500/70 rounded-2xl px-3.5 py-2.5 shadow-2xl shadow-black/80 flex items-center justify-between gap-2 transition active:scale-[0.99] cursor-pointer"
+            >
+              {/* Left: Cart icon + item count badge */}
+              <div className="flex items-center gap-2 shrink-0">
+                <div className="w-8 h-8 rounded-xl bg-sky-500/20 border border-sky-500/40 flex items-center justify-center text-sky-400">
+                  <ShoppingBag className="w-4 h-4" />
+                </div>
+                <span className="bg-sky-500/20 text-sky-300 border border-sky-500/40 px-2 py-0.5 rounded-lg text-xs font-mono font-black">
+                  {totalUnits} {totalUnits === 1 ? 'item' : 'items'}
+                </span>
+              </div>
 
-              <button
-                type="button"
-                onClick={() => setMobileTab('catalog')}
-                className="p-2 rounded-xl bg-slate-900 border border-slate-800 text-slate-300 hover:text-white cursor-pointer"
-                title="Close Cart & Return to Catalog"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
+              {/* Center: Total amount in bold cyan/green */}
+              <div className="text-sm font-black font-mono text-emerald-400 truncate px-1">
+                KSh {grandTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+              </div>
 
-            <div className="flex-1">
-              {renderCartPanel()}
+              {/* Right: View Cart ^ expand button */}
+              <span className="inline-flex items-center gap-1 bg-sky-600 text-white text-xs font-extrabold px-3 py-1.5 rounded-xl shadow-sm shrink-0">
+                <span>View Cart</span>
+                <ChevronUp className="w-3.5 h-3.5" />
+              </span>
+            </button>
+          </div>
+        );
+
+        return inPhoneFrame && phoneOverlayRoot ? createPortal(pillMarkup, phoneOverlayRoot) : pillMarkup;
+      })()}
+
+      {/* EXPANDABLE SLIDE-UP MOBILE SELLING CART BOTTOM SHEET (EXPANDED STATE) */}
+      {(() => {
+        if (mobileTab !== 'cart') return null;
+        const drawerMarkup = (
+          <div
+            className={
+              inPhoneFrame
+                ? 'pointer-events-auto absolute inset-0 z-[110] flex flex-col justify-end bg-slate-950/75 backdrop-blur-sm animate-fade-in'
+                : 'lg:hidden fixed inset-0 z-[110] flex flex-col justify-end bg-slate-950/75 backdrop-blur-sm animate-fade-in'
+            }
+            onClick={() => setMobileTab('catalog')}
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className="rounded-t-2xl bg-slate-900 border-t border-slate-700 shadow-2xl w-full max-h-[90dvh] flex flex-col text-slate-100 overflow-hidden"
+            >
+              {/* Drag indicator handle */}
+              <div className="pt-2 pb-1 flex justify-center shrink-0">
+                <span className="w-10 h-1 rounded-full bg-slate-700" />
+              </div>
+
+              {/* Scrollable Receipt Order Cart Body */}
+              <div className="flex-1 min-h-0 overflow-y-auto px-4 pt-1.5 pb-6">
+                {renderCartPanel()}
+              </div>
             </div>
           </div>
-        )}
+        );
+
+        return inPhoneFrame && phoneOverlayRoot ? createPortal(drawerMarkup, phoneOverlayRoot) : drawerMarkup;
+      })()}
 
       {/* MODAL 1: CHECKOUT & MULTI-PAYMENT / PARTIAL PAYMENT */}
       {showCheckoutModal && (
-        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-[120] bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden text-slate-100 flex flex-col max-h-[90vh]">
             <div className="p-4 border-b border-slate-800 bg-slate-950/50 flex items-center justify-between">
               <div>
@@ -3655,20 +3936,36 @@ export const POSView: React.FC<POSViewProps> = ({
             </div>
 
             {/* Modal Footer */}
-            <div className="p-4 bg-slate-950 border-t border-slate-800 flex justify-end gap-2">
+            <div className="p-4 bg-slate-950 border-t border-slate-800 flex flex-wrap items-center justify-between gap-2">
               <button
-                onClick={() => setShowCheckoutModal(false)}
-                className="bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold px-4 py-2.5 rounded-xl text-xs transition"
+                type="button"
+                onClick={() => {
+                  setMpesaPromptAmount(grandTotal);
+                  setMpesaActiveRowIndex(0);
+                  setIsDirectMpesaCheckout(false);
+                  setShowMpesaPromptModal(true);
+                }}
+                className="bg-emerald-600/20 hover:bg-emerald-600/35 border border-emerald-500/50 text-emerald-300 font-bold px-3.5 py-2.5 rounded-xl text-xs transition flex items-center gap-1.5 cursor-pointer"
               >
-                Cancel
+                <Smartphone className="w-4 h-4" />
+                <span>M-Pesa STK Push</span>
               </button>
-              <button
-                id="btn-confirm-finalize-sale"
-                onClick={handleFinalizeSale}
-                className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-6 py-2.5 rounded-xl text-xs transition shadow-lg shadow-emerald-600/20 flex items-center gap-2"
-              >
-                <CheckCircle className="w-4 h-4" /> Confirm & Print Receipt
-              </button>
+
+              <div className="flex items-center gap-2 ml-auto">
+                <button
+                  onClick={() => setShowCheckoutModal(false)}
+                  className="bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold px-4 py-2.5 rounded-xl text-xs transition cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  id="btn-confirm-finalize-sale"
+                  onClick={() => handleFinalizeSale()}
+                  className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-5 py-2.5 rounded-xl text-xs transition shadow-lg shadow-emerald-600/20 flex items-center gap-2 cursor-pointer"
+                >
+                  <CheckCircle className="w-4 h-4" /> Complete Sale & Print
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -3676,7 +3973,7 @@ export const POSView: React.FC<POSViewProps> = ({
 
       {/* MODAL 2: ADD NEW CUSTOMER */}
       {showAddCustomerModal && (
-        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-[125] bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-md shadow-2xl p-5 space-y-4 text-slate-100">
             <div className="flex justify-between items-center border-b border-slate-800 pb-3">
               <h3 className="font-bold text-sm text-slate-200">Add New Customer</h3>
@@ -3798,6 +4095,7 @@ export const POSView: React.FC<POSViewProps> = ({
       {completedTx && (
         <ReceiptModal
           transaction={completedTx}
+          storeName={resolvedStoreName}
           onClose={() => {
             setCompletedTx(null);
             executeNewSale();
@@ -3807,7 +4105,7 @@ export const POSView: React.FC<POSViewProps> = ({
 
       {/* MODAL: CONFIRM START NEW SALE WHEN CART NOT EMPTY */}
       {showNewSaleConfirmModal && (
-        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-[125] bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-md shadow-2xl p-6 space-y-4">
             <div className="flex items-center gap-3">
               <div className="p-3 bg-emerald-950 border border-emerald-800 text-emerald-400 rounded-xl">
@@ -3854,7 +4152,7 @@ export const POSView: React.FC<POSViewProps> = ({
 
       {/* MODAL 5: ADMIN DISCOUNT AUTHORIZATION PIN MODAL */}
       {showAdminDiscountAuthModal && (
-        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-[125] bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-sm shadow-2xl overflow-hidden text-slate-100">
             <div className="p-4 border-b border-slate-800 bg-slate-950 flex items-center justify-between">
               <div className="flex items-center gap-2 text-amber-400">
@@ -4060,7 +4358,9 @@ export const POSView: React.FC<POSViewProps> = ({
         isOpen={showMpesaPromptModal}
         onClose={() => setShowMpesaPromptModal(false)}
         amount={mpesaPromptAmount || grandTotal}
-        initialPhone={selectedCustomer.phone && selectedCustomer.phone !== 'N/A' ? selectedCustomer.phone : ''}
+        initialPhone={
+          selectedCustomer.phone && selectedCustomer.phone !== 'N/A' ? selectedCustomer.phone : ''
+        }
         customerName={selectedCustomer.name}
         accountReference={`POS-${cart.length > 0 ? (cart[0].product.sku || 'ITEM').slice(0, 8) : 'SALE'}`}
         onPaymentSuccess={handleMpesaPromptSuccess}
@@ -4075,7 +4375,7 @@ export const POSView: React.FC<POSViewProps> = ({
 
       {/* MODAL 7: KRA TURNOVER TAX (TOT) & E-TIMS COMPLIANCE CENTER */}
       {showKraTotModal && (
-        <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6 overflow-y-auto">
+        <div className="fixed inset-0 z-[125] bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6 overflow-y-auto">
           <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-5xl shadow-2xl p-5 sm:p-6 space-y-4 max-h-[92vh] overflow-y-auto text-slate-100">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <div className="flex items-center gap-2">
@@ -4105,7 +4405,7 @@ export const POSView: React.FC<POSViewProps> = ({
 
       {/* SALES REP MODAL */}
       {showRepModal && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-fadeIn">
+        <div className="fixed inset-0 z-[125] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-fadeIn">
           <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-sm p-5 shadow-2xl space-y-4">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <h4 className="font-extrabold text-sm text-slate-100 flex items-center gap-2">

@@ -18,7 +18,7 @@ import {
   subscribeToAllStoresForSuperAdmin,
   superAdminUpdateStoreSubscription,
 } from '../../lib/cloudSync';
-import { OWNER_PRIMARY_STORE_ID } from '../../lib/firebase';
+import { OWNER_PRIMARY_STORE_ID, OWNER_CLOUD_EMAIL } from '../../lib/firebase';
 
 interface SuperAdminSubscribersModalProps {
   isOpen: boolean;
@@ -78,8 +78,11 @@ export const SuperAdminSubscribersModal: React.FC<SuperAdminSubscribersModalProp
     const now = Date.now();
     return stores.map((s) => {
       const expMs = s.expiresAt ? Date.parse(s.expiresAt) : 0;
+      const isPrimaryOwner =
+        s.id === OWNER_PRIMARY_STORE_ID ||
+        s.ownerEmail?.toLowerCase() === OWNER_CLOUD_EMAIL;
       const isExpired =
-        s.id !== OWNER_PRIMARY_STORE_ID &&
+        !isPrimaryOwner &&
         (s.subscriptionStatus === 'expired' || (expMs > 0 && expMs <= now));
       const daysRemaining =
         expMs > now ? Math.ceil((expMs - now) / 86400000) : 0;

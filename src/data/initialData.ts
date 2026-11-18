@@ -874,7 +874,7 @@ export const INITIAL_CASH_TRANSACTIONS: CashTransaction[] = [
 export const INITIAL_STORES: StoreLocation[] = [
   {
     id: 'store-main',
-    name: 'Rofani Electronics',
+    name: 'Rofani POS',
     code: 'HQ-CBD',
     city: 'Nairobi',
     address: 'Kenyatta Avenue, City Center, Nairobi',
@@ -941,7 +941,7 @@ export const INITIAL_ONLINE_ORDERS: OnlineOrder[] = [
     id: 'ord-1001',
     orderNumber: 'ORD-1001',
     storeId: 'store-main',
-    storeName: 'Rofani Electronics',
+    storeName: 'Rofani POS',
     customerName: 'Robert Chen',
     customerPhone: '+254 720 123456',
     customerEmail: 'robert.chen@gmail.com',
@@ -1040,7 +1040,7 @@ export const INITIAL_STOCK_TRANSFERS: StockTransferRecord[] = [
     id: 'trf-101',
     transferNumber: 'TRF-2026-001',
     sourceStoreId: 'store-main',
-    sourceStoreName: 'Rofani Electronics',
+    sourceStoreName: 'Rofani POS',
     targetStoreId: 'store-warehouse',
     targetStoreName: 'Central Storage Hub',
     productId: 'prod-1',
@@ -1050,7 +1050,7 @@ export const INITIAL_STOCK_TRANSFERS: StockTransferRecord[] = [
     status: 'Completed',
     createdAt: new Date(Date.now() - 86400000 * 2).toISOString(),
     transferredBy: 'Sarah Miller (Manager)',
-    notes: 'Restock batch received at Rofani Electronics.'
+    notes: 'Restock batch received at Rofani POS.'
   },
   {
     id: 'trf-102',
@@ -1058,7 +1058,7 @@ export const INITIAL_STOCK_TRANSFERS: StockTransferRecord[] = [
     sourceStoreId: 'store-warehouse',
     sourceStoreName: 'Central Storage Hub',
     targetStoreId: 'store-main',
-    targetStoreName: 'Rofani Electronics',
+    targetStoreName: 'Rofani POS',
     productId: 'prod-3',
     productName: 'Designer Silk Evening Dress',
     sku: 'FASH-DRS-008',

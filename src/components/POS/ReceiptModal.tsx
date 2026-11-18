@@ -8,13 +8,35 @@ import { safeGetJSON, safeSetJSON } from '../../utils/safeStorage';
 
 interface ReceiptModalProps {
   transaction: Transaction;
+  storeName?: string;
   onClose: () => void;
 }
 
-export const ReceiptModal: React.FC<ReceiptModalProps> = ({ transaction, onClose }) => {
+const isLegacyStoreBrand = (val?: string): boolean => {
+  if (!val || !val.trim()) return true;
+  const norm = val.trim().toLowerCase();
+  return (
+    norm === 'rofani electronics' ||
+    norm === 'rofani electronics & boutique' ||
+    norm === 'rofani electronics and boutique'
+  );
+};
+
+export const ReceiptModal: React.FC<ReceiptModalProps> = ({ transaction, storeName, onClose }) => {
   const [currentTx, setCurrentTx] = useState<Transaction>(transaction);
   const [showSmsModal, setShowSmsModal] = useState(false);
   const [latestSms, setLatestSms] = useState<SmsDeliveryRecord | null>(null);
+
+  const customShopName = safeGetJSON<string>('rofani_settings_shop_name', '');
+  const resolvedStoreName = (() => {
+    if (customShopName && !isLegacyStoreBrand(customShopName) && customShopName.trim().toLowerCase() !== 'rofani pos') {
+      return customShopName.trim();
+    }
+    if (storeName && !isLegacyStoreBrand(storeName)) {
+      return storeName.trim();
+    }
+    return 'Rofani POS';
+  })();
 
   useEffect(() => {
     setCurrentTx(transaction);
@@ -56,7 +78,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({ transaction, onClose
   // Format receipt message string for WhatsApp and SMS sharing
   const formatReceiptText = () => {
     let msg = `*RECEIPT #${transaction.receiptNumber}*\n`;
-    msg += `Store: ROFANI ELECTRONICS AND BOUTIQUE\n`;
+    msg += `Store: ${resolvedStoreName}\n`;
     msg += `Date: ${new Date(transaction.date).toLocaleDateString()}\n\n`;
     msg += `*Items Purchased:*\n`;
     transaction.items.forEach((it) => {
@@ -87,7 +109,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({ transaction, onClose
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-[145] bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
       <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden text-slate-100 flex flex-col max-h-[90vh]">
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-slate-800 bg-slate-950/50">
@@ -134,9 +156,9 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({ transaction, onClose
           <div className="bg-white text-slate-900 rounded-xl p-6 shadow-xl font-mono text-xs max-w-sm mx-auto space-y-3 border border-slate-200">
             {/* Store branding */}
             <div className="text-center space-y-1 pb-3 border-b border-dashed border-slate-300">
-              <div className="font-bold text-sm tracking-tight font-sans">ROFANI ELECTRONICS AND BOUTIQUE</div>
-              <div className="text-[11px] text-slate-600">Electronics, Mobile Accessories & Fashion Boutique</div>
-              <div className="text-[10px] text-slate-500">VAT Reg: 893021 | Tel: +1 800-555-0199</div>
+              <div className="font-bold text-sm tracking-tight font-sans">{resolvedStoreName}</div>
+              <div className="text-[11px] text-slate-600">Retail & Wholesale Point of Sale</div>
+              <div className="text-[10px] text-slate-500">Official Customer Receipt</div>
             </div>
 
             {/* Receipt Info */}
@@ -306,14 +328,14 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({ transaction, onClose
         <div className="p-4 bg-slate-950 border-t border-slate-800 space-y-3">
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
             <button
-              onClick={() => exportReceiptPDF(transaction)}
+              onClick={() => exportReceiptPDF(currentTx, { storeName: resolvedStoreName })}
               className="flex items-center justify-center gap-1.5 bg-sky-600 hover:bg-sky-500 text-white py-2 px-3 rounded-xl text-xs font-semibold transition"
             >
               <Download className="w-4 h-4" /> Download PDF
             </button>
 
             <button
-              onClick={() => exportReceiptPDF(transaction)}
+              onClick={() => exportReceiptPDF(currentTx, { storeName: resolvedStoreName })}
               className="flex items-center justify-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 py-2 px-3 rounded-xl text-xs font-semibold transition border border-slate-700"
             >
               <Printer className="w-4 h-4" /> Print
@@ -350,7 +372,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({ transaction, onClose
         isOpen={showSmsModal}
         onClose={() => setShowSmsModal(false)}
         transaction={transaction}
-        storeName="ROFANI ELECTRONICS AND BOUTIQUE"
+        storeName={resolvedStoreName}
         onSmsSent={(rec) => setLatestSms(rec)}
       />
     </div>

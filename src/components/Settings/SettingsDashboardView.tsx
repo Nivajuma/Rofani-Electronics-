@@ -518,9 +518,14 @@ export const SettingsDashboardView: React.FC<SettingsDashboardViewProps> = ({
   };
 
   // Persistent settings states
-  const [shopName, setShopName] = useState(() =>
-    safeGetJSON<string>('rofani_settings_shop_name', 'Rofani Electronics & Boutique')
-  );
+  const [shopName, setShopName] = useState(() => {
+    const saved = safeGetJSON<string>('rofani_settings_shop_name', 'Rofani POS');
+    const lower = (saved || '').trim().toLowerCase();
+    if (!lower || lower === 'rofani electronics' || lower === 'rofani electronics & boutique' || lower === 'rofani electronics and boutique') {
+      return 'Rofani POS';
+    }
+    return saved;
+  });
   useEffect(() => { safeSetJSON('rofani_settings_shop_name', shopName); }, [shopName]);
 
   const [branchLocation, setBranchLocation] = useState(() =>
@@ -529,7 +534,7 @@ export const SettingsDashboardView: React.FC<SettingsDashboardViewProps> = ({
   useEffect(() => { safeSetJSON('rofani_settings_branch', branchLocation); }, [branchLocation]);
 
   const [receiptFooter, setReceiptFooter] = useState(() =>
-    safeGetJSON<string>('rofani_settings_footer', 'Goods once sold are non-returnable after 7 days. Thank you for shopping with Rofani!')
+    safeGetJSON<string>('rofani_settings_footer', 'Goods once sold are non-returnable after 7 days. Thank you for shopping with Rofani POS!')
   );
   useEffect(() => { safeSetJSON('rofani_settings_footer', receiptFooter); }, [receiptFooter]);
 
@@ -566,7 +571,7 @@ export const SettingsDashboardView: React.FC<SettingsDashboardViewProps> = ({
   useEffect(() => { safeSetJSON('rofani_settings_show_logo', showLogoOnReceipt); }, [showLogoOnReceipt]);
 
   const [customHeader, setCustomHeader] = useState(() =>
-    safeGetJSON<string>('rofani_settings_custom_header', 'ROFANI OFFICIAL RECEIPT')
+    safeGetJSON<string>('rofani_settings_custom_header', 'ROFANI POS OFFICIAL RECEIPT')
   );
   useEffect(() => { safeSetJSON('rofani_settings_custom_header', customHeader); }, [customHeader]);
 
@@ -716,7 +721,7 @@ export const SettingsDashboardView: React.FC<SettingsDashboardViewProps> = ({
           <div>
             <h2 className="font-bold text-lg text-slate-100">Store Settings & Preferences</h2>
             <p className="text-xs text-slate-400">
-              Configure Rofani Electronics & Boutique executive preferences, tax defaults, and POS terminals
+              Configure Rofani POS executive preferences, tax defaults, and POS terminals
             </p>
           </div>
         </div>

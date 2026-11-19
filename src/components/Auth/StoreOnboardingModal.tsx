@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Store,
   Phone,
@@ -9,24 +9,30 @@ import {
   AlertTriangle,
   RefreshCw,
   LogOut,
+  Gift,
 } from 'lucide-react';
 import { signOutFromCloud } from '../../lib/firebase';
+import { lookupReferralCode, normalizeReferralCode } from '../../lib/cloudSync';
+import { ReferralCodeLookup } from '../../types';
 
 interface StoreOnboardingModalProps {
   userEmail: string;
   userDisplayName?: string;
+  initialReferralCode?: string;
   onCreateStore: (data: {
     storeName: string;
     phone: string;
     kraPin: string;
     mpesaShortcode: string;
     mpesaShortcodeType: 'till' | 'paybill';
+    referralCode?: string;
   }) => Promise<void>;
 }
 
 export const StoreOnboardingModal: React.FC<StoreOnboardingModalProps> = ({
   userEmail,
   userDisplayName,
+  initialReferralCode = '',
   onCreateStore,
 }) => {
   const [storeName, setStoreName] = useState(
@@ -36,8 +42,47 @@ export const StoreOnboardingModal: React.FC<StoreOnboardingModalProps> = ({
   const [kraPin, setKraPin] = useState('');
   const [mpesaShortcodeType, setMpesaShortcodeType] = useState<'till' | 'paybill'>('till');
   const [mpesaShortcode, setMpesaShortcode] = useState('');
+  const [referralCode, setReferralCode] = useState(normalizeReferralCode(initialReferralCode));
+  const [matchedReferrer, setMatchedReferrer] = useState<ReferralCodeLookup | null>(null);
+  const [referralCheckStatus, setReferralCheckStatus] = useState<'idle' | 'checking' | 'valid' | 'invalid'>('idle');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    const clean = normalizeReferralCode(referralCode);
+    if (!clean || clean.length < 4) {
+      setMatchedReferrer(null);
+      setReferralCheckStatus('idle');
+      return;
+    }
+
+    let cancelled = false;
+    setReferralCheckStatus('checking');
+    const timer = setTimeout(() => {
+      lookupReferralCode(clean)
+        .then((res) => {
+          if (cancelled) return;
+          if (res) {
+            setMatchedReferrer(res);
+            setReferralCheckStatus('valid');
+          } else {
+            setMatchedReferrer(null);
+            setReferralCheckStatus('invalid');
+          }
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setMatchedReferrer(null);
+            setReferralCheckStatus('idle');
+          }
+        });
+    }, 350);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [referralCode]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -60,12 +105,15 @@ export const StoreOnboardingModal: React.FC<StoreOnboardingModalProps> = ({
         kraPin: kraPin.trim().toUpperCase(),
         mpesaShortcode: mpesaShortcode.trim(),
         mpesaShortcodeType,
+        referralCode: referralCode.trim() ? normalizeReferralCode(referralCode) : undefined,
       });
     } catch (err: any) {
       setErrorMsg(err?.message || 'Could not create your store profile. Please try again.');
       setIsSubmitting(false);
     }
   };
+
+  const hasValidReferral = referralCheckStatus === 'valid' && Boolean(matchedReferrer);
 
   return (
     <div className="min-h-screen bg-[#0f172a] text-slate-100 flex items-center justify-center p-4 sm:p-6 font-sans">
@@ -95,12 +143,28 @@ export const StoreOnboardingModal: React.FC<StoreOnboardingModalProps> = ({
           </button>
         </div>
 
-        <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-2xl p-3.5 flex items-start gap-2.5 text-xs text-emerald-200">
-          <Sparkles className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+        <div
+          className={`rounded-2xl p-3.5 flex items-start gap-2.5 text-xs border ${
+            hasValidReferral
+              ? 'bg-amber-500/10 border-amber-400/40 text-amber-100'
+              : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-200'
+          }`}
+        >
+          {hasValidReferral ? (
+            <Gift className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+          ) : (
+            <Sparkles className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+          )}
           <div>
-            <p className="font-bold text-white">7-Day Free Trial Activated Automatically</p>
-            <p className="text-[11px] text-emerald-200/80 mt-0.5 leading-relaxed">
-              Your store starts completely empty and 100% isolated in Cloud Firestore. Only your account can view or edit your products and sales.
+            <p className="font-bold text-white">
+              {hasValidReferral
+                ? `45-Day Free Trial Unlocked (Referred by ${matchedReferrer?.storeName})!`
+                : '30-Day Free Trial Activated Automatically'}
+            </p>
+            <p className="text-[11px] text-slate-300 mt-0.5 leading-relaxed">
+              {hasValidReferral
+                ? `Your fellow merchant gave you +15 bonus days on top of the standard 30-day trial — and they will automatically earn +30 Days Free when you launch!`
+                : 'Your store starts completely empty and 100% isolated in Cloud Firestore. Only your account can view or edit your products and sales.'}
             </p>
           </div>
         </div>
@@ -165,6 +229,36 @@ export const StoreOnboardingModal: React.FC<StoreOnboardingModalProps> = ({
             </div>
           </div>
 
+          {/* Referral Code (Optional) */}
+          <div className="bg-[#0f172a]/70 border border-slate-700/70 rounded-2xl p-3.5 space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <label className="font-semibold text-slate-200 flex items-center gap-1.5">
+                <Gift className="w-4 h-4 text-amber-400" />
+                Referral Code (Optional)
+              </label>
+              {referralCheckStatus === 'checking' && (
+                <span className="text-[10px] text-sky-400 font-semibold">Checking code...</span>
+              )}
+              {hasValidReferral && (
+                <span className="text-[10px] text-emerald-300 font-bold">
+                  +15 Days Bonus Verified
+                </span>
+              )}
+              {referralCheckStatus === 'invalid' && (
+                <span className="text-[10px] text-amber-300 font-semibold">
+                  Code not found (check spelling)
+                </span>
+              )}
+            </div>
+            <input
+              type="text"
+              value={referralCode}
+              onChange={(e) => setReferralCode(normalizeReferralCode(e.target.value))}
+              placeholder="Enter friend's code (e.g. ROFANI-NIVA78) for 45 Days Free"
+              className="w-full bg-[#1e293b] border border-slate-700 rounded-xl px-3.5 py-2.5 text-white font-mono uppercase placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-400"
+            />
+          </div>
+
           <div className="bg-[#0f172a]/70 border border-slate-700/70 rounded-2xl p-3.5 space-y-3">
             <div className="flex items-center justify-between">
               <span className="font-semibold text-slate-200 flex items-center gap-1.5">
@@ -213,7 +307,11 @@ export const StoreOnboardingModal: React.FC<StoreOnboardingModalProps> = ({
               <CheckCircle2 className="w-4 h-4" />
             )}
             <span>
-              {isSubmitting ? 'Creating Private Store...' : 'Launch My Store (7-Day Free Trial)'}
+              {isSubmitting
+                ? 'Creating Private Store...'
+                : hasValidReferral
+                ? 'Launch My Store (45-Day Referral Trial)'
+                : 'Launch My Store (30-Day Free Trial)'}
             </span>
           </button>
         </form>

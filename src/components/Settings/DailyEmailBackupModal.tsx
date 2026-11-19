@@ -32,6 +32,7 @@ import {
 } from '../../lib/gmailService';
 import { Product, Transaction, Customer, Supplier, Expense, CashTransaction, User as POSUser } from '../../types';
 import { playBackupSuccessSound } from '../../utils/uiFeedback';
+import { recordLastBackupMeta } from '../../utils/storeBackup';
 
 interface DailyEmailBackupModalProps {
   isOpen: boolean;
@@ -347,6 +348,17 @@ export const DailyEmailBackupModal: React.FC<DailyEmailBackupModalProps> = ({
         });
 
         setSettings(updatedSettings);
+        recordLastBackupMeta({
+          timestamp: new Date().toISOString(),
+          method: 'gmail_api',
+          fileName,
+          recipientEmail: targetRecipient,
+          productsCount: payload.summary.totalProducts,
+          categoriesCount: 0,
+          salesCount: payload.summary.totalTransactions,
+          customersCount: customers.length,
+          storeName,
+        });
         playBackupSuccessSound();
         setSendNotice({
           type: 'success',
@@ -401,16 +413,27 @@ export const DailyEmailBackupModal: React.FC<DailyEmailBackupModalProps> = ({
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `Rofani_Full_Backup_${new Date().toISOString().slice(0, 10)}.json`;
+    const fileName = `RofaniPOS_Backup_${(storeName || 'RofaniPOS').replace(/[^a-zA-Z0-9]+/g, '_')}_${new Date().toISOString().slice(0, 10)}.json`;
+    link.download = fileName;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
 
+    recordLastBackupMeta({
+      timestamp: new Date().toISOString(),
+      method: 'local_download',
+      fileName,
+      productsCount: products.length,
+      categoriesCount: 0,
+      salesCount: transactions.length,
+      customersCount: customers.length,
+      storeName,
+    });
     playBackupSuccessSound();
     setSendNotice({
       type: 'success',
-      message: 'Backup JSON downloaded directly to your computer.',
+      message: '✅ Backup saved to your Downloads folder!',
     });
   };
 

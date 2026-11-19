@@ -40,6 +40,7 @@ interface PhoneDeviceFrameProps {
   conflictCount?: number;
   onOpenConflictAssistant?: () => void;
   hideBottomNav?: boolean;
+  quickToolsBar?: React.ReactNode;
 }
 
 export const PhoneDeviceFrame: React.FC<PhoneDeviceFrameProps> = ({
@@ -54,7 +55,7 @@ export const PhoneDeviceFrame: React.FC<PhoneDeviceFrameProps> = ({
   lowStockCount,
   onLockTerminal: _onLockTerminal,
   onOpenStaffModal: _onOpenStaffModal,
-  onNewSale,
+  onNewSale: _onNewSale,
   onOpenCloudSync,
   onOpenStockAlerts,
   cloudSyncStatus = 'synced',
@@ -62,18 +63,9 @@ export const PhoneDeviceFrame: React.FC<PhoneDeviceFrameProps> = ({
   conflictCount = 0,
   onOpenConflictAssistant,
   hideBottomNav = false,
+  quickToolsBar,
 }) => {
   const isLandscape = phoneOrientation === 'landscape';
-
-  const handleMakeSaleShortcut = () => {
-    if (activeTab !== 'pos') {
-      onSelectTab('pos');
-    } else if (onNewSale) {
-      onNewSale();
-    } else {
-      onSelectTab('pos');
-    }
-  };
 
   const getFrameDimensions = () => {
     if (phoneModel === 'galaxyS24') {
@@ -232,25 +224,14 @@ export const PhoneDeviceFrame: React.FC<PhoneDeviceFrameProps> = ({
         {/* MOBILE MAIN VIEWPORT CONTENT CONTAINER */}
         <div
           className={`flex-1 min-h-0 overflow-y-auto bg-[#0f172a] text-slate-100 p-3 sm:p-4 scrollbar-thin scrollbar-thumb-slate-800 ${
-            hideBottomNav ? 'pb-6' : 'pb-24'
+            hideBottomNav ? 'pb-6' : 'pb-28'
           }`}
         >
           {children}
         </div>
 
-        {/* FLOATING 1-TAP MAKE SALE SHORTCUT (Shown on non-POS tabs for instant mobile checkout access) */}
-        {activeTab !== 'pos' && !hideBottomNav && (
-          <button
-            type="button"
-            id="btn-phone-fab-make-sale"
-            onClick={handleMakeSaleShortcut}
-            title="Make Sale — Jump straight to POS Checkout"
-            className="absolute bottom-20 right-3 z-40 h-11 px-4 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 active:scale-95 text-white text-xs font-extrabold flex items-center gap-1.5 shadow-xl shadow-emerald-950/70 border border-emerald-400/40 transition cursor-pointer"
-          >
-            <ShoppingBag className="w-4 h-4 shrink-0" />
-            <span>Make Sale</span>
-          </button>
-        )}
+        {/* FLOATING QUICK TOOLS & MAKE SALE BAR */}
+        {!hideBottomNav && quickToolsBar}
 
         {/* PORTAL ROOT FOR POS FLOATING CART PILL & SLIDE-UP DRAWER */}
         <div id="phone-frame-overlay-root" className="pointer-events-none absolute inset-0 z-[105]" />

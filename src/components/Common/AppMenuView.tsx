@@ -36,10 +36,12 @@ import {
   MessageCircle,
   ExternalLink,
   LogOut,
-  Plus
+  Plus,
+  Gift
 } from 'lucide-react';
 import { TabKey } from '../../utils/permissions';
 import { User, StoreSubscriptionProfile } from '../../types';
+import { generateStoreReferralCode } from '../../lib/cloudSync';
 
 export interface AppMenuViewProps {
   onSelectTab: (tab: TabKey) => void;
@@ -142,13 +144,37 @@ export const AppMenuView: React.FC<AppMenuViewProps> = ({
   const liveAppUrl =
     typeof window !== 'undefined' ? window.location.origin : 'https://rofani-pos.vercel.app';
 
+  const merchantReferralCode =
+    storeProfile?.referralCode ||
+    (storeProfile?.id
+      ? generateStoreReferralCode(storeProfile.storeName || storeName, storeProfile.id)
+      : 'ROFANI-SHOP01');
+  const referralInviteUrl = `${liveAppUrl}/?ref=${encodeURIComponent(merchantReferralCode)}`;
+
   const handleCopyShareInstructions = () => {
-    const text = `Rofani POS — Live Web App:\n${liveAppUrl}\n\nWorker Sign-In: Open link, sign in with your store PIN or Google account, and tap Cloud Sync to stay synced across devices.`;
+    const text = `Join me on Rofani POS! Use my Referral Code ${merchantReferralCode} to get a 45-Day Free Trial (+15 extra days):\n${referralInviteUrl}\n\nWorker Sign-In: Open link, sign in with your store PIN or Google account, and tap Cloud Sync to stay synced across devices.`;
     if (typeof navigator !== 'undefined' && navigator.clipboard) {
       navigator.clipboard.writeText(text).catch(() => {});
     }
     setCopiedShareLink(true);
     setTimeout(() => setCopiedShareLink(false), 2500);
+  };
+
+  const handleShareInviteNative = async () => {
+    const shareText = `Manage your shop stock, sales & M-Pesa with Rofani POS! Sign up using my referral code ${merchantReferralCode} for a 45-Day Free Trial:\n${referralInviteUrl}`;
+    if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
+      try {
+        await navigator.share({
+          title: 'Join Rofani POS (45 Days Free)',
+          text: shareText,
+          url: referralInviteUrl,
+        });
+        return;
+      } catch {
+        // Fallback to clipboard copy
+      }
+    }
+    handleCopyShareInstructions();
   };
 
   const displayName = storeName || 'Rofani POS';
@@ -651,8 +677,12 @@ export const AppMenuView: React.FC<AppMenuViewProps> = ({
                         : storeProfile.planType === 'trial'
                         ? `Trial · ${daysLeft}d`
                         : storeProfile.planType === 'annual'
-                        ? 'Annual'
-                        : 'Monthly'}
+                        ? '12 Months'
+                        : storeProfile.planType === 'biannual'
+                        ? '6 Months'
+                        : storeProfile.planType === 'quarterly'
+                        ? '3 Months'
+                        : '30 Days'}
                     </span>
                   );
                 }
@@ -1007,38 +1037,82 @@ export const AppMenuView: React.FC<AppMenuViewProps> = ({
                   </button>
                 </div>
                 <div className="space-y-3 text-xs">
+                  {/* Referral Code & +30d Bonus Card */}
+                  <div className="bg-gradient-to-br from-[#0f172a] to-[#16233b] border border-amber-500/40 rounded-xl p-3 space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="inline-flex items-center gap-1.5 font-bold text-amber-300">
+                        <Gift className="w-4 h-4 text-amber-400" />
+                        Your Store Referral Code
+                      </span>
+                      <span className="px-2 py-0.5 rounded bg-amber-500/15 border border-amber-500/30 text-amber-200 text-[10px] font-bold tabular-nums">
+                        {storeProfile?.referralCount || 0} Joined
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between gap-2 bg-[#1e293b] border border-slate-700 rounded-lg px-3 py-2">
+                      <span className="font-mono font-extrabold text-sm text-white tracking-wider">
+                        {merchantReferralCode}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (typeof navigator !== 'undefined' && navigator.clipboard) {
+                            navigator.clipboard.writeText(merchantReferralCode).catch(() => {});
+                          }
+                          setCopiedShareLink(true);
+                          setTimeout(() => setCopiedShareLink(false), 2000);
+                        }}
+                        className="text-[11px] font-bold text-[#38bdf8] hover:text-sky-300 cursor-pointer"
+                      >
+                        Copy Code
+                      </button>
+                    </div>
+                    <p className="text-[11px] text-slate-300 leading-relaxed">
+                      Invite fellow shop owners: they get <strong className="text-emerald-300">45 Days Free</strong> and you automatically get <strong className="text-amber-300">+30 Days Free (+1 Month)</strong>!
+                    </p>
+                  </div>
+
                   <div className="bg-[#0f172a] border border-slate-700/70 rounded-xl p-3 space-y-1.5">
-                    <div className="text-slate-400">Live App URL</div>
-                    <div className="font-mono text-[#38bdf8] break-all">{liveAppUrl}</div>
+                    <div className="text-slate-400">Your Personalized Invite Link</div>
+                    <div className="font-mono text-[#38bdf8] break-all">{referralInviteUrl}</div>
                   </div>
                   <div className="bg-[#0f172a] border border-slate-700/70 rounded-xl p-3 space-y-1 text-slate-300">
                     <div className="font-semibold text-white">Store &amp; Staff Sign-In Instructions</div>
                     <p className="text-slate-400 leading-relaxed">
-                      1. Open the link in Chrome or Safari on your mobile phone.
+                      1. Open your invite link in Chrome or Safari on your mobile phone.
                       <br />
-                      2. Shop owners: Sign in with your Google account to launch your own private store (7-day free trial).
+                      2. Shop owners: Sign in with your Google account and confirm referral code <span className="font-mono text-amber-300">{merchantReferralCode}</span> for 45 days free.
                       <br />
                       3. Cashiers/staff: Sign in with the store Google account and enter your assigned worker PIN.
                     </p>
                   </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={handleCopyShareInstructions}
-                  className="w-full py-2.5 rounded-xl bg-[#38bdf8] hover:bg-sky-400 text-slate-950 font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer transition"
-                >
-                  {copiedShareLink ? (
-                    <>
-                      <Check className="w-4 h-4" />
-                      <span>Copied Link &amp; Login Guide</span>
-                    </>
-                  ) : (
-                    <>
-                      <Copy className="w-4 h-4" />
-                      <span>Copy App Link &amp; Instructions</span>
-                    </>
-                  )}
-                </button>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={handleShareInviteNative}
+                    className="w-full py-2.5 px-3 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-extrabold text-xs flex items-center justify-center gap-1.5 cursor-pointer transition"
+                  >
+                    <Share2 className="w-4 h-4" />
+                    <span>Share Invite Link</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleCopyShareInstructions}
+                    className="w-full py-2.5 px-3 rounded-xl bg-[#38bdf8] hover:bg-sky-400 text-slate-950 font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer transition"
+                  >
+                    {copiedShareLink ? (
+                      <>
+                        <Check className="w-4 h-4" />
+                        <span>Copied Link &amp; Code</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-4 h-4" />
+                        <span>Copy Link &amp; Guide</span>
+                      </>
+                    )}
+                  </button>
+                </div>
               </>
             )}
 

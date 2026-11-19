@@ -225,12 +225,12 @@ export const FloatingToolWidget: React.FC<FloatingToolWidgetProps> = ({ onNaviga
 
   return (
     <>
-      {/* Floating Draggable Action Toggle Button */}
+      {/* Floating Draggable Action Toggle Button (Desktop Only — Mobile uses MobileQuickToolsBar) */}
       <motion.div
         drag
         dragMomentum={false}
         whileDrag={{ scale: 1.08 }}
-        className="fixed bottom-6 right-6 z-50 cursor-grab active:cursor-grabbing touch-none"
+        className="hidden lg:block fixed bottom-6 right-6 z-50 cursor-grab active:cursor-grabbing touch-none"
       >
         <button
           id="btn-floating-tools-toggle"
@@ -247,7 +247,7 @@ export const FloatingToolWidget: React.FC<FloatingToolWidgetProps> = ({ onNaviga
         </button>
       </motion.div>
 
-      {/* Floating Draggable Modal Panel */}
+      {/* Floating Draggable Modal Panel (Desktop Only) */}
       <AnimatePresence>
         {isOpen && (
           <motion.div
@@ -256,7 +256,7 @@ export const FloatingToolWidget: React.FC<FloatingToolWidgetProps> = ({ onNaviga
             initial={{ opacity: 0, y: 20, scale: 0.95 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 20, scale: 0.95 }}
-            className="fixed bottom-20 right-6 z-50 w-80 sm:w-96 bg-slate-900 border border-slate-800 text-slate-100 rounded-2xl shadow-2xl overflow-hidden select-none"
+            className="hidden lg:block fixed bottom-20 right-6 z-50 w-80 sm:w-96 bg-slate-900 border border-slate-800 text-slate-100 rounded-2xl shadow-2xl overflow-hidden select-none"
           >
             {/* Header / Drag Handle */}
             <div className="flex items-center justify-between px-4 py-3 bg-slate-950/80 border-b border-slate-800 cursor-grab active:cursor-grabbing">

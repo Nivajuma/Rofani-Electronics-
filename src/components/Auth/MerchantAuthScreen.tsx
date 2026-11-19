@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Store,
   ShieldCheck,
@@ -10,6 +10,7 @@ import {
   RefreshCw,
   LogIn,
   Lock,
+  Gift,
 } from 'lucide-react';
 import {
   signInWithGoogleForCloud,
@@ -20,25 +21,47 @@ import {
 interface MerchantAuthScreenProps {
   hasOfflineOwnerCache?: boolean;
   onContinueOfflineOwner?: () => void;
+  initialReferralCode?: string;
+  onReferralCodeChange?: (code: string) => void;
 }
 
 export const MerchantAuthScreen: React.FC<MerchantAuthScreenProps> = ({
   hasOfflineOwnerCache = false,
   onContinueOfflineOwner,
+  initialReferralCode = '',
+  onReferralCodeChange,
 }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [showRedirectFallback, setShowRedirectFallback] = useState(false);
+  const [referralInput, setReferralInput] = useState<string>(initialReferralCode);
   const [unauthorizedDomainInfo, setUnauthorizedDomainInfo] = useState<{
     hostname: string;
     consoleUrl: string;
   } | null>(null);
+
+  useEffect(() => {
+    if (initialReferralCode && !referralInput) {
+      setReferralInput(initialReferralCode);
+    }
+  }, [initialReferralCode]);
+
+  const handleReferralChange = (val: string) => {
+    const cleaned = val.toUpperCase().replace(/[^A-Z0-9-]/g, '').slice(0, 32);
+    setReferralInput(cleaned);
+    if (onReferralCodeChange) {
+      onReferralCodeChange(cleaned);
+    }
+  };
 
   const handleGoogleSignIn = async () => {
     if (isLoading) return;
     setIsLoading(true);
     setErrorMsg(null);
     setUnauthorizedDomainInfo(null);
+    if (onReferralCodeChange) {
+      onReferralCodeChange(referralInput.trim());
+    }
     try {
       await signInWithGoogleForCloud();
     } catch (err: any) {
@@ -73,6 +96,9 @@ export const MerchantAuthScreen: React.FC<MerchantAuthScreenProps> = ({
     if (isLoading) return;
     setIsLoading(true);
     setErrorMsg(null);
+    if (onReferralCodeChange) {
+      onReferralCodeChange(referralInput.trim());
+    }
     try {
       await signInWithGoogleRedirectForCloud();
     } catch (err: any) {
@@ -104,7 +130,9 @@ export const MerchantAuthScreen: React.FC<MerchantAuthScreenProps> = ({
             <div className="space-y-2 pt-2">
               <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-[11px] font-bold">
                 <Sparkles className="w-3.5 h-3.5" />
-                7-Day Free Trial for New Shopkeepers
+                {referralInput.trim()
+                  ? '45-Day Free Trial (Referral Bonus Applied!)'
+                  : '30-Day Free Trial for New Shopkeepers'}
               </span>
               <h2 className="text-2xl sm:text-3xl font-extrabold text-white leading-tight">
                 Run your shop inventory, M-Pesa sales &amp; KRA reports privately.
@@ -153,12 +181,34 @@ export const MerchantAuthScreen: React.FC<MerchantAuthScreenProps> = ({
         </div>
 
         {/* Right Sign-In Panel */}
-        <div className="lg:col-span-2 p-6 sm:p-8 flex flex-col justify-center space-y-5 bg-[#1e293b]">
+        <div className="lg:col-span-2 p-6 sm:p-8 flex flex-col justify-center space-y-4 bg-[#1e293b]">
           <div className="space-y-1.5">
             <h3 className="text-lg font-bold text-white">Sign In or Register Shop</h3>
             <p className="text-xs text-slate-400 leading-relaxed">
-              Sign in with your Google account to open your existing shop or create a brand-new private store with a 7-day free trial.
+              Sign in with your Google account to open your existing shop or create a brand-new private store with a 30-day free trial (45 days with a referral code).
             </p>
+          </div>
+
+          {/* Optional Referral Code Input */}
+          <div className="bg-[#0f172a]/80 border border-slate-700/80 rounded-2xl p-3 space-y-1.5">
+            <label className="flex items-center justify-between text-[11px] font-semibold text-slate-300">
+              <span className="inline-flex items-center gap-1.5">
+                <Gift className="w-3.5 h-3.5 text-amber-400" />
+                Referral Code (Optional)
+              </span>
+              {referralInput.trim() && (
+                <span className="text-[10px] text-emerald-300 font-bold">
+                  +15 Bonus Days Ready
+                </span>
+              )}
+            </label>
+            <input
+              type="text"
+              value={referralInput}
+              onChange={(e) => handleReferralChange(e.target.value)}
+              placeholder="e.g. ROFANI-NIVA78"
+              className="w-full bg-[#1e293b] border border-slate-700 rounded-xl px-3 py-2 text-xs font-mono uppercase text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-400/60"
+            />
           </div>
 
           {errorMsg && (
@@ -214,7 +264,7 @@ export const MerchantAuthScreen: React.FC<MerchantAuthScreenProps> = ({
               <span>What happens next?</span>
             </div>
             <p className="leading-relaxed">
-              • <strong className="text-white">New shopkeepers:</strong> Enter your Store Name, Phone, KRA PIN &amp; M-Pesa Till to start your 7-day free trial immediately.
+              • <strong className="text-white">New shopkeepers:</strong> Enter your Store Name, Phone, KRA PIN &amp; M-Pesa Till to start your {referralInput.trim() ? '45-day referral trial' : '30-day free trial'} immediately.
             </p>
             <p className="leading-relaxed">
               • <strong className="text-white">Existing owners:</strong> Your private store catalog, sales &amp; settings load automatically.

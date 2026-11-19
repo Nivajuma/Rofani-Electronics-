@@ -19,11 +19,13 @@ import {
   Download,
   Mail,
   Sliders,
-  Cloud
+  Cloud,
+  Clock
 } from 'lucide-react';
 import { safeGetJSON, safeSetJSON } from '../../utils/safeStorage';
 import { getIsOnline, useAggressiveAutoSync, useNetworkStatus } from '../../utils/offlineSync';
 import { playButtonSound } from '../../utils/uiFeedback';
+import { getLastBackupMeta, formatLastBackupTimestamp, formatBackupMethodLabel, LastBackupMeta } from '../../utils/storeBackup';
 
 interface GeneralSettingsViewProps {
   onBack: () => void;
@@ -115,6 +117,16 @@ export const GeneralSettingsView: React.FC<GeneralSettingsViewProps> = ({
   const [aggressiveAutoSync, setAggressiveAutoSync] = useAggressiveAutoSync();
   const { pendingCount, isOnline } = useNetworkStatus();
   const [isRetryingSync, setIsRetryingSync] = useState(false);
+  const [lastBackupMeta, setLastBackupMeta] = useState<LastBackupMeta | null>(() => getLastBackupMeta());
+
+  useEffect(() => {
+    const onBackupRecorded = (e: Event) => {
+      const detail = (e as CustomEvent<LastBackupMeta>).detail;
+      setLastBackupMeta(detail || getLastBackupMeta());
+    };
+    window.addEventListener('rofani:backup-recorded', onBackupRecorded);
+    return () => window.removeEventListener('rofani:backup-recorded', onBackupRecorded);
+  }, []);
 
   const [settings, setSettings] = useState<GeneralSettingsState>(() => {
     const saved = safeGetJSON<GeneralSettingsState>('rofani_general_settings_v1', GENERAL_SETTINGS_DEFAULT);
@@ -788,32 +800,50 @@ export const GeneralSettingsView: React.FC<GeneralSettingsViewProps> = ({
                 </div>
               </button>
 
-              {/* Quick Actions Row: Export JSON & Daily Email Backup */}
+              {/* Quick Actions Row: Last Backup Badge, Local Backup & Email Backup */}
               {(onExportFullBackup || onOpenEmailBackup) && (
-                <div className="p-4 flex flex-wrap items-center gap-2.5 bg-slate-950/40">
-                  {onExportFullBackup && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        onExportFullBackup();
-                        triggerToast('✅ Full database JSON backup downloaded!');
-                      }}
-                      className="px-3.5 py-2 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/40 rounded-xl font-bold text-[11px] flex items-center gap-1.5 transition cursor-pointer"
-                    >
-                      <Download className="w-3.5 h-3.5" />
-                      <span>Download Full JSON Backup</span>
-                    </button>
-                  )}
-                  {onOpenEmailBackup && (
-                    <button
-                      type="button"
-                      onClick={onOpenEmailBackup}
-                      className="px-3.5 py-2 bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/40 rounded-xl font-bold text-[11px] flex items-center gap-1.5 transition cursor-pointer"
-                    >
-                      <Mail className="w-3.5 h-3.5" />
-                      <span>Daily Email Backup</span>
-                    </button>
-                  )}
+                <div className="p-4 flex flex-wrap items-center justify-between gap-2.5 bg-slate-950/40">
+                  <div className="flex flex-wrap items-center gap-2.5">
+                    {onExportFullBackup && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onExportFullBackup();
+                          setLastBackupMeta(getLastBackupMeta());
+                          triggerToast('✅ Backup saved to your Downloads folder!');
+                        }}
+                        className="px-3.5 py-2 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/40 rounded-xl font-bold text-[11px] flex items-center gap-1.5 transition cursor-pointer"
+                      >
+                        <Download className="w-3.5 h-3.5" />
+                        <span>Download Backup to Phone</span>
+                      </button>
+                    )}
+                    {onOpenEmailBackup && (
+                      <button
+                        type="button"
+                        onClick={onOpenEmailBackup}
+                        className="px-3.5 py-2 bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/40 rounded-xl font-bold text-[11px] flex items-center gap-1.5 transition cursor-pointer"
+                      >
+                        <Mail className="w-3.5 h-3.5" />
+                        <span>Email Backup Copy</span>
+                      </button>
+                    )}
+                  </div>
+                  <span
+                    className={`inline-flex items-center gap-1.5 text-[10px] font-mono px-2.5 py-1 rounded-full border ${
+                      lastBackupMeta
+                        ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30'
+                        : 'bg-slate-800 text-slate-400 border-slate-700'
+                    }`}
+                  >
+                    <Clock className="w-3 h-3" />
+                    <span>
+                      Last Backup:{' '}
+                      {lastBackupMeta
+                        ? `${formatLastBackupTimestamp(lastBackupMeta.timestamp)} (${formatBackupMethodLabel(lastBackupMeta.method)})`
+                        : 'Never'}
+                    </span>
+                  </span>
                 </div>
               )}
             </div>

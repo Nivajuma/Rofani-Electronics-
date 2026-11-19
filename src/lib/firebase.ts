@@ -2,8 +2,7 @@ import { initializeApp, getApps, getApp } from 'firebase/app';
 import {
   initializeFirestore,
   getFirestore,
-  persistentLocalCache,
-  persistentSingleTabManager,
+  memoryLocalCache,
   enableNetwork,
   doc,
   getDoc,
@@ -50,19 +49,17 @@ try {
 // Initialize Firebase App instance safely
 export const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 
-// Initialize Firestore with single-tab IndexedDB persistent local cache (survives phone sleep,
-// tab discard & offline drops WITHOUT writing sequence numbers/client state to 5MB localStorage)
-// plus ignoreUndefinedProperties and experimentalForceLongPolling for restricted mobile/proxy networks.
+// Initialize Firestore with memoryLocalCache (the app persists instant offline snapshots and queues
+// in localStorage + custom IndexedDB, avoiding Firestore persistentLocalCache Target ID collisions)
+// plus ignoreUndefinedProperties and experimentalAutoDetectLongPolling for mobile/proxy networks.
 export const db: Firestore = (() => {
   try {
     return initializeFirestore(
       app,
       {
         ignoreUndefinedProperties: true,
-        experimentalForceLongPolling: true,
-        localCache: persistentLocalCache({
-          tabManager: persistentSingleTabManager({ forceOwnership: true }),
-        }),
+        experimentalAutoDetectLongPolling: true,
+        localCache: memoryLocalCache(),
       },
       firebaseConfig.firestoreDatabaseId
     );
@@ -72,7 +69,7 @@ export const db: Firestore = (() => {
         app,
         {
           ignoreUndefinedProperties: true,
-          experimentalForceLongPolling: true,
+          experimentalAutoDetectLongPolling: true,
         },
         firebaseConfig.firestoreDatabaseId
       );
@@ -83,13 +80,25 @@ export const db: Firestore = (() => {
   }
 })();
 
-// Silently re-enable and refresh the Firestore network stream when the phone wakes from sleep/background
+let hadOfflineTransition = false;
+if (typeof window !== 'undefined') {
+  window.addEventListener('offline', () => {
+    hadOfflineTransition = true;
+  });
+}
+
+// Safely re-enable Firestore network stream only after an actual offline transition
 export async function refreshFirestoreConnection(): Promise<boolean> {
   if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    hadOfflineTransition = true;
     return false;
+  }
+  if (!hadOfflineTransition) {
+    return true;
   }
   try {
     await enableNetwork(db);
+    hadOfflineTransition = false;
     return true;
   } catch {
     return false;

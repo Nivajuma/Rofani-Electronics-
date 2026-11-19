@@ -11,12 +11,14 @@ import {
   CheckCircle2,
   AlertTriangle,
   Users,
+  Gift,
 } from 'lucide-react';
 import { StoreSubscriptionProfile } from '../../types';
 import {
   fetchAllStoresForSuperAdmin,
   subscribeToAllStoresForSuperAdmin,
   superAdminUpdateStoreSubscription,
+  reconcileIncomingReferralRewards,
 } from '../../lib/cloudSync';
 import { OWNER_PRIMARY_STORE_ID, OWNER_CLOUD_EMAIL } from '../../lib/firebase';
 
@@ -76,6 +78,13 @@ export const SuperAdminSubscribersModal: React.FC<SuperAdminSubscribersModalProp
 
   const enrichedStores = useMemo(() => {
     const now = Date.now();
+    const referredByCounts: Record<string, number> = {};
+    for (const s of stores) {
+      if (s.referredBy) {
+        referredByCounts[s.referredBy] = (referredByCounts[s.referredBy] || 0) + 1;
+      }
+    }
+
     return stores.map((s) => {
       const expMs = s.expiresAt ? Date.parse(s.expiresAt) : 0;
       const isPrimaryOwner =
@@ -86,13 +95,28 @@ export const SuperAdminSubscribersModal: React.FC<SuperAdminSubscribersModalProp
         (s.subscriptionStatus === 'expired' || (expMs > 0 && expMs <= now));
       const daysRemaining =
         expMs > now ? Math.ceil((expMs - now) / 86400000) : 0;
+      const effectiveReferrals = Math.max(
+        s.referralCount || 0,
+        referredByCounts[s.id] || 0
+      );
       return {
         ...s,
         liveStatus: (isExpired ? 'expired' : 'active') as 'active' | 'expired',
         daysRemaining,
+        effectiveReferrals,
+        hasPendingReconcile: (referredByCounts[s.id] || 0) > (s.referralCount || 0),
       };
     });
   }, [stores]);
+
+  useEffect(() => {
+    if (!isOpen || stores.length === 0) return;
+    const pendingShops = enrichedStores.filter((s) => s.hasPendingReconcile);
+    if (pendingShops.length === 0) return;
+    pendingShops.forEach((s) => {
+      reconcileIncomingReferralRewards(s.id).catch(() => {});
+    });
+  }, [isOpen, enrichedStores, stores.length]);
 
   const stats = useMemo(() => {
     const total = enrichedStores.length;
@@ -345,6 +369,17 @@ export const SuperAdminSubscribersModal: React.FC<SuperAdminSubscribersModalProp
                       <span className="px-2 py-0.5 rounded-md bg-slate-800 border border-slate-700 text-slate-300 text-[10px] font-semibold uppercase">
                         {isPrimaryOwnerStore ? 'Owner Master' : shop.planType || 'trial'}
                       </span>
+
+                      <span
+                        className={`px-2 py-0.5 rounded-md border text-[10px] font-bold inline-flex items-center gap-1 tabular-nums ${
+                          shop.effectiveReferrals > 0
+                            ? 'bg-amber-500/15 text-amber-300 border-amber-500/35'
+                            : 'bg-slate-800/80 text-slate-400 border-slate-700'
+                        }`}
+                      >
+                        <Gift className="w-3 h-3" />
+                        Referrals: {shop.effectiveReferrals}
+                      </span>
                     </div>
 
                     <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-slate-400">
@@ -373,6 +408,16 @@ export const SuperAdminSubscribersModal: React.FC<SuperAdminSubscribersModalProp
                           </span>
                         )}
                       </span>
+                      {shop.referralCode && (
+                        <span className="text-slate-400">
+                          Code: <strong className="text-amber-300 font-mono">{shop.referralCode}</strong>
+                        </span>
+                      )}
+                      {shop.referredByStoreName && (
+                        <span className="text-emerald-300/90">
+                          Invited by: <strong>{shop.referredByStoreName}</strong>
+                        </span>
+                      )}
                       {shop.lastPaymentRef && (
                         <span className="text-slate-400">
                           Last Ref:{' '}

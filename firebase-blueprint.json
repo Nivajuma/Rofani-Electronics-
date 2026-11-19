@@ -14,7 +14,7 @@
         "mpesaShortcode": { "type": "string", "maxLength": 64 },
         "mpesaShortcodeType": { "type": "string", "enum": ["till", "paybill"] },
         "mpesaStoreNumber": { "type": "string", "maxLength": 64 },
-        "planType": { "type": "string", "enum": ["trial", "monthly", "annual"] },
+        "planType": { "type": "string", "enum": ["trial", "monthly", "quarterly", "biannual", "annual"] },
         "subscriptionStatus": { "type": "string", "enum": ["active", "expired"] },
         "expiresAt": { "type": "string", "maxLength": 64 },
         "lastPaymentRef": { "type": "string", "maxLength": 128 },
@@ -22,10 +22,48 @@
         "lastPaymentAt": { "type": "string", "maxLength": 64 },
         "lastPaymentPhone": { "type": "string", "maxLength": 64 },
         "lastPaymentMethod": { "type": "string", "enum": ["stk_push", "manual_receipt", "admin_override", "free_trial"] },
+        "referralCode": { "type": "string", "maxLength": 32 },
+        "referredBy": { "type": "string", "maxLength": 128 },
+        "referredByCode": { "type": "string", "maxLength": 32 },
+        "referredByStoreName": { "type": "string", "maxLength": 200 },
+        "referralCount": { "type": "number" },
+        "trialDaysGranted": { "type": "number" },
+        "lastReferralBonusAt": { "type": "string", "maxLength": 64 },
+        "lastReferralRewardStoreName": { "type": "string", "maxLength": 200 },
         "createdAt": { "type": "string", "maxLength": 64 },
         "updatedAt": { "type": "string", "maxLength": 64 }
       },
       "required": ["id", "ownerUid", "ownerEmail", "storeName", "planType", "subscriptionStatus", "expiresAt"]
+    },
+    "ReferralCodeIndex": {
+      "title": "ReferralCodeIndex",
+      "description": "Non-PII lookup index mapping a merchant referral code to its storeId",
+      "type": "object",
+      "properties": {
+        "code": { "type": "string", "maxLength": 32, "pattern": "^[A-Z0-9\\-]+$" },
+        "storeId": { "type": "string", "maxLength": 128 },
+        "storeName": { "type": "string", "maxLength": 200 },
+        "ownerUid": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["code", "storeId", "storeName", "ownerUid"]
+    },
+    "ReferralRewardClaim": {
+      "title": "ReferralRewardClaim",
+      "description": "Idempotent record of a 30-day referral bonus credited to a referrer store",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "referrerStoreId": { "type": "string", "maxLength": 128 },
+        "referredStoreId": { "type": "string", "maxLength": 128 },
+        "referredStoreName": { "type": "string", "maxLength": 200 },
+        "referralCode": { "type": "string", "maxLength": 32 },
+        "bonusDays": { "type": "number" },
+        "applied": { "type": "boolean" },
+        "appliedAt": { "type": "string", "maxLength": 64 },
+        "awardedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "referrerStoreId", "referredStoreId", "bonusDays", "applied", "awardedAt"]
     },
     "SubscriptionPayment": {
       "title": "SubscriptionPayment",
@@ -34,7 +72,7 @@
       "properties": {
         "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
         "storeId": { "type": "string", "maxLength": 128 },
-        "planType": { "type": "string", "enum": ["monthly", "annual"] },
+        "planType": { "type": "string", "enum": ["monthly", "quarterly", "biannual", "annual"] },
         "amount": { "type": "number" },
         "phoneNumber": { "type": "string", "maxLength": 64 },
         "mpesaReceiptNumber": { "type": "string", "maxLength": 128 },
@@ -179,6 +217,14 @@
     "/stores/{storeId}/subscription_payments/{paymentId}": {
       "schema": { "$ref": "#/entities/SubscriptionPayment" },
       "description": "Tenant subscription payment receipts (M-Pesa STK or manual confirmation)"
+    },
+    "/stores/{storeId}/referral_rewards/{claimId}": {
+      "schema": { "$ref": "#/entities/ReferralRewardClaim" },
+      "description": "Idempotent +30 day referral bonus claim records credited when a referred merchant joins"
+    },
+    "/referral_codes/{code}": {
+      "schema": { "$ref": "#/entities/ReferralCodeIndex" },
+      "description": "Lookup index resolving a clean referral code to a storeId during registration"
     },
     "/stores/{storeId}/products/{productId}": {
       "schema": { "$ref": "#/entities/Product" },

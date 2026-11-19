@@ -1,26 +1,181 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    // Global default-deny safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() {
+      return request.auth != null && request.auth.token.email_verified == true;
+    }
+
     function isSuperAdmin() {
-      return request.auth != null
+      return isSignedIn()
         && request.auth.token.email != null
         && (
-          request.auth.token.email == 'NivaJuma@gmail.com'
+          request.auth.token.email == 'nivajuma@gmail.com'
+          || request.auth.token.email == 'NivaJuma@gmail.com'
           || request.auth.token.email.lower() == 'nivajuma@gmail.com'
         );
     }
 
-    // Legacy root fallback so existing admin data migrates smoothly
-    match /{legacyCollection}/{docId} {
-      allow read, write: if isSuperAdmin();
+    function isStoreOwnerOrAdmin(storeId) {
+      return isSignedIn() && (request.auth.uid == storeId || isSuperAdmin());
     }
 
-    // Multi-tenant store isolation for friends/merchants
-    match /stores/{storeId} {
-      allow read, write: if request.auth != null && (request.auth.uid == storeId || isSuperAdmin());
+    function isValidDocId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128;
+    }
 
-      match /{subcollection}/{docId} {
-        allow read, write: if request.auth != null && (request.auth.uid == storeId || isSuperAdmin());
+    // Legacy root collections: readable/writable strictly by Super Admin for one-time migration into stores/{uid}
+    match /products/{productId} {
+      allow get, create, update, delete: if isSuperAdmin() && isValidDocId(productId);
+      allow list: if isSuperAdmin();
+    }
+
+    match /transactions/{transactionId} {
+      allow get, create, update, delete: if isSuperAdmin() && isValidDocId(transactionId);
+      allow list: if isSuperAdmin();
+    }
+
+    match /customers/{customerId} {
+      allow get, create, update, delete: if isSuperAdmin() && isValidDocId(customerId);
+      allow list: if isSuperAdmin();
+    }
+
+    match /suppliers/{supplierId} {
+      allow get, create, update, delete: if isSuperAdmin() && isValidDocId(supplierId);
+      allow list: if isSuperAdmin();
+    }
+
+    match /expenses/{expenseId} {
+      allow get, create, update, delete: if isSuperAdmin() && isValidDocId(expenseId);
+      allow list: if isSuperAdmin();
+    }
+
+    match /users/{userId} {
+      allow get, create, update, delete: if isSuperAdmin() && isValidDocId(userId);
+      allow list: if isSuperAdmin();
+    }
+
+    match /restock_records/{recordId} {
+      allow get, create, update, delete: if isSuperAdmin() && isValidDocId(recordId);
+      allow list: if isSuperAdmin();
+    }
+
+    match /sensitive_action_logs/{logId} {
+      allow get, create, update, delete: if isSuperAdmin() && isValidDocId(logId);
+      allow list: if isSuperAdmin();
+    }
+
+    match /store_settings/{settingId} {
+      allow get, create, update, delete: if isSuperAdmin() && isValidDocId(settingId);
+      allow list: if isSuperAdmin();
+    }
+
+    // Non-PII referral code lookup index (get-only for signed-in merchants, list only for Super Admin)
+    match /referral_codes/{code} {
+      allow get: if isSignedIn() && isValidDocId(code);
+      allow list: if isSuperAdmin();
+      allow create: if isSignedIn()
+        && isValidDocId(code)
+        && request.resource.data.ownerUid == request.auth.uid
+        && request.resource.data.storeId == request.auth.uid
+        && request.resource.data.code == code
+        && request.resource.data.storeName is string
+        && request.resource.data.storeName.size() > 0
+        && request.resource.data.storeName.size() <= 200;
+      allow update: if isSignedIn()
+        && isValidDocId(code)
+        && resource.data.ownerUid == request.auth.uid
+        && request.resource.data.ownerUid == resource.data.ownerUid
+        && request.resource.data.storeId == resource.data.storeId
+        && request.resource.data.code == resource.data.code
+        && request.resource.data.storeName is string
+        && request.resource.data.storeName.size() > 0
+        && request.resource.data.storeName.size() <= 200;
+      allow delete: if isSuperAdmin() && isValidDocId(code);
+    }
+
+    // Multi-tenant store isolation under /stores/{storeId}
+    match /stores/{storeId} {
+      allow get: if isStoreOwnerOrAdmin(storeId) && isValidDocId(storeId);
+      allow list: if isSuperAdmin() || (isSignedIn() && resource.data.ownerUid == request.auth.uid);
+      allow create, update: if isStoreOwnerOrAdmin(storeId) && isValidDocId(storeId);
+      allow delete: if isSuperAdmin() && isValidDocId(storeId);
+
+      match /referral_rewards/{claimId} {
+        allow get: if isStoreOwnerOrAdmin(storeId) && isValidDocId(claimId);
+        allow list: if isStoreOwnerOrAdmin(storeId);
+        allow create: if isSignedIn()
+          && isValidDocId(claimId)
+          && claimId == request.auth.uid
+          && storeId != request.auth.uid
+          && !exists(/databases/$(database)/documents/stores/$(storeId)/referral_rewards/$(claimId))
+          && existsAfter(/databases/$(database)/documents/stores/$(request.auth.uid))
+          && request.resource.data.id == claimId
+          && request.resource.data.referredStoreId == request.auth.uid
+          && request.resource.data.referrerStoreId == storeId
+          && request.resource.data.bonusDays == 30
+          && request.resource.data.applied == false;
+        allow update: if isStoreOwnerOrAdmin(storeId)
+          && isValidDocId(claimId)
+          && request.resource.data.id == resource.data.id
+          && request.resource.data.referredStoreId == resource.data.referredStoreId
+          && request.resource.data.referrerStoreId == resource.data.referrerStoreId
+          && request.resource.data.bonusDays == resource.data.bonusDays;
+        allow delete: if isSuperAdmin() && isValidDocId(claimId);
+      }
+
+      match /products/{productId} {
+        allow get, create, update, delete: if isStoreOwnerOrAdmin(storeId) && isValidDocId(productId);
+        allow list: if isStoreOwnerOrAdmin(storeId);
+      }
+
+      match /transactions/{transactionId} {
+        allow get, create, update, delete: if isStoreOwnerOrAdmin(storeId) && isValidDocId(transactionId);
+        allow list: if isStoreOwnerOrAdmin(storeId);
+      }
+
+      match /customers/{customerId} {
+        allow get, create, update, delete: if isStoreOwnerOrAdmin(storeId) && isValidDocId(customerId);
+        allow list: if isStoreOwnerOrAdmin(storeId);
+      }
+
+      match /suppliers/{supplierId} {
+        allow get, create, update, delete: if isStoreOwnerOrAdmin(storeId) && isValidDocId(supplierId);
+        allow list: if isStoreOwnerOrAdmin(storeId);
+      }
+
+      match /expenses/{expenseId} {
+        allow get, create, update, delete: if isStoreOwnerOrAdmin(storeId) && isValidDocId(expenseId);
+        allow list: if isStoreOwnerOrAdmin(storeId);
+      }
+
+      match /users/{userId} {
+        allow get, create, update, delete: if isStoreOwnerOrAdmin(storeId) && isValidDocId(userId);
+        allow list: if isStoreOwnerOrAdmin(storeId);
+      }
+
+      match /restock_records/{recordId} {
+        allow get, create, update, delete: if isStoreOwnerOrAdmin(storeId) && isValidDocId(recordId);
+        allow list: if isStoreOwnerOrAdmin(storeId);
+      }
+
+      match /sensitive_action_logs/{logId} {
+        allow get, create, update, delete: if isStoreOwnerOrAdmin(storeId) && isValidDocId(logId);
+        allow list: if isStoreOwnerOrAdmin(storeId);
+      }
+
+      match /store_settings/{settingId} {
+        allow get, create, update, delete: if isStoreOwnerOrAdmin(storeId) && isValidDocId(settingId);
+        allow list: if isStoreOwnerOrAdmin(storeId);
+      }
+
+      match /subscription_payments/{paymentId} {
+        allow get, create, update, delete: if isStoreOwnerOrAdmin(storeId) && isValidDocId(paymentId);
+        allow list: if isStoreOwnerOrAdmin(storeId);
       }
     }
   }

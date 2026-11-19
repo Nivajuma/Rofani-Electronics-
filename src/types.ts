@@ -660,7 +660,7 @@ export interface SensitiveActionLog {
   severity: 'critical' | 'high' | 'medium';
 }
 
-export type SubscriptionPlanType = 'trial' | 'monthly' | 'annual';
+export type SubscriptionPlanType = 'trial' | 'monthly' | 'quarterly' | 'biannual' | 'annual';
 export type SubscriptionStatus = 'active' | 'expired';
 
 export interface StoreSubscriptionProfile {
@@ -681,14 +681,42 @@ export interface StoreSubscriptionProfile {
   lastPaymentAt?: string;
   lastPaymentPhone?: string;
   lastPaymentMethod?: 'stk_push' | 'manual_receipt' | 'admin_override' | 'free_trial';
+  referralCode?: string;
+  referredBy?: string; // Referrer storeId
+  referredByCode?: string;
+  referredByStoreName?: string;
+  referralCount?: number;
+  trialDaysGranted?: number;
+  lastReferralBonusAt?: string;
+  lastReferralRewardStoreName?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface ReferralCodeLookup {
+  code: string;
+  storeId: string;
+  storeName: string;
+  ownerUid: string;
+  createdAt: string;
+}
+
+export interface ReferralRewardClaim {
+  id: string; // equals referredStoreId for one-time idempotency
+  referrerStoreId: string;
+  referredStoreId: string;
+  referredStoreName: string;
+  referralCode: string;
+  bonusDays: number;
+  applied: boolean;
+  appliedAt?: string;
+  awardedAt: string;
 }
 
 export interface SubscriptionPaymentRecord {
   id: string;
   storeId: string;
-  planType: 'monthly' | 'annual';
+  planType: 'monthly' | 'quarterly' | 'biannual' | 'annual';
   amount: number;
   phoneNumber: string;
   mpesaReceiptNumber: string;

@@ -49,7 +49,8 @@ import {
   VolumeX,
   LayoutDashboard,
   Award,
-  LogOut
+  LogOut,
+  Gift
 } from 'lucide-react';
 import {
   Product,
@@ -113,6 +114,7 @@ import { ReportsView } from './components/Reports/ReportsView';
 import { AuditLogsView } from './components/Reports/AuditLogsView';
 import { DataManagementView } from './components/Settings/DataManagementView';
 import { FloatingToolWidget } from './components/Tools/FloatingToolWidget';
+import { MobileQuickToolsBar, MobileCartSummary } from './components/Tools/MobileQuickToolsBar';
 import { PinLoginModal } from './components/Auth/PinLoginModal';
 import { StaffManagementModal } from './components/Auth/StaffManagementModal';
 import { RoleAuthorizationModal, RoleAuthorizationRequest } from './components/Auth/RoleAuthorizationModal';
@@ -143,6 +145,7 @@ import { formatKSh } from './utils/currency';
 import {
   TabKey,
   hasTabPermission,
+  hasWorkerPermission,
   hasRole,
   getUserRoles,
   setWorkerRoles,
@@ -174,12 +177,15 @@ import {
   subscribeToCustomers,
   saveCustomerToCloud,
   deleteCustomerFromCloud,
+  batchSaveCustomersToCloud,
   subscribeToSuppliers,
   saveSupplierToCloud,
   deleteSupplierFromCloud,
+  batchSaveSuppliersToCloud,
   subscribeToExpenses,
   saveExpenseToCloud,
   deleteExpenseFromCloud,
+  batchSaveExpensesToCloud,
   subscribeToRestockRecords,
   saveRestockRecordToCloud,
   subscribeToStoreSecurity,
@@ -203,6 +209,10 @@ import {
   ensureOwnerPrimaryStoreProfile,
   createMerchantStoreProfile,
   migrateLegacyRootCollectionsToOwnerStoreIfNeeded,
+  ensureReferralCodeForStore,
+  reconcileIncomingReferralRewards,
+  subscribeToReferralRewards,
+  normalizeReferralCode,
 } from './lib/cloudSync';
 import { loadMpesaConfig, saveMpesaConfig } from './utils/mpesa';
 import {
@@ -625,6 +635,42 @@ export default function App() {
   const [showPlansModal, setShowPlansModal] = useState<boolean>(false);
   const [showSuperAdminModal, setShowSuperAdminModal] = useState<boolean>(false);
 
+  const PENDING_REFERRAL_STORAGE_KEY = 'rofani_pending_referral_code';
+  const [pendingReferralCode, setPendingReferralCode] = useState<string>(() => {
+    if (typeof window === 'undefined') return '';
+    try {
+      const urlRef = new URLSearchParams(window.location.search).get('ref');
+      if (urlRef) {
+        const clean = normalizeReferralCode(urlRef);
+        if (clean) {
+          localStorage.setItem(PENDING_REFERRAL_STORAGE_KEY, clean);
+          return clean;
+        }
+      }
+      return normalizeReferralCode(localStorage.getItem(PENDING_REFERRAL_STORAGE_KEY) || '');
+    } catch {
+      return '';
+    }
+  });
+  const updatePendingReferralCode = (code: string) => {
+    const clean = normalizeReferralCode(code);
+    setPendingReferralCode(clean);
+    try {
+      if (clean) {
+        localStorage.setItem(PENDING_REFERRAL_STORAGE_KEY, clean);
+      } else {
+        localStorage.removeItem(PENDING_REFERRAL_STORAGE_KEY);
+      }
+    } catch {}
+  };
+
+  const [referralRewardToast, setReferralRewardToast] = useState<{
+    kind: 'reward' | 'welcome';
+    message: string;
+    subtext?: string;
+  } | null>(null);
+  const [welcomeBannerDismissedForStore, setWelcomeBannerDismissedForStore] = useState<string | null>(null);
+
   useEffect(() => {
     completeGoogleRedirectSignIn().catch(() => null);
     // Strict 3-second failsafe so slow/offline networks never hang the startup gate
@@ -892,6 +938,25 @@ export default function App() {
       }
     };
 
+    const runReferralReconciliation = () => {
+      reconcileIncomingReferralRewards(nextCloudStoreId)
+        .then((res) => {
+          if (cancelled || res.newlyAppliedCount <= 0) return;
+          if (res.updatedProfile) {
+            applyStoreProfileToWorkspace(res.updatedProfile);
+          }
+          setReferralRewardToast({
+            kind: 'reward',
+            message:
+              "🎉 Referral Bonus! A new friend joined using your code. You've been rewarded +30 Days Free!",
+            subtext: res.latestReferredStoreName
+              ? `Unlocked via ${res.latestReferredStoreName} (+${res.totalBonusDays} bonus days added to your store license).`
+              : `+${res.totalBonusDays} bonus days added to your store license.`,
+          });
+        })
+        .catch(() => {});
+    };
+
     // Only block UI for profile check when there is no cached profile and user is not the owner
     const cachedProfile = safeGetJSON<StoreSubscriptionProfile | null>('rofani_pos_store_profile', null);
     if (!isOwnerCloudUser(firebaseUser) && !cachedProfile) {
@@ -908,6 +973,7 @@ export default function App() {
         .then((prof) => {
           applyStoreProfileToWorkspace(prof);
           if (!cancelled) setIsCheckingStoreProfile(false);
+          runReferralReconciliation();
           // Automatic One-Time Data Bridge: checks stores/{userId} first and copies root/legacy data if empty
           migrateLegacyRootCollectionsToOwnerStoreIfNeeded(firebaseUser.uid)
             .then((migrated) => {
@@ -955,25 +1021,43 @@ export default function App() {
     } else {
       fetchStoreProfile(nextCloudStoreId)
         .then((prof) => {
-          applyStoreProfileToWorkspace(prof);
+          if (prof && !prof.referralCode) {
+            ensureReferralCodeForStore(prof)
+              .then((ensured) => applyStoreProfileToWorkspace(ensured))
+              .catch(() => applyStoreProfileToWorkspace(prof));
+          } else {
+            applyStoreProfileToWorkspace(prof);
+          }
           if (!cancelled) setIsCheckingStoreProfile(false);
+          if (prof) {
+            runReferralReconciliation();
+          }
         })
         .catch(() => {
           if (!cancelled) setIsCheckingStoreProfile(false);
         });
     }
 
+    let unsubscribeRewards: (() => void) | undefined;
     try {
       unsubscribeProfile = subscribeToStoreProfile(
         nextCloudStoreId,
         (prof) => {
           applyStoreProfileToWorkspace(prof);
           if (!cancelled) setIsCheckingStoreProfile(false);
+          if (prof && !prof.referralCode) {
+            ensureReferralCodeForStore(prof)
+              .then((ensured) => applyStoreProfileToWorkspace(ensured))
+              .catch(() => {});
+          }
         },
         () => {
           if (!cancelled) setIsCheckingStoreProfile(false);
         }
       );
+      unsubscribeRewards = subscribeToReferralRewards(nextCloudStoreId, () => {
+        if (!cancelled) runReferralReconciliation();
+      });
     } catch {
       if (!cancelled) setIsCheckingStoreProfile(false);
     }
@@ -982,6 +1066,7 @@ export default function App() {
       cancelled = true;
       clearTimeout(profileTimeoutId);
       if (unsubscribeProfile) unsubscribeProfile();
+      if (unsubscribeRewards) unsubscribeRewards();
     };
   }, [isFirebaseAuthReady, firebaseUser?.uid, allowOfflineOwnerMode]);
 
@@ -1799,6 +1884,80 @@ export default function App() {
   // New Sale global trigger counter
   const [newSaleTrigger, setNewSaleTrigger] = useState(0);
   const [isMobileSearchActive, setIsMobileSearchActive] = useState(false);
+  const [isMobileCartOpen, setIsMobileCartOpen] = useState(false);
+  const [isEditableKeyboardOpen, setIsEditableKeyboardOpen] = useState(false);
+  const [mobileCartSummary, setMobileCartSummary] = useState<MobileCartSummary>({
+    itemCount: 0,
+    subtotal: 0,
+    discountTotal: 0,
+    grandTotal: 0,
+    hasCartItems: false,
+  });
+  const [externalScanTrigger, setExternalScanTrigger] = useState(0);
+  const [externalAiScanTrigger, setExternalAiScanTrigger] = useState(0);
+  const [externalManualBarcodeRequest, setExternalManualBarcodeRequest] = useState<{
+    code: string;
+    nonce: number;
+  } | null>(null);
+  const [externalQuickDiscountRequest, setExternalQuickDiscountRequest] = useState<{
+    mode: 'fixed' | 'percentage';
+    value: number;
+    nonce: number;
+  } | null>(null);
+  const [externalClearDiscountTrigger, setExternalClearDiscountTrigger] = useState(0);
+
+  // Auto-hide mobile floating Quick Tools bar whenever phone soft keyboard is active
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const isEditableTarget = (el: EventTarget | null): el is HTMLElement => {
+      if (!(el instanceof HTMLElement)) return false;
+      if (el.closest('[data-quick-tools-container="true"]')) return false;
+      if (el.tagName === 'TEXTAREA') return true;
+      if (el.tagName === 'INPUT') {
+        const type = (el as HTMLInputElement).type || 'text';
+        return !['checkbox', 'radio', 'button', 'submit', 'reset', 'file', 'range', 'color'].includes(type);
+      }
+      return el.isContentEditable;
+    };
+
+    const handleFocusIn = (e: FocusEvent) => {
+      if (isEditableTarget(e.target)) {
+        setIsEditableKeyboardOpen(true);
+      }
+    };
+
+    const handleFocusOut = () => {
+      setTimeout(() => {
+        const activeEl = document.activeElement;
+        setIsEditableKeyboardOpen(isEditableTarget(activeEl));
+      }, 60);
+    };
+
+    const baseViewportHeight = window.innerHeight;
+    const handleViewportResize = () => {
+      const vv = window.visualViewport;
+      if (!vv) return;
+      const activeEl = document.activeElement;
+      if (activeEl instanceof HTMLElement && activeEl.closest('[data-quick-tools-container="true"]')) {
+        return;
+      }
+      const heightDrop = baseViewportHeight - vv.height;
+      if (heightDrop > 160 && isEditableTarget(activeEl)) {
+        setIsEditableKeyboardOpen(true);
+      } else if (heightDrop <= 100 && !isEditableTarget(activeEl)) {
+        setIsEditableKeyboardOpen(false);
+      }
+    };
+
+    document.addEventListener('focusin', handleFocusIn);
+    document.addEventListener('focusout', handleFocusOut);
+    window.visualViewport?.addEventListener('resize', handleViewportResize);
+    return () => {
+      document.removeEventListener('focusin', handleFocusIn);
+      document.removeEventListener('focusout', handleFocusOut);
+      window.visualViewport?.removeEventListener('resize', handleViewportResize);
+    };
+  }, []);
 
   const handleGlobalNewSale = () => {
     setActiveTab('pos');
@@ -1806,11 +1965,54 @@ export default function App() {
     setNewSaleTrigger((prev) => prev + 1);
   };
 
-  // Close mobile drawer whenever active tab changes & reset POS search focus state
+  const handleMobileMakeSaleBarClick = () => {
+    if (activeTab !== 'pos') {
+      setActiveTab('pos');
+      setIsMobileMenuOpen(false);
+    } else {
+      handleGlobalNewSale();
+    }
+  };
+
+  const handleMobileOpenBarcodeScanner = () => {
+    setActiveTab('pos');
+    setIsMobileMenuOpen(false);
+    setExternalScanTrigger((prev) => prev + 1);
+  };
+
+  const handleMobileOpenAiScanner = () => {
+    setActiveTab('pos');
+    setIsMobileMenuOpen(false);
+    setExternalAiScanTrigger((prev) => prev + 1);
+  };
+
+  const handleMobileManualBarcode = (code: string) => {
+    setActiveTab('pos');
+    setIsMobileMenuOpen(false);
+    setExternalManualBarcodeRequest({ code, nonce: Date.now() });
+  };
+
+  const handleMobileApplyQuickDiscount = (payload: { mode: 'fixed' | 'percentage'; value: number }) => {
+    setActiveTab('pos');
+    setIsMobileMenuOpen(false);
+    setExternalQuickDiscountRequest({ ...payload, nonce: Date.now() });
+  };
+
+  const handleMobileClearQuickDiscount = () => {
+    setExternalClearDiscountTrigger((prev) => prev + 1);
+  };
+
+  const shouldHideMobileQuickTools =
+    isMobileSearchActive ||
+    isEditableKeyboardOpen ||
+    (activeTab === 'pos' && isMobileCartOpen);
+
+  // Close mobile drawer whenever active tab changes & reset POS search/cart sheet flags
   useEffect(() => {
     setIsMobileMenuOpen(false);
     if (activeTab !== 'pos') {
       setIsMobileSearchActive(false);
+      setIsMobileCartOpen(false);
     }
   }, [activeTab]);
 
@@ -1997,11 +2199,18 @@ export default function App() {
 
   // Real-time synchronization subscription for transactions with conflict detection
   useEffect(() => {
-    if (!isCloudAuthReady) return;
+    const activeUid = firebaseUser?.uid;
+    if (!isCloudAuthReady || !activeUid) return;
+    let cancelled = false;
+    let receivedSnapshot = false;
     let unsubscribe: (() => void) | undefined;
+    let fallbackTimer: ReturnType<typeof setTimeout> | undefined;
+
     try {
       unsubscribe = subscribeToTransactions(
         (incomingRemoteSales) => {
+          receivedSnapshot = true;
+          if (cancelled) return;
           const currentLocal = transactionsRef.current.length > 0
             ? transactionsRef.current
             : safeGetJSON<Transaction[]>('retail_pos_transactions', []);
@@ -2023,12 +2232,15 @@ export default function App() {
         },
         (err) => {
           console.warn('Transactions subscription notice:', err);
-        }
+        },
+        activeUid
       );
 
-      // Proactive initial fetch for transactions on startup
-      fetchTransactionsFromCloud().then((sales) => {
-        if (sales && sales.length > 0) {
+      // Delayed REST/getDocs fallback only if onSnapshot has not delivered within 2.5s
+      fallbackTimer = setTimeout(() => {
+        if (cancelled || receivedSnapshot) return;
+        fetchTransactionsFromCloud(activeUid).then((sales) => {
+          if (cancelled || !sales || sales.length === 0) return;
           const currentLocal = transactionsRef.current.length > 0
             ? transactionsRef.current
             : safeGetJSON<Transaction[]>('retail_pos_transactions', []);
@@ -2047,23 +2259,32 @@ export default function App() {
           if (conflicts.length > 0) {
             enqueueSyncConflicts(conflicts, true);
           }
-        }
-      }).catch((e) => console.warn('Startup transactions fetch notice:', e));
+        }).catch((e) => console.warn('Startup transactions fetch notice:', e));
+      }, 2500);
     } catch (err) {
       console.warn('Could not subscribe to transactions:', err);
     }
     return () => {
+      cancelled = true;
+      if (fallbackTimer) clearTimeout(fallbackTimer);
       if (unsubscribe) unsubscribe();
     };
   }, [isCloudAuthReady, firebaseUser?.uid]);
 
   // Real-time synchronization subscription for products with ID-based local preservation & exact-ms conflict detection
   useEffect(() => {
-    if (!isCloudAuthReady) return;
+    const activeUid = firebaseUser?.uid;
+    if (!isCloudAuthReady || !activeUid) return;
+    let cancelled = false;
+    let receivedSnapshot = false;
     let unsubscribe: (() => void) | undefined;
+    let fallbackTimer: ReturnType<typeof setTimeout> | undefined;
+
     try {
       unsubscribe = subscribeToProducts(
         (incomingRemoteProducts) => {
+          receivedSnapshot = true;
+          if (cancelled) return;
           if (incomingRemoteProducts && incomingRemoteProducts.length > 0) {
             const deletedIds = getDeletedProductIds();
             const pendingMap = getPendingProductMap();
@@ -2096,12 +2317,15 @@ export default function App() {
           } else {
             console.warn('Products Firestore subscription notice:', err);
           }
-        }
+        },
+        activeUid
       );
 
-      // Proactive initial retrieval from cloud: guarantees all products populate while preserving newer local edits
-      fetchProductsFromCloud().then((cloudItems) => {
-        if (cloudItems && cloudItems.length > 0) {
+      // Delayed REST/getDocs fallback only if onSnapshot has not delivered within 2.5s
+      fallbackTimer = setTimeout(() => {
+        if (cancelled || receivedSnapshot) return;
+        fetchProductsFromCloud(activeUid).then((cloudItems) => {
+          if (cancelled || !cloudItems || cloudItems.length === 0) return;
           const deletedIds = getDeletedProductIds();
           const pendingMap = getPendingProductMap();
           const { merged, conflicts } = mergeRecordsWithConflictDetection<Product>({
@@ -2124,19 +2348,22 @@ export default function App() {
           if (conflicts.length > 0) {
             enqueueSyncConflicts(conflicts, true);
           }
-        }
-      }).catch((e) => console.warn('Startup products cloud fetch notice:', e));
+        }).catch((e) => console.warn('Startup products cloud fetch notice:', e));
+      }, 2500);
     } catch (err) {
       console.warn('Could not subscribe to products:', err);
     }
     return () => {
+      cancelled = true;
+      if (fallbackTimer) clearTimeout(fallbackTimer);
       if (unsubscribe) unsubscribe();
     };
   }, [isCloudAuthReady, firebaseUser?.uid]);
 
   // Real-time synchronization subscription for M-PESA & Daraja store configuration
   useEffect(() => {
-    if (!isCloudAuthReady) return;
+    const activeUid = firebaseUser?.uid;
+    if (!isCloudAuthReady || !activeUid) return;
     let unsubscribe: (() => void) | undefined;
     try {
       unsubscribe = subscribeToMpesaConfig(
@@ -2155,7 +2382,8 @@ export default function App() {
             safeSetJSON('rofani_pos_mpesa_config', merged);
           }
         },
-        (err) => console.warn('Mpesa config subscription notice:', err)
+        (err) => console.warn('Mpesa config subscription notice:', err),
+        activeUid
       );
     } catch (err) {
       console.warn('Could not subscribe to M-Pesa config:', err);
@@ -2167,7 +2395,8 @@ export default function App() {
 
   // Real-time synchronization subscription for users & staff accounts
   useEffect(() => {
-    if (!isCloudAuthReady) return;
+    const activeUid = firebaseUser?.uid;
+    if (!isCloudAuthReady || !activeUid) return;
     let unsubscribe: (() => void) | undefined;
     try {
       unsubscribe = subscribeToUsers(
@@ -2190,7 +2419,8 @@ export default function App() {
             }
           }
         },
-        (err) => console.warn('Users cloud subscription notice:', err)
+        (err) => console.warn('Users cloud subscription notice:', err),
+        activeUid
       );
     } catch (err) {
       console.warn('Could not subscribe to users:', err);
@@ -4748,86 +4978,209 @@ export default function App() {
     setCashTransactions(isOwnerScope ? INITIAL_CASH_TRANSACTIONS : []);
   };
 
-  const handleImportData = (imported: any) => {
+  const handleImportData = (imported: any, options?: { mode?: 'merge' | 'replace' }) => {
+    const mode = options?.mode === 'replace' ? 'replace' : 'merge';
     try {
       // Save emergency rollback snapshot before importing
       const backupBefore = {
         timestamp: Date.now(),
-        products,
-        transactions,
-        customers,
-        suppliers,
-        expenses,
+        products: productsRef.current,
+        transactions: transactionsRef.current,
+        customers: customersRef.current,
+        suppliers: suppliersRef.current,
+        expenses: expensesRef.current,
         attendanceRecords,
       };
       safeSetJSON('rofani_pos_pre_import_backup', backupBefore);
+      saveToIDB(resolveTenantStorageKey('rofani_pos_pre_import_backup'), backupBefore).catch(() => {});
     } catch {}
 
-    if (Array.isArray(imported.products) && imported.products.length > 0) {
-      setProducts((prev) => {
-        const merged = [...imported.products];
-        prev.forEach((p) => {
-          if (!merged.some((m) => m.id === p.id)) merged.push(p);
-        });
-        safeSetJSON('retail_pos_products', merged);
-        return merged;
+    const mergeById = <T extends { id?: any }>(incoming: T[], existing: T[]): T[] => {
+      if (mode === 'replace') return [...incoming];
+      const merged = [...incoming];
+      const seenIds = new Set(
+        incoming
+          .map((item) => (item && item.id !== undefined && item.id !== null ? String(item.id) : ''))
+          .filter(Boolean)
+      );
+      existing.forEach((item) => {
+        const key = item && item.id !== undefined && item.id !== null ? String(item.id) : '';
+        if (!key || !seenIds.has(key)) {
+          merged.push(item);
+        }
       });
+      return merged;
+    };
+
+    let nextProductsForCloud: Product[] = [];
+    let nextSalesForCloud: Transaction[] = [];
+    let nextCustomersForCloud: Customer[] = [];
+    let nextSuppliersForCloud: Supplier[] = [];
+    let nextExpensesForCloud: Expense[] = [];
+    let nextUsersForCloud: User[] = [];
+
+    if (Array.isArray(imported.products) && (imported.products.length > 0 || mode === 'replace')) {
+      const merged = mergeById<Product>(imported.products, productsRef.current);
+      productsRef.current = merged;
+      nextProductsForCloud = merged;
+      setProducts(merged);
+      safeSetJSON('retail_pos_products', merged);
+      saveToIDB(resolveTenantStorageKey('retail_pos_products'), merged).catch(() => {});
     }
 
-    if (Array.isArray(imported.transactions) && imported.transactions.length > 0) {
-      setTransactions((prev) => {
-        const merged = [...imported.transactions];
-        prev.forEach((t) => {
-          if (!merged.some((m) => m.id === t.id)) merged.push(t);
+    if (Array.isArray(imported.categories) && (imported.categories.length > 0 || mode === 'replace')) {
+      const mergedCategories: any[] = [...imported.categories];
+      if (mode === 'merge') {
+        (categories || []).forEach((c: any) => {
+          const exists = mergedCategories.some(
+            (m: any) =>
+              (m?.id && c?.id && m.id === c.id) ||
+              (m?.name && c?.name && String(m.name).toLowerCase() === String(c.name).toLowerCase())
+          );
+          if (!exists) mergedCategories.push(c);
         });
-        merged.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-        safeSetJSON('retail_pos_transactions', merged);
-        return merged;
-      });
+      }
+      setCategories(mergedCategories);
+      safeSetJSON('retail_pos_categories_v2', mergedCategories);
     }
 
-    if (Array.isArray(imported.customers) && imported.customers.length > 0) {
-      setCustomers((prev) => {
-        const merged = [...imported.customers];
-        prev.forEach((c) => {
-          if (!merged.some((m) => m.id === c.id)) merged.push(c);
-        });
-        safeSetJSON('retail_pos_customers', merged);
-        return merged;
-      });
+    if (Array.isArray(imported.transactions) && (imported.transactions.length > 0 || mode === 'replace')) {
+      const merged = mergeById<Transaction>(imported.transactions, transactionsRef.current);
+      merged.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      transactionsRef.current = merged;
+      nextSalesForCloud = merged;
+      setTransactions(merged);
+      safeSetJSON('retail_pos_transactions', merged);
     }
 
-    if (Array.isArray(imported.suppliers) && imported.suppliers.length > 0) {
-      setSuppliers((prev) => {
-        const merged = [...imported.suppliers];
-        prev.forEach((s) => {
-          if (!merged.some((m) => m.id === s.id)) merged.push(s);
-        });
-        safeSetJSON('retail_pos_suppliers', merged);
-        return merged;
-      });
+    if (Array.isArray(imported.customers) && (imported.customers.length > 0 || mode === 'replace')) {
+      const merged = mergeById<Customer>(imported.customers, customersRef.current);
+      customersRef.current = merged;
+      nextCustomersForCloud = merged;
+      setCustomers(merged);
+      safeSetJSON('retail_pos_customers', merged);
     }
 
-    if (Array.isArray(imported.expenses) && imported.expenses.length > 0) {
-      setExpenses((prev) => {
-        const merged = [...imported.expenses];
-        prev.forEach((e) => {
-          if (!merged.some((m) => m.id === e.id)) merged.push(e);
-        });
-        safeSetJSON('retail_pos_expenses', merged);
-        return merged;
-      });
+    if (Array.isArray(imported.suppliers) && (imported.suppliers.length > 0 || mode === 'replace')) {
+      const merged = mergeById<Supplier>(imported.suppliers, suppliersRef.current);
+      suppliersRef.current = merged;
+      nextSuppliersForCloud = merged;
+      setSuppliers(merged);
+      safeSetJSON('retail_pos_suppliers', merged);
     }
 
-    if (Array.isArray(imported.attendanceRecords) && imported.attendanceRecords.length > 0) {
-      setAttendanceRecords((prev) => {
-        const merged = [...imported.attendanceRecords];
-        prev.forEach((a) => {
-          if (!merged.some((m) => m.id === a.id)) merged.push(a);
+    if (Array.isArray(imported.expenses) && (imported.expenses.length > 0 || mode === 'replace')) {
+      const merged = mergeById<Expense>(imported.expenses, expensesRef.current);
+      expensesRef.current = merged;
+      nextExpensesForCloud = merged;
+      setExpenses(merged);
+      safeSetJSON('retail_pos_expenses', merged);
+    }
+
+    if (Array.isArray(imported.attendanceRecords) && (imported.attendanceRecords.length > 0 || mode === 'replace')) {
+      const merged = mergeById<AttendanceRecord>(imported.attendanceRecords, attendanceRecords);
+      setAttendanceRecords(merged);
+      safeSetJSON('retail_pos_attendance', merged);
+    }
+
+    if (Array.isArray(imported.allUsers) && imported.allUsers.length > 0) {
+      const merged = mergeById<User>(imported.allUsers, allUsersRef.current);
+      allUsersRef.current = merged;
+      nextUsersForCloud = merged;
+      setAllUsers(merged);
+      safeSetJSON('retail_pos_users', merged);
+      safeSetJSON('pos_store_staff_users', merged);
+    }
+
+    if (Array.isArray(imported.stores) && imported.stores.length > 0) {
+      const merged = mergeById<StoreLocation>(imported.stores, stores);
+      setStores(merged);
+      safeSetJSON('retail_pos_stores', merged);
+    }
+
+    const restoredSettings = imported.storeInfo || imported.storeSettings;
+    if (restoredSettings && typeof restoredSettings === 'object') {
+      const sName = restoredSettings.storeName || restoredSettings.name;
+      if (sName) {
+        safeSetJSON('retail_pos_store_name', sName);
+        safeSetJSON('rofani_settings_shop_name', sName);
+      }
+      if (typeof restoredSettings.kraPin === 'string') {
+        safeSetJSON('retail_pos_kra_pin', restoredSettings.kraPin);
+      }
+      if (typeof restoredSettings.phone === 'string') {
+        safeSetJSON('retail_pos_store_phone', restoredSettings.phone);
+        safeSetJSON('rofani_settings_phone', restoredSettings.phone);
+      }
+      if (typeof restoredSettings.paybillTillNumber === 'string') {
+        safeSetJSON('retail_pos_store_paybill', restoredSettings.paybillTillNumber);
+      }
+      if (typeof restoredSettings.kraTaxRate === 'number') {
+        safeSetJSON('retail_pos_kra_tax_rate', restoredSettings.kraTaxRate);
+        safeSetJSON('rofani_settings_tot_rate', restoredSettings.kraTaxRate);
+      }
+      if (typeof restoredSettings.branchLocation === 'string') {
+        safeSetJSON('rofani_settings_branch', restoredSettings.branchLocation);
+      }
+      if (typeof restoredSettings.receiptFooter === 'string') {
+        safeSetJSON('rofani_settings_footer', restoredSettings.receiptFooter);
+      }
+      if (typeof restoredSettings.enableVat === 'boolean') {
+        safeSetJSON('rofani_settings_enable_vat', restoredSettings.enableVat);
+      }
+      if (typeof restoredSettings.pricingMode === 'string') {
+        safeSetJSON('rofani_settings_pricing_mode', restoredSettings.pricingMode);
+      }
+      if (typeof restoredSettings.currency === 'string') {
+        safeSetJSON('rofani_settings_currency', restoredSettings.currency);
+      }
+      if (typeof restoredSettings.taxMode === 'string') {
+        safeSetJSON('rofani_settings_tax_mode', restoredSettings.taxMode);
+      }
+      if (
+        typeof restoredSettings.mpesaShortcode === 'string' ||
+        typeof restoredSettings.mpesaStoreNumber === 'string' ||
+        typeof restoredSettings.mpesaShortcodeType === 'string'
+      ) {
+        const existingMpesa = safeGetJSON<any>('rofani_pos_mpesa_config', {});
+        safeSetJSON('rofani_pos_mpesa_config', {
+          ...existingMpesa,
+          ...(typeof restoredSettings.mpesaShortcode === 'string'
+            ? { shortcode: restoredSettings.mpesaShortcode }
+            : {}),
+          ...(typeof restoredSettings.mpesaStoreNumber === 'string'
+            ? { storeNumber: restoredSettings.mpesaStoreNumber }
+            : {}),
+          ...(typeof restoredSettings.mpesaShortcodeType === 'string'
+            ? { shortcodeType: restoredSettings.mpesaShortcodeType }
+            : {}),
         });
-        safeSetJSON('retail_pos_attendance', merged);
-        return merged;
-      });
+      }
+    }
+
+    // Sync restored collections into active Cloud Firestore store (stores/{userId}) when online & verified
+    const activeUid = auth.currentUser?.uid;
+    if (getIsOnline() && isAuthorizedCloudUser(auth.currentUser) && activeUid) {
+      Promise.all([
+        nextProductsForCloud.length > 0
+          ? batchSaveProductsToCloud(nextProductsForCloud, undefined, activeUid).catch(() => 0)
+          : Promise.resolve(0),
+        nextSalesForCloud.length > 0
+          ? batchSaveTransactionsToCloud(nextSalesForCloud.slice(0, 200), undefined, activeUid).catch(() => 0)
+          : Promise.resolve(0),
+        nextCustomersForCloud.length > 0
+          ? batchSaveCustomersToCloud(nextCustomersForCloud.slice(0, 200), undefined, activeUid).catch(() => 0)
+          : Promise.resolve(0),
+        nextSuppliersForCloud.length > 0
+          ? batchSaveSuppliersToCloud(nextSuppliersForCloud, undefined, activeUid).catch(() => 0)
+          : Promise.resolve(0),
+        nextExpensesForCloud.length > 0
+          ? batchSaveExpensesToCloud(nextExpensesForCloud.slice(0, 100), undefined, activeUid).catch(() => 0)
+          : Promise.resolve(0),
+        nextUsersForCloud.length > 0
+          ? bulkUploadUsersToCloud(nextUsersForCloud, activeUid).catch(() => 0)
+          : Promise.resolve(0),
+      ]).catch(() => {});
     }
   };
 
@@ -4985,6 +5338,13 @@ export default function App() {
           onBatchImportProducts={handleBatchImportProducts}
           inPhoneFrame={deviceFormat === 'phone'}
           onMobileSearchActiveChange={setIsMobileSearchActive}
+          onMobileCartOpenChange={setIsMobileCartOpen}
+          onMobileCartSummaryChange={setMobileCartSummary}
+          externalScanTrigger={externalScanTrigger}
+          externalAiScanTrigger={externalAiScanTrigger}
+          externalManualBarcodeRequest={externalManualBarcodeRequest}
+          externalQuickDiscountRequest={externalQuickDiscountRequest}
+          externalClearDiscountTrigger={externalClearDiscountTrigger}
           storeName={stores.find((s) => s.id === activeStoreId)?.name || storeProfile?.storeName || 'Rofani POS'}
         />
       )}
@@ -5217,6 +5577,9 @@ export default function App() {
           onLockNow={() => setIsTerminalLocked(true)}
           onOpenAuditLogs={() => setActiveTab('auditlogs')}
           stores={stores}
+          activeStoreId={activeCloudStoreId || getActiveTenantStoreId()}
+          activeStoreName={stores.find((s) => s.id === activeStoreId)?.name || storeProfile?.storeName || 'Rofani POS'}
+          accountEmail={firebaseUser?.email || storeProfile?.ownerEmail || cachedCloudSession?.email || ''}
           onOpenStoreManager={() => setShowStoreManagerModal(true)}
           onOpenCategoryManager={() => setShowCategoryManagerModal(true)}
           lastSyncedTime={lastSyncedTime}
@@ -5291,6 +5654,8 @@ export default function App() {
     return (
       <MerchantAuthScreen
         hasOfflineOwnerCache={hasCachedOwnerAccess}
+        initialReferralCode={pendingReferralCode}
+        onReferralCodeChange={updatePendingReferralCode}
         onContinueOfflineOwner={() => {
           setActiveTenantStoreId(OWNER_PRIMARY_STORE_ID);
           setAllowOfflineOwnerMode(true);
@@ -5316,6 +5681,7 @@ export default function App() {
       <StoreOnboardingModal
         userEmail={firebaseUser?.email || ''}
         userDisplayName={firebaseUser?.displayName || undefined}
+        initialReferralCode={pendingReferralCode}
         onCreateStore={async (formData) => {
           if (!firebaseUser?.uid || !firebaseUser?.email) {
             throw new Error('Verified Google session is required.');
@@ -5329,8 +5695,18 @@ export default function App() {
             kraPin: formData.kraPin,
             mpesaShortcode: formData.mpesaShortcode,
             mpesaShortcodeType: formData.mpesaShortcodeType,
+            referralCode: formData.referralCode || pendingReferralCode,
           });
+          updatePendingReferralCode('');
           setStoreProfile(created);
+          safeSetJSON('rofani_pos_store_profile', created);
+          if (created.referredBy) {
+            setReferralRewardToast({
+              kind: 'welcome',
+              message: `🎁 Welcome Bonus! Referred by ${created.referredByStoreName || 'a fellow merchant'} — 45 Days Free unlocked!`,
+              subtext: `You received +15 extra free trial days on top of the 30-day standard trial.`,
+            });
+          }
           setStores([
             {
               id: 'store-main',
@@ -5366,6 +5742,20 @@ export default function App() {
           storeId={activeCloudStoreId || firebaseUser!.uid}
           storeProfile={storeProfile}
           onSubscriptionUpdated={(updated) => setStoreProfile(updated)}
+          onOpenAiAssistant={() => setShowAiAssistantModal(true)}
+        />
+        <AIAssistantModal
+          isOpen={showAiAssistantModal}
+          onClose={() => setShowAiAssistantModal(false)}
+          activeStoreName={stores.find((s) => s.id === activeStoreId)?.name || storeProfile?.storeName || 'Rofani POS'}
+          workerRole={currentUser.role}
+          activeTab={activeTab}
+          lowStockCount={lowStockCount}
+          totalProductsCount={products.length}
+          totalSalesToday={todaySales > 0 ? todaySales : totalGrossSales}
+          products={products}
+          transactions={transactions}
+          onOpenPredictiveRestock={() => setActiveTab('inventory')}
         />
       </div>
     );
@@ -5403,6 +5793,21 @@ export default function App() {
           conflictCount={syncConflicts.length}
           onOpenConflictAssistant={() => setIsConflictModalOpen(true)}
           hideBottomNav={activeTab === 'pos' && isMobileSearchActive}
+          quickToolsBar={
+            <MobileQuickToolsBar
+              placement="phoneFrame"
+              hidden={shouldHideMobileQuickTools}
+              activeTab={activeTab}
+              onMakeSale={handleMobileMakeSaleBarClick}
+              onOpenBarcodeScanner={handleMobileOpenBarcodeScanner}
+              onScanManualBarcode={handleMobileManualBarcode}
+              onOpenAiScanner={handleMobileOpenAiScanner}
+              onApplyQuickDiscount={handleMobileApplyQuickDiscount}
+              onClearQuickDiscount={handleMobileClearQuickDiscount}
+              cartSummary={mobileCartSummary}
+              canGiveDiscounts={hasWorkerPermission(currentUser, 'canGiveDiscounts')}
+            />
+          }
         >
           {renderActiveTabContent()}
         </PhoneDeviceFrame>
@@ -5450,6 +5855,7 @@ export default function App() {
           storeId={activeCloudStoreId || OWNER_PRIMARY_STORE_ID}
           storeProfile={storeProfile}
           onSubscriptionUpdated={(updated) => setStoreProfile(updated)}
+          onOpenAiAssistant={() => setShowAiAssistantModal(true)}
         />
 
         {isOwnerAccount && (
@@ -5606,6 +6012,39 @@ export default function App() {
           }}
           onOpenStockDigest={() => setShowStockAlertModal(true)}
         />
+
+        {/* Referral Reward / Welcome Toast (Phone Mode) */}
+        {referralRewardToast && (
+          <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[260] w-[calc(100%-2rem)] max-w-md bg-slate-900 border border-amber-400/60 text-slate-100 rounded-2xl p-4 shadow-2xl flex items-start gap-3">
+            <div className="w-9 h-9 rounded-xl bg-amber-400/20 border border-amber-400/40 flex items-center justify-center text-amber-300 shrink-0">
+              <Gift className="w-5 h-5" />
+            </div>
+            <div className="flex-1 min-w-0 text-xs">
+              <p className="font-extrabold text-white leading-snug">{referralRewardToast.message}</p>
+              {referralRewardToast.subtext && (
+                <p className="text-[11px] text-slate-300 mt-1 leading-relaxed">{referralRewardToast.subtext}</p>
+              )}
+              <button
+                type="button"
+                onClick={() => {
+                  setReferralRewardToast(null);
+                  setShowPlansModal(true);
+                }}
+                className="mt-2 inline-flex items-center gap-1 text-[11px] font-bold text-amber-300 hover:text-amber-200 cursor-pointer"
+              >
+                View My License &amp; Referral Code →
+              </button>
+            </div>
+            <button
+              type="button"
+              onClick={() => setReferralRewardToast(null)}
+              className="p-1 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white cursor-pointer shrink-0"
+              aria-label="Close notification"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
 
         {/* Role Authorization Modal for Sensitive Operations in Phone Mode */}
         <RoleAuthorizationModal request={roleAuthRequest} />
@@ -6291,6 +6730,47 @@ export default function App() {
           );
         })()}
 
+        {/* Referred Merchant 45-Day Welcome Banner */}
+        {storeProfile?.referredBy &&
+          storeProfile.planType === 'trial' &&
+          welcomeBannerDismissedForStore !== storeProfile.id &&
+          (() => {
+            try {
+              if (localStorage.getItem(`rofani_welcome_ref_dismissed_${storeProfile.id}`) === '1') {
+                return null;
+              }
+            } catch {}
+            return (
+              <div className="bg-gradient-to-r from-amber-500/20 via-emerald-500/15 to-sky-500/20 border-b border-amber-400/40 bg-slate-900 text-slate-100 px-4 py-2.5 text-xs flex items-center justify-between gap-3 shrink-0 z-30">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-400 text-slate-950 font-extrabold text-[10px] uppercase">
+                    <Gift className="w-3 h-3" /> Referral Bonus Active
+                  </span>
+                  <span>
+                    Welcome to Rofani POS! You were referred by{' '}
+                    <strong className="text-amber-300">
+                      {storeProfile.referredByStoreName || 'a fellow merchant'}
+                    </strong>{' '}
+                    — enjoy <strong className="text-emerald-300">45 Days Free Trial</strong> (+15 extra days)!
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    try {
+                      localStorage.setItem(`rofani_welcome_ref_dismissed_${storeProfile.id}`, '1');
+                    } catch {}
+                    setWelcomeBannerDismissedForStore(storeProfile.id);
+                  }}
+                  className="p-1 rounded hover:bg-slate-800 text-slate-300 hover:text-white cursor-pointer shrink-0"
+                  aria-label="Dismiss welcome bonus banner"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            );
+          })()}
+
         {/* Daily Email Backup Notification Banner */}
         {backupBanner && (
           <div className={`px-4 py-2.5 text-xs font-semibold flex items-center justify-between shadow-sm z-30 shrink-0 ${
@@ -6790,7 +7270,7 @@ export default function App() {
         {/* Dynamic Workspace Canvas for Computer Format */}
         <div
           className={`flex-1 min-h-0 overflow-y-auto ${
-            activeTab === 'pos' && isMobileSearchActive ? 'pb-4 lg:pb-0' : 'pb-24 lg:pb-0'
+            activeTab === 'pos' && isMobileSearchActive ? 'pb-4 lg:pb-0' : 'pb-28 lg:pb-0'
           } ${
             activeTab === 'menu'
               ? 'bg-[#0f172a] text-slate-100'
@@ -6800,19 +7280,20 @@ export default function App() {
           {renderActiveTabContent()}
         </div>
 
-        {/* Floating 1-Tap Make Sale Shortcut on Responsive Mobile Screens (non-POS tabs) */}
-        {activeTab !== 'pos' && (
-          <button
-            type="button"
-            id="btn-mobile-responsive-fab-make-sale"
-            onClick={() => setActiveTab('pos')}
-            title="Make Sale — Jump straight to POS Checkout"
-            className="lg:hidden fixed bottom-20 right-3 z-40 h-11 px-4 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 active:scale-95 text-white text-xs font-extrabold flex items-center gap-1.5 shadow-xl shadow-emerald-950/70 border border-emerald-400/40 transition cursor-pointer"
-          >
-            <ShoppingBag className="w-4 h-4 shrink-0" />
-            <span>Make Sale</span>
-          </button>
-        )}
+        {/* Floating Mobile Quick Tools & Make Sale Bar (Responsive < lg Mobile Screens) */}
+        <MobileQuickToolsBar
+          placement="responsiveMobile"
+          hidden={shouldHideMobileQuickTools}
+          activeTab={activeTab}
+          onMakeSale={handleMobileMakeSaleBarClick}
+          onOpenBarcodeScanner={handleMobileOpenBarcodeScanner}
+          onScanManualBarcode={handleMobileManualBarcode}
+          onOpenAiScanner={handleMobileOpenAiScanner}
+          onApplyQuickDiscount={handleMobileApplyQuickDiscount}
+          onClearQuickDiscount={handleMobileClearQuickDiscount}
+          cartSummary={mobileCartSummary}
+          canGiveDiscounts={hasWorkerPermission(currentUser, 'canGiveDiscounts')}
+        />
 
         {/* Fixed 5-Tab Dark Bottom Navigation Bar (Mobile Screens — hidden when POS search keyboard is active) */}
         {!(activeTab === 'pos' && isMobileSearchActive) && (
@@ -7004,6 +7485,7 @@ export default function App() {
         storeId={activeCloudStoreId || OWNER_PRIMARY_STORE_ID}
         storeProfile={storeProfile}
         onSubscriptionUpdated={(updated) => setStoreProfile(updated)}
+        onOpenAiAssistant={() => setShowAiAssistantModal(true)}
       />
 
       {/* Owner-Only Super Admin Subscribers Control Panel */}
@@ -7171,6 +7653,39 @@ export default function App() {
         }}
         onOpenStockDigest={() => setShowStockAlertModal(true)}
       />
+
+      {/* Referral Reward / Welcome Toast (Desktop Mode) */}
+      {referralRewardToast && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[260] w-[calc(100%-2rem)] max-w-md bg-slate-900 border border-amber-400/60 text-slate-100 rounded-2xl p-4 shadow-2xl flex items-start gap-3">
+          <div className="w-9 h-9 rounded-xl bg-amber-400/20 border border-amber-400/40 flex items-center justify-center text-amber-300 shrink-0">
+            <Gift className="w-5 h-5" />
+          </div>
+          <div className="flex-1 min-w-0 text-xs">
+            <p className="font-extrabold text-white leading-snug">{referralRewardToast.message}</p>
+            {referralRewardToast.subtext && (
+              <p className="text-[11px] text-slate-300 mt-1 leading-relaxed">{referralRewardToast.subtext}</p>
+            )}
+            <button
+              type="button"
+              onClick={() => {
+                setReferralRewardToast(null);
+                setShowPlansModal(true);
+              }}
+              className="mt-2 inline-flex items-center gap-1 text-[11px] font-bold text-amber-300 hover:text-amber-200 cursor-pointer"
+            >
+              View My License &amp; Referral Code →
+            </button>
+          </div>
+          <button
+            type="button"
+            onClick={() => setReferralRewardToast(null)}
+            className="p-1 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white cursor-pointer shrink-0"
+            aria-label="Close notification"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
 
       {/* Automatic Camera Authorization on App Launch */}
       <CameraStartupPrompt />

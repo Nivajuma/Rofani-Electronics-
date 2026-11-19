@@ -103,6 +103,19 @@ interface POSViewProps {
   onBatchImportProducts?: (products: Product[], replaceExisting: boolean) => void;
   inPhoneFrame?: boolean;
   onMobileSearchActiveChange?: (active: boolean) => void;
+  onMobileCartOpenChange?: (isOpen: boolean) => void;
+  onMobileCartSummaryChange?: (summary: {
+    itemCount: number;
+    subtotal: number;
+    discountTotal: number;
+    grandTotal: number;
+    hasCartItems: boolean;
+  }) => void;
+  externalScanTrigger?: number;
+  externalAiScanTrigger?: number;
+  externalManualBarcodeRequest?: { code: string; nonce: number } | null;
+  externalQuickDiscountRequest?: { mode: 'fixed' | 'percentage'; value: number; nonce: number } | null;
+  externalClearDiscountTrigger?: number;
   storeName?: string;
 }
 
@@ -122,6 +135,13 @@ export const POSView: React.FC<POSViewProps> = ({
   onBatchImportProducts,
   inPhoneFrame = false,
   onMobileSearchActiveChange,
+  onMobileCartOpenChange,
+  onMobileCartSummaryChange,
+  externalScanTrigger,
+  externalAiScanTrigger,
+  externalManualBarcodeRequest,
+  externalQuickDiscountRequest,
+  externalClearDiscountTrigger,
   storeName = 'Rofani POS',
 }) => {
   const customSettingsShopName = safeGetJSON<string>('rofani_settings_shop_name', '');
@@ -1475,6 +1495,107 @@ export const POSView: React.FC<POSViewProps> = ({
   const afterDiscountAmount = Math.max(0, itemsSubtotal - numDiscount);
   const taxTotal = afterDiscountAmount * (taxRate / 100);
   const grandTotal = Math.max(0, afterDiscountAmount + taxTotal);
+
+  const isAnyCheckoutSheetOpen = mobileTab === 'cart' || showCheckoutModal || showMpesaPromptModal;
+
+  useEffect(() => {
+    onMobileCartOpenChange?.(isAnyCheckoutSheetOpen);
+  }, [isAnyCheckoutSheetOpen, onMobileCartOpenChange]);
+
+  useEffect(() => {
+    return () => {
+      onMobileCartOpenChange?.(false);
+    };
+  }, [onMobileCartOpenChange]);
+
+  useEffect(() => {
+    const itemCount = cart.reduce((sum, item) => sum + item.quantity, 0);
+    onMobileCartSummaryChange?.({
+      itemCount,
+      subtotal: itemsSubtotal,
+      discountTotal: totalDiscount,
+      grandTotal,
+      hasCartItems: cart.length > 0,
+    });
+  }, [cart, itemsSubtotal, totalDiscount, grandTotal, onMobileCartSummaryChange]);
+
+  const handledScanNonceRef = useRef<number>(0);
+  useEffect(() => {
+    if (externalScanTrigger && externalScanTrigger !== handledScanNonceRef.current) {
+      handledScanNonceRef.current = externalScanTrigger;
+      setShowScanner(true);
+    }
+  }, [externalScanTrigger]);
+
+  const handledAiScanNonceRef = useRef<number>(0);
+  useEffect(() => {
+    if (externalAiScanTrigger && externalAiScanTrigger !== handledAiScanNonceRef.current) {
+      handledAiScanNonceRef.current = externalAiScanTrigger;
+      setShowAiReceiptScanner(true);
+    }
+  }, [externalAiScanTrigger]);
+
+  const handledManualBarcodeNonceRef = useRef<number>(0);
+  useEffect(() => {
+    if (
+      externalManualBarcodeRequest &&
+      externalManualBarcodeRequest.code &&
+      externalManualBarcodeRequest.nonce !== handledManualBarcodeNonceRef.current
+    ) {
+      handledManualBarcodeNonceRef.current = externalManualBarcodeRequest.nonce;
+      handleBarcodeScan(externalManualBarcodeRequest.code);
+    }
+  }, [externalManualBarcodeRequest]);
+
+  const handledDiscountNonceRef = useRef<number>(0);
+  useEffect(() => {
+    if (
+      externalQuickDiscountRequest &&
+      externalQuickDiscountRequest.nonce !== handledDiscountNonceRef.current
+    ) {
+      handledDiscountNonceRef.current = externalQuickDiscountRequest.nonce;
+      const { mode, value } = externalQuickDiscountRequest;
+      if (hasWorkerPermission(currentUser, 'canGiveDiscounts')) {
+        setDiscountMode(mode);
+        setDiscountInputVal(String(value));
+        const computed =
+          mode === 'percentage'
+            ? Math.round((Math.min(100, value) / 100) * itemsSubtotal)
+            : Math.min(itemsSubtotal, value);
+        setDiscountAmount(computed);
+        setPosNotice({
+          type: 'success',
+          message:
+            mode === 'percentage'
+              ? `Quick Discount applied: ${value}% off (KSh ${computed.toLocaleString()})`
+              : `Quick Discount applied: -KSh ${computed.toLocaleString()}`,
+        });
+        setTimeout(() => setPosNotice(null), 3500);
+      } else {
+        setSupervisorDiscountMode(mode);
+        setTempDiscountVal(value);
+        setAdminPinInput('');
+        setAdminAuthError('');
+        setShowAdminDiscountAuthModal(true);
+      }
+    }
+  }, [externalQuickDiscountRequest, currentUser, itemsSubtotal]);
+
+  const handledClearDiscountNonceRef = useRef<number>(0);
+  useEffect(() => {
+    if (
+      externalClearDiscountTrigger &&
+      externalClearDiscountTrigger !== handledClearDiscountNonceRef.current
+    ) {
+      handledClearDiscountNonceRef.current = externalClearDiscountTrigger;
+      setDiscountAmount(0);
+      setDiscountInputVal('');
+      setDiscountMode('fixed');
+      if (currentUser.role !== 'Admin') {
+        setDiscountAuthorizedBy(null);
+      }
+    }
+  }, [externalClearDiscountTrigger, currentUser.role]);
 
   const currentCartComm = calculateWorkerCommission(selectedSalesRep, grandTotal, cart);
   const repTodayComm = repTodayTx.reduce((sum, tx) => {
@@ -3613,8 +3734,8 @@ export const POSView: React.FC<POSViewProps> = ({
           <div
             className={
               inPhoneFrame
-                ? 'pointer-events-auto absolute bottom-[4.25rem] left-3 right-3 z-40'
-                : 'lg:hidden fixed bottom-[4.25rem] left-3 right-3 z-40'
+                ? 'pointer-events-auto absolute bottom-[7.5rem] left-3 right-3 z-40'
+                : 'lg:hidden fixed bottom-[7.5rem] left-3 right-3 z-40'
             }
           >
             <button

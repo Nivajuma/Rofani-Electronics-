@@ -23,11 +23,13 @@ import {
   Trash2,
   KeyRound,
   RefreshCw,
-  Database
+  Database,
+  Clock
 } from 'lucide-react';
 import { Product, Customer, Supplier, Transaction, Expense, AttendanceRecord, User, StoreLocation, Role, WorkerPermissions } from '../../types';
 import { safeGetJSON, safeSetJSON } from '../../utils/safeStorage';
 import { saveUserToCloud, deleteUserFromCloud } from '../../lib/cloudSync';
+import { getLastBackupMeta, formatLastBackupTimestamp, LastBackupMeta } from '../../utils/storeBackup';
 import { ItemSettingsView } from './ItemSettingsView';
 import { GeneralSettingsView } from './GeneralSettingsView';
 import { PrintAndTaxSettingsView } from './PrintAndTaxSettingsView';
@@ -309,6 +311,16 @@ export const SettingsDashboardView: React.FC<SettingsDashboardViewProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [activeSubPanel, setActiveSubPanel] = useState<SettingCategoryKey | null>(null);
   const [successToast, setSuccessToast] = useState<string | null>(null);
+  const [lastBackupMeta, setLastBackupMeta] = useState<LastBackupMeta | null>(() => getLastBackupMeta());
+
+  useEffect(() => {
+    const onBackupRecorded = (e: Event) => {
+      const detail = (e as CustomEvent<LastBackupMeta>).detail;
+      setLastBackupMeta(detail || getLastBackupMeta());
+    };
+    window.addEventListener('rofani:backup-recorded', onBackupRecorded);
+    return () => window.removeEventListener('rofani:backup-recorded', onBackupRecorded);
+  }, []);
 
   const triggerNotify = (msg: string) => {
     setSuccessToast(msg);
@@ -774,9 +786,28 @@ export const SettingsDashboardView: React.FC<SettingsDashboardViewProps> = ({
                     <IconComponent className="w-5 h-5" />
                   </div>
                   <div>
-                    <h3 className="font-bold text-sm text-slate-100 group-hover:text-blue-400 transition">
-                      {item.title}
-                    </h3>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h3 className="font-bold text-sm text-slate-100 group-hover:text-blue-400 transition">
+                        {item.title}
+                      </h3>
+                      {item.id === 'data' && (
+                        <span
+                          className={`inline-flex items-center gap-1 text-[10px] font-mono px-2 py-0.5 rounded-full border ${
+                            lastBackupMeta
+                              ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/35'
+                              : 'bg-amber-500/15 text-amber-300 border-amber-500/35'
+                          }`}
+                        >
+                          <Clock className="w-2.5 h-2.5" />
+                          <span>
+                            Last Backup:{' '}
+                            {lastBackupMeta
+                              ? formatLastBackupTimestamp(lastBackupMeta.timestamp)
+                              : 'Not Yet Backed Up'}
+                          </span>
+                        </span>
+                      )}
+                    </div>
                     <p className="text-xs text-slate-400 mt-0.5 line-clamp-1">
                       {item.description}
                     </p>

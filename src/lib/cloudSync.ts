@@ -7,6 +7,7 @@ import {
   writeBatch,
   getDocs,
   getDoc,
+  runTransaction,
 } from 'firebase/firestore';
 import {
   db,
@@ -32,6 +33,8 @@ import {
   SensitiveActionLog,
   StoreSubscriptionProfile,
   SubscriptionPaymentRecord,
+  ReferralCodeLookup,
+  ReferralRewardClaim,
 } from '../types';
 
 const DEFAULT_FIRESTORE_WRITE_TIMEOUT_MS = 18000;
@@ -569,7 +572,8 @@ function isTransportStallError(error: unknown): boolean {
     msg.includes('could not reach') ||
     msg.includes('unavailable') ||
     msg.includes('deadline') ||
-    msg.includes('network')
+    msg.includes('network') ||
+    msg.includes('target id already exists')
   );
 }
 
@@ -1329,6 +1333,144 @@ export function subscribeToStoreProfile(
   );
 }
 
+export const STANDARD_FREE_TRIAL_DAYS = 30;
+export const REFERRED_FREE_TRIAL_DAYS = 45;
+export const REFERRER_BONUS_DAYS = 30;
+
+export function normalizeReferralCode(raw: string): string {
+  return String(raw || '')
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, '-')
+    .replace(/[^A-Z0-9-]/g, '')
+    .slice(0, 32);
+}
+
+export function generateStoreReferralCode(
+  storeName: string,
+  storeId: string,
+  saltIndex: number = 0
+): string {
+  const cleanedName = String(storeName || '')
+    .toUpperCase()
+    .replace(/\b(ROFANI|POS|SHOP|STORE|ENTERPRISES|LTD)\b/g, '')
+    .replace(/[^A-Z0-9]/g, '');
+  const prefix = (cleanedName.slice(0, 4) || 'SHOP').padEnd(4, 'X');
+  const uidClean = String(storeId || 'RF01')
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, '');
+  const tail = (uidClean.slice(0, 2) + uidClean.slice(-2)).slice(0, 2).padEnd(2, '9');
+  const salt = saltIndex > 0 ? String(saltIndex) : '';
+  return `ROFANI-${prefix}${tail}${salt}`.slice(0, 20);
+}
+
+export async function lookupReferralCode(rawCode: string): Promise<ReferralCodeLookup | null> {
+  const normalized = normalizeReferralCode(rawCode);
+  if (!normalized || normalized.length < 4) return null;
+
+  const candidates = normalized.startsWith('ROFANI-')
+    ? [normalized]
+    : [normalized, `ROFANI-${normalized}`];
+
+  for (const candidate of candidates) {
+    try {
+      const snap = await withFirestoreTimeout(
+        getDoc(doc(db, 'referral_codes', candidate)),
+        `checking referral code ${candidate}`,
+        3000
+      );
+      if (snap.exists()) {
+        return snap.data() as ReferralCodeLookup;
+      }
+    } catch {
+      // Ignore invalid/offline lookup attempt and try next candidate
+    }
+  }
+  return null;
+}
+
+export async function ensureReferralCodeForStore(
+  profile: StoreSubscriptionProfile
+): Promise<StoreSubscriptionProfile> {
+  if (!profile?.id) return profile;
+
+  const existingCode = profile.referralCode ? normalizeReferralCode(profile.referralCode) : '';
+  let chosenCode = existingCode;
+
+  if (!chosenCode) {
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const candidate = generateStoreReferralCode(
+        profile.ownerEmail?.toLowerCase() === OWNER_CLOUD_EMAIL ? 'NIVA' : profile.storeName,
+        profile.id,
+        attempt
+      );
+      try {
+        const snap = await withFirestoreTimeout(
+          getDoc(doc(db, 'referral_codes', candidate)),
+          'checking referral code availability',
+          3000
+        );
+        if (!snap.exists() || snap.data()?.storeId === profile.id) {
+          chosenCode = candidate;
+          break;
+        }
+      } catch {
+        chosenCode = candidate;
+        break;
+      }
+    }
+    if (!chosenCode) {
+      chosenCode = generateStoreReferralCode(profile.storeName, profile.id, Date.now() % 97);
+    }
+  }
+
+  const nowIso = new Date().toISOString();
+  try {
+    await withFirestoreTimeout(
+      setDoc(
+        doc(db, 'referral_codes', chosenCode),
+        cleanForFirestore({
+          code: chosenCode,
+          storeId: profile.id,
+          storeName: (profile.storeName || 'Rofani POS').slice(0, 200),
+          ownerUid: profile.ownerUid || profile.id,
+          createdAt: profile.createdAt || nowIso,
+        }),
+        { merge: true }
+      ),
+      'registering referral code index',
+      3000
+    ).catch(() => {});
+
+    if (profile.referralCode !== chosenCode) {
+      const updated: StoreSubscriptionProfile = {
+        ...profile,
+        referralCode: chosenCode,
+        referralCount: profile.referralCount ?? 0,
+        updatedAt: nowIso,
+      };
+      await withFirestoreTimeout(
+        setDoc(
+          doc(db, 'stores', profile.id),
+          cleanForFirestore({
+            referralCode: chosenCode,
+            referralCount: profile.referralCount ?? 0,
+            updatedAt: nowIso,
+          }),
+          { merge: true }
+        ),
+        'saving store referral code',
+        3000
+      ).catch(() => {});
+      return updated;
+    }
+  } catch {
+    // Non-fatal offline fallback
+  }
+
+  return profile.referralCode ? profile : { ...profile, referralCode: chosenCode };
+}
+
 export async function ensureOwnerPrimaryStoreProfile(user: {
   uid: string;
   email?: string | null;
@@ -1338,6 +1480,7 @@ export async function ensureOwnerPrimaryStoreProfile(user: {
   const nowIso = new Date().toISOString();
   const existing = await fetchStoreProfile(targetStoreId).catch(() => null);
   if (existing) {
+    let baseProfile = existing;
     if (existing.subscriptionStatus !== 'active' || existing.planType !== 'annual') {
       const updated: StoreSubscriptionProfile = {
         ...existing,
@@ -1354,9 +1497,9 @@ export async function ensureOwnerPrimaryStoreProfile(user: {
         'updating primary owner store profile',
         3000
       ).catch(() => {});
-      return updated;
+      baseProfile = updated;
     }
-    return existing;
+    return ensureReferralCodeForStore(baseProfile);
   }
 
   // Fallback: inherit existing primary profile from legacy stores/rofani-pos if present
@@ -1378,6 +1521,8 @@ export async function ensureOwnerPrimaryStoreProfile(user: {
     expiresAt: new Date(Date.now() + 10 * 365 * 86400000).toISOString(),
     lastPaymentRef: legacyProfile?.lastPaymentRef || 'OWNER-MASTER',
     lastPaymentMethod: 'admin_override',
+    referralCode: legacyProfile?.referralCode || generateStoreReferralCode('NIVA', targetStoreId),
+    referralCount: legacyProfile?.referralCount ?? 0,
     createdAt: legacyProfile?.createdAt || nowIso,
     updatedAt: nowIso,
   };
@@ -1391,7 +1536,7 @@ export async function ensureOwnerPrimaryStoreProfile(user: {
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, `stores/${targetStoreId}`);
   }
-  return profile;
+  return ensureReferralCodeForStore(profile);
 }
 
 export async function createMerchantStoreProfile(params: {
@@ -1403,11 +1548,33 @@ export async function createMerchantStoreProfile(params: {
   kraPin?: string;
   mpesaShortcode?: string;
   mpesaShortcodeType?: 'till' | 'paybill';
+  referralCode?: string;
 }): Promise<StoreSubscriptionProfile> {
   const now = new Date();
   const nowIso = now.toISOString();
-  const trialExpiresIso = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString();
   const storeId = params.uid;
+
+  const matchedReferrer = params.referralCode
+    ? await lookupReferralCode(params.referralCode).catch(() => null)
+    : null;
+  const validReferrer =
+    matchedReferrer && matchedReferrer.storeId !== storeId ? matchedReferrer : null;
+
+  const grantedTrialDays = validReferrer ? REFERRED_FREE_TRIAL_DAYS : STANDARD_FREE_TRIAL_DAYS;
+  const trialExpiresIso = new Date(
+    now.getTime() + grantedTrialDays * 24 * 60 * 60 * 1000
+  ).toISOString();
+
+  // Generate unique clean referral code for this newly created merchant store
+  let ownReferralCode = generateStoreReferralCode(params.storeName, storeId, 0);
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const candidate = generateStoreReferralCode(params.storeName, storeId, attempt);
+    const existingCodeSnap = await getDoc(doc(db, 'referral_codes', candidate)).catch(() => null);
+    if (!existingCodeSnap || !existingCodeSnap.exists() || existingCodeSnap.data()?.storeId === storeId) {
+      ownReferralCode = candidate;
+      break;
+    }
+  }
 
   const profile: StoreSubscriptionProfile = {
     id: storeId,
@@ -1422,13 +1589,54 @@ export async function createMerchantStoreProfile(params: {
     subscriptionStatus: 'active',
     expiresAt: trialExpiresIso,
     lastPaymentMethod: 'free_trial',
+    referralCode: ownReferralCode,
+    referralCount: 0,
+    trialDaysGranted: grantedTrialDays,
+    ...(validReferrer
+      ? {
+          referredBy: validReferrer.storeId,
+          referredByCode: validReferrer.code,
+          referredByStoreName: validReferrer.storeName,
+        }
+      : {}),
     createdAt: nowIso,
     updatedAt: nowIso,
   };
 
   try {
+    const batch = writeBatch(db);
+    batch.set(doc(db, 'stores', storeId), cleanForFirestore(profile), { merge: true });
+    batch.set(
+      doc(db, 'referral_codes', ownReferralCode),
+      cleanForFirestore({
+        code: ownReferralCode,
+        storeId,
+        storeName: profile.storeName.slice(0, 200),
+        ownerUid: params.uid,
+        createdAt: nowIso,
+      }),
+      { merge: true }
+    );
+
+    if (validReferrer) {
+      const claimDoc: ReferralRewardClaim = {
+        id: storeId,
+        referrerStoreId: validReferrer.storeId,
+        referredStoreId: storeId,
+        referredStoreName: profile.storeName,
+        referralCode: validReferrer.code,
+        bonusDays: REFERRER_BONUS_DAYS,
+        applied: false,
+        awardedAt: nowIso,
+      };
+      batch.set(
+        doc(db, 'stores', validReferrer.storeId, 'referral_rewards', storeId),
+        cleanForFirestore(claimDoc)
+      );
+    }
+
     await withFirestoreTimeout(
-      setDoc(doc(db, 'stores', storeId), cleanForFirestore(profile), { merge: true }),
+      batch.commit(),
       `creating store ${profile.storeName}`
     );
 
@@ -1473,6 +1681,139 @@ export async function createMerchantStoreProfile(params: {
   }
 }
 
+export async function reconcileIncomingReferralRewards(storeId: string): Promise<{
+  newlyAppliedCount: number;
+  totalBonusDays: number;
+  latestReferredStoreName?: string;
+  updatedProfile?: StoreSubscriptionProfile;
+}> {
+  if (!storeId) {
+    return { newlyAppliedCount: 0, totalBonusDays: 0 };
+  }
+
+  const rewardsColRef = collection(db, 'stores', storeId, 'referral_rewards');
+  try {
+    const snap = await withFirestoreTimeout(
+      getDocs(rewardsColRef),
+      'checking referral rewards',
+      4000
+    );
+
+    const pendingClaims: ReferralRewardClaim[] = [];
+    snap.forEach((d) => {
+      const data = d.data() as ReferralRewardClaim;
+      if (data && data.applied !== true) {
+        pendingClaims.push({ ...data, id: d.id });
+      }
+    });
+
+    if (pendingClaims.length === 0) {
+      return { newlyAppliedCount: 0, totalBonusDays: 0 };
+    }
+
+    const result = await withFirestoreTimeout(
+      runTransaction(db, async (tx) => {
+        const storeRef = doc(db, 'stores', storeId);
+        const storeSnap = await tx.get(storeRef);
+        if (!storeSnap.exists()) {
+          return { newlyAppliedCount: 0, totalBonusDays: 0 };
+        }
+
+        const currentStore = { id: storeSnap.id, ...storeSnap.data() } as StoreSubscriptionProfile;
+        const claimsToApply: { ref: ReturnType<typeof doc>; data: ReferralRewardClaim }[] = [];
+
+        for (const claim of pendingClaims) {
+          const claimRef = doc(db, 'stores', storeId, 'referral_rewards', claim.id);
+          const freshClaimSnap = await tx.get(claimRef);
+          if (freshClaimSnap.exists()) {
+            const freshData = freshClaimSnap.data() as ReferralRewardClaim;
+            if (freshData.applied !== true) {
+              claimsToApply.push({ ref: claimRef, data: freshData });
+            }
+          }
+        }
+
+        if (claimsToApply.length === 0) {
+          return { newlyAppliedCount: 0, totalBonusDays: 0 };
+        }
+
+        const totalDays = claimsToApply.reduce(
+          (sum, c) => sum + (Number(c.data.bonusDays) || REFERRER_BONUS_DAYS),
+          0
+        );
+        const nowMs = Date.now();
+        const nowIso = new Date(nowMs).toISOString();
+        const existingExpMs = currentStore.expiresAt ? Date.parse(currentStore.expiresAt) : 0;
+        const baseMs = Number.isFinite(existingExpMs) && existingExpMs > nowMs ? existingExpMs : nowMs;
+        const nextExpiresAt = new Date(baseMs + totalDays * 24 * 60 * 60 * 1000).toISOString();
+        const nextReferralCount = (currentStore.referralCount || 0) + claimsToApply.length;
+        const latestReferredStoreName =
+          claimsToApply[claimsToApply.length - 1]?.data?.referredStoreName || 'a fellow merchant';
+
+        const storePatch: Partial<StoreSubscriptionProfile> = {
+          subscriptionStatus: 'active',
+          expiresAt: nextExpiresAt,
+          referralCount: nextReferralCount,
+          lastReferralBonusAt: nowIso,
+          lastReferralRewardStoreName: latestReferredStoreName,
+          updatedAt: nowIso,
+        };
+
+        tx.set(storeRef, cleanForFirestore(storePatch), { merge: true });
+        for (const item of claimsToApply) {
+          tx.update(item.ref, {
+            applied: true,
+            appliedAt: nowIso,
+          });
+        }
+
+        return {
+          newlyAppliedCount: claimsToApply.length,
+          totalBonusDays: totalDays,
+          latestReferredStoreName,
+          updatedProfile: {
+            ...currentStore,
+            ...storePatch,
+          } as StoreSubscriptionProfile,
+        };
+      }),
+      'applying referral bonus days',
+      5000
+    );
+
+    return result;
+  } catch (err) {
+    console.warn('[Referral Rewards] Non-fatal reconciliation notice:', err);
+    return { newlyAppliedCount: 0, totalBonusDays: 0 };
+  }
+}
+
+export function subscribeToReferralRewards(
+  storeId: string,
+  onPendingRewardsDetected: () => void
+) {
+  if (!storeId) return () => {};
+  const rewardsColRef = collection(db, 'stores', storeId, 'referral_rewards');
+  return onSnapshot(
+    rewardsColRef,
+    (snapshot) => {
+      let hasUnapplied = false;
+      snapshot.forEach((d) => {
+        const data = d.data() as ReferralRewardClaim;
+        if (data && data.applied !== true) {
+          hasUnapplied = true;
+        }
+      });
+      if (hasUnapplied) {
+        onPendingRewardsDetected();
+      }
+    },
+    (error) => {
+      handleFirestoreError(error, OperationType.LIST, `stores/${storeId}/referral_rewards`);
+    }
+  );
+}
+
 export async function updateStoreProfileDetails(
   storeId: string,
   updates: Partial<Pick<StoreSubscriptionProfile, 'storeName' | 'phone' | 'kraPin' | 'mpesaShortcode' | 'mpesaShortcodeType'>>
@@ -1499,7 +1840,7 @@ export async function updateStoreProfileDetails(
 export async function activateStoreSubscription(
   storeId: string,
   params: {
-    planType: 'monthly' | 'annual';
+    planType: 'monthly' | 'quarterly' | 'biannual' | 'annual';
     durationDays: number;
     paymentRef: string;
     amount: number;

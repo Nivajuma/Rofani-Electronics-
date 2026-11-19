@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Database,
   Download,
@@ -38,7 +38,9 @@ import {
   RotateCcw,
   History,
   BatteryCharging,
-  Wifi
+  Wifi,
+  Send,
+  X
 } from 'lucide-react';
 import { Product, Customer, Supplier, Transaction, Expense, AttendanceRecord, User, StoreLocation } from '../../types';
 import { detectDuplicateProducts, deduplicateProducts } from '../../utils/deduplicate';
@@ -67,6 +69,21 @@ import {
   fetchProductsFromCloud,
   fetchTransactionsFromCloud,
 } from '../../lib/cloudSync';
+import {
+  LastBackupMeta,
+  ParsedBackupPreview,
+  getLastBackupMeta,
+  recordLastBackupMeta,
+  formatLastBackupTimestamp,
+  formatBackupMethodLabel,
+  getStoreBackupFileName,
+  buildCompleteStoreBackupPayload,
+  buildHumanReadableStoreSummaryCSV,
+  triggerBrowserDownload,
+  canUseNativeFileShare,
+  shareOrEmailStoreBackup,
+  parseStoreBackupFile,
+} from '../../utils/storeBackup';
 
 interface DataManagementViewProps {
   products: Product[];
@@ -81,8 +98,11 @@ interface DataManagementViewProps {
   onUpdateUser?: (updatedUser: User) => void;
   onDeleteUser?: (userId: string) => void;
   stores?: StoreLocation[];
+  activeStoreId?: string | null;
+  activeStoreName?: string;
+  accountEmail?: string;
   onOpenStoreManager?: () => void;
-  onImportData: (data: any) => void;
+  onImportData: (data: any, options?: { mode?: 'merge' | 'replace' }) => void;
   onResetSampleData: () => void;
   onClearTransactions: () => void;
   onClearExpenses: () => void;
@@ -144,6 +164,9 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
   onLockNow,
   onOpenAuditLogs,
   stores = [],
+  activeStoreId = null,
+  activeStoreName = 'Rofani POS',
+  accountEmail = '',
   onOpenStoreManager,
   onEmergencyRestore,
   onOpenCategoryManager,
@@ -166,6 +189,36 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
     details: string;
     timestamp: string;
   } | null>(null);
+  const restoreFileInputRef = useRef<HTMLInputElement | null>(null);
+  const [lastBackupMeta, setLastBackupMeta] = useState<LastBackupMeta | null>(() => getLastBackupMeta());
+  const [showShareEmailModal, setShowShareEmailModal] = useState(false);
+  const [backupEmailInput, setBackupEmailInput] = useState<string>(() => {
+    const saved = safeGetJSON<string>('rofani_pos_backup_email', '');
+    return saved || accountEmail || '';
+  });
+  const [isSharingBackup, setIsSharingBackup] = useState(false);
+  const [shareFeedback, setShareFeedback] = useState<{ type: 'success' | 'info' | 'error'; message: string } | null>(null);
+  const [pendingRestorePreview, setPendingRestorePreview] = useState<ParsedBackupPreview | null>(null);
+  const [restoreMode, setRestoreMode] = useState<'merge' | 'replace'>('merge');
+  const [restorePinInput, setRestorePinInput] = useState('');
+  const [showRestorePin, setShowRestorePin] = useState(false);
+  const [restorePinError, setRestorePinError] = useState<string | null>(null);
+  const [isRestoringBackup, setIsRestoringBackup] = useState(false);
+
+  useEffect(() => {
+    if (accountEmail && !backupEmailInput.trim()) {
+      setBackupEmailInput(accountEmail);
+    }
+  }, [accountEmail]);
+
+  useEffect(() => {
+    const onBackupRecorded = (e: Event) => {
+      const detail = (e as CustomEvent<LastBackupMeta>).detail;
+      setLastBackupMeta(detail || getLastBackupMeta());
+    };
+    window.addEventListener('rofani:backup-recorded', onBackupRecorded);
+    return () => window.removeEventListener('rofani:backup-recorded', onBackupRecorded);
+  }, []);
 
   const handleToggleAggressiveAutoSync = () => {
     const nextVal = !aggressiveAutoSync;
@@ -453,48 +506,139 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
 
   const triggerNotify = (msg: string) => {
     setSuccessMessage(msg);
-    setTimeout(() => setSuccessMessage(null), 4000);
+    setTimeout(() => setSuccessMessage(null), 4500);
   };
 
-  // 1. Export entire database to JSON
-  const handleExportFullDatabaseJSON = () => {
-    const fullBackup = {
-      version: '1.0.0',
-      exportedAt: new Date().toISOString(),
-      storeInfo: {
-        name: storeName,
+  const resolvedStoreName = (activeStoreName || storeName || 'Rofani POS').trim();
+  const resolvedStoreId = (activeStoreId || '').trim() || 'active-store';
+  const nativeFileShareSupported = canUseNativeFileShare();
+
+  const buildActiveStoreSnapshot = () =>
+    buildCompleteStoreBackupPayload({
+      storeId: resolvedStoreId,
+      accountEmail,
+      storeName: resolvedStoreName,
+      storeSettingsOverrides: {
+        storeName: resolvedStoreName,
         kraPin,
         phone: storePhone,
         paybillTillNumber,
-        kraTaxRate
+        kraTaxRate,
       },
-      data: {
-        products,
-        categories,
-        customers,
-        suppliers,
-        transactions,
-        expenses,
-        attendanceRecords,
-        allUsers
-      }
-    };
+      products,
+      categories,
+      transactions,
+      customers,
+      suppliers,
+      expenses,
+      attendanceRecords,
+      allUsers,
+      stores,
+    });
 
-    const jsonString = `data:text/json;charset=utf-8,${encodeURIComponent(
-      JSON.stringify(fullBackup, null, 2)
-    )}`;
-    const downloadAnchor = document.createElement('a');
-    downloadAnchor.setAttribute('href', jsonString);
-    downloadAnchor.setAttribute(
-      'download',
-      `Rofani_Full_Backup_${new Date().toISOString().slice(0, 10)}.json`
-    );
-    document.body.appendChild(downloadAnchor);
-    downloadAnchor.click();
-    downloadAnchor.remove();
+  // 1. Export entire active store database to timestamped JSON
+  const handleExportFullDatabaseJSON = () => {
+    const fullBackup = buildActiveStoreSnapshot();
+    const fileName = getStoreBackupFileName(resolvedStoreName, 'json', 'RofaniPOS_Backup');
+    const jsonString = JSON.stringify(fullBackup, null, 2);
+
+    triggerBrowserDownload(jsonString, fileName, 'application/json');
+    const meta = recordLastBackupMeta({
+      timestamp: new Date().toISOString(),
+      method: 'local_download',
+      fileName,
+      productsCount: fullBackup.summary.totalProducts,
+      categoriesCount: fullBackup.summary.totalCategories,
+      salesCount: fullBackup.summary.totalTransactions,
+      customersCount: fullBackup.summary.totalCustomers,
+      storeId: resolvedStoreId,
+      storeName: resolvedStoreName,
+    });
+    setLastBackupMeta(meta);
 
     playBackupSuccessSound();
-    triggerNotify('Full JSON database backup downloaded successfully!');
+    triggerNotify('✅ Backup saved to your Downloads folder!');
+  };
+
+  // 1b. Export human-readable CSV summary (Store Overview + Products + Sales)
+  const handleExportStoreSummaryCSV = () => {
+    const fullBackup = buildActiveStoreSnapshot();
+    const fileName = getStoreBackupFileName(resolvedStoreName, 'csv', 'RofaniPOS_Summary');
+    const csvContent = buildHumanReadableStoreSummaryCSV(fullBackup);
+
+    triggerBrowserDownload(csvContent, fileName, 'text/csv;charset=utf-8;');
+    const meta = recordLastBackupMeta({
+      timestamp: new Date().toISOString(),
+      method: 'csv_summary',
+      fileName,
+      productsCount: fullBackup.summary.totalProducts,
+      categoriesCount: fullBackup.summary.totalCategories,
+      salesCount: fullBackup.summary.totalTransactions,
+      customersCount: fullBackup.summary.totalCustomers,
+      storeId: resolvedStoreId,
+      storeName: resolvedStoreName,
+    });
+    setLastBackupMeta(meta);
+
+    playBackupSuccessSound();
+    triggerNotify(`✅ Store CSV summary saved to Downloads (${fileName})!`);
+  };
+
+  // 1c. Share or Email backup copy using Web Share API or mailto: fallback
+  const handleExecuteShareOrEmailBackup = async (preferNativeShare = true) => {
+    const trimmedEmail = backupEmailInput.trim();
+    if (!preferNativeShare && (!trimmedEmail || !trimmedEmail.includes('@'))) {
+      setShareFeedback({
+        type: 'error',
+        message: 'Please enter a valid email address to prepare your email backup draft.',
+      });
+      return;
+    }
+
+    if (trimmedEmail) {
+      safeSetJSON('rofani_pos_backup_email', trimmedEmail);
+    }
+
+    setIsSharingBackup(true);
+    setShareFeedback(null);
+    try {
+      const payload = buildActiveStoreSnapshot();
+      const result = await shareOrEmailStoreBackup({
+        payload,
+        recipientEmail: trimmedEmail || accountEmail || '',
+        preferNativeShare,
+      });
+
+      if (result.outcome === 'web_share') {
+        setLastBackupMeta(getLastBackupMeta());
+        playBackupSuccessSound();
+        setShareFeedback({
+          type: 'success',
+          message: `✅ Backup file (${result.fileName}) shared successfully!`,
+        });
+        triggerNotify(`✅ Backup shared (${result.fileName})!`);
+      } else if (result.outcome === 'mailto_fallback') {
+        setLastBackupMeta(getLastBackupMeta());
+        playBackupSuccessSound();
+        setShareFeedback({
+          type: 'success',
+          message: `✅ Backup saved to Downloads (${result.fileName}) and your email draft was opened. Tap Attach and select "${result.fileName}" before sending.`,
+        });
+        triggerNotify(`✅ Email draft opened & ${result.fileName} saved to Downloads!`);
+      } else {
+        setShareFeedback({
+          type: 'info',
+          message: 'Share sheet closed — no changes were made.',
+        });
+      }
+    } catch (err: any) {
+      setShareFeedback({
+        type: 'error',
+        message: err?.message || 'Could not share or prepare email backup.',
+      });
+    } finally {
+      setIsSharingBackup(false);
+    }
   };
 
   // 2. Export Products as CSV
@@ -536,7 +680,7 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
     triggerNotify('Sales Transactions CSV export generated successfully!');
   };
 
-  // 4. Import / Restore JSON Backup
+  // 4. Import / Restore JSON Backup (Opens Admin PIN-Protected Preview Modal)
   const handleImportJSONFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -544,26 +688,74 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
     const reader = new FileReader();
     reader.onload = (event) => {
       try {
-        const parsed = JSON.parse(event.target?.result as string);
-        if (parsed && (parsed.data || parsed.products)) {
-          const importPayload = parsed.data || parsed;
-          onImportData(importPayload);
-          if (parsed.storeInfo) {
-            if (parsed.storeInfo.name) setStoreName(parsed.storeInfo.name);
-            if (parsed.storeInfo.kraPin) setKraPin(parsed.storeInfo.kraPin);
-            if (parsed.storeInfo.phone) setStorePhone(parsed.storeInfo.phone);
-            if (parsed.storeInfo.paybillTillNumber) setPaybillTillNumber(parsed.storeInfo.paybillTillNumber);
-          }
-          triggerNotify('Data database restored successfully!');
-        } else {
-          setErrorMessage('Invalid backup file format. Expected a valid JSON database.');
-        }
-      } catch (err) {
-        setErrorMessage('Failed to parse JSON backup file.');
+        const preview = parseStoreBackupFile(String(event.target?.result || ''), file.name);
+        setRestoreMode('merge');
+        setRestorePinInput('');
+        setShowRestorePin(false);
+        setRestorePinError(null);
+        setPendingRestorePreview(preview);
+        setErrorMessage(null);
+      } catch (err: any) {
+        setErrorMessage(err?.message || 'Failed to parse JSON backup file.');
       }
     };
     reader.readAsText(file);
     e.target.value = '';
+  };
+
+  const handleConfirmPinProtectedRestore = () => {
+    if (!pendingRestorePreview) return;
+    const enteredPin = restorePinInput.trim();
+    if (!enteredPin) {
+      setRestorePinError('Enter your Admin PIN to authorize restoring this backup.');
+      return;
+    }
+
+    const isMasterValid = enteredPin === (masterPin || '1234');
+    const isAdminWorkerPinValid = (allUsers || []).some(
+      (u) =>
+        u.status !== 'inactive' &&
+        (u.role === 'Admin' || u.role === 'Manager' || (u.roles || []).includes('Admin')) &&
+        String(u.pin || '').trim() === enteredPin
+    );
+
+    if (!isMasterValid && !isAdminWorkerPinValid) {
+      setRestorePinError('Incorrect Admin PIN. Please enter the Store Master PIN or an Admin PIN.');
+      return;
+    }
+
+    setIsRestoringBackup(true);
+    try {
+      const { importPayload } = pendingRestorePreview;
+      onImportData(importPayload, { mode: restoreMode });
+
+      if (importPayload.storeInfo) {
+        const si: any = importPayload.storeInfo;
+        if (si.storeName || si.name) setStoreName(si.storeName || si.name);
+        if (typeof si.kraPin === 'string') setKraPin(si.kraPin);
+        if (typeof si.phone === 'string') setStorePhone(si.phone);
+        if (typeof si.paybillTillNumber === 'string') setPaybillTillNumber(si.paybillTillNumber);
+        if (typeof si.kraTaxRate === 'number') setKraTaxRate(si.kraTaxRate);
+      }
+
+      const restoredParts: string[] = [];
+      if (pendingRestorePreview.productsCount > 0) restoredParts.push(`${pendingRestorePreview.productsCount} products`);
+      if (pendingRestorePreview.categoriesCount > 0) restoredParts.push(`${pendingRestorePreview.categoriesCount} categories`);
+      if (pendingRestorePreview.salesCount > 0) restoredParts.push(`${pendingRestorePreview.salesCount} sales`);
+      if (pendingRestorePreview.customersCount > 0) restoredParts.push(`${pendingRestorePreview.customersCount} customers`);
+
+      playBackupSuccessSound();
+      triggerNotify(
+        `✅ ${restoreMode === 'replace' ? 'Restored' : 'Safely merged'} ${restoredParts.join(', ') || 'store records'} into ${resolvedStoreName}!`
+      );
+      setPendingRestorePreview(null);
+      setRestorePinInput('');
+      setRestorePinError(null);
+    } catch (err: any) {
+      setRestorePinError(err?.message || 'Restore failed. Please check the backup file and try again.');
+    } finally {
+      setIsRestoringBackup(false);
+    }
   };
 
   const handleSaveStoreSettings = (e: React.FormEvent) => {
@@ -614,13 +806,16 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
         onOpenCloudSync={onOpenCloudSync}
         onTriggerSync={onTriggerSync}
         onOpenDataManagement={() => {
-          const el = document.getElementById('data-management-section');
+          const el = document.getElementById('local-email-backup-center') || document.getElementById('data-management-section');
           if (el) {
             el.scrollIntoView({ behavior: 'smooth', block: 'start' });
           }
         }}
         onExportFullBackup={handleExportFullDatabaseJSON}
-        onOpenEmailBackup={() => setShowEmailBackupModal(true)}
+        onOpenEmailBackup={() => {
+          setShareFeedback(null);
+          setShowShareEmailModal(true);
+        }}
         deviceFormat={deviceFormat}
         onChangeDeviceFormat={onChangeDeviceFormat}
         requirePinOnStartup={requirePinOnStartup}
@@ -632,7 +827,7 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
         onOpenCategoryManager={onOpenCategoryManager}
       />
 
-      <div id="data-management-section" className="p-6 space-y-6 max-w-7xl mx-auto border-t border-slate-800 pt-8">
+      <div id="data-management-section" className="p-4 sm:p-6 space-y-6 max-w-7xl mx-auto border-t border-slate-800 pt-8">
       {/* Top Banner */}
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 text-white flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-xl">
         <div className="flex items-center gap-3">
@@ -640,26 +835,229 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
             <Database className="w-6 h-6" />
           </div>
           <div>
-            <h2 className="font-bold text-lg text-slate-100">Data Management & System Settings</h2>
+            <h2 className="font-bold text-lg text-slate-100">Data Settings, Sync &amp; Backups</h2>
             <p className="text-xs text-slate-400">
-              Export/Import backups, customize KRA tax details, manage store data purges & storage footprint
+              One-tap local phone backup, email &amp; WhatsApp share, PIN-protected file restore, and Cloud Firestore sync
             </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          <span className="bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs px-3 py-1.5 rounded-xl font-mono flex items-center gap-1.5 font-semibold">
-            <ShieldCheck className="w-4 h-4" /> System Healthy ({totalDbRecords} Records)
+        <div className="flex items-center gap-2 flex-wrap">
+          <span
+            className={`text-xs px-3 py-1.5 rounded-xl font-mono flex items-center gap-1.5 font-semibold border ${
+              lastBackupMeta
+                ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
+                : 'bg-amber-500/15 border-amber-500/40 text-amber-300'
+            }`}
+          >
+            <Clock className="w-3.5 h-3.5" />
+            <span>
+              Last Backup:{' '}
+              {lastBackupMeta
+                ? `${formatLastBackupTimestamp(lastBackupMeta.timestamp)} (${formatBackupMethodLabel(lastBackupMeta.method)})`
+                : 'Never'}
+            </span>
+          </span>
+          <span className="bg-slate-800 border border-slate-700 text-slate-200 text-xs px-3 py-1.5 rounded-xl font-mono flex items-center gap-1.5 font-semibold">
+            <ShieldCheck className="w-4 h-4 text-emerald-400" /> {totalDbRecords} Records
           </span>
         </div>
       </div>
 
-      {/* Success / Error Toast Alerts */}
-      {successMessage && (
-        <div className="bg-emerald-900/60 border border-emerald-500/50 text-emerald-200 text-xs p-3.5 rounded-xl flex items-center gap-2 font-medium">
-          <Check className="w-4 h-4 text-emerald-400 shrink-0" />
-          <span>{successMessage}</span>
+      {/* Prominent Local Device & Email Backup Center */}
+      <div
+        id="local-email-backup-center"
+        className="bg-slate-900 border border-slate-800 rounded-2xl p-5 text-slate-100 shadow-xl space-y-4"
+      >
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-slate-800 pb-4">
+          <div className="flex items-start gap-3">
+            <div className="w-11 h-11 rounded-xl bg-emerald-500/15 text-emerald-400 border border-emerald-500/35 flex items-center justify-center shrink-0">
+              <HardDrive className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h3 className="font-extrabold text-base text-white">Local Device &amp; Email Backup</h3>
+                <span className="text-[10px] font-mono font-bold px-2.5 py-0.5 rounded-full bg-slate-800 text-sky-300 border border-slate-700">
+                  Store: {resolvedStoreName}
+                </span>
+              </div>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Package your complete store snapshot ({products.length} products, {categories.length} categories, {transactions.length} sales, {customers.length} customers &amp; settings) into <code className="text-slate-300">{getStoreBackupFileName(resolvedStoreName, 'json')}</code>.
+              </p>
+            </div>
+          </div>
+
+          <div
+            className={`px-3 py-2 rounded-xl border text-xs font-mono flex items-center gap-2 shrink-0 ${
+              lastBackupMeta
+                ? 'bg-emerald-950/50 border-emerald-500/40 text-emerald-200'
+                : 'bg-slate-800/80 border-slate-700 text-slate-300'
+            }`}
+          >
+            <Clock className={`w-4 h-4 shrink-0 ${lastBackupMeta ? 'text-emerald-400' : 'text-amber-400'}`} />
+            <div>
+              <div className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">
+                Last Backup Date &amp; Time
+              </div>
+              <div className="font-bold text-xs">
+                {lastBackupMeta
+                  ? `${formatLastBackupTimestamp(lastBackupMeta.timestamp)} • ${formatBackupMethodLabel(lastBackupMeta.method)}`
+                  : 'No backup created yet'}
+              </div>
+            </div>
+          </div>
         </div>
+
+        {/* Store Scope Snapshot Pills */}
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5">
+          <div className="bg-slate-800/70 border border-slate-700/80 rounded-xl p-3">
+            <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Products</div>
+            <div className="text-base font-black font-mono text-sky-400 mt-0.5">{products.length}</div>
+          </div>
+          <div className="bg-slate-800/70 border border-slate-700/80 rounded-xl p-3">
+            <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Categories</div>
+            <div className="text-base font-black font-mono text-indigo-400 mt-0.5">{categories.length}</div>
+          </div>
+          <div className="bg-slate-800/70 border border-slate-700/80 rounded-xl p-3">
+            <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Sales Receipts</div>
+            <div className="text-base font-black font-mono text-emerald-400 mt-0.5">{transactions.length}</div>
+          </div>
+          <div className="bg-slate-800/70 border border-slate-700/80 rounded-xl p-3">
+            <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Customers</div>
+            <div className="text-base font-black font-mono text-purple-400 mt-0.5">{customers.length}</div>
+          </div>
+          <div className="bg-slate-800/70 border border-slate-700/80 rounded-xl p-3 col-span-2 sm:col-span-1">
+            <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Store Scope</div>
+            <div className="text-xs font-mono font-bold text-slate-200 mt-1 truncate" title={`stores/${resolvedStoreId}`}>
+              stores/{resolvedStoreId.slice(0, 12)}{resolvedStoreId.length > 12 ? '…' : ''}
+            </div>
+          </div>
+        </div>
+
+        {/* Hidden file input shared by Restore from File button */}
+        <input
+          ref={restoreFileInputRef}
+          type="file"
+          accept=".json,application/json"
+          onChange={handleImportJSONFile}
+          className="hidden"
+        />
+
+        {/* 3 Primary Actions: Download Local, Email/Share Copy, Restore from File */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <button
+            type="button"
+            id="btn-download-backup-phone"
+            data-feedback="backup"
+            onClick={handleExportFullDatabaseJSON}
+            className="bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white p-4 rounded-xl border border-emerald-400/50 shadow-lg shadow-emerald-950/50 transition text-left space-y-1.5 cursor-pointer group"
+          >
+            <div className="flex items-center justify-between">
+              <div className="p-2 rounded-lg bg-white/15">
+                <Download className="w-5 h-5 text-white group-hover:translate-y-0.5 transition" />
+              </div>
+              <span className="text-[10px] font-black font-mono bg-slate-950/40 px-2 py-0.5 rounded-full text-emerald-100">
+                .JSON SNAPSHOT
+              </span>
+            </div>
+            <div className="font-extrabold text-sm text-white">Download Backup to Phone</div>
+            <div className="text-[11px] text-emerald-100/90">
+              Save complete store backup directly to Downloads (~{estimatedStorageKb} KB)
+            </div>
+          </button>
+
+          <button
+            type="button"
+            id="btn-email-backup-copy"
+            data-feedback="backup"
+            onClick={() => {
+              setShareFeedback(null);
+              setShowShareEmailModal(true);
+            }}
+            className="bg-sky-600 hover:bg-sky-500 active:scale-95 text-white p-4 rounded-xl border border-sky-400/50 shadow-lg shadow-sky-950/50 transition text-left space-y-1.5 cursor-pointer group"
+          >
+            <div className="flex items-center justify-between">
+              <div className="p-2 rounded-lg bg-white/15">
+                <Mail className="w-5 h-5 text-white group-hover:scale-105 transition" />
+              </div>
+              <span className="text-[10px] font-black font-mono bg-slate-950/40 px-2 py-0.5 rounded-full text-sky-100">
+                {nativeFileShareSupported ? 'GMAIL / WHATSAPP' : 'EMAIL DRAFT'}
+              </span>
+            </div>
+            <div className="font-extrabold text-sm text-white">Email Backup Copy</div>
+            <div className="text-[11px] text-sky-100/90">
+              Send backup file to Gmail, Yahoo, or WhatsApp in one tap
+            </div>
+          </button>
+
+          <button
+            type="button"
+            id="btn-restore-from-file"
+            onClick={() => restoreFileInputRef.current?.click()}
+            className="bg-slate-800 hover:bg-slate-700 active:scale-95 text-slate-100 p-4 rounded-xl border border-slate-700 shadow-lg transition text-left space-y-1.5 cursor-pointer group"
+          >
+            <div className="flex items-center justify-between">
+              <div className="p-2 rounded-lg bg-amber-500/20 text-amber-400 border border-amber-500/30">
+                <Upload className="w-5 h-5 group-hover:-translate-y-0.5 transition" />
+              </div>
+              <span className="text-[10px] font-black font-mono bg-amber-500/15 border border-amber-500/40 px-2 py-0.5 rounded-full text-amber-300 flex items-center gap-1">
+                <Lock className="w-2.5 h-2.5" /> PIN PROTECTED
+              </span>
+            </div>
+            <div className="font-extrabold text-sm text-white">Restore from File</div>
+            <div className="text-[11px] text-slate-300">
+              Upload a saved .json backup, preview counts, and restore with Admin PIN
+            </div>
+          </button>
+        </div>
+
+        {/* Optional CSV Summary & Advanced Backup Shortcuts */}
+        <div className="pt-3 border-t border-slate-800 flex flex-wrap items-center justify-between gap-2.5">
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={handleExportStoreSummaryCSV}
+              className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-bold flex items-center gap-2 transition cursor-pointer"
+            >
+              <FileSpreadsheet className="w-4 h-4 text-emerald-400" />
+              <span>Download CSV Summary (Products &amp; Sales)</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowEmailBackupModal(true)}
+              className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-sky-300 border border-slate-700 rounded-xl text-xs font-bold flex items-center gap-2 transition cursor-pointer"
+            >
+              <Clock className="w-4 h-4 text-sky-400" />
+              <span>Daily Scheduled Gmail Backup</span>
+            </button>
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowSnapshotModal(true)}
+            className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-indigo-300 border border-slate-700 rounded-xl text-xs font-bold flex items-center gap-2 transition cursor-pointer"
+          >
+            <Lock className="w-4 h-4 text-indigo-400" />
+            <span>AES-256 Encrypted Snapshot</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Success / Error Toast Alerts (Fixed Floating Toast + Inline Banner) */}
+      {successMessage && (
+        <>
+          <div
+            role="status"
+            aria-live="polite"
+            className="bg-emerald-900/70 border border-emerald-500/60 text-emerald-100 text-xs p-3.5 rounded-xl flex items-center gap-2 font-semibold shadow-lg"
+          >
+            <Check className="w-4 h-4 text-emerald-400 shrink-0" />
+            <span>{successMessage}</span>
+          </div>
+          <div className="fixed bottom-20 sm:bottom-6 left-1/2 -translate-x-1/2 z-[140] bg-emerald-950 border border-emerald-400/70 text-emerald-100 px-4 py-3 rounded-2xl shadow-2xl flex items-center gap-2.5 text-xs font-bold max-w-[92vw] animate-in fade-in slide-in-from-bottom-3">
+            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+            <span>{successMessage}</span>
+          </div>
+        </>
       )}
 
       {/* Storage Health & Usage Indicator Card */}
@@ -1429,22 +1827,22 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
         </div>
       </div>
 
-        {/* Middle Column: Export & Import Center */}
+        {/* Middle Column: Export & Import Center (Dark Mode) */}
         <div className="lg:col-span-2 space-y-6">
           {/* Backup & Export Box */}
-          <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl space-y-4 text-slate-100">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <div className="flex items-center gap-2">
-                <Download className="w-5 h-5 text-emerald-600" />
-                <h3 className="font-bold text-sm text-slate-800">Export & Backup Database</h3>
+                <Download className="w-5 h-5 text-emerald-400" />
+                <h3 className="font-bold text-sm text-white">Export &amp; Backup Database</h3>
               </div>
-              <span className="text-[11px] font-mono text-slate-400 bg-slate-100 px-2.5 py-1 rounded-lg">
+              <span className="text-[11px] font-mono text-slate-300 bg-slate-800 border border-slate-700 px-2.5 py-1 rounded-lg">
                 ~{estimatedStorageKb} KB
               </span>
             </div>
 
-            <p className="text-xs text-slate-500">
-              Download complete backups of your system state. You can restore this file at any time on any computer or store terminal.
+            <p className="text-xs text-slate-400">
+              Download complete backups or individual spreadsheets of your store inventory and sales history.
             </p>
 
             {/* DAILY AUTOMATIC EMAIL BACKUP CARD */}
@@ -1457,11 +1855,11 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
                   <div className="flex items-center gap-2 flex-wrap">
                     <h4 className="font-extrabold text-sm text-white">Daily Automatic Email Backup</h4>
                     <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-400/40 text-[10px] px-2 py-0.5 rounded-full font-mono font-bold flex items-center gap-1">
-                      ● Active • NivaJuma@gmail.com
+                      ● {accountEmail || 'Scheduled Gmail Dispatch'}
                     </span>
                   </div>
                   <p className="text-xs text-slate-300 mt-0.5">
-                    Automated daily database snapshot emailed every evening to <b>NivaJuma@gmail.com</b> with complete JSON database, products CSV, and financial summary.
+                    Automated daily database snapshot emailed every evening with complete JSON database, products CSV, and financial summary.
                   </p>
                 </div>
               </div>
@@ -1474,25 +1872,25 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
                 className="px-4 py-2.5 bg-gradient-to-r from-sky-500 to-indigo-600 hover:from-sky-400 hover:to-indigo-500 text-white font-extrabold rounded-xl text-xs flex items-center gap-2 shadow-lg shadow-sky-600/30 ring-2 ring-sky-400/40 transition shrink-0 active:scale-95 cursor-pointer"
               >
                 <Mail className="w-4 h-4" />
-                <span>Configure & Send Backup</span>
+                <span>Configure Schedule</span>
               </button>
             </div>
 
             {/* FULL ENCRYPTED DATA SNAPSHOT CARD */}
-            <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 border-2 border-indigo-500/50 rounded-2xl p-4.5 text-white shadow-md flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div className="bg-gradient-to-r from-slate-950 via-indigo-950 to-slate-950 border border-indigo-500/50 rounded-2xl p-4.5 text-white shadow-md flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
               <div className="flex items-start gap-3.5">
                 <div className="w-11 h-11 bg-indigo-500/20 border border-indigo-400/40 rounded-xl flex items-center justify-center text-indigo-300 shrink-0 shadow-inner">
                   <Lock className="w-5 h-5 text-sky-300" />
                 </div>
                 <div>
                   <div className="flex items-center gap-2">
-                    <h4 className="font-extrabold text-sm text-white">Download Full Data Snapshot</h4>
+                    <h4 className="font-extrabold text-sm text-white">Download Encrypted Data Snapshot</h4>
                     <span className="bg-sky-500/20 text-sky-200 border border-sky-400/40 text-[10px] px-2 py-0.5 rounded-full font-mono font-bold">
                       AES-256 / Unified CSV
                     </span>
                   </div>
                   <p className="text-xs text-slate-300 mt-0.5">
-                    Export all collections ({products.length} products, {transactions.length} sales, {customers.length} customers) into a single encrypted JSON or unified CSV file.
+                    Export all collections ({products.length} products, {transactions.length} sales, {customers.length} customers) into a password-encrypted JSON or unified CSV file.
                   </p>
                 </div>
               </div>
@@ -1505,7 +1903,7 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
                 className="px-4 py-2.5 bg-gradient-to-r from-sky-500 to-indigo-600 hover:from-sky-400 hover:to-indigo-500 text-white font-extrabold rounded-xl text-xs flex items-center gap-2 shadow-lg shadow-indigo-600/30 ring-2 ring-indigo-400/40 transition shrink-0 active:scale-95 cursor-pointer"
               >
                 <Download className="w-4 h-4" />
-                <span>Download Full Snapshot</span>
+                <span>Encrypted Snapshot</span>
               </button>
             </div>
 
@@ -1515,7 +1913,7 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
                 id="btn-full-system-backup-json"
                 data-feedback="backup"
                 onClick={handleExportFullDatabaseJSON}
-                className="bg-gradient-to-br from-emerald-600 via-teal-600 to-sky-600 hover:from-emerald-500 hover:via-teal-500 hover:to-sky-500 text-white p-3.5 rounded-xl transition text-left space-y-1.5 shadow-lg shadow-emerald-600/30 border-2 border-emerald-300/80 ring-2 ring-emerald-400/35 group cursor-pointer active:scale-95"
+                className="bg-gradient-to-br from-emerald-600 via-teal-600 to-sky-600 hover:from-emerald-500 hover:via-teal-500 hover:to-sky-500 text-white p-3.5 rounded-xl transition text-left space-y-1.5 shadow-lg shadow-emerald-900/30 border border-emerald-400/60 group cursor-pointer active:scale-95"
               >
                 <div className="flex items-center justify-between">
                   <div className="p-1.5 bg-white/15 rounded-lg">
@@ -1525,50 +1923,52 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
                     FULL BACKUP • JSON
                   </span>
                 </div>
-                <div className="font-extrabold text-xs text-white">Full System Backup</div>
-                <div className="text-[10px] text-emerald-100">Products, Sales, Customers & Expenses</div>
+                <div className="font-extrabold text-xs text-white">Download Backup to Phone</div>
+                <div className="text-[10px] text-emerald-100">Products, Categories, Sales, Customers &amp; Settings</div>
               </button>
 
               <button
+                type="button"
                 onClick={handleExportProductsCSV}
-                className="bg-slate-50 hover:bg-slate-100 text-slate-800 p-3.5 rounded-xl border border-slate-200 transition text-left space-y-1.5 group"
+                className="bg-slate-800 hover:bg-slate-700 text-slate-100 p-3.5 rounded-xl border border-slate-700 transition text-left space-y-1.5 group cursor-pointer"
               >
                 <div className="flex items-center justify-between">
-                  <FileSpreadsheet className="w-5 h-5 text-emerald-600 group-hover:scale-110 transition" />
+                  <FileSpreadsheet className="w-5 h-5 text-emerald-400 group-hover:scale-110 transition" />
                   <span className="text-[10px] font-mono text-slate-400">CSV</span>
                 </div>
-                <div className="font-bold text-xs text-slate-800">Products Inventory CSV</div>
-                <div className="text-[10px] text-slate-500">{products.length} SKU items list</div>
+                <div className="font-bold text-xs text-white">Products Inventory CSV</div>
+                <div className="text-[10px] text-slate-400">{products.length} SKU items list</div>
               </button>
 
               <button
+                type="button"
                 onClick={handleExportTransactionsCSV}
-                className="bg-slate-50 hover:bg-slate-100 text-slate-800 p-3.5 rounded-xl border border-slate-200 transition text-left space-y-1.5 group"
+                className="bg-slate-800 hover:bg-slate-700 text-slate-100 p-3.5 rounded-xl border border-slate-700 transition text-left space-y-1.5 group cursor-pointer"
               >
                 <div className="flex items-center justify-between">
-                  <Receipt className="w-5 h-5 text-blue-600 group-hover:scale-110 transition" />
+                  <Receipt className="w-5 h-5 text-sky-400 group-hover:scale-110 transition" />
                   <span className="text-[10px] font-mono text-slate-400">CSV</span>
                 </div>
-                <div className="font-bold text-xs text-slate-800">Sales Transactions CSV</div>
-                <div className="text-[10px] text-slate-500">{transactions.length} receipts history</div>
+                <div className="font-bold text-xs text-white">Sales Transactions CSV</div>
+                <div className="text-[10px] text-slate-400">{transactions.length} receipts history</div>
               </button>
 
               {onOpenAuditLogs && (
                 <button
                   type="button"
                   onClick={onOpenAuditLogs}
-                  className="bg-purple-50 hover:bg-purple-100 text-purple-900 p-3.5 rounded-xl border border-purple-200 transition text-left space-y-1.5 group md:col-span-3 flex items-center justify-between cursor-pointer"
+                  className="bg-purple-950/50 hover:bg-purple-900/50 text-purple-100 p-3.5 rounded-xl border border-purple-500/40 transition text-left space-y-1.5 group md:col-span-3 flex items-center justify-between cursor-pointer"
                 >
                   <div className="flex items-center gap-3">
-                    <div className="p-2 bg-purple-100 text-purple-700 rounded-lg group-hover:scale-110 transition">
+                    <div className="p-2 bg-purple-500/20 text-purple-300 rounded-lg group-hover:scale-110 transition">
                       <ShieldCheck className="w-5 h-5" />
                     </div>
                     <div>
-                      <div className="font-bold text-xs text-purple-950">Worker Role Authorization Audit Trail</div>
-                      <div className="text-[10px] text-purple-700">Inspect full audit ledger of worker roles authorizing sensitive actions (expense deletions, catalog edits)</div>
+                      <div className="font-bold text-xs text-white">Worker Role Authorization Audit Trail</div>
+                      <div className="text-[10px] text-purple-200/80">Inspect full audit ledger of worker roles authorizing sensitive actions (expense deletions, catalog edits)</div>
                     </div>
                   </div>
-                  <span className="px-3.5 py-1.5 bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs rounded-xl shadow-sm transition">
+                  <span className="px-3.5 py-1.5 bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs rounded-xl shadow-sm transition shrink-0">
                     View Audit Logs →
                   </span>
                 </button>
@@ -1576,31 +1976,36 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
             </div>
           </div>
 
-          {/* Import / Restore Database Box */}
-          <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-4">
-            <div className="flex items-center gap-2 border-b border-slate-100 pb-3">
-              <Upload className="w-5 h-5 text-blue-600" />
-              <h3 className="font-bold text-sm text-slate-800">Restore Data from Backup File</h3>
+          {/* Import / Restore Database Box (Dark Mode + PIN Protected) */}
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl space-y-4 text-slate-100">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2">
+                <Upload className="w-5 h-5 text-sky-400" />
+                <h3 className="font-bold text-sm text-white">Restore Data from Backup File</h3>
+              </div>
+              <span className="text-[10px] font-mono font-bold px-2.5 py-1 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/40 flex items-center gap-1">
+                <Lock className="w-3 h-3" /> Admin PIN Required
+              </span>
             </div>
 
-            <p className="text-xs text-slate-500">
-              Select a previously exported JSON backup file (`.json`) to populate your store inventory, transactions, customers, and records.
+            <p className="text-xs text-slate-400">
+              Select a previously saved `.json` backup file to preview its item &amp; sales count, enter your Admin PIN, and safely merge or restore into your store (<code className="text-slate-300">stores/{resolvedStoreId}</code>).
             </p>
 
-            <div className="border-2 border-dashed border-slate-200 hover:border-blue-400 bg-slate-50/50 hover:bg-blue-50/20 rounded-2xl p-6 text-center transition cursor-pointer relative">
+            <div className="border-2 border-dashed border-slate-700 hover:border-sky-500 bg-slate-950/70 hover:bg-slate-800/60 rounded-2xl p-6 text-center transition cursor-pointer relative">
               <input
                 type="file"
-                accept=".json"
+                accept=".json,application/json"
                 onChange={handleImportJSONFile}
                 className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
               />
               <div className="flex flex-col items-center justify-center space-y-2">
-                <div className="w-10 h-10 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center">
+                <div className="w-11 h-11 bg-sky-500/20 text-sky-400 border border-sky-500/30 rounded-full flex items-center justify-center">
                   <Upload className="w-5 h-5" />
                 </div>
                 <div>
-                  <span className="font-bold text-xs text-slate-800 block">Click or Drag & Drop Backup File</span>
-                  <span className="text-[11px] text-slate-400">Supports Rofani POS `.json` backup files</span>
+                  <span className="font-bold text-xs text-white block">Tap to Select or Drag &amp; Drop Backup File</span>
+                  <span className="text-[11px] text-slate-400">Supports Rofani POS `.json` store backup files</span>
                 </div>
               </div>
             </div>
@@ -1748,7 +2153,7 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
         attendanceRecords={attendanceRecords}
         allUsers={allUsers}
         stores={stores}
-        storeName={storeName}
+        storeName={resolvedStoreName}
         masterPin={masterPin}
         onRestoreSnapshot={onImportData}
       />
@@ -1763,8 +2168,304 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
         suppliers={suppliers}
         expenses={expenses}
         allUsers={allUsers}
-        storeName={storeName}
+        storeName={resolvedStoreName}
       />
+
+      {/* ONE-TAP EMAIL & SHARE BACKUP MODAL */}
+      {showShareEmailModal && (
+        <div
+          className="fixed inset-0 z-[135] bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto"
+          onClick={() => setShowShareEmailModal(false)}
+        >
+          <div
+            className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden text-slate-100 my-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="p-4 sm:p-5 bg-slate-950/70 border-b border-slate-800 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-sky-500/20 text-sky-400 border border-sky-500/40 flex items-center justify-center shrink-0">
+                  <Mail className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-base text-white">Email or Share Store Backup</h3>
+                  <p className="text-xs text-slate-400">
+                    Attach {getStoreBackupFileName(resolvedStoreName, 'json')} to Gmail, Yahoo, or WhatsApp
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowShareEmailModal(false)}
+                className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition cursor-pointer"
+                aria-label="Close Email Backup"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4">
+              {shareFeedback && (
+                <div
+                  className={`p-3 rounded-xl border text-xs font-medium flex items-start gap-2 ${
+                    shareFeedback.type === 'success'
+                      ? 'bg-emerald-950/60 border-emerald-500/50 text-emerald-200'
+                      : shareFeedback.type === 'error'
+                      ? 'bg-rose-950/60 border-rose-500/50 text-rose-200'
+                      : 'bg-sky-950/60 border-sky-500/50 text-sky-200'
+                  }`}
+                >
+                  {shareFeedback.type === 'success' ? (
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                  ) : (
+                    <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                  )}
+                  <span>{shareFeedback.message}</span>
+                </div>
+              )}
+
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-slate-300">
+                  Destination Email Address
+                </label>
+                <input
+                  type="email"
+                  value={backupEmailInput}
+                  onChange={(e) => setBackupEmailInput(e.target.value)}
+                  placeholder="Enter your email (e.g. shopowner@gmail.com)"
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-white font-mono focus:outline-none focus:ring-2 focus:ring-sky-500"
+                />
+                <p className="text-[11px] text-slate-400">
+                  Defaults to your registered account email. On mobile, tap Share to send the attached `.json` file directly to Gmail, Yahoo, or WhatsApp.
+                </p>
+              </div>
+
+              <div className="bg-slate-800/70 border border-slate-700/80 rounded-xl p-3.5 text-xs space-y-1.5">
+                <div className="flex items-center justify-between text-slate-300">
+                  <span className="font-semibold">Included Store Snapshot:</span>
+                  <span className="font-mono text-[11px] text-sky-300">{resolvedStoreName}</span>
+                </div>
+                <div className="grid grid-cols-2 gap-1.5 text-[11px] text-slate-400 font-mono pt-1">
+                  <span>• Products: <b className="text-white">{products.length}</b></span>
+                  <span>• Categories: <b className="text-white">{categories.length}</b></span>
+                  <span>• Sales Receipts: <b className="text-white">{transactions.length}</b></span>
+                  <span>• Customers: <b className="text-white">{customers.length}</b></span>
+                </div>
+              </div>
+
+              <div className="space-y-2.5 pt-1">
+                {nativeFileShareSupported && (
+                  <button
+                    type="button"
+                    disabled={isSharingBackup}
+                    onClick={() => handleExecuteShareOrEmailBackup(true)}
+                    className="w-full py-3 px-4 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-extrabold rounded-xl text-xs flex items-center justify-center gap-2 shadow-lg transition cursor-pointer"
+                  >
+                    <Share2 className="w-4 h-4" />
+                    <span>{isSharingBackup ? 'Preparing Backup File...' : 'Share Backup File (Gmail / Yahoo / WhatsApp)'}</span>
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  disabled={isSharingBackup}
+                  onClick={() => handleExecuteShareOrEmailBackup(false)}
+                  className="w-full py-3 px-4 bg-sky-600 hover:bg-sky-500 disabled:opacity-50 text-white font-extrabold rounded-xl text-xs flex items-center justify-center gap-2 shadow-lg transition cursor-pointer"
+                >
+                  <Send className="w-4 h-4" />
+                  <span>
+                    {isSharingBackup
+                      ? 'Preparing Email Draft...'
+                      : 'Save Backup & Open Email Draft'}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowShareEmailModal(false);
+                    setShowEmailBackupModal(true);
+                  }}
+                  className="w-full py-2.5 px-4 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl text-xs border border-slate-700 flex items-center justify-center gap-2 transition cursor-pointer"
+                >
+                  <Clock className="w-3.5 h-3.5 text-sky-400" />
+                  <span>Open Scheduled Daily Gmail Auto-Backup</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ADMIN PIN-PROTECTED RESTORE PREVIEW MODAL */}
+      {pendingRestorePreview && (
+        <div
+          className="fixed inset-0 z-[136] bg-slate-950/90 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto"
+          onClick={() => setPendingRestorePreview(null)}
+        >
+          <div
+            className="bg-slate-900 border border-amber-500/50 rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden text-slate-100 my-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="p-4 sm:p-5 bg-slate-950/80 border-b border-slate-800 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-400 border border-amber-500/40 flex items-center justify-center shrink-0">
+                  <ShieldCheck className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-base text-white">Preview &amp; Authorize Store Restore</h3>
+                  <p className="text-xs text-slate-400 truncate max-w-[260px]">
+                    {pendingRestorePreview.fileName}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPendingRestorePreview(null)}
+                className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition cursor-pointer"
+                aria-label="Cancel Restore"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4">
+              {/* Source Metadata */}
+              <div className="bg-slate-800/70 border border-slate-700 rounded-xl p-3.5 text-xs space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-400">Backup Store:</span>
+                  <span className="font-bold text-white">{pendingRestorePreview.sourceStoreName}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-400">Exported On:</span>
+                  <span className="font-mono text-slate-200">
+                    {pendingRestorePreview.exportedAt
+                      ? formatLastBackupTimestamp(pendingRestorePreview.exportedAt)
+                      : 'Unknown date'}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-400">Target Store:</span>
+                  <span className="font-mono text-sky-300">stores/{resolvedStoreId}</span>
+                </div>
+              </div>
+
+              {/* Record Counts Preview */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
+                <div className="bg-slate-950 border border-slate-800 rounded-xl p-2.5">
+                  <div className="text-[10px] text-slate-400 font-bold uppercase">Products</div>
+                  <div className="text-base font-black font-mono text-sky-400">
+                    {pendingRestorePreview.productsCount}
+                  </div>
+                </div>
+                <div className="bg-slate-950 border border-slate-800 rounded-xl p-2.5">
+                  <div className="text-[10px] text-slate-400 font-bold uppercase">Categories</div>
+                  <div className="text-base font-black font-mono text-indigo-400">
+                    {pendingRestorePreview.categoriesCount}
+                  </div>
+                </div>
+                <div className="bg-slate-950 border border-slate-800 rounded-xl p-2.5">
+                  <div className="text-[10px] text-slate-400 font-bold uppercase">Sales</div>
+                  <div className="text-base font-black font-mono text-emerald-400">
+                    {pendingRestorePreview.salesCount}
+                  </div>
+                </div>
+                <div className="bg-slate-950 border border-slate-800 rounded-xl p-2.5">
+                  <div className="text-[10px] text-slate-400 font-bold uppercase">Customers</div>
+                  <div className="text-base font-black font-mono text-purple-400">
+                    {pendingRestorePreview.customersCount}
+                  </div>
+                </div>
+              </div>
+
+              {/* Restore Mode Selector */}
+              <div className="space-y-2">
+                <label className="block text-xs font-bold text-slate-300">Restore Strategy</label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setRestoreMode('merge')}
+                    className={`p-3 rounded-xl border text-left transition cursor-pointer ${
+                      restoreMode === 'merge'
+                        ? 'bg-emerald-950/60 border-emerald-500 text-white'
+                        : 'bg-slate-800/70 border-slate-700 text-slate-300 hover:bg-slate-800'
+                    }`}
+                  >
+                    <div className="font-bold text-xs">Merge Safely (Recommended)</div>
+                    <div className="text-[10px] text-slate-400 mt-0.5">
+                      Adds &amp; updates backup records while keeping existing store items
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setRestoreMode('replace')}
+                    className={`p-3 rounded-xl border text-left transition cursor-pointer ${
+                      restoreMode === 'replace'
+                        ? 'bg-amber-950/60 border-amber-500 text-white'
+                        : 'bg-slate-800/70 border-slate-700 text-slate-300 hover:bg-slate-800'
+                    }`}
+                  >
+                    <div className="font-bold text-xs">Full Store Restore</div>
+                    <div className="text-[10px] text-slate-400 mt-0.5">
+                      Replaces current lists with exact snapshot from this backup file
+                    </div>
+                  </button>
+                </div>
+              </div>
+
+              {/* Admin PIN Verification */}
+              <div className="space-y-1.5 bg-slate-950 border border-slate-800 rounded-xl p-3.5">
+                <label className="block text-xs font-bold text-amber-300 flex items-center gap-1.5">
+                  <KeyRound className="w-3.5 h-3.5" />
+                  <span>Enter Admin PIN to Confirm Restore</span>
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type={showRestorePin ? 'text' : 'password'}
+                    inputMode="numeric"
+                    value={restorePinInput}
+                    onChange={(e) => {
+                      setRestorePinInput(e.target.value);
+                      if (restorePinError) setRestorePinError(null);
+                    }}
+                    placeholder="Enter 4-digit Admin PIN"
+                    className="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white font-mono tracking-widest focus:outline-none focus:ring-2 focus:ring-amber-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowRestorePin((v) => !v)}
+                    className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 transition cursor-pointer"
+                    aria-label="Toggle PIN visibility"
+                  >
+                    {showRestorePin ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+                {restorePinError && (
+                  <p className="text-[11px] text-rose-400 font-semibold mt-1">{restorePinError}</p>
+                )}
+              </div>
+
+              <div className="flex items-center justify-end gap-2.5 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setPendingRestorePreview(null)}
+                  className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold rounded-xl transition cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={isRestoringBackup}
+                  onClick={handleConfirmPinProtectedRestore}
+                  className="px-5 py-2.5 bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 text-xs font-black rounded-xl shadow-lg transition flex items-center gap-2 cursor-pointer"
+                >
+                  <ShieldCheck className="w-4 h-4" />
+                  <span>{isRestoringBackup ? 'Restoring...' : 'Authorize & Restore Backup'}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* CLOUD SYNC HISTORY & RELIABILITY MODAL */}
       {showSyncHistoryModal && (() => {

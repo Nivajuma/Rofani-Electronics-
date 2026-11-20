@@ -66,6 +66,12 @@ import { useNetworkStatus } from '../../utils/offlineSync';
 import { safeGetJSON, safeSetJSON, safeRemove } from '../../utils/safeStorage';
 import { refreshFirestoreConnection } from '../../lib/firebase';
 import { POSProductListRow, POSProductGridCard } from './POSProductItem';
+import {
+  useTransactionSettings,
+  getActiveFirmPrefixes,
+  formatDocumentNumberWithPrefix,
+  getLast5SalePricesForProduct,
+} from '../../utils/transactionSettings';
 
 const SEARCH_RESULT_PAGE_SIZE = 25;
 const ACTIVE_SALE_DRAFT_KEY = 'retail_pos_active_sale_draft';
@@ -117,6 +123,8 @@ interface POSViewProps {
   externalQuickDiscountRequest?: { mode: 'fixed' | 'percentage'; value: number; nonce: number } | null;
   externalClearDiscountTrigger?: number;
   storeName?: string;
+  activeStoreId?: string;
+  requirePinOnStartup?: boolean;
 }
 
 export const POSView: React.FC<POSViewProps> = ({
@@ -143,7 +151,29 @@ export const POSView: React.FC<POSViewProps> = ({
   externalQuickDiscountRequest,
   externalClearDiscountTrigger,
   storeName = 'Rofani POS',
+  activeStoreId,
+  requirePinOnStartup = true,
 }) => {
+  const [txSettings] = useTransactionSettings(activeStoreId);
+  const isNonAdminCashierLocked =
+    currentUser.role !== 'Admin' && (requirePinOnStartup || currentUser.role === 'Cashier');
+  const canViewCostAndProfit = !isNonAdminCashierLocked;
+
+  const [kraTaxModeSetting, setKraTaxModeSetting] = useState<'none' | 'tot' | 'vat'>(() =>
+    safeGetJSON<'none' | 'tot' | 'vat'>('rofani_settings_tax_mode', 'none')
+  );
+  useEffect(() => {
+    const syncTaxMode = () => {
+      setKraTaxModeSetting(safeGetJSON<'none' | 'tot' | 'vat'>('rofani_settings_tax_mode', 'none'));
+    };
+    window.addEventListener('rofani:transaction-settings-updated', syncTaxMode);
+    window.addEventListener('storage', syncTaxMode);
+    return () => {
+      window.removeEventListener('rofani:transaction-settings-updated', syncTaxMode);
+      window.removeEventListener('storage', syncTaxMode);
+    };
+  }, []);
+
   const customSettingsShopName = safeGetJSON<string>('rofani_settings_shop_name', '');
   const resolvedStoreName = (() => {
     const legacy = ['rofani electronics', 'rofani electronics & boutique', 'rofani electronics and boutique'];
@@ -713,6 +743,50 @@ export const POSView: React.FC<POSViewProps> = ({
   const [customerKraPin, setCustomerKraPin] = useState<string>('');
   const [showKraTotModal, setShowKraTotModal] = useState(false);
 
+  // Extended Transaction Settings Checkout & Cart States
+  const [last5RatesItemId, setLast5RatesItemId] = useState<string | null>(null);
+  const [billingPartyName, setBillingPartyName] = useState<string>('');
+  const [customerPoNumber, setCustomerPoNumber] = useState<string>('');
+  const [customerPoDate, setCustomerPoDate] = useState<string>('');
+  const [paymentDiscountAmount, setPaymentDiscountAmount] = useState<number>(0);
+  const [linkedInvoiceRef, setLinkedInvoiceRef] = useState<string>('');
+  const [dueDateInput, setDueDateInput] = useState<string>('');
+  const [paymentTermsInput, setPaymentTermsInput] = useState<string>(
+    () => txSettings.dueDatesPaymentTerms.defaultTerms || 'Net 15 Days'
+  );
+  const [transportMode, setTransportMode] = useState<string>(
+    () => txSettings.transportationDetails.defaultMode || 'Boda Boda'
+  );
+  const [transportDriverName, setTransportDriverName] = useState<string>('');
+  const [transportVehicleRef, setTransportVehicleRef] = useState<string>('');
+  const [additionalChargeLabel, setAdditionalChargeLabel] = useState<string>(
+    () => txSettings.additionalCharges.defaultLabel || 'Delivery / Packaging Fee'
+  );
+  const [additionalChargeAmount, setAdditionalChargeAmount] = useState<number>(
+    () => txSettings.additionalCharges.defaultAmount || 0
+  );
+  const [additionalFieldsValues, setAdditionalFieldsValues] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    setPaymentTermsInput(txSettings.dueDatesPaymentTerms.defaultTerms || 'Net 15 Days');
+    if (txSettings.dueDatesPaymentTerms.enabled && txSettings.dueDatesPaymentTerms.defaultDueDays > 0 && !dueDateInput) {
+      const d = new Date();
+      d.setDate(d.getDate() + txSettings.dueDatesPaymentTerms.defaultDueDays);
+      setDueDateInput(d.toISOString().slice(0, 10));
+    }
+    setTransportMode(txSettings.transportationDetails.defaultMode || 'Boda Boda');
+    setAdditionalChargeLabel(txSettings.additionalCharges.defaultLabel || 'Delivery / Packaging Fee');
+    setAdditionalChargeAmount(txSettings.additionalCharges.enabled ? (txSettings.additionalCharges.defaultAmount || 0) : 0);
+  }, [
+    txSettings.dueDatesPaymentTerms.enabled,
+    txSettings.dueDatesPaymentTerms.defaultTerms,
+    txSettings.dueDatesPaymentTerms.defaultDueDays,
+    txSettings.transportationDetails.defaultMode,
+    txSettings.additionalCharges.enabled,
+    txSettings.additionalCharges.defaultLabel,
+    txSettings.additionalCharges.defaultAmount,
+  ]);
+
   // Add multiple items to cart (e.g. from AI vision scanner)
   const handleAddMultipleToCart = (itemsToAdd: { product: Product; quantity: number }[]) => {
     if (!itemsToAdd || itemsToAdd.length === 0) return;
@@ -863,8 +937,18 @@ export const POSView: React.FC<POSViewProps> = ({
     setShowCheckoutModal(false);
     setShowMpesaPromptModal(false);
     setShowNewSaleConfirmModal(false);
-    setPaymentEntries([{ method: 'cash', amount: 0, reference: '' }]);
+    setPaymentEntries([{ method: txSettings.cashSaleByDefault ? 'cash' : (txSettings.defaultPaymentMethod || 'mpesa'), amount: 0, reference: '' }]);
     setSaleNotes('');
+    setBillingPartyName('');
+    setCustomerPoNumber('');
+    setCustomerPoDate('');
+    setPaymentDiscountAmount(0);
+    setLinkedInvoiceRef('');
+    setTransportDriverName('');
+    setTransportVehicleRef('');
+    setAdditionalFieldsValues({});
+    setAdditionalChargeAmount(txSettings.additionalCharges.enabled ? (txSettings.additionalCharges.defaultAmount || 0) : 0);
+    setLast5RatesItemId(null);
     setSaleDate(getLocalDateString());
     setMobileTab('catalog');
     safeRemove(ACTIVE_SALE_DRAFT_KEY);
@@ -1472,12 +1556,22 @@ export const POSView: React.FC<POSViewProps> = ({
     );
   };
 
+  // Item-level custom fields updaters (Free Qty, Count, Tax Mode)
+  const handleUpdateItemMeta = (
+    productId: string,
+    patch: Partial<Pick<CartItem, 'freeQuantity' | 'customCount' | 'taxModeOnRate'>>
+  ) => {
+    setCart((prev) =>
+      prev.map((item) => (item.product.id === productId ? { ...item, ...patch } : item))
+    );
+  };
+
   // Calculate Subtotals & Totals
   const grossSubtotal = cart.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0);
   const itemDiscountsTotal = cart.reduce((sum, item) => sum + (item.discount || 0) * item.quantity, 0);
   const itemsSubtotal = cart.reduce((sum, item) => sum + item.total, 0);
 
-  // Compute sale-level manual or percentage discount
+  // Compute sale-level manual or percentage discount (when Transaction wise Discount is enabled)
   let numDiscount = 0;
   const parsedSaleInput = parseFloat(discountInputVal);
   if (!isNaN(parsedSaleInput) && parsedSaleInput > 0) {
@@ -1493,8 +1587,48 @@ export const POSView: React.FC<POSViewProps> = ({
   const totalDiscount = itemDiscountsTotal + numDiscount;
   const subtotal = grossSubtotal; // Gross subtotal
   const afterDiscountAmount = Math.max(0, itemsSubtotal - numDiscount);
-  const taxTotal = afterDiscountAmount * (taxRate / 100);
-  const grandTotal = Math.max(0, afterDiscountAmount + taxTotal);
+
+  const activeAdditionalCharge =
+    txSettings.additionalCharges.enabled ? Math.max(0, Number(additionalChargeAmount) || 0) : 0;
+  const activePaymentDiscount =
+    txSettings.discountDuringPayment ? Math.max(0, Number(paymentDiscountAmount) || 0) : 0;
+
+  // Transaction-wise Tax & Exclusive Line Tax Math
+  const exclusiveVatAddOn =
+    txSettings.enableTransactionWiseTax && kraTaxModeSetting === 'vat'
+      ? cart.reduce((sum, item) => {
+          if (txSettings.allowTaxInclusiveExclusiveOnRate && item.taxModeOnRate === 'exclusive') {
+            return sum + item.total * 0.16;
+          }
+          return sum;
+        }, 0)
+      : 0;
+
+  const baseTxRate = txSettings.enableTransactionWiseTax
+    ? (taxRate > 0 ? taxRate : 0)
+    : 0;
+  const taxTotal = Math.max(0, afterDiscountAmount * (baseTxRate / 100) + exclusiveVatAddOn);
+
+  const rawGrandTotal = Math.max(
+    0,
+    afterDiscountAmount + taxTotal + activeAdditionalCharge - activePaymentDiscount
+  );
+  const grandTotal = txSettings.roundOffTransactionAmount
+    ? Math.round(rawGrandTotal)
+    : rawGrandTotal;
+  const roundOffAmount = Number((grandTotal - rawGrandTotal).toFixed(2));
+
+  // Owner-only live profit estimation (hidden for non-Admin Cashiers when PIN lock active)
+  const cartCostTotal = cart.reduce(
+    (sum, item) =>
+      sum + (Number(item.product.costPrice) || 0) * (item.quantity + (item.freeQuantity || 0)),
+    0
+  );
+  const estimatedCartProfit = Number(
+    (afterDiscountAmount - activePaymentDiscount - cartCostTotal).toFixed(2)
+  );
+  const estimatedProfitMarginPct =
+    afterDiscountAmount > 0 ? Math.round((estimatedCartProfit / afterDiscountAmount) * 100) : 0;
 
   const isAnyCheckoutSheetOpen = mobileTab === 'cart' || showCheckoutModal || showMpesaPromptModal;
 
@@ -1605,8 +1739,10 @@ export const POSView: React.FC<POSViewProps> = ({
   // Open Checkout Modal
   const handleOpenCheckout = () => {
     if (cart.length === 0) return;
-    // Default single payment entry to total amount
-    setPaymentEntries([{ method: 'cash', amount: grandTotal, reference: '' }]);
+    const preferredMethod: PaymentMethod = txSettings.cashSaleByDefault
+      ? 'cash'
+      : ((txSettings.defaultPaymentMethod as PaymentMethod) || 'mpesa');
+    setPaymentEntries([{ method: preferredMethod, amount: grandTotal, reference: '' }]);
     // IMPORTANT: Preserve existing backdated saleDate if selected; only default if empty
     if (!saleDate) {
       setSaleDate(getLocalDateString());
@@ -1684,18 +1820,16 @@ export const POSView: React.FC<POSViewProps> = ({
     const { isoDate: finalTxDate, timestamp: finalTxTimestamp } = buildFinalTxDate(saleDate);
 
     const txDateObj = new Date(finalTxDate);
-    const receiptYear = txDateObj.getFullYear();
-    const receiptMonth = (txDateObj.getMonth() + 1).toString().padStart(2, '0');
-    const receiptDay = txDateObj.getDate().toString().padStart(2, '0');
-    const receiptNo = `INV-${receiptYear}${receiptMonth}${receiptDay}-${Math.floor(100 + Math.random() * 900)}`;
+    const activePrefixes = getActiveFirmPrefixes(txSettings, activeStoreId);
+    const receiptNo = formatDocumentNumberWithPrefix(activePrefixes.saleInvoice, txDateObj);
 
     const cuin = isEtimsRequested ? `CUIN-2026-${Math.floor(100000 + Math.random() * 900000)}` : undefined;
     const cusn = isEtimsRequested ? `CUSN-KENYA-${Math.floor(10000000 + Math.random() * 90000000)}` : undefined;
     const taxBreakdown = {
-      vat16Total: grandTotal * 0.16,
+      vat16Total: kraTaxModeSetting === 'vat' ? Number((grandTotal - grandTotal / 1.16).toFixed(2)) : grandTotal * 0.16,
       zeroRatedTotal: 0,
-      exemptTotal: 0,
-      totTotal: grandTotal * 0.015,
+      exemptTotal: kraTaxModeSetting === 'none' ? grandTotal : 0,
+      totTotal: kraTaxModeSetting === 'tot' || kraTaxModeSetting === 'none' ? grandTotal * 0.015 : 0,
     };
 
     const newTx: Transaction = {
@@ -1735,15 +1869,26 @@ export const POSView: React.FC<POSViewProps> = ({
       cuin,
       cusn,
       taxBreakdown,
+      billingPartyName: txSettings.enableBillingPartyName && billingPartyName.trim() ? billingPartyName.trim() : undefined,
+      customerPoNumber: txSettings.enableCustomerPoDetails && customerPoNumber.trim() ? customerPoNumber.trim() : undefined,
+      customerPoDate: txSettings.enableCustomerPoDetails && customerPoDate ? customerPoDate : undefined,
+      roundOffAmount: roundOffAmount !== 0 ? roundOffAmount : undefined,
+      additionalChargeLabel: activeAdditionalCharge > 0 ? additionalChargeLabel : undefined,
+      additionalChargeAmount: activeAdditionalCharge > 0 ? activeAdditionalCharge : undefined,
+      termsAndConditionsText: txSettings.termsAndConditions.enabled ? txSettings.termsAndConditions.text : undefined,
+      showTimeOnReceipt: txSettings.addTimeOnTransactions,
+      hideInvoiceNumber: !txSettings.enableInvoiceBillNumber,
+      customCountLabel: txSettings.enableItemCountColumn ? txSettings.customCountLabel : undefined,
     };
 
-    // Update Product Stock Levels
+    // Update Product Stock Levels (including free bonus quantities)
     const updatedProducts = products.map((prod) => {
       const cartMatch = cart.find((c) => c.product.id === prod.id);
       if (cartMatch) {
+        const totalDeducted = cartMatch.quantity + (cartMatch.freeQuantity || 0);
         return {
           ...prod,
-          stockQuantity: Math.max(0, prod.stockQuantity - cartMatch.quantity),
+          stockQuantity: Math.max(0, prod.stockQuantity - totalDeducted),
           updatedAt: new Date().toISOString().slice(0, 10),
         };
       }
@@ -1830,8 +1975,7 @@ export const POSView: React.FC<POSViewProps> = ({
   // Process Final Sale (supports optional direct override payments e.g. 1-tap Mobile Cash checkout)
   const handleFinalizeSale = (overridePayments?: PaymentBreakdown[] | unknown) => {
     if (!cart || cart.length === 0) {
-      console.error('Sale finalization failed: Cart is empty.');
-      alert('Cannot complete sale: Receipt cart is empty. Please add items first.');
+      setPosNotice({ message: 'Cannot complete sale: Receipt cart is empty. Please add items first.', type: 'warning' });
       setShowCheckoutModal(false);
       return;
     }
@@ -1839,8 +1983,6 @@ export const POSView: React.FC<POSViewProps> = ({
     const activePayments = Array.isArray(overridePayments)
       ? (overridePayments as PaymentBreakdown[])
       : paymentEntries;
-
-    console.log('Finalizing sale with cart items:', cart.length, 'Grand Total:', grandTotal);
 
     const totalPaid = activePayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
     const balanceDue = Math.max(0, grandTotal - totalPaid);
@@ -1855,10 +1997,8 @@ export const POSView: React.FC<POSViewProps> = ({
     const { isoDate: finalTxDate, timestamp: finalTxTimestamp } = buildFinalTxDate(saleDate);
 
     const txDateObj = new Date(finalTxDate);
-    const receiptYear = txDateObj.getFullYear();
-    const receiptMonth = (txDateObj.getMonth() + 1).toString().padStart(2, '0');
-    const receiptDay = txDateObj.getDate().toString().padStart(2, '0');
-    const receiptNo = `INV-${receiptYear}${receiptMonth}${receiptDay}-${Math.floor(100 + Math.random() * 900)}`;
+    const activePrefixes = getActiveFirmPrefixes(txSettings, activeStoreId);
+    const receiptNo = formatDocumentNumberWithPrefix(activePrefixes.saleInvoice, txDateObj);
 
     const currentCommRate = currentCartComm.rate;
     const currentCommAmount = currentCartComm.amount;
@@ -1866,14 +2006,24 @@ export const POSView: React.FC<POSViewProps> = ({
     const cuin = isEtimsRequested ? `CUIN-2026-${Math.floor(100000 + Math.random() * 900000)}` : undefined;
     const cusn = isEtimsRequested ? `CUSN-KENYA-${Math.floor(10000000 + Math.random() * 90000000)}` : undefined;
     const taxBreakdown = {
-      vat16Total: grandTotal * 0.16,
+      vat16Total: kraTaxModeSetting === 'vat' ? Number((grandTotal - grandTotal / 1.16).toFixed(2)) : grandTotal * 0.16,
       zeroRatedTotal: 0,
-      exemptTotal: 0,
-      totTotal: grandTotal * 0.015,
+      exemptTotal: kraTaxModeSetting === 'none' ? grandTotal : 0,
+      totTotal: kraTaxModeSetting === 'tot' || kraTaxModeSetting === 'none' ? grandTotal * 0.015 : 0,
     };
 
     const effectiveCustomerName = selectedCustomer.name;
     const effectiveCustomerPhone = selectedCustomer.phone;
+
+    const enabledCustomFieldPairs = txSettings.additionalFields.enabled
+      ? txSettings.additionalFields.fields
+          .filter((f) => f.enabled)
+          .map((f) => ({
+            label: f.label,
+            value: (additionalFieldsValues[f.id] ?? f.defaultValue ?? '').trim(),
+          }))
+          .filter((f) => f.value.length > 0)
+      : [];
 
     const newTx: Transaction = {
       id: `tx-${Date.now()}`,
@@ -1882,8 +2032,11 @@ export const POSView: React.FC<POSViewProps> = ({
       timestamp: finalTxTimestamp,
       items: [...cart],
       subtotal,
-      discountTotal: totalDiscount,
-      discountAuthorizedBy: totalDiscount > 0 ? (discountAuthorizedBy || `${currentUser.name} (Admin)`) : undefined,
+      discountTotal: totalDiscount + activePaymentDiscount,
+      discountAuthorizedBy:
+        totalDiscount + activePaymentDiscount > 0
+          ? (discountAuthorizedBy || `${currentUser.name} (Admin)`)
+          : undefined,
       taxTotal,
       grandTotal,
       totalAmount: grandTotal,
@@ -1909,7 +2062,30 @@ export const POSView: React.FC<POSViewProps> = ({
       customerKraPin: isEtimsRequested && customerKraPin ? customerKraPin.trim() : undefined,
       cuin,
       cusn,
-      taxBreakdown
+      taxBreakdown,
+      billingPartyName: txSettings.enableBillingPartyName && billingPartyName.trim() ? billingPartyName.trim() : undefined,
+      customerPoNumber: txSettings.enableCustomerPoDetails && customerPoNumber.trim() ? customerPoNumber.trim() : undefined,
+      customerPoDate: txSettings.enableCustomerPoDetails && customerPoDate ? customerPoDate : undefined,
+      roundOffAmount: roundOffAmount !== 0 ? roundOffAmount : undefined,
+      paymentDiscount: activePaymentDiscount > 0 ? activePaymentDiscount : undefined,
+      linkedInvoiceRef: txSettings.linkPaymentsToInvoices && linkedInvoiceRef.trim() ? linkedInvoiceRef.trim() : undefined,
+      dueDate: txSettings.dueDatesPaymentTerms.enabled && dueDateInput ? dueDateInput : undefined,
+      paymentTerms: txSettings.dueDatesPaymentTerms.enabled && paymentTermsInput.trim() ? paymentTermsInput.trim() : undefined,
+      termsAndConditionsText: txSettings.termsAndConditions.enabled ? txSettings.termsAndConditions.text : undefined,
+      additionalFieldsValues: enabledCustomFieldPairs.length > 0 ? enabledCustomFieldPairs : undefined,
+      transportationDetails:
+        txSettings.transportationDetails.enabled && (transportDriverName.trim() || transportVehicleRef.trim())
+          ? {
+              deliveryMode: transportMode,
+              driverName: transportDriverName.trim() || undefined,
+              vehicleNumber: transportVehicleRef.trim() || undefined,
+            }
+          : undefined,
+      additionalChargeLabel: activeAdditionalCharge > 0 ? additionalChargeLabel : undefined,
+      additionalChargeAmount: activeAdditionalCharge > 0 ? activeAdditionalCharge : undefined,
+      showTimeOnReceipt: txSettings.addTimeOnTransactions,
+      hideInvoiceNumber: !txSettings.enableInvoiceBillNumber,
+      customCountLabel: txSettings.enableItemCountColumn ? txSettings.customCountLabel : undefined,
     };
 
     // Save directly to localStorage keys pos_store_sales & retail_pos_transactions immediately
@@ -1922,13 +2098,14 @@ export const POSView: React.FC<POSViewProps> = ({
       console.warn('Could not update localStorage sales:', err);
     }
 
-    // Update Product Stock Levels
+    // Update Product Stock Levels (including free bonus quantities)
     const updatedProducts = products.map((prod) => {
       const cartMatch = cart.find((c) => c.product.id === prod.id);
       if (cartMatch) {
+        const totalDeducted = cartMatch.quantity + (cartMatch.freeQuantity || 0);
         return {
           ...prod,
-          stockQuantity: Math.max(0, prod.stockQuantity - cartMatch.quantity),
+          stockQuantity: Math.max(0, prod.stockQuantity - totalDeducted),
           updatedAt: new Date().toISOString().slice(0, 10)
         };
       }
@@ -1949,10 +2126,9 @@ export const POSView: React.FC<POSViewProps> = ({
 
     try {
       onCompleteSale(newTx, updatedProducts, updatedCustomers);
-      console.log('Successfully recorded transaction:', newTx.receiptNumber);
     } catch (err) {
       console.error('Error invoking onCompleteSale callback:', err);
-      alert('Error recording sale transaction. Please check console logs.');
+      setPosNotice({ message: 'Error recording sale transaction. Please check inputs and retry.', type: 'warning' });
       return;
     }
 
@@ -2264,6 +2440,148 @@ export const POSView: React.FC<POSViewProps> = ({
                 </div>
               </div>
 
+              {/* Dynamic Transaction Settings Item Controls (Tax Mode, Cost Price, Last 5 Rates, Free Qty, Count) */}
+              {(txSettings.allowTaxInclusiveExclusiveOnRate ||
+                (txSettings.displayPurchasePrice && canViewCostAndProfit) ||
+                txSettings.showLast5SalePrices ||
+                txSettings.enableFreeItemQuantity ||
+                txSettings.enableItemCountColumn) && (
+                <div
+                  onClick={(e) => e.stopPropagation()}
+                  className="flex flex-wrap items-center gap-1.5 pt-1 border-t border-slate-900/90 text-[10px]"
+                >
+                  {txSettings.allowTaxInclusiveExclusiveOnRate && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        handleUpdateItemMeta(item.product.id, {
+                          taxModeOnRate:
+                            item.taxModeOnRate === 'exclusive' ? 'inclusive' : 'exclusive',
+                        })
+                      }
+                      className={`px-2 py-0.5 rounded-md font-bold border transition cursor-pointer ${
+                        item.taxModeOnRate === 'exclusive'
+                          ? 'bg-amber-950/70 text-amber-300 border-amber-700'
+                          : 'bg-slate-900 text-sky-300 border-slate-700'
+                      }`}
+                      title="Toggle Inclusive vs Exclusive tax on this item's rate"
+                    >
+                      {item.taxModeOnRate === 'exclusive' ? 'Tax Excl.' : 'Tax Incl.'}
+                    </button>
+                  )}
+
+                  {txSettings.displayPurchasePrice && canViewCostAndProfit && (
+                    <span className="px-2 py-0.5 rounded-md bg-slate-900 border border-slate-700 text-slate-300 font-mono">
+                      Cost: KSh {(item.product.costPrice || 0).toLocaleString()}
+                    </span>
+                  )}
+
+                  {txSettings.showLast5SalePrices && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setLast5RatesItemId((prev) =>
+                          prev === item.product.id ? null : item.product.id
+                        )
+                      }
+                      className="px-2 py-0.5 rounded-md bg-indigo-950/70 hover:bg-indigo-900 text-indigo-300 border border-indigo-700/70 font-semibold transition cursor-pointer"
+                    >
+                      Last 5 Rates ▾
+                    </button>
+                  )}
+
+                  {txSettings.enableFreeItemQuantity && (
+                    <label className="inline-flex items-center gap-1 bg-slate-900 border border-slate-700 px-1.5 py-0.5 rounded-md">
+                      <span className="text-emerald-400 font-bold">Free Qty:</span>
+                      <input
+                        type="number"
+                        min={0}
+                        value={item.freeQuantity ?? 0}
+                        onChange={(e) =>
+                          handleUpdateItemMeta(item.product.id, {
+                            freeQuantity: Math.max(0, parseInt(e.target.value, 10) || 0),
+                          })
+                        }
+                        className="w-10 bg-slate-950 border border-slate-700 rounded px-1 text-center font-mono text-white"
+                      />
+                    </label>
+                  )}
+
+                  {txSettings.enableItemCountColumn && (
+                    <label className="inline-flex items-center gap-1 bg-slate-900 border border-slate-700 px-1.5 py-0.5 rounded-md">
+                      <span className="text-sky-300 font-bold">
+                        {txSettings.customCountLabel || 'Count'}:
+                      </span>
+                      <input
+                        type="number"
+                        min={0}
+                        value={item.customCount ?? 1}
+                        onChange={(e) =>
+                          handleUpdateItemMeta(item.product.id, {
+                            customCount: Math.max(0, parseInt(e.target.value, 10) || 0),
+                          })
+                        }
+                        className="w-10 bg-slate-950 border border-slate-700 rounded px-1 text-center font-mono text-white"
+                      />
+                    </label>
+                  )}
+                </div>
+              )}
+
+              {/* Last 5 Sale Prices Negotiation Lookup Popover */}
+              {txSettings.showLast5SalePrices && last5RatesItemId === item.product.id && (
+                <div
+                  onClick={(e) => e.stopPropagation()}
+                  className="p-2 bg-slate-900 border border-indigo-700/60 rounded-xl space-y-1 text-[10px]"
+                >
+                  <div className="flex items-center justify-between text-indigo-300 font-bold">
+                    <span>Recent Sale Prices ({item.product.name})</span>
+                    <button
+                      type="button"
+                      onClick={() => setLast5RatesItemId(null)}
+                      className="text-slate-400 hover:text-white cursor-pointer"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                  {(() => {
+                    const historyRates = getLast5SalePricesForProduct(
+                      item.product.id,
+                      transactions,
+                      selectedCustomer.id
+                    );
+                    if (historyRates.length === 0) {
+                      return (
+                        <div className="text-slate-400 italic">
+                          No previous recorded sales found for this item yet.
+                        </div>
+                      );
+                    }
+                    return (
+                      <div className="flex flex-wrap gap-1.5 pt-0.5">
+                        {historyRates.map((hr, idx) => (
+                          <button
+                            key={idx}
+                            type="button"
+                            onClick={() => {
+                              handleUpdateItemUnitPrice(item.product.id, hr.unitPrice);
+                              setLast5RatesItemId(null);
+                            }}
+                            className="px-2 py-1 rounded-lg bg-slate-950 hover:bg-indigo-950 border border-slate-700 hover:border-indigo-500 text-slate-200 font-mono cursor-pointer transition"
+                            title={`Sold to ${hr.customerName} on ${new Date(hr.date).toLocaleDateString()} (${hr.receiptNumber})`}
+                          >
+                            <span className="font-bold text-emerald-400">
+                              KSh {hr.unitPrice.toLocaleString()}
+                            </span>{' '}
+                            <span className="text-slate-400">({hr.customerName.split(' ')[0]})</span>
+                          </button>
+                        ))}
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
+
               {/* Item Discount Action Bar */}
               <div className="flex items-center justify-between pt-1 border-t border-slate-900 text-[11px]">
                 <div className="flex items-center gap-2">
@@ -2454,6 +2772,62 @@ export const POSView: React.FC<POSViewProps> = ({
 
       {/* Financial Summary */}
       <div className="bg-slate-950/80 p-3 rounded-2xl border border-slate-800 space-y-2.5 text-xs">
+        {/* Transaction-wise Discount Control */}
+        {txSettings.enableTransactionWiseDiscount && hasWorkerPermission(currentUser, 'canGiveDiscounts') && cart.length > 0 && (
+          <div className="flex items-center justify-between gap-2 pb-2 border-b border-slate-800/80">
+            <span className="text-[11px] font-semibold text-slate-300">Invoice Discount:</span>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => setDiscountMode((m) => (m === 'fixed' ? 'percentage' : 'fixed'))}
+                className="px-2 py-1 rounded-lg bg-slate-900 border border-slate-700 text-[10px] font-bold text-amber-300 cursor-pointer"
+              >
+                {discountMode === 'percentage' ? '%' : 'KSh'}
+              </button>
+              <input
+                type="number"
+                min={0}
+                value={discountInputVal}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setDiscountInputVal(val);
+                  const num = parseFloat(val) || 0;
+                  setDiscountAmount(
+                    discountMode === 'percentage'
+                      ? Math.round((Math.min(100, num) / 100) * itemsSubtotal)
+                      : Math.min(itemsSubtotal, num)
+                  );
+                }}
+                placeholder="0"
+                className="w-20 bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-xs font-mono text-amber-300 text-right focus:outline-none focus:border-amber-500"
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Additional Charges Control */}
+        {txSettings.additionalCharges.enabled && cart.length > 0 && (
+          <div className="flex items-center justify-between gap-2 pb-2 border-b border-slate-800/80">
+            <input
+              type="text"
+              value={additionalChargeLabel}
+              onChange={(e) => setAdditionalChargeLabel(e.target.value)}
+              className="flex-1 min-w-0 bg-transparent border-b border-slate-800 text-[11px] font-semibold text-slate-300 focus:outline-none focus:border-blue-500"
+            />
+            <div className="flex items-center gap-1 shrink-0">
+              <span className="text-[10px] text-slate-400 font-mono">+KSh</span>
+              <input
+                type="number"
+                min={0}
+                value={additionalChargeAmount === 0 ? '' : additionalChargeAmount}
+                onChange={(e) => setAdditionalChargeAmount(Math.max(0, parseFloat(e.target.value) || 0))}
+                placeholder="0"
+                className="w-20 bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-xs font-mono text-sky-300 text-right focus:outline-none focus:border-sky-500"
+              />
+            </div>
+          </div>
+        )}
+
         <div className="space-y-1.5 font-mono pt-1 text-slate-300">
           <div className="flex justify-between text-slate-400">
             <span>Items Subtotal:</span>
@@ -2467,20 +2841,48 @@ export const POSView: React.FC<POSViewProps> = ({
             </div>
           )}
 
-          <div className="flex justify-between items-center text-amber-400/90 text-[11px]">
-            <span className="flex items-center gap-1.5">
-              <span>KRA Turnover Tax (1.5% TOT):</span>
-              <button
-                type="button"
-                onClick={() => setShowKraTotModal(true)}
-                className="text-[10px] text-amber-300 hover:text-white font-bold underline cursor-pointer"
-                title="View KRA Monthly Turnover Tax Return & iTax Filing Status"
-              >
-                Month-End Return ↗
-              </button>
-            </span>
-            <span className="font-mono font-bold">KSh {(grandTotal * 0.015).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
-          </div>
+          {activeAdditionalCharge > 0 && (
+            <div className="flex justify-between text-sky-300">
+              <span>{additionalChargeLabel}:</span>
+              <span>+KSh {activeAdditionalCharge.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+            </div>
+          )}
+
+          {txSettings.enableTransactionWiseTax && (
+            <div className="flex justify-between items-center text-amber-400/90 text-[11px]">
+              <span className="flex items-center gap-1.5">
+                <span>
+                  {kraTaxModeSetting === 'vat'
+                    ? 'KRA VAT (16%):'
+                    : kraTaxModeSetting === 'none'
+                      ? 'Tax Mode (Exempt):'
+                      : 'KRA Turnover Tax (1.5% TOT):'}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setShowKraTotModal(true)}
+                  className="text-[10px] text-amber-300 hover:text-white font-bold underline cursor-pointer"
+                  title="View KRA Monthly Turnover Tax Return & iTax Filing Status"
+                >
+                  Month-End Return ↗
+                </button>
+              </span>
+              <span className="font-mono font-bold">
+                {kraTaxModeSetting === 'vat'
+                  ? `KSh ${(exclusiveVatAddOn > 0 ? exclusiveVatAddOn : grandTotal - grandTotal / 1.16).toLocaleString(undefined, { minimumFractionDigits: 2 })}`
+                  : kraTaxModeSetting === 'none'
+                    ? 'KSh 0.00'
+                    : `KSh ${(grandTotal * 0.015).toLocaleString(undefined, { minimumFractionDigits: 2 })}`}
+              </span>
+            </div>
+          )}
+
+          {txSettings.roundOffTransactionAmount && roundOffAmount !== 0 && (
+            <div className="flex justify-between text-slate-400 text-[11px]">
+              <span>Round Off:</span>
+              <span>{roundOffAmount > 0 ? '+' : ''}KSh {roundOffAmount.toFixed(2)}</span>
+            </div>
+          )}
 
           <div className="border-t border-slate-800 pt-2 flex items-center justify-between text-white font-sans">
             <span className="text-xs font-bold text-slate-400 uppercase tracking-wide">Grand Total:</span>
@@ -2488,6 +2890,17 @@ export const POSView: React.FC<POSViewProps> = ({
               KSh {grandTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}
             </span>
           </div>
+
+          {txSettings.showProfitOnSaleInvoice && canViewCostAndProfit && cart.length > 0 && (
+            <div className="mt-1.5 px-2.5 py-1.5 rounded-xl bg-emerald-950/60 border border-emerald-700/50 flex items-center justify-between text-[11px]">
+              <span className="font-sans font-semibold text-emerald-300">
+                Est. Owner Profit ({estimatedProfitMarginPct}%):
+              </span>
+              <span className={`font-mono font-extrabold ${estimatedCartProfit >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                KSh {estimatedCartProfit.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+              </span>
+            </div>
+          )}
         </div>
       </div>
 
@@ -2808,17 +3221,19 @@ export const POSView: React.FC<POSViewProps> = ({
                   </button>
                 )}
               </div>
-              <button
-                id="btn-pos-quick-scan"
-                type="button"
-                onClick={() => setShowScanner(true)}
-                className="bg-sky-600 hover:bg-sky-500 active:scale-95 text-white font-bold px-3.5 py-2.5 rounded-xl text-xs transition flex items-center gap-1.5 shadow-md shadow-sky-600/25 whitespace-nowrap shrink-0 cursor-pointer"
-                title="Open barcode & QR camera scanner to add items to the current transaction"
-                aria-label="Quick Scan barcode or QR code"
-              >
-                <Scan className="w-4 h-4 shrink-0" />
-                <span>Quick Scan</span>
-              </button>
+              {txSettings.enableBarcodeScanning && (
+                <button
+                  id="btn-pos-quick-scan"
+                  type="button"
+                  onClick={() => setShowScanner(true)}
+                  className="bg-sky-600 hover:bg-sky-500 active:scale-95 text-white font-bold px-3.5 py-2.5 rounded-xl text-xs transition flex items-center gap-1.5 shadow-md shadow-sky-600/25 whitespace-nowrap shrink-0 cursor-pointer"
+                  title="Open barcode & QR camera scanner to add items to the current transaction"
+                  aria-label="Quick Scan barcode or QR code"
+                >
+                  <Scan className="w-4 h-4 shrink-0" />
+                  <span>Quick Scan</span>
+                </button>
+              )}
             </div>
 
             {/* Active search pill right below search bar — full height, zero clipping */}
@@ -2890,15 +3305,17 @@ export const POSView: React.FC<POSViewProps> = ({
                 </button>
 
                 {/* Scan QR Code (Tablet/Desktop) */}
-                <button
-                  id="btn-pos-scan-barcode"
-                  onClick={() => setShowScanner(true)}
-                  className="hidden sm:flex bg-sky-600 hover:bg-sky-500 text-white font-semibold px-3 py-1.5 rounded-xl text-xs transition items-center gap-1.5 shadow-md shadow-sky-600/20 whitespace-nowrap shrink-0 cursor-pointer"
-                  title="Scan QR Code"
-                >
-                  <QrCode className="w-3.5 h-3.5" />
-                  <span>Scan QR</span>
-                </button>
+                {txSettings.enableBarcodeScanning && (
+                  <button
+                    id="btn-pos-scan-barcode"
+                    onClick={() => setShowScanner(true)}
+                    className="hidden sm:flex bg-sky-600 hover:bg-sky-500 text-white font-semibold px-3 py-1.5 rounded-xl text-xs transition items-center gap-1.5 shadow-md shadow-sky-600/20 whitespace-nowrap shrink-0 cursor-pointer"
+                    title="Scan QR Code"
+                  >
+                    <QrCode className="w-3.5 h-3.5" />
+                    <span>Scan QR</span>
+                  </button>
+                )}
 
                 {/* Transaction SMS Logs Button */}
                 <button
@@ -3941,6 +4358,43 @@ export const POSView: React.FC<POSViewProps> = ({
                 ))}
               </div>
 
+              {/* Discount during Payment & Link Payments */}
+              {(txSettings.discountDuringPayment || txSettings.linkPaymentsToInvoices) && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 bg-slate-950 p-3 rounded-xl border border-slate-800 text-xs">
+                  {txSettings.discountDuringPayment && (
+                    <div>
+                      <label className="text-[11px] text-amber-300 font-semibold block mb-1">
+                        Discount During Payment (KSh)
+                      </label>
+                      <input
+                        type="number"
+                        min={0}
+                        value={paymentDiscountAmount === 0 ? '' : paymentDiscountAmount}
+                        onChange={(e) =>
+                          setPaymentDiscountAmount(Math.max(0, parseFloat(e.target.value) || 0))
+                        }
+                        placeholder="0"
+                        className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs font-mono text-amber-300 focus:outline-none focus:border-amber-500"
+                      />
+                    </div>
+                  )}
+                  {txSettings.linkPaymentsToInvoices && (
+                    <div>
+                      <label className="text-[11px] text-sky-300 font-semibold block mb-1">
+                        Link Payment to Invoice # (Optional)
+                      </label>
+                      <input
+                        type="text"
+                        value={linkedInvoiceRef}
+                        onChange={(e) => setLinkedInvoiceRef(e.target.value)}
+                        placeholder="e.g. INV-20261120-104"
+                        className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs font-mono text-slate-100 focus:outline-none focus:border-sky-500"
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Payment Math Summary */}
               {(() => {
                 const totalPaid = paymentEntries.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
@@ -3974,6 +4428,142 @@ export const POSView: React.FC<POSViewProps> = ({
 
               {/* Custom Mobile-Optimized Date Selector */}
               {renderMobileDateSelector()}
+
+              {/* Billing Name, Customer PO Details, Due Date/Terms, Transport & Additional Fields */}
+              {(txSettings.enableBillingPartyName ||
+                txSettings.enableCustomerPoDetails ||
+                txSettings.dueDatesPaymentTerms.enabled ||
+                txSettings.transportationDetails.enabled ||
+                txSettings.additionalFields.enabled) && (
+                <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 space-y-3 text-xs">
+                  <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                    Invoice &amp; Dispatch Details
+                  </div>
+
+                  {txSettings.enableBillingPartyName && (
+                    <div>
+                      <label className="text-[11px] text-slate-400 block mb-1">
+                        Billing Name of Party / Business
+                      </label>
+                      <input
+                        type="text"
+                        value={billingPartyName}
+                        onChange={(e) => setBillingPartyName(e.target.value)}
+                        placeholder={`Optional billing name (defaults to ${selectedCustomer.name})`}
+                        className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-blue-500"
+                      />
+                    </div>
+                  )}
+
+                  {txSettings.enableCustomerPoDetails && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                      <div>
+                        <label className="text-[11px] text-slate-400 block mb-1">Customer PO Number</label>
+                        <input
+                          type="text"
+                          value={customerPoNumber}
+                          onChange={(e) => setCustomerPoNumber(e.target.value)}
+                          placeholder="e.g. LPO-9942"
+                          className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs font-mono text-white"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[11px] text-slate-400 block mb-1">Customer PO Date</label>
+                        <input
+                          type="date"
+                          value={customerPoDate}
+                          onChange={(e) => setCustomerPoDate(e.target.value)}
+                          className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs font-mono text-white"
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {txSettings.dueDatesPaymentTerms.enabled && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                      <div>
+                        <label className="text-[11px] text-slate-400 block mb-1">Payment Terms</label>
+                        <input
+                          type="text"
+                          value={paymentTermsInput}
+                          onChange={(e) => setPaymentTermsInput(e.target.value)}
+                          placeholder="Net 15 Days"
+                          className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[11px] text-slate-400 block mb-1">Invoice Due Date</label>
+                        <input
+                          type="date"
+                          value={dueDateInput}
+                          onChange={(e) => setDueDateInput(e.target.value)}
+                          className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs font-mono text-white"
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {txSettings.transportationDetails.enabled && (
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                      <div>
+                        <label className="text-[11px] text-slate-400 block mb-1">Transport Mode</label>
+                        <input
+                          type="text"
+                          value={transportMode}
+                          onChange={(e) => setTransportMode(e.target.value)}
+                          placeholder="Boda Boda / Matatu"
+                          className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[11px] text-slate-400 block mb-1">
+                          {txSettings.transportationDetails.driverLabel}
+                        </label>
+                        <input
+                          type="text"
+                          value={transportDriverName}
+                          onChange={(e) => setTransportDriverName(e.target.value)}
+                          placeholder="Driver name"
+                          className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[11px] text-slate-400 block mb-1">
+                          {txSettings.transportationDetails.vehicleLabel}
+                        </label>
+                        <input
+                          type="text"
+                          value={transportVehicleRef}
+                          onChange={(e) => setTransportVehicleRef(e.target.value)}
+                          placeholder="KMFZ 123X"
+                          className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs font-mono text-white"
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {txSettings.additionalFields.enabled &&
+                    txSettings.additionalFields.fields
+                      .filter((f) => f.enabled)
+                      .map((f) => (
+                        <div key={f.id}>
+                          <label className="text-[11px] text-slate-400 block mb-1">{f.label}</label>
+                          <input
+                            type="text"
+                            value={additionalFieldsValues[f.id] ?? f.defaultValue ?? ''}
+                            onChange={(e) =>
+                              setAdditionalFieldsValues((prev) => ({
+                                ...prev,
+                                [f.id]: e.target.value,
+                              }))
+                            }
+                            placeholder={`Enter ${f.label}...`}
+                            className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white"
+                          />
+                        </div>
+                      ))}
+                </div>
+              )}
 
               {/* Notes */}
               <div>
@@ -4217,6 +4807,7 @@ export const POSView: React.FC<POSViewProps> = ({
         <ReceiptModal
           transaction={completedTx}
           storeName={resolvedStoreName}
+          activeStoreId={activeStoreId}
           onClose={() => {
             setCompletedTx(null);
             executeNewSale();

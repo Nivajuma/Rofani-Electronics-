@@ -262,6 +262,10 @@
       "schema": { "$ref": "#/entities/StoreSetting" },
       "description": "Tenant-isolated store security and M-Pesa configuration documents"
     },
+    "/stores/{storeId}/settings/{settingId}": {
+      "schema": { "$ref": "#/entities/StoreSetting" },
+      "description": "Tenant-isolated store operational settings documents (e.g. transaction rules and prefixes)"
+    },
     "/products/{productId}": {
       "schema": { "$ref": "#/entities/Product" },
       "description": "Legacy owner root products collection"

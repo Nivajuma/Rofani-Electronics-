@@ -155,6 +155,9 @@ export interface CartItem {
   unitPrice: number;
   discount: number; // percentage or fixed amount
   total: number;
+  freeQuantity?: number;
+  customCount?: number;
+  taxModeOnRate?: 'inclusive' | 'exclusive';
 }
 
 export interface CustomerContactItem {
@@ -251,6 +254,27 @@ export interface Transaction {
   customerId?: string;
   customerName?: string;
   customerPhone?: string;
+  billingPartyName?: string;
+  customerPoNumber?: string;
+  customerPoDate?: string;
+  roundOffAmount?: number;
+  paymentDiscount?: number;
+  linkedInvoiceRef?: string;
+  dueDate?: string;
+  paymentTerms?: string;
+  termsAndConditionsText?: string;
+  additionalFieldsValues?: { label: string; value: string }[];
+  transportationDetails?: {
+    driverName?: string;
+    vehicleNumber?: string;
+    deliveryMode?: string;
+    notes?: string;
+  };
+  additionalChargeLabel?: string;
+  additionalChargeAmount?: number;
+  showTimeOnReceipt?: boolean;
+  hideInvoiceNumber?: boolean;
+  customCountLabel?: string;
   cashierName: string;
   cashierId: string;
   salesRepId?: string; // Staff member who assisted / made the sale

@@ -113,7 +113,6 @@ import { AttendanceView } from './components/Attendance/AttendanceView';
 import { ReportsView } from './components/Reports/ReportsView';
 import { AuditLogsView } from './components/Reports/AuditLogsView';
 import { DataManagementView } from './components/Settings/DataManagementView';
-import { FloatingToolWidget } from './components/Tools/FloatingToolWidget';
 import { MobileQuickToolsBar, MobileCartSummary } from './components/Tools/MobileQuickToolsBar';
 import { PinLoginModal } from './components/Auth/PinLoginModal';
 import { StaffManagementModal } from './components/Auth/StaffManagementModal';
@@ -126,7 +125,6 @@ import { OnlineStorefrontView } from './components/OnlineStore/OnlineStorefrontV
 import { OnlineOrdersManagerView } from './components/OnlineStore/OnlineOrdersManagerView';
 import { CustomersSuppliersView } from './components/Contacts/CustomersSuppliersView';
 import { AIAssistantModal } from './components/AI/AIAssistantModal';
-import { AIAssistantWidget } from './components/AI/AIAssistantWidget';
 import { CloudSyncModal } from './components/CloudSync/CloudSyncModal';
 import { ConflictResolutionModal } from './components/CloudSync/ConflictResolutionModal';
 import { PrintBarcodesUtilityModal } from './components/Inventory/PrintBarcodesUtilityModal';
@@ -213,8 +211,14 @@ import {
   reconcileIncomingReferralRewards,
   subscribeToReferralRewards,
   normalizeReferralCode,
+  subscribeToTransactionSettings,
+  deleteTransactionFromCloud,
 } from './lib/cloudSync';
 import { loadMpesaConfig, saveMpesaConfig } from './utils/mpesa';
+import {
+  saveTransactionSettingsLocal,
+  normalizeTransactionSettings,
+} from './utils/transactionSettings';
 import {
   auth,
   isAuthorizedCloudUser,
@@ -2392,6 +2396,32 @@ export default function App() {
       if (unsubscribe) unsubscribe();
     };
   }, [isCloudAuthReady, firebaseUser?.uid, isOwnerAccount]);
+
+  // Real-time synchronization subscription for per-store Transaction Settings
+  useEffect(() => {
+    const activeUid = activeCloudStoreId || firebaseUser?.uid;
+    if (!isCloudAuthReady || !activeUid) return;
+    let isCancelled = false;
+    let unsubscribe: (() => void) | undefined;
+    try {
+      unsubscribe = subscribeToTransactionSettings(
+        (remoteConfig) => {
+          if (isCancelled) return;
+          if (remoteConfig && typeof remoteConfig === 'object') {
+            saveTransactionSettingsLocal(normalizeTransactionSettings(remoteConfig), activeUid);
+          }
+        },
+        (err) => console.warn('Transaction settings subscription notice:', err),
+        activeUid
+      );
+    } catch (err) {
+      console.warn('Could not subscribe to transaction settings:', err);
+    }
+    return () => {
+      isCancelled = true;
+      if (unsubscribe) unsubscribe();
+    };
+  }, [isCloudAuthReady, firebaseUser?.uid, activeCloudStoreId]);
 
   // Real-time synchronization subscription for users & staff accounts
   useEffect(() => {
@@ -5197,6 +5227,21 @@ export default function App() {
     setProducts(updatedProducts);
   };
 
+  const handleDeleteTransaction = (txId: string, updatedProducts: Product[]) => {
+    setTransactions((prev) => {
+      const next = prev.filter((t) => t.id !== txId);
+      safeSetJSON('retail_pos_transactions', next);
+      safeSetJSON('pos_store_sales', next);
+      return next;
+    });
+    setProducts(updatedProducts);
+    if (isCloudAuthReady && firebaseUser?.uid) {
+      deleteTransactionFromCloud(txId, activeCloudStoreId || firebaseUser.uid).catch((err) =>
+        console.warn('Cloud delete transaction notice:', err)
+      );
+    }
+  };
+
   const handleClearTransactions = () => {
     const userRoles = getUserRoles(currentUser);
     const qualifyingRoles = getQualifyingRolesForAction(currentUser, 'CLEAR_TRANSACTIONS');
@@ -5346,6 +5391,8 @@ export default function App() {
           externalQuickDiscountRequest={externalQuickDiscountRequest}
           externalClearDiscountTrigger={externalClearDiscountTrigger}
           storeName={stores.find((s) => s.id === activeStoreId)?.name || storeProfile?.storeName || 'Rofani POS'}
+          activeStoreId={activeCloudStoreId || getActiveTenantStoreId()}
+          requirePinOnStartup={requirePinOnStartup}
         />
       )}
 
@@ -5499,6 +5546,10 @@ export default function App() {
           expenses={expenses}
           auditLogs={auditLogs}
           onUpdateTransaction={handleUpdateTransaction}
+          onDeleteTransaction={handleDeleteTransaction}
+          activeStoreId={activeCloudStoreId || getActiveTenantStoreId()}
+          masterPin={masterPin}
+          allUsers={allUsers}
         />
       )}
 
@@ -5799,6 +5850,16 @@ export default function App() {
               hidden={shouldHideMobileQuickTools}
               activeTab={activeTab}
               onMakeSale={handleMobileMakeSaleBarClick}
+              onNavigateTab={(tab) => setActiveTab(tab)}
+              onOpenAiAssistant={() => setShowAiAssistantModal(true)}
+              onOpenStoreManager={() => setShowStoreManagerModal(true)}
+              activeStoreName={stores.find((s) => s.id === activeStoreId)?.name || storeProfile?.storeName || 'Rofani POS'}
+              stores={stores}
+              activeStoreId={activeStoreId}
+              onSelectActiveStore={(id) => setActiveStoreId(id)}
+              onUseCalcAmountInPos={(_amt) => {
+                setActiveTab('pos');
+              }}
               onOpenBarcodeScanner={handleMobileOpenBarcodeScanner}
               onScanManualBarcode={handleMobileManualBarcode}
               onOpenAiScanner={handleMobileOpenAiScanner}
@@ -7280,12 +7341,22 @@ export default function App() {
           {renderActiveTabContent()}
         </div>
 
-        {/* Floating Mobile Quick Tools & Make Sale Bar (Responsive < lg Mobile Screens) */}
+        {/* Floating 9-Dot Shortcuts & Calculator Suite Trigger */}
         <MobileQuickToolsBar
           placement="responsiveMobile"
           hidden={shouldHideMobileQuickTools}
           activeTab={activeTab}
           onMakeSale={handleMobileMakeSaleBarClick}
+          onNavigateTab={(tab) => setActiveTab(tab)}
+          onOpenAiAssistant={() => setShowAiAssistantModal(true)}
+          onOpenStoreManager={() => setShowStoreManagerModal(true)}
+          activeStoreName={stores.find((s) => s.id === activeStoreId)?.name || storeProfile?.storeName || 'Rofani POS'}
+          stores={stores}
+          activeStoreId={activeStoreId}
+          onSelectActiveStore={(id) => setActiveStoreId(id)}
+          onUseCalcAmountInPos={(_amt) => {
+            setActiveTab('pos');
+          }}
           onOpenBarcodeScanner={handleMobileOpenBarcodeScanner}
           onScanManualBarcode={handleMobileManualBarcode}
           onOpenAiScanner={handleMobileOpenAiScanner}
@@ -7398,9 +7469,6 @@ export default function App() {
           </div>
         </footer>
       </main>
-
-      {/* Floating Calculator & Converter Utilities Widget */}
-      <FloatingToolWidget onNavigateTab={(tab) => setActiveTab(tab)} />
 
       {/* Terminal PIN Lock Screen Modal */}
       <PinLoginModal
@@ -7572,9 +7640,6 @@ export default function App() {
           />
         </div>
       )}
-
-      {/* Floating AI Worker Assistant Widget Trigger */}
-      <AIAssistantWidget onOpen={() => setShowAiAssistantModal(true)} />
 
       {/* AI Worker Assistant Modal */}
       <AIAssistantModal

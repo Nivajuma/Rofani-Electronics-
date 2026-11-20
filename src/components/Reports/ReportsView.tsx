@@ -25,13 +25,16 @@ import {
   CreditCard,
   Landmark,
   Layers,
-  ShoppingCart
+  ShoppingCart,
+  Lock,
+  Trash2
 } from 'lucide-react';
-import { Transaction, Product, Customer, Supplier, Expense, PurchaseOrder } from '../../types';
+import { Transaction, Product, Customer, Supplier, Expense, PurchaseOrder, User } from '../../types';
 import { KraTotComplianceCenter } from './KraTotComplianceCenter';
 import { DailyOverviewCard } from './DailyOverviewCard';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import { useTransactionSettings } from '../../utils/transactionSettings';
 
 interface ReportsViewProps {
   transactions: Transaction[];
@@ -43,6 +46,10 @@ interface ReportsViewProps {
   auditLogs?: any[];
   onBack?: () => void;
   onUpdateTransaction?: (updatedTx: Transaction, updatedProducts: Product[]) => void;
+  onDeleteTransaction?: (txId: string, updatedProducts: Product[]) => void;
+  activeStoreId?: string;
+  masterPin?: string;
+  allUsers?: User[];
 }
 
 interface ReportItem {
@@ -63,7 +70,12 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   auditLogs = [],
   onBack,
   onUpdateTransaction,
+  onDeleteTransaction,
+  activeStoreId,
+  masterPin = '1234',
+  allUsers = [],
 }) => {
+  const [txSettings] = useTransactionSettings(activeStoreId);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedReport, setSelectedReport] = useState<ReportItem | null>(null);
   const [datePreset, setDatePreset] = useState<'today' | 'yesterday' | 'week' | 'month' | 'custom'>('today');
@@ -88,19 +100,89 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
     setTimeout(() => setToastMessage(null), 3500);
   };
 
-  // Historical Transaction Edit State & Handlers
+  // Historical Transaction Edit & PIN-Protected Delete State & Handlers
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   const [editCustomerName, setEditCustomerName] = useState('');
   const [editPaymentMethod, setEditPaymentMethod] = useState('');
   const [editCuin, setEditCuin] = useState('');
   const [editItems, setEditItems] = useState<Array<{ product: Product; quantity: number; unitPrice: number }>>([]);
+  const [pinPromptAction, setPinPromptAction] = useState<{ mode: 'edit' | 'delete'; tx: Transaction } | null>(null);
+  const [pinPromptInput, setPinPromptInput] = useState('');
+  const [pinPromptError, setPinPromptError] = useState<string | null>(null);
 
-  const handleOpenEditReceipt = (tx: Transaction) => {
+  const openEditReceiptDirect = (tx: Transaction) => {
     setEditingTransaction(tx);
     setEditCustomerName(tx.customerName || '');
     setEditPaymentMethod(tx.paymentMethod || 'cash');
     setEditCuin(tx.cuin || '');
     setEditItems(tx.items.map(item => ({ ...item })));
+  };
+
+  const executeDeleteReceiptDirect = (tx: Transaction) => {
+    const updatedProducts = products.map((p) => {
+      const match = tx.items.find((it) => it.product?.id === p.id);
+      if (!match) return p;
+      return {
+        ...p,
+        stockQuantity: p.stockQuantity + match.quantity + (match.freeQuantity || 0),
+        updatedAt: new Date().toISOString().slice(0, 10),
+      };
+    });
+    if (onDeleteTransaction) {
+      onDeleteTransaction(tx.id, updatedProducts);
+    }
+    if (selectedTransactionDetail?.id === tx.id) {
+      setSelectedTransactionDetail(null);
+    }
+    triggerToast(`Receipt ${tx.receiptNumber} deleted & stock restored.`);
+  };
+
+  const handleOpenEditReceipt = (tx: Transaction) => {
+    if (txSettings.passcodeForEditDelete) {
+      setPinPromptAction({ mode: 'edit', tx });
+      setPinPromptInput('');
+      setPinPromptError(null);
+      return;
+    }
+    openEditReceiptDirect(tx);
+  };
+
+  const handleRequestDeleteReceipt = (tx: Transaction) => {
+    setPinPromptAction({ mode: 'delete', tx });
+    setPinPromptInput('');
+    setPinPromptError(null);
+  };
+
+  const handleConfirmPinProtectedAction = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!pinPromptAction) return;
+
+    if (txSettings.passcodeForEditDelete) {
+      const entered = pinPromptInput.trim();
+      const isMasterValid = entered === (masterPin || '1234');
+      const isAdminWorkerValid = (allUsers || []).some(
+        (u) =>
+          u.status !== 'inactive' &&
+          (u.role === 'Admin' || u.role === 'Manager' || (u.roles || []).includes('Admin')) &&
+          String(u.pin || '').trim() === entered
+      );
+      if (!isMasterValid && !isAdminWorkerValid) {
+        setPinPromptError('Invalid Admin/Master PIN. Access denied.');
+        return;
+      }
+    }
+
+    const { mode, tx } = pinPromptAction;
+    setPinPromptAction(null);
+    setPinPromptInput('');
+    setPinPromptError(null);
+
+    if (mode === 'edit') {
+      setSelectedTransactionDetail(null);
+      openEditReceiptDirect(tx);
+    } else {
+      executeDeleteReceiptDirect(tx);
+    }
   };
 
   const handleSaveEditedReceipt = () => {
@@ -1267,11 +1349,25 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                                     e.stopPropagation();
                                     handleOpenEditReceipt(tx);
                                   }}
-                                  className="px-2.5 py-1 bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold rounded-lg text-[10px] shadow-sm transition cursor-pointer"
+                                  className="px-2.5 py-1 bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold rounded-lg text-[10px] shadow-sm transition cursor-pointer inline-flex items-center gap-1"
                                   title="Edit past sale receipt and adjust stock"
                                 >
-                                  [ Edit ]
+                                  {txSettings.passcodeForEditDelete && <Lock className="w-2.5 h-2.5" />}
+                                  <span>[ Edit ]</span>
                                 </button>
+                                {onDeleteTransaction && (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleRequestDeleteReceipt(tx);
+                                    }}
+                                    className="px-2 py-1 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-lg text-[10px] shadow-sm transition cursor-pointer inline-flex items-center gap-1"
+                                    title="Delete past receipt and restore stock"
+                                  >
+                                    <Trash2 className="w-3 h-3" />
+                                  </button>
+                                )}
                                 <ChevronRight className="w-4 h-4 text-slate-400 group-hover:translate-x-0.5 transition-transform" />
                               </div>
                             </div>
@@ -1540,12 +1636,24 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
               <button
                 onClick={() => {
                   handleOpenEditReceipt(selectedTransactionDetail);
-                  setSelectedTransactionDetail(null);
+                  if (!txSettings.passcodeForEditDelete) {
+                    setSelectedTransactionDetail(null);
+                  }
                 }}
                 className="px-4 py-2.5 bg-amber-500 hover:bg-amber-600 text-slate-950 font-black rounded-xl text-xs flex items-center gap-1.5 cursor-pointer shadow-sm"
               >
+                {txSettings.passcodeForEditDelete && <Lock className="w-3.5 h-3.5" />}
                 <span>[ Edit Receipt ]</span>
               </button>
+              {onDeleteTransaction && (
+                <button
+                  onClick={() => handleRequestDeleteReceipt(selectedTransactionDetail)}
+                  className="px-3.5 py-2.5 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 cursor-pointer shadow-sm"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Delete</span>
+                </button>
+              )}
             </div>
             <button
               onClick={() => setSelectedTransactionDetail(null)}
@@ -2028,6 +2136,99 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
               Save Changes & Adjust Stock
             </button>
           </div>
+        </div>
+      )}
+
+      {/* Passcode Verification Modal for Edit / Delete Receipt */}
+      {pinPromptAction && (
+        <div className="fixed inset-0 z-[150] bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <form
+            onSubmit={handleConfirmPinProtectedAction}
+            className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-sm shadow-2xl p-5 space-y-4 text-slate-100"
+          >
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div
+                  className={`w-9 h-9 rounded-xl flex items-center justify-center border ${
+                    pinPromptAction.mode === 'delete'
+                      ? 'bg-rose-500/20 text-rose-400 border-rose-500/40'
+                      : 'bg-amber-500/20 text-amber-400 border-amber-500/40'
+                  }`}
+                >
+                  <Lock className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-sm text-white">
+                    {pinPromptAction.mode === 'delete' ? 'Delete Receipt' : 'Edit Receipt'}
+                  </h3>
+                  <p className="text-[11px] text-slate-400 font-mono">
+                    {pinPromptAction.tx.receiptNumber}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPinPromptAction(null)}
+                className="p-1 text-slate-400 hover:text-white cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {txSettings.passcodeForEditDelete ? (
+              <div className="space-y-2">
+                <p className="text-xs text-slate-300">
+                  Passcode protection is enabled. Enter Store Admin / Master PIN to{' '}
+                  {pinPromptAction.mode === 'delete'
+                    ? 'permanently delete this receipt and restore stock.'
+                    : 'edit this past invoice.'}
+                </p>
+                <input
+                  type="password"
+                  inputMode="numeric"
+                  autoFocus
+                  value={pinPromptInput}
+                  onChange={(e) => {
+                    setPinPromptInput(e.target.value);
+                    setPinPromptError(null);
+                  }}
+                  placeholder="Enter Admin / Master PIN"
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2.5 text-center font-mono text-base tracking-widest text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                {pinPromptError && (
+                  <div className="text-xs text-rose-400 font-semibold">{pinPromptError}</div>
+                )}
+              </div>
+            ) : (
+              <p className="text-xs text-slate-300">
+                Confirm deleting receipt{' '}
+                <strong className="font-mono text-white">
+                  {pinPromptAction.tx.receiptNumber}
+                </strong>
+                ? Sold quantities will be returned to inventory.
+              </p>
+            )}
+
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setPinPromptAction(null)}
+                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className={`px-4 py-2 rounded-xl text-white text-xs font-bold cursor-pointer ${
+                  pinPromptAction.mode === 'delete'
+                    ? 'bg-rose-600 hover:bg-rose-500'
+                    : 'bg-blue-600 hover:bg-blue-500'
+                }`}
+              >
+                {pinPromptAction.mode === 'delete' ? 'Confirm Delete' : 'Unlock & Edit'}
+              </button>
+            </div>
+          </form>
         </div>
       )}
     </div>

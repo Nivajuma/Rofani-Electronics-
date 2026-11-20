@@ -33,6 +33,7 @@ import { getLastBackupMeta, formatLastBackupTimestamp, LastBackupMeta } from '..
 import { ItemSettingsView } from './ItemSettingsView';
 import { GeneralSettingsView } from './GeneralSettingsView';
 import { PrintAndTaxSettingsView } from './PrintAndTaxSettingsView';
+import { TransactionSettingsView } from './TransactionSettingsView';
 
 interface SettingsDashboardViewProps {
   products: Product[];
@@ -47,6 +48,8 @@ interface SettingsDashboardViewProps {
   onUpdateUser?: (updatedUser: User) => void;
   onDeleteUser?: (userId: string) => void;
   stores?: StoreLocation[];
+  activeStoreId?: string;
+  activeStoreName?: string;
   onOpenStoreManager?: () => void;
   onImportData: (data: any) => void;
   displayTheme?: 'light' | 'dark' | 'contrast';
@@ -290,6 +293,8 @@ export const SettingsDashboardView: React.FC<SettingsDashboardViewProps> = ({
   onUpdateUser,
   onDeleteUser,
   stores = [],
+  activeStoreId,
+  activeStoreName = 'Rofani POS',
   onOpenStoreManager,
   displayTheme = 'dark',
   onChangeDisplayTheme,
@@ -659,8 +664,8 @@ export const SettingsDashboardView: React.FC<SettingsDashboardViewProps> = ({
       icon: CreditCard,
       color: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30',
       title: 'Transaction',
-      description: 'Default payment methods (Cash, M-PESA STK), auto-print receipt toggle, default sales rep settings.',
-      keywords: ['payment', 'cash', 'mpesa', 'receipt', 'print', 'sales rep', 'transaction']
+      description: 'Invoice numbers, prefixes, item table columns, barcode scanner, round-off, share format, profit & PIN rules.',
+      keywords: ['payment', 'cash', 'mpesa', 'receipt', 'print', 'sales rep', 'transaction', 'prefix', 'invoice', 'barcode', 'profit', 'round off', 'passcode', 'terms', 'transport', 'charges']
     },
     {
       id: 'print_tax' as SettingCategoryKey,
@@ -863,8 +868,20 @@ export const SettingsDashboardView: React.FC<SettingsDashboardViewProps> = ({
         </div>
       )}
 
+      {activeSubPanel === 'transaction' && (
+        <div className="fixed inset-0 z-50 bg-slate-950 overflow-y-auto">
+          <TransactionSettingsView
+            onBack={() => setActiveSubPanel(null)}
+            activeStoreId={activeStoreId}
+            activeStoreName={activeStoreName}
+            stores={stores}
+            requirePinOnStartup={requirePinOnStartup}
+          />
+        </div>
+      )}
+
       {/* Sub-Panel Modal Overlay */}
-      {activeSubPanel && activeSubPanel !== 'inventory' && activeSubPanel !== 'general' && activeSubPanel !== 'print_tax' && activeSubPanel !== 'data' && (
+      {activeSubPanel && activeSubPanel !== 'inventory' && activeSubPanel !== 'general' && activeSubPanel !== 'print_tax' && activeSubPanel !== 'data' && activeSubPanel !== 'transaction' && (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
             {/* Modal Header */}
@@ -875,7 +892,6 @@ export const SettingsDashboardView: React.FC<SettingsDashboardViewProps> = ({
                 </div>
                 <div>
                   <h3 className="font-bold text-base text-slate-100 capitalize">
-                    {(activeSubPanel as string) === 'transaction' && '💱 Transaction & POS Settings'}
                     {(activeSubPanel as string) === 'users' && '👥 User Management & Granular Permissions'}
                     {(activeSubPanel as string) === 'reminders' && '🔔 Reminders & Low Stock Alerts'}
                     {(activeSubPanel as string) === 'party' && '🤝 Party & Customer Management'}
@@ -896,51 +912,6 @@ export const SettingsDashboardView: React.FC<SettingsDashboardViewProps> = ({
 
             {/* Modal Body with Inputs */}
             <div className="p-6 space-y-4 overflow-y-auto flex-1 text-xs text-slate-300">
-
-
-              {activeSubPanel === 'transaction' && (
-                <div className="space-y-4">
-                  <div>
-                    <label className="block font-semibold text-slate-200 mb-1">Default Payment Method</label>
-                    <select
-                      value={defaultPaymentMethod}
-                      onChange={(e) => setDefaultPaymentMethod(e.target.value)}
-                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2.5 text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500 font-medium"
-                    >
-                      <option value="mpesa">M-PESA STK / Till</option>
-                      <option value="cash">Cash</option>
-                      <option value="card">Credit Card / POS</option>
-                      <option value="bank_transfer">Bank Transfer</option>
-                    </select>
-                  </div>
-
-                  <div className="flex items-center justify-between p-3.5 bg-slate-950/60 border border-slate-800 rounded-xl">
-                    <div>
-                      <div className="font-bold text-slate-100">Auto-Print Receipt on Sale Completion</div>
-                      <div className="text-[11px] text-slate-400">Trigger thermal print dialog automatically after checkout</div>
-                    </div>
-                    <label className="relative inline-flex items-center cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={autoPrintReceipt}
-                        onChange={(e) => setAutoPrintReceipt(e.target.checked)}
-                        className="sr-only peer"
-                      />
-                      <div className="w-9 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-600"></div>
-                    </label>
-                  </div>
-
-                  <div>
-                    <label className="block font-semibold text-slate-200 mb-1">Default Sales Representative</label>
-                    <input
-                      type="text"
-                      value={defaultSalesRep}
-                      onChange={(e) => setDefaultSalesRep(e.target.value)}
-                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2.5 text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                    />
-                  </div>
-                </div>
-              )}
 
 
 

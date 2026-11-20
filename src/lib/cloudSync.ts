@@ -859,6 +859,18 @@ export async function saveTransactionToCloud(tx: Transaction, storeId?: string):
   }
 }
 
+export async function deleteTransactionFromCloud(txId: string, storeId?: string): Promise<void> {
+  const sid = resolveCloudStoreId(storeId);
+  const path = `${getScopedCollectionPath('transactions', sid)}/${txId}`;
+  try {
+    const docRef = getScopedDocRef('transactions', txId, sid);
+    await withFirestoreTimeout(deleteDoc(docRef), `deleting sale ${txId}`);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+    throw error;
+  }
+}
+
 // ---------------- CUSTOMERS LIVE SYNC ----------------
 
 export function subscribeToCustomers(
@@ -1172,6 +1184,68 @@ export async function saveMpesaConfigToCloud(config: any, storeId?: string): Pro
     });
     await withFirestoreTimeout(setDoc(docRef, cleaned, { merge: true }), 'saving M-Pesa config');
   } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+    throw error;
+  }
+}
+
+// ---------------- TRANSACTION SETTINGS LIVE SYNC (stores/{storeId}/settings/transaction) ----------------
+
+export function subscribeToTransactionSettings(
+  onUpdate: (config: Record<string, any>) => void,
+  onError?: (err: any) => void,
+  storeId?: string
+) {
+  const sid = resolveCloudStoreId(storeId);
+  const path = `${getScopedCollectionPath('settings', sid)}/transaction`;
+  const docRef = getScopedDocRef('settings', 'transaction', sid);
+  return onSnapshot(
+    docRef,
+    (snapshot) => {
+      if (snapshot.exists()) {
+        onUpdate(snapshot.data() as Record<string, any>);
+      }
+    },
+    (error) => {
+      handleFirestoreError(error, OperationType.GET, path);
+      if (onError) onError(error);
+    }
+  );
+}
+
+export async function saveTransactionSettingsToCloud(
+  config: Record<string, any>,
+  storeId?: string
+): Promise<void> {
+  const sid = resolveCloudStoreId(storeId);
+  const scopedColPath = getScopedCollectionPath('settings', sid);
+  const path = `${scopedColPath}/transaction`;
+  const cleaned = cleanForFirestore({
+    ...config,
+    updatedAt: new Date().toISOString(),
+  });
+  try {
+    const docRef = getScopedDocRef('settings', 'transaction', sid);
+    await withFirestoreTimeout(setDoc(docRef, cleaned, { merge: true }), 'saving transaction settings');
+  } catch (error) {
+    if (
+      !isQuotaExceededError(error) &&
+      isTransportStallError(error) &&
+      (typeof navigator === 'undefined' || navigator.onLine)
+    ) {
+      try {
+        await commitChunkViaRest(
+          scopedColPath,
+          [{ ...cleaned, id: 'transaction' }],
+          (item) => cleanForFirestore(item),
+          'saving transaction settings'
+        );
+        return;
+      } catch (restError) {
+        handleFirestoreError(restError, OperationType.WRITE, path);
+        throw restError;
+      }
+    }
     handleFirestoreError(error, OperationType.WRITE, path);
     throw error;
   }

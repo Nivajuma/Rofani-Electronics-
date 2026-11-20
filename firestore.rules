@@ -173,6 +173,11 @@ service cloud.firestore {
         allow list: if isStoreOwnerOrAdmin(storeId);
       }
 
+      match /settings/{settingId} {
+        allow get, create, update, delete: if isStoreOwnerOrAdmin(storeId) && isValidDocId(settingId);
+        allow list: if isStoreOwnerOrAdmin(storeId);
+      }
+
       match /subscription_payments/{paymentId} {
         allow get, create, update, delete: if isStoreOwnerOrAdmin(storeId) && isValidDocId(paymentId);
         allow list: if isStoreOwnerOrAdmin(storeId);

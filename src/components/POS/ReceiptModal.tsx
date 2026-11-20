@@ -1,14 +1,26 @@
 import React, { useState, useEffect } from 'react';
 import { Transaction } from '../../types';
 import { exportReceiptPDF } from '../../utils/pdfGenerator';
-import { X, Printer, Download, Share2, MessageSquare, CheckCircle2, Send, Smartphone, QrCode, Receipt } from 'lucide-react';
+import {
+  X,
+  Printer,
+  Download,
+  Share2,
+  MessageSquare,
+  CheckCircle2,
+  Smartphone,
+  QrCode,
+  Image as ImageIcon,
+} from 'lucide-react';
 import { TransactionSmsModal } from './TransactionSmsModal';
 import { getSmsDeliveryLogs, SmsDeliveryRecord } from '../../utils/smsService';
 import { safeGetJSON, safeSetJSON } from '../../utils/safeStorage';
+import { useTransactionSettings } from '../../utils/transactionSettings';
 
 interface ReceiptModalProps {
   transaction: Transaction;
   storeName?: string;
+  activeStoreId?: string;
   onClose: () => void;
 }
 
@@ -22,14 +34,26 @@ const isLegacyStoreBrand = (val?: string): boolean => {
   );
 };
 
-export const ReceiptModal: React.FC<ReceiptModalProps> = ({ transaction, storeName, onClose }) => {
+export const ReceiptModal: React.FC<ReceiptModalProps> = ({
+  transaction,
+  storeName,
+  activeStoreId,
+  onClose,
+}) => {
+  const [txSettings] = useTransactionSettings(activeStoreId);
   const [currentTx, setCurrentTx] = useState<Transaction>(transaction);
   const [showSmsModal, setShowSmsModal] = useState(false);
   const [latestSms, setLatestSms] = useState<SmsDeliveryRecord | null>(null);
+  const [showSharePicker, setShowSharePicker] = useState(false);
+  const [receiptToast, setReceiptToast] = useState<string | null>(null);
 
   const customShopName = safeGetJSON<string>('rofani_settings_shop_name', '');
   const resolvedStoreName = (() => {
-    if (customShopName && !isLegacyStoreBrand(customShopName) && customShopName.trim().toLowerCase() !== 'rofani pos') {
+    if (
+      customShopName &&
+      !isLegacyStoreBrand(customShopName) &&
+      customShopName.trim().toLowerCase() !== 'rofani pos'
+    ) {
       return customShopName.trim();
     }
     if (storeName && !isLegacyStoreBrand(storeName)) {
@@ -42,7 +66,21 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({ transaction, storeNa
     setCurrentTx(transaction);
   }, [transaction]);
 
-  const isEtims = currentTx.isEtimsRequested === true || (Boolean(currentTx.cuin) && currentTx.isEtimsRequested !== false);
+  const showTime =
+    currentTx.showTimeOnReceipt !== undefined
+      ? currentTx.showTimeOnReceipt
+      : txSettings.addTimeOnTransactions;
+  const showInvoiceNumber =
+    !currentTx.hideInvoiceNumber && txSettings.enableInvoiceBillNumber;
+
+  const isEtims =
+    currentTx.isEtimsRequested === true ||
+    (Boolean(currentTx.cuin) && currentTx.isEtimsRequested !== false);
+
+  const showToast = (msg: string) => {
+    setReceiptToast(msg);
+    window.setTimeout(() => setReceiptToast(null), 2600);
+  };
 
   const handleConvertToEtims = () => {
     const cuin = `CUIN-2026-${Math.floor(100000 + Math.random() * 900000)}`;
@@ -75,37 +113,164 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({ transaction, storeNa
     }
   }, [currentTx]);
 
+  const formattedDateDisplay = showTime
+    ? new Date(currentTx.date).toLocaleString()
+    : new Date(currentTx.date).toLocaleDateString();
+
   // Format receipt message string for WhatsApp and SMS sharing
   const formatReceiptText = () => {
-    let msg = `*RECEIPT #${transaction.receiptNumber}*\n`;
+    let msg = showInvoiceNumber
+      ? `*RECEIPT #${currentTx.receiptNumber}*\n`
+      : `*OFFICIAL RECEIPT*\n`;
     msg += `Store: ${resolvedStoreName}\n`;
-    msg += `Date: ${new Date(transaction.date).toLocaleDateString()}\n\n`;
-    msg += `*Items Purchased:*\n`;
-    transaction.items.forEach((it) => {
-      msg += `• ${it.product.name} x${it.quantity} - KSh ${it.total.toLocaleString()}\n`;
-    });
-    msg += `\n*Total:* KSh ${transaction.grandTotal.toLocaleString()}\n`;
-    msg += `(Incl. KRA TOT 1.5%: KSh ${(transaction.grandTotal * 0.015).toLocaleString()})\n`;
-    msg += `Paid: KSh ${transaction.amountPaid.toLocaleString()}\n`;
-    if (transaction.balanceDue > 0) {
-      msg += `Balance Due: KSh ${transaction.balanceDue.toLocaleString()}\n`;
+    msg += `Date: ${formattedDateDisplay}\n`;
+    if (currentTx.billingPartyName) {
+      msg += `Billing Name: ${currentTx.billingPartyName}\n`;
     }
-    msg += `Status: ${transaction.paymentStatus}\n`;
-    msg += `Thank you for shopping with us!`;
+    if (currentTx.customerPoNumber) {
+      msg += `Customer PO: ${currentTx.customerPoNumber}\n`;
+    }
+    msg += `\n*Items Purchased:*\n`;
+    currentTx.items.forEach((it) => {
+      const freeLabel = it.freeQuantity ? ` (+${it.freeQuantity} free)` : '';
+      msg += `• ${it.product.name} x${it.quantity}${freeLabel} - KSh ${it.total.toLocaleString()}\n`;
+    });
+    if ((currentTx.additionalChargeAmount || 0) > 0) {
+      msg += `\n${currentTx.additionalChargeLabel || 'Additional Charge'}: +KSh ${Number(
+        currentTx.additionalChargeAmount
+      ).toLocaleString()}\n`;
+    }
+    if (currentTx.roundOffAmount) {
+      msg += `Round Off: ${currentTx.roundOffAmount > 0 ? '+' : ''}KSh ${currentTx.roundOffAmount.toFixed(2)}\n`;
+    }
+    msg += `\n*Total:* KSh ${currentTx.grandTotal.toLocaleString()}\n`;
+    msg += `Paid: KSh ${currentTx.amountPaid.toLocaleString()}\n`;
+    if (currentTx.balanceDue > 0) {
+      msg += `Balance Due: KSh ${currentTx.balanceDue.toLocaleString()}\n`;
+    }
+    msg += `Status: ${currentTx.paymentStatus}\n`;
+    msg += currentTx.termsAndConditionsText || `Thank you for shopping with us!`;
     return encodeURIComponent(msg);
+  };
+
+  const triggerExternalHref = (href: string) => {
+    const link = document.createElement('a');
+    link.href = href;
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   const handleWhatsAppShare = () => {
     const text = formatReceiptText();
-    const phone = transaction.customerPhone ? transaction.customerPhone.replace(/[^0-9]/g, '') : '';
+    const phone = currentTx.customerPhone ? currentTx.customerPhone.replace(/[^0-9]/g, '') : '';
     const url = phone ? `https://wa.me/${phone}?text=${text}` : `https://wa.me/?text=${text}`;
-    window.open(url, '_blank');
+    triggerExternalHref(url);
   };
 
-  const handleSMSShare = () => {
-    const text = formatReceiptText();
-    const phone = transaction.customerPhone || '';
-    window.open(`sms:${phone}?body=${text}`, '_blank');
+  const handleDownloadThermalImage = async () => {
+    try {
+      const lines: string[] = [
+        resolvedStoreName.toUpperCase(),
+        'Official Customer Receipt',
+        '--------------------------------',
+        ...(showInvoiceNumber ? [`Receipt: ${currentTx.receiptNumber}`] : []),
+        `Date: ${formattedDateDisplay}`,
+        `Cashier: ${currentTx.cashierName}`,
+        `Customer: ${currentTx.billingPartyName || currentTx.customerName || 'Walk-in'}`,
+        ...(currentTx.customerPoNumber ? [`PO #: ${currentTx.customerPoNumber}`] : []),
+        '--------------------------------',
+        ...currentTx.items.map(
+          (it) =>
+            `${it.product.name.slice(0, 18).padEnd(18, ' ')} x${it.quantity} KSh ${it.total.toLocaleString()}`
+        ),
+        '--------------------------------',
+        `Subtotal:   KSh ${currentTx.subtotal.toLocaleString()}`,
+        ...(currentTx.discountTotal > 0
+          ? [`Discount:  -KSh ${currentTx.discountTotal.toLocaleString()}`]
+          : []),
+        ...((currentTx.additionalChargeAmount || 0) > 0
+          ? [
+              `${currentTx.additionalChargeLabel || 'Extra'}: +KSh ${Number(
+                currentTx.additionalChargeAmount
+              ).toLocaleString()}`,
+            ]
+          : []),
+        ...(currentTx.roundOffAmount
+          ? [
+              `Round Off: ${currentTx.roundOffAmount > 0 ? '+' : ''}KSh ${currentTx.roundOffAmount.toFixed(2)}`,
+            ]
+          : []),
+        `GRAND TOTAL: KSh ${currentTx.grandTotal.toLocaleString()}`,
+        `Paid:        KSh ${currentTx.amountPaid.toLocaleString()}`,
+        ...(currentTx.balanceDue > 0
+          ? [`Balance Due: KSh ${currentTx.balanceDue.toLocaleString()}`]
+          : []),
+        '--------------------------------',
+        currentTx.termsAndConditionsText || 'Thank you for shopping with us!',
+      ];
+
+      const canvas = document.createElement('canvas');
+      const lineHeight = 22;
+      canvas.width = 420;
+      canvas.height = Math.max(320, lines.length * lineHeight + 60);
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = '#0f172a';
+      ctx.font = 'bold 14px monospace';
+
+      lines.forEach((line, idx) => {
+        ctx.font = idx === 0 || line.startsWith('GRAND TOTAL') ? 'bold 15px monospace' : '13px monospace';
+        ctx.fillText(line, 20, 34 + idx * lineHeight);
+      });
+
+      const blob = await new Promise<Blob | null>((resolve) =>
+        canvas.toBlob((b) => resolve(b), 'image/png')
+      );
+      if (!blob) return;
+
+      const fileName = `${currentTx.receiptNumber || 'Receipt'}_Thermal.png`;
+      const file = new File([blob], fileName, { type: 'image/png' });
+      const nav: any = typeof navigator !== 'undefined' ? navigator : null;
+      if (nav && typeof nav.canShare === 'function' && nav.canShare({ files: [file] })) {
+        await nav.share({
+          title: `${resolvedStoreName} Receipt ${currentTx.receiptNumber}`,
+          files: [file],
+        });
+        showToast('Thermal receipt image shared!');
+        return;
+      }
+
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      showToast(`Thermal receipt saved (${fileName})`);
+    } catch (err) {
+      console.warn('Thermal image generation notice:', err);
+    }
+  };
+
+  const handleSmartShare = () => {
+    const mode = txSettings.shareTransactionAs || 'ask';
+    if (mode === 'pdf') {
+      exportReceiptPDF(currentTx, { storeName: resolvedStoreName });
+    } else if (mode === 'thermal') {
+      handleDownloadThermalImage();
+    } else if (mode === 'whatsapp') {
+      handleWhatsAppShare();
+    } else {
+      setShowSharePicker((v) => !v);
+    }
   };
 
   return (
@@ -128,16 +293,24 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({ transaction, storeNa
         {/* Automated Transaction Summary SMS Banner */}
         <div className="px-4 py-2.5 bg-slate-950 border-b border-slate-800 text-xs flex items-center justify-between flex-wrap gap-2">
           <div className="flex items-center gap-2">
-            <div className={`w-2 h-2 rounded-full ${latestSms ? 'bg-emerald-400 animate-pulse' : 'bg-indigo-400'}`}></div>
+            <div
+              className={`w-2 h-2 rounded-full ${
+                latestSms ? 'bg-emerald-400 animate-pulse' : 'bg-indigo-400'
+              }`}
+            ></div>
             {latestSms ? (
               <span className="text-emerald-300 font-medium">
                 Summary SMS sent to <strong className="text-white font-mono">{latestSms.formattedPhone}</strong>{' '}
-                <span className="text-[10px] text-emerald-400 font-mono">({latestSms.status} • {latestSms.id})</span>
+                <span className="text-[10px] text-emerald-400 font-mono">
+                  ({latestSms.status} • {latestSms.id})
+                </span>
               </span>
             ) : (
               <span className="text-slate-300">
-                Customer: <strong className="text-white">{transaction.customerName || 'Walk-in'}</strong>{' '}
-                <span className="font-mono text-indigo-300">({transaction.customerPhone || 'No phone set'})</span>
+                Customer: <strong className="text-white">{currentTx.customerName || 'Walk-in'}</strong>{' '}
+                <span className="font-mono text-indigo-300">
+                  ({currentTx.customerPhone || 'No phone set'})
+                </span>
               </span>
             )}
           </div>
@@ -153,38 +326,76 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({ transaction, storeNa
 
         {/* Thermal Receipt Visual Preview Container */}
         <div className="p-6 overflow-y-auto flex-1 bg-slate-950/40">
+          {receiptToast && (
+            <div className="mb-3 bg-emerald-950/90 border border-emerald-500/60 text-emerald-200 text-xs px-3 py-2 rounded-xl text-center font-semibold">
+              {receiptToast}
+            </div>
+          )}
+
           <div className="bg-white text-slate-900 rounded-xl p-6 shadow-xl font-mono text-xs max-w-sm mx-auto space-y-3 border border-slate-200">
             {/* Store branding */}
             <div className="text-center space-y-1 pb-3 border-b border-dashed border-slate-300">
               <div className="font-bold text-sm tracking-tight font-sans">{resolvedStoreName}</div>
-              <div className="text-[11px] text-slate-600">Retail & Wholesale Point of Sale</div>
+              <div className="text-[11px] text-slate-600">Retail &amp; Wholesale Point of Sale</div>
               <div className="text-[10px] text-slate-500">Official Customer Receipt</div>
             </div>
 
             {/* Receipt Info */}
             <div className="text-[11px] space-y-1 pb-3 border-b border-dashed border-slate-300">
-              <div className="flex justify-between">
-                <span className="text-slate-500">Receipt #:</span>
-                <span className="font-bold">{transaction.receiptNumber}</span>
-              </div>
+              {showInvoiceNumber && (
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Receipt #:</span>
+                  <span className="font-bold">{currentTx.receiptNumber}</span>
+                </div>
+              )}
               <div className="flex justify-between">
                 <span className="text-slate-500">Date:</span>
-                <span>{new Date(transaction.date).toLocaleString()}</span>
+                <span>{formattedDateDisplay}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-slate-500">Cashier:</span>
-                <span>{transaction.cashierName}</span>
+                <span>{currentTx.cashierName}</span>
               </div>
-              {transaction.salesRepName && (
+              {currentTx.salesRepName && (
                 <div className="flex justify-between">
                   <span className="text-slate-500">Sales Rep:</span>
-                  <span className="font-semibold">{transaction.salesRepName}</span>
+                  <span className="font-semibold">{currentTx.salesRepName}</span>
                 </div>
               )}
               <div className="flex justify-between">
                 <span className="text-slate-500">Customer:</span>
-                <span>{transaction.customerName || 'Walk-in'}</span>
+                <span>{currentTx.customerName || 'Walk-in'}</span>
               </div>
+              {currentTx.billingPartyName && (
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Billing Party:</span>
+                  <span className="font-bold">{currentTx.billingPartyName}</span>
+                </div>
+              )}
+              {currentTx.customerPoNumber && (
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Customer PO #:</span>
+                  <span className="font-semibold">
+                    {currentTx.customerPoNumber}
+                    {currentTx.customerPoDate ? ` (${currentTx.customerPoDate})` : ''}
+                  </span>
+                </div>
+              )}
+              {currentTx.linkedInvoiceRef && (
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Linked Invoice:</span>
+                  <span className="font-semibold">{currentTx.linkedInvoiceRef}</span>
+                </div>
+              )}
+              {currentTx.dueDate && (
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Due / Terms:</span>
+                  <span>
+                    {currentTx.paymentTerms ? `${currentTx.paymentTerms} • ` : ''}
+                    {currentTx.dueDate}
+                  </span>
+                </div>
+              )}
             </div>
 
             {/* Item List Table */}
@@ -195,15 +406,28 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({ transaction, storeNa
                 <span className="col-span-4 text-right">Price</span>
               </div>
 
-              {transaction.items.map((it, idx) => (
+              {currentTx.items.map((it, idx) => (
                 <div key={idx} className="grid grid-cols-12 text-[11px] items-center">
                   <div className="col-span-6 font-sans font-medium text-slate-800">
                     <div className="truncate">{it.product.name}</div>
                     {it.discount > 0 && (
                       <div className="text-[9px] text-emerald-600 font-mono">
-                        (Disc: -KSh {it.discount.toLocaleString()} ea • Saved KSh {(it.discount * it.quantity).toLocaleString()})
+                        (Disc: -KSh {it.discount.toLocaleString()} ea • Saved KSh{' '}
+                        {(it.discount * it.quantity).toLocaleString()})
                       </div>
                     )}
+                    {(it.freeQuantity || 0) > 0 && (
+                      <div className="text-[9px] text-blue-600 font-mono font-bold">
+                        +{it.freeQuantity} FREE BONUS
+                      </div>
+                    )}
+                    {(txSettings.enableItemCountColumn || currentTx.customCountLabel) &&
+                      typeof it.customCount === 'number' && (
+                        <div className="text-[9px] text-slate-500 font-mono">
+                          {currentTx.customCountLabel || txSettings.customCountLabel || 'Count'}:{' '}
+                          {it.customCount}
+                        </div>
+                      )}
                   </div>
                   <div className="col-span-2 text-center text-slate-600">{it.quantity}</div>
                   <div className="col-span-4 text-right font-bold text-slate-900">
@@ -217,37 +441,75 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({ transaction, storeNa
             <div className="space-y-1.5 pt-2 text-[11px]">
               <div className="flex justify-between text-slate-600">
                 <span>Subtotal</span>
-                <span>KSh {transaction.subtotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                <span>
+                  KSh {currentTx.subtotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                </span>
               </div>
-              {transaction.discountTotal > 0 && (
+              {currentTx.discountTotal > 0 && (
                 <div className="flex justify-between text-emerald-600 font-semibold">
                   <span className="flex items-center gap-1">
                     <span>Discount</span>
-                    {transaction.discountAuthorizedBy && (
+                    {currentTx.discountAuthorizedBy && (
                       <span className="text-[9px] text-slate-500 font-normal">
-                        ({transaction.discountAuthorizedBy})
+                        ({currentTx.discountAuthorizedBy})
                       </span>
                     )}
                   </span>
-                  <span>-KSh {transaction.discountTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                  <span>
+                    -KSh{' '}
+                    {currentTx.discountTotal.toLocaleString(undefined, {
+                      minimumFractionDigits: 2,
+                    })}
+                  </span>
+                </div>
+              )}
+              {(currentTx.additionalChargeAmount || 0) > 0 && (
+                <div className="flex justify-between text-slate-700">
+                  <span>{currentTx.additionalChargeLabel || 'Additional Charge'}</span>
+                  <span>
+                    +KSh{' '}
+                    {Number(currentTx.additionalChargeAmount).toLocaleString(undefined, {
+                      minimumFractionDigits: 2,
+                    })}
+                  </span>
                 </div>
               )}
               <div className="flex justify-between text-slate-600 text-[10px]">
                 <span>KRA Turnover Tax (1.5% TOT)</span>
-                <span>KSh {(transaction.grandTotal * 0.015).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                <span>
+                  KSh{' '}
+                  {(currentTx.grandTotal * 0.015).toLocaleString(undefined, {
+                    minimumFractionDigits: 2,
+                  })}
+                </span>
               </div>
+              {currentTx.roundOffAmount !== undefined && currentTx.roundOffAmount !== 0 && (
+                <div className="flex justify-between text-slate-600 text-[10px]">
+                  <span>Round Off</span>
+                  <span>
+                    {currentTx.roundOffAmount > 0 ? '+' : ''}KSh{' '}
+                    {currentTx.roundOffAmount.toFixed(2)}
+                  </span>
+                </div>
+              )}
               <div className="flex justify-between text-sm font-extrabold text-slate-900 pt-1 border-t border-slate-300">
                 <span>Grand Total</span>
-                <span>KSh {transaction.grandTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                <span>
+                  KSh {currentTx.grandTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                </span>
               </div>
               <div className="flex justify-between text-slate-700">
                 <span>Amount Paid</span>
-                <span>KSh {transaction.amountPaid.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                <span>
+                  KSh {currentTx.amountPaid.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                </span>
               </div>
-              {transaction.balanceDue > 0 && (
+              {currentTx.balanceDue > 0 && (
                 <div className="flex justify-between text-red-600 font-bold bg-red-50 p-1.5 rounded">
                   <span>Credit / Balance Due</span>
-                  <span>KSh {transaction.balanceDue.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                  <span>
+                    KSh {currentTx.balanceDue.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  </span>
                 </div>
               )}
             </div>
@@ -255,28 +517,61 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({ transaction, storeNa
             {/* Payment Method Details */}
             <div className="pt-2 border-t border-dashed border-slate-300 text-[10px] text-slate-600">
               <div className="font-semibold mb-1 text-slate-700">Payment Breakdown:</div>
-              {transaction.payments.map((p, i) => (
+              {currentTx.payments.map((p, i) => (
                 <div key={i} className="flex justify-between">
-                  <span className="capitalize">• {p.method} {p.reference ? `(${p.reference})` : ''}</span>
+                  <span className="capitalize">
+                    • {p.method} {p.reference ? `(${p.reference})` : ''}
+                  </span>
                   <span>KSh {p.amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
                 </div>
               ))}
             </div>
+
+            {/* Dispatch & Custom Additional Fields */}
+            {(currentTx.transportationDetails ||
+              (currentTx.additionalFieldsValues && currentTx.additionalFieldsValues.length > 0)) && (
+              <div className="pt-2 border-t border-dashed border-slate-300 text-[10px] text-slate-600 space-y-0.5">
+                {currentTx.transportationDetails && (
+                  <div>
+                    <span className="font-bold text-slate-700">Dispatch:</span>{' '}
+                    {currentTx.transportationDetails.deliveryMode}
+                    {currentTx.transportationDetails.driverName
+                      ? ` • ${currentTx.transportationDetails.driverName}`
+                      : ''}
+                    {currentTx.transportationDetails.vehicleNumber
+                      ? ` • ${currentTx.transportationDetails.vehicleNumber}`
+                      : ''}
+                  </div>
+                )}
+                {currentTx.additionalFieldsValues?.map((af, idx) => (
+                  <div key={idx} className="flex justify-between">
+                    <span className="text-slate-500">{af.label}:</span>
+                    <span className="font-semibold text-slate-800">{af.value}</span>
+                  </div>
+                ))}
+              </div>
+            )}
 
             {/* KRA eTIMS vs Standard Retail Receipt Section */}
             {isEtims ? (
               <div className="pt-2 border-t border-dashed border-slate-300 text-[10px] text-slate-700 space-y-1 bg-amber-50/50 p-2.5 rounded-lg border border-amber-200">
                 <div className="font-extrabold text-amber-900 flex items-center justify-between">
                   <span>KRA eTIMS Tax Invoice</span>
-                  <span className="text-[9px] bg-emerald-100 text-emerald-800 px-1.5 py-0.2 rounded font-bold">Verified ✓</span>
+                  <span className="text-[9px] bg-emerald-100 text-emerald-800 px-1.5 py-0.2 rounded font-bold">
+                    Verified ✓
+                  </span>
                 </div>
                 <div className="flex justify-between font-mono text-[9px]">
                   <span className="text-slate-500">CUIN:</span>
-                  <span className="font-bold text-slate-900">{currentTx.cuin || 'CUIN-2026-984712'}</span>
+                  <span className="font-bold text-slate-900">
+                    {currentTx.cuin || 'CUIN-2026-984712'}
+                  </span>
                 </div>
                 <div className="flex justify-between font-mono text-[9px]">
                   <span className="text-slate-500">CUSN:</span>
-                  <span className="font-bold text-slate-900">{currentTx.cusn || 'CUSN-KENYA-44910293'}</span>
+                  <span className="font-bold text-slate-900">
+                    {currentTx.cusn || 'CUSN-KENYA-44910293'}
+                  </span>
                 </div>
                 <div className="flex justify-between font-mono text-[9px]">
                   <span className="text-slate-500">Store KRA PIN:</span>
@@ -301,7 +596,9 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({ transaction, storeNa
               <div className="pt-2 border-t border-dashed border-slate-300 text-[10px] text-slate-500 space-y-1.5 bg-slate-50 p-2.5 rounded-lg border border-slate-200">
                 <div className="flex items-center justify-between text-[9px] font-bold text-slate-700">
                   <span>Standard Retail Cash Receipt</span>
-                  <span className="text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.2 rounded">KRA TOT Inclusive</span>
+                  <span className="text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.2 rounded">
+                    KRA TOT Inclusive
+                  </span>
                 </div>
                 <p className="text-[9px] text-slate-400 leading-tight">
                   Customer opted for standard receipt. Automatically registered for store monthly KRA Turnover Tax return.
@@ -317,40 +614,102 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({ transaction, storeNa
               </div>
             )}
 
-            {/* Footer */}
-            <div className="text-center pt-3 text-[10px] text-slate-500 font-sans border-t border-slate-200">
-              Thank you for shopping with us! Have a great day.
+            {/* Footer / Custom Terms & Conditions */}
+            <div className="text-center pt-3 text-[10px] text-slate-500 font-sans border-t border-slate-200 space-y-1">
+              {currentTx.termsAndConditionsText ? (
+                <div className="text-[9px] text-slate-600 leading-snug">
+                  {currentTx.termsAndConditionsText}
+                </div>
+              ) : (
+                <div>Thank you for shopping with us! Have a great day.</div>
+              )}
             </div>
           </div>
         </div>
+
+        {/* Ask Me Everytime Share Format Picker */}
+        {showSharePicker && (
+          <div className="px-4 py-3 bg-slate-900 border-t border-slate-800 space-y-2">
+            <div className="flex items-center justify-between text-[11px] font-bold text-slate-300">
+              <span>Choose Receipt Share Format:</span>
+              <button
+                type="button"
+                onClick={() => setShowSharePicker(false)}
+                className="text-slate-400 hover:text-white"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowSharePicker(false);
+                  exportReceiptPDF(currentTx, { storeName: resolvedStoreName });
+                }}
+                className="py-2 px-2.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <Download className="w-3.5 h-3.5" /> PDF Receipt
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowSharePicker(false);
+                  handleDownloadThermalImage();
+                }}
+                className="py-2 px-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <ImageIcon className="w-3.5 h-3.5" /> Thermal Image
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowSharePicker(false);
+                  handleWhatsAppShare();
+                }}
+                className="py-2 px-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <Share2 className="w-3.5 h-3.5" /> WhatsApp
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Actions Toolbar */}
         <div className="p-4 bg-slate-950 border-t border-slate-800 space-y-3">
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
             <button
               onClick={() => exportReceiptPDF(currentTx, { storeName: resolvedStoreName })}
-              className="flex items-center justify-center gap-1.5 bg-sky-600 hover:bg-sky-500 text-white py-2 px-3 rounded-xl text-xs font-semibold transition"
+              className="flex items-center justify-center gap-1.5 bg-sky-600 hover:bg-sky-500 text-white py-2 px-3 rounded-xl text-xs font-semibold transition cursor-pointer"
             >
-              <Download className="w-4 h-4" /> Download PDF
+              <Download className="w-4 h-4" /> PDF
             </button>
 
             <button
-              onClick={() => exportReceiptPDF(currentTx, { storeName: resolvedStoreName })}
-              className="flex items-center justify-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 py-2 px-3 rounded-xl text-xs font-semibold transition border border-slate-700"
+              onClick={handleDownloadThermalImage}
+              className="flex items-center justify-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 py-2 px-3 rounded-xl text-xs font-semibold transition border border-slate-700 cursor-pointer"
+              title="Download / share Thermal Receipt Image"
             >
-              <Printer className="w-4 h-4" /> Print
+              <Printer className="w-4 h-4" /> Thermal
             </button>
 
             <button
-              onClick={handleWhatsAppShare}
-              className="flex items-center justify-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white py-2 px-3 rounded-xl text-xs font-semibold transition"
+              onClick={handleSmartShare}
+              className="flex items-center justify-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white py-2 px-3 rounded-xl text-xs font-semibold transition cursor-pointer"
             >
-              <Share2 className="w-4 h-4" /> WhatsApp
+              <Share2 className="w-4 h-4" />{' '}
+              {txSettings.shareTransactionAs === 'pdf'
+                ? 'Share PDF'
+                : txSettings.shareTransactionAs === 'thermal'
+                  ? 'Share Image'
+                  : txSettings.shareTransactionAs === 'whatsapp'
+                    ? 'WhatsApp'
+                    : 'Share'}
             </button>
 
             <button
               onClick={() => setShowSmsModal(true)}
-              className="flex items-center justify-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 text-white py-2 px-3 rounded-xl text-xs font-semibold transition"
+              className="flex items-center justify-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 text-white py-2 px-3 rounded-xl text-xs font-semibold transition cursor-pointer"
             >
               <MessageSquare className="w-4 h-4" /> {latestSms ? 'Resend SMS' : 'Send SMS'}
             </button>
@@ -359,7 +718,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({ transaction, storeNa
           <button
             id="btn-receipt-new-sale"
             onClick={onClose}
-            className="w-full bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-extrabold py-3 rounded-xl text-xs transition flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/25"
+            className="w-full bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-extrabold py-3 rounded-xl text-xs transition flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/25 cursor-pointer"
           >
             <CheckCircle2 className="w-4 h-4" />
             <span>+ Start New Sale (Next Customer)</span>
@@ -371,7 +730,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({ transaction, storeNa
       <TransactionSmsModal
         isOpen={showSmsModal}
         onClose={() => setShowSmsModal(false)}
-        transaction={transaction}
+        transaction={currentTx}
         storeName={resolvedStoreName}
         onSmsSent={(rec) => setLatestSms(rec)}
       />

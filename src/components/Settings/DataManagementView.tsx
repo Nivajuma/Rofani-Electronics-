@@ -128,6 +128,8 @@ interface DataManagementViewProps {
   lastSyncedTime?: string | null;
   onCloudSyncSuccess?: () => void;
   onCloudSyncError?: () => void;
+  storeKraPin?: string;
+  onUpdateStoreKraPin?: (kraPin: string) => Promise<void> | void;
 }
 
 export const DataManagementView: React.FC<DataManagementViewProps> = ({
@@ -173,6 +175,8 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
   lastSyncedTime = null,
   onCloudSyncSuccess,
   onCloudSyncError,
+  storeKraPin,
+  onUpdateStoreKraPin,
 }) => {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -468,8 +472,14 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
   }, [storeName]);
 
   const [kraPin, setKraPin] = useState(() =>
+    (storeKraPin && storeKraPin.trim()) ||
     safeGetJSON<string>('retail_pos_kra_pin', 'P051234567X', (val) => typeof val === 'string')
   );
+  useEffect(() => {
+    if (storeKraPin && storeKraPin.trim()) {
+      setKraPin(storeKraPin.trim().toUpperCase());
+    }
+  }, [storeKraPin]);
   useEffect(() => {
     safeSetJSON('retail_pos_kra_pin', kraPin);
   }, [kraPin]);
@@ -760,6 +770,20 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
 
   const handleSaveStoreSettings = (e: React.FormEvent) => {
     e.preventDefault();
+    const cleanPin = kraPin.trim().toUpperCase();
+    if (cleanPin) {
+      setKraPin(cleanPin);
+      safeSetJSON('retail_pos_kra_pin', cleanPin);
+      const existingTaxSettings = safeGetJSON<Record<string, any>>('printAndTaxSettings', {});
+      safeSetJSON('printAndTaxSettings', {
+        ...existingTaxSettings,
+        kraPinNumber: cleanPin,
+        kraTotRate: kraTaxRate,
+      });
+      if (onUpdateStoreKraPin) {
+        Promise.resolve(onUpdateStoreKraPin(cleanPin)).catch(() => {});
+      }
+    }
     setIsSavedSettings(true);
     triggerNotify('Store Tax & Profile Settings updated!');
     setTimeout(() => setIsSavedSettings(false), 3000);
@@ -817,6 +841,16 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
         onOpenEmailBackup={() => {
           setShareFeedback(null);
           setShowShareEmailModal(true);
+        }}
+        storeKraPin={kraPin}
+        onUpdateStoreKraPin={async (nextPin) => {
+          const cleanPin = nextPin.trim().toUpperCase();
+          if (cleanPin) {
+            setKraPin(cleanPin);
+            if (onUpdateStoreKraPin) {
+              await onUpdateStoreKraPin(cleanPin);
+            }
+          }
         }}
         deviceFormat={deviceFormat}
         onChangeDeviceFormat={onChangeDeviceFormat}
@@ -1654,7 +1688,7 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
           <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-4">
             <div className="flex items-center gap-2 border-b border-slate-100 pb-3">
               <Building2 className="w-5 h-5 text-blue-600" />
-              <h3 className="font-bold text-sm text-slate-800">Business & KRA Tax Profile</h3>
+              <h3 className="font-bold text-sm text-slate-800">Business &amp; Optional Tax Profile</h3>
             </div>
 
           <form onSubmit={handleSaveStoreSettings} className="space-y-3 text-xs">
@@ -1670,19 +1704,18 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
             </div>
 
             <div>
-              <label className="block font-semibold text-slate-700 mb-1">KRA PIN Number</label>
+              <label className="block font-semibold text-slate-700 mb-1">Business Tax PIN (Optional)</label>
               <input
                 type="text"
                 value={kraPin}
                 onChange={(e) => setKraPin(e.target.value)}
                 className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-mono text-slate-900 font-bold focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="e.g. P051234567X"
-                required
+                placeholder="Optional Tax PIN"
               />
             </div>
 
             <div>
-              <label className="block font-semibold text-slate-700 mb-1">KRA Turnover Tax (TOT) Rate %</label>
+              <label className="block font-semibold text-slate-700 mb-1">Turnover Levy Rate % (Optional)</label>
               <div className="flex items-center gap-2">
                 <input
                   type="number"
@@ -1693,7 +1726,7 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
                 />
                 <span className="font-bold text-slate-500">%</span>
               </div>
-              <p className="text-[10px] text-slate-400 mt-1">Standard Kenya KRA TOT rate is 1.5% for sales &lt; KSh 25M</p>
+              <p className="text-[10px] text-slate-400 mt-1">Optional turnover levy rate (e.g. 1.5%) when Sales Tax / Levy is enabled</p>
             </div>
 
             <div>

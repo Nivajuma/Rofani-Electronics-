@@ -1,6 +1,13 @@
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { Transaction, Product, Customer, Supplier, Expense, StaffCommissionPayout, WorkerSalaryPayout, User, RestockRecord } from '../types';
+import {
+  ROFANI_MASTER_KRA_PIN,
+  SUPPORT_PHONE_PRIMARY,
+  SUPPORT_PHONE_SECONDARY,
+  SUPPORT_EMAIL,
+  resolveActiveStoreKraPin,
+} from './supportConfig';
 
 /**
  * Common Header styling for reports
@@ -353,10 +360,27 @@ export const exportKRATaxReportPDF = (
 /**
  * 7. Export Sales Receipt PDF
  */
-export const exportReceiptPDF = (tx: Transaction, options?: { storeName?: string }) => {
+export const exportReceiptPDF = (
+  tx: Transaction,
+  options?: { storeName?: string; storeKraPin?: string }
+) => {
+  const showInvoiceNumber = !tx.hideInvoiceNumber;
+  const showTime = tx.showTimeOnReceipt !== false;
+  const formattedDate = showTime
+    ? new Date(tx.date).toLocaleString()
+    : new Date(tx.date).toLocaleDateString();
+  const resolvedKraPin = resolveActiveStoreKraPin(options?.storeKraPin);
+
+  const extraLines =
+    (tx.billingPartyName ? 1 : 0) +
+    (tx.customerPoNumber ? 1 : 0) +
+    ((tx.additionalChargeAmount || 0) > 0 ? 1 : 0) +
+    (tx.roundOffAmount ? 1 : 0) +
+    (tx.isEtimsRequested ? 4 : 1);
+
   const doc = new jsPDF({
     unit: 'mm',
-    format: [80, 175 + tx.items.length * 10] // Thermal receipt style dimensions (80mm width)
+    format: [80, 175 + tx.items.length * 10 + extraLines * 5] // Thermal receipt style dimensions (80mm width)
   });
 
   const receiptTitle = (options?.storeName || 'Rofani POS').toUpperCase();
@@ -367,18 +391,48 @@ export const exportReceiptPDF = (tx: Transaction, options?: { storeName?: string
   doc.setFontSize(8);
   doc.setFont('helvetica', 'normal');
   doc.text('Official Customer Receipt', 40, 15, { align: 'center' });
-  doc.text('KRA Tax Compliant POS Terminal', 40, 19, { align: 'center' });
-
-  doc.text('----------------------------------------------------', 40, 24, { align: 'center' });
-  doc.setFont('helvetica', 'bold');
-  doc.text(`Receipt #: ${tx.receiptNumber}`, 6, 29);
+  let headerY = 25;
+  if (resolvedKraPin) {
+    doc.text(`Tax PIN: ${resolvedKraPin}`, 40, 19, { align: 'center' });
+    doc.text('----------------------------------------------------', 40, 24, { align: 'center' });
+    headerY = 29;
+  } else {
+    doc.text('----------------------------------------------------', 40, 20, { align: 'center' });
+    headerY = 25;
+  }
+  if (showInvoiceNumber) {
+    doc.setFont('helvetica', 'bold');
+    doc.text(`Receipt #: ${tx.receiptNumber}`, 6, headerY);
+    headerY += 4;
+  }
   doc.setFont('helvetica', 'normal');
-  doc.text(`Date: ${new Date(tx.date).toLocaleString()}`, 6, 33);
-  doc.text(`Cashier: ${tx.cashierName}`, 6, 37);
-  doc.text(`Customer: ${tx.customerName || 'Walk-in'}`, 6, 41);
-  doc.text('----------------------------------------------------', 40, 45, { align: 'center' });
+  doc.text(`Date: ${formattedDate}`, 6, headerY);
+  headerY += 4;
+  doc.text(`Cashier: ${tx.cashierName}`, 6, headerY);
+  headerY += 4;
+  doc.text(`Customer: ${tx.customerName || 'Walk-in'}`, 6, headerY);
+  headerY += 4;
+  if (tx.billingPartyName) {
+    doc.text(`Billing Party: ${tx.billingPartyName}`, 6, headerY);
+    headerY += 4;
+  }
+  if (tx.customerPoNumber) {
+    doc.text(`Customer PO: ${tx.customerPoNumber}`, 6, headerY);
+    headerY += 4;
+  }
+  if (tx.isEtimsRequested) {
+    doc.setFont('helvetica', 'bold');
+    doc.text(`Fiscal Ref CUIN: ${tx.cuin || 'VERIFIED'}`, 6, headerY);
+    headerY += 4;
+    doc.setFont('helvetica', 'normal');
+    if (tx.customerKraPin) {
+      doc.text(`Buyer Tax PIN: ${tx.customerKraPin}`, 6, headerY);
+      headerY += 4;
+    }
+  }
+  doc.text('----------------------------------------------------', 40, headerY, { align: 'center' });
 
-  let y = 50;
+  let y = headerY + 5;
   doc.setFont('helvetica', 'bold');
   doc.text('Item', 6, y);
   doc.text('Qty', 45, y);
@@ -391,10 +445,11 @@ export const exportReceiptPDF = (tx: Transaction, options?: { storeName?: string
     // Truncate long item names
     const shortName = it.product.name.length > 20 ? it.product.name.slice(0, 18) + '..' : it.product.name;
     doc.text(shortName, 6, y);
+    const freeTag = it.freeQuantity ? ` +${it.freeQuantity}free` : '';
     if (it.discount > 0) {
-      doc.text(`${it.quantity} x KSh ${(it.unitPrice - it.discount).toLocaleString()} (disc -${it.discount})`, 45, y);
+      doc.text(`${it.quantity}${freeTag} x KSh ${(it.unitPrice - it.discount).toLocaleString()}`, 45, y);
     } else {
-      doc.text(`${it.quantity} x KSh ${it.unitPrice.toLocaleString()}`, 45, y);
+      doc.text(`${it.quantity}${freeTag} x KSh ${it.unitPrice.toLocaleString()}`, 45, y);
     }
     doc.text(`KSh ${it.total.toLocaleString()}`, 74, y, { align: 'right' });
     y += 5;
@@ -414,9 +469,23 @@ export const exportReceiptPDF = (tx: Transaction, options?: { storeName?: string
     y += 4;
   }
 
-  doc.text('KRA Turnover Tax (1.5%):', 6, y);
-  doc.text(`KSh ${(tx.grandTotal * 0.015).toLocaleString(undefined, { minimumFractionDigits: 2 })}`, 74, y, { align: 'right' });
-  y += 4;
+  if ((tx.additionalChargeAmount || 0) > 0) {
+    doc.text(`${tx.additionalChargeLabel || 'Additional Charge'}:`, 6, y);
+    doc.text(`+KSh ${Number(tx.additionalChargeAmount).toLocaleString(undefined, { minimumFractionDigits: 2 })}`, 74, y, { align: 'right' });
+    y += 4;
+  }
+
+  if (tx.roundOffAmount) {
+    doc.text('Round Off:', 6, y);
+    doc.text(`${tx.roundOffAmount > 0 ? '+' : ''}KSh ${tx.roundOffAmount.toFixed(2)}`, 74, y, { align: 'right' });
+    y += 4;
+  }
+
+  if (tx.taxTotal > 0) {
+    doc.text('Sales Tax / Levy:', 6, y);
+    doc.text(`KSh ${tx.taxTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}`, 74, y, { align: 'right' });
+    y += 4;
+  }
 
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(10);
@@ -449,7 +518,10 @@ export const exportReceiptPDF = (tx: Transaction, options?: { storeName?: string
 
   y += 4;
   doc.setFont('helvetica', 'bold');
-  doc.text('Thank you for shopping with us!', 40, y, { align: 'center' });
+  const footerLine = tx.termsAndConditionsText
+    ? tx.termsAndConditionsText.slice(0, 64)
+    : 'Thank you for shopping with us!';
+  doc.text(footerLine, 40, y, { align: 'center' });
 
   doc.save(`Receipt_${tx.receiptNumber}.pdf`);
 };
@@ -1047,4 +1119,106 @@ export const exportPayrollSummaryPDF = (payouts: WorkerSalaryPayout[], periodLab
   doc.save(`Payroll_Register_${new Date().toISOString().slice(0, 10)}.pdf`);
 };
 
+/**
+ * 18. Export Official Rofani POS Platform Subscription Invoice PDF
+ * Always uses Rofani POS's Official Master KRA PIN (A003466239X) as the SaaS billing issuer.
+ */
+export interface SubscriptionInvoiceData {
+  invoiceNumber: string;
+  storeName: string;
+  storeEmail?: string;
+  storePhone?: string;
+  customerKraPin?: string;
+  planName: string;
+  durationDays: number;
+  amount: number;
+  paymentRef?: string;
+  paymentMethod?: string;
+  issuedAt: string;
+  expiresAt?: string;
+}
+
+export const exportSubscriptionInvoicePDF = (invoice: SubscriptionInvoiceData) => {
+  const doc = new jsPDF();
+  addReportHeader(
+    doc,
+    'OFFICIAL SUBSCRIPTION TAX INVOICE',
+    `Invoice #: ${invoice.invoiceNumber}`,
+    'ROFANI POS PLATFORM'
+  );
+
+  doc.setFontSize(10);
+  doc.setFont('helvetica', 'bold');
+  doc.text('ISSUER (PLATFORM PROVIDER)', 14, 38);
+  doc.text('BILLED TO (MERCHANT STORE)', 112, 38);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9);
+  doc.text('Rofani POS Technologies', 14, 44);
+  doc.setFont('helvetica', 'bold');
+  doc.text(`Official KRA PIN: ${ROFANI_MASTER_KRA_PIN}`, 14, 50);
+  doc.setFont('helvetica', 'normal');
+  doc.text('Lipa na M-Pesa Buy Goods Till: 1833804', 14, 56);
+  doc.text(`Support: ${SUPPORT_PHONE_PRIMARY} / ${SUPPORT_PHONE_SECONDARY}`, 14, 62);
+  doc.text(`Email: ${SUPPORT_EMAIL}`, 14, 68);
+
+  doc.setFont('helvetica', 'bold');
+  doc.text((invoice.storeName || 'Subscriber Store').toUpperCase(), 112, 44);
+  doc.setFont('helvetica', 'normal');
+  doc.text(`Owner Email: ${invoice.storeEmail || 'N/A'}`, 112, 50);
+  doc.text(`Phone: ${invoice.storePhone || 'N/A'}`, 112, 56);
+  doc.text(`Client KRA PIN: ${invoice.customerKraPin || 'Not Provided'}`, 112, 62);
+  doc.text(
+    `Issued Date: ${new Date(invoice.issuedAt).toLocaleDateString()}`,
+    112,
+    68
+  );
+
+  autoTable(doc, {
+    startY: 78,
+    head: [['Description', 'Duration', 'Payment Reference', 'Method', 'Amount (KE)']],
+    body: [
+      [
+        `Rofani POS Cloud License — ${invoice.planName}`,
+        `${invoice.durationDays} Days`,
+        invoice.paymentRef || 'M-PESA / SUBSCRIPTION',
+        (invoice.paymentMethod || 'M-PESA').replace(/_/g, ' ').toUpperCase(),
+        `KE ${Number(invoice.amount || 0).toLocaleString()}`,
+      ],
+    ],
+    theme: 'grid',
+    headStyles: { fillColor: [15, 23, 42], textColor: [255, 255, 255], fontStyle: 'bold' },
+    styles: { fontSize: 9, cellPadding: 4 },
+  });
+
+  const finalY = (doc as any).lastAutoTable?.finalY || 115;
+
+  doc.setFontSize(10);
+  doc.setFont('helvetica', 'bold');
+  doc.text(
+    `Total Paid: KE ${Number(invoice.amount || 0).toLocaleString()}`,
+    196,
+    finalY + 12,
+    { align: 'right' }
+  );
+
+  doc.setFontSize(9);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(71, 85, 105);
+  if (invoice.expiresAt) {
+    doc.text(
+      `License Active Until: ${new Date(invoice.expiresAt).toLocaleDateString()}`,
+      14,
+      finalY + 12
+    );
+  }
+  doc.text(
+    `Issued by Rofani POS (KRA PIN: ${ROFANI_MASTER_KRA_PIN}) • Thank you for your business!`,
+    14,
+    finalY + 24
+  );
+
+  const safeStore = (invoice.storeName || 'Store').replace(/[^a-zA-Z0-9_-]/g, '_');
+  doc.save(`Rofani_Subscription_Invoice_${safeStore}_${invoice.invoiceNumber}.pdf`);
+};
 

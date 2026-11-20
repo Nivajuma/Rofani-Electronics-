@@ -22,6 +22,7 @@ import {
   isOwnerCloudUser,
 } from './firebase';
 import { getActiveTenantStoreId } from '../utils/tenantScope';
+import { TRANSACTION_SETTINGS_DEFAULT } from '../utils/transactionSettings';
 import {
   Product,
   Transaction,
@@ -1666,6 +1667,8 @@ export async function createMerchantStoreProfile(params: {
     referralCode: ownReferralCode,
     referralCount: 0,
     trialDaysGranted: grantedTrialDays,
+    taxMode: 'none',
+    transactionWiseTax: false,
     ...(validReferrer
       ? {
           referredBy: validReferrer.storeId,
@@ -1746,6 +1749,20 @@ export async function createMerchantStoreProfile(params: {
         { merge: true }
       ),
       'initializing merchant M-Pesa profile'
+    );
+
+    await withFirestoreTimeout(
+      setDoc(
+        getScopedDocRef('settings', 'transaction', storeId),
+        cleanForFirestore({
+          ...TRANSACTION_SETTINGS_DEFAULT,
+          enableTransactionWiseTax: false,
+          activePrefixFirmId: storeId,
+          updatedAt: nowIso,
+        }),
+        { merge: true }
+      ),
+      'initializing store transaction defaults'
     );
 
     return profile;

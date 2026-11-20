@@ -163,10 +163,10 @@ export const TransactionSettingsView: React.FC<TransactionSettingsViewProps> = (
     if (nextMode === 'tot') safeSetJSON('rofani_settings_tot_rate', 1.5);
     showToast(
       nextMode === 'none'
-        ? 'Tax mode set to No Tax (Exempt)'
+        ? 'Sales Tax / Levy set to None (Off)'
         : nextMode === 'tot'
-          ? 'Tax mode set to KRA Turnover Tax (1.5% TOT)'
-          : 'Tax mode set to Standard VAT (16%)'
+          ? 'Sales Tax / Levy set to 1.5% Turnover Levy'
+          : 'Sales Tax / Levy set to 16% Standard Tax'
     );
   };
 
@@ -325,7 +325,7 @@ export const TransactionSettingsView: React.FC<TransactionSettingsViewProps> = (
   );
   const s3Visible = matchesQuery(
     'taxes discount total',
-    'transaction wise tax kra tot vat',
+    'transaction wise tax sales levy tot vat',
     'transaction wise discount',
     'round off transaction amount'
   );
@@ -715,7 +715,7 @@ export const TransactionSettingsView: React.FC<TransactionSettingsViewProps> = (
                   Taxes, Discount &amp; Total
                 </h2>
                 <p className="text-[10px] text-slate-400">
-                  Integrates with Rofani KRA TOT (1.5%), VAT (16%), cart discounts, and Shilling rounding
+                  Optional Sales Tax / Levy (None, 1.5% Turnover Levy, 16% Standard Tax), cart discounts &amp; rounding
                 </p>
               </div>
             </div>
@@ -724,30 +724,30 @@ export const TransactionSettingsView: React.FC<TransactionSettingsViewProps> = (
               {renderToggleRow({
                 id: 'tx_wise_tax',
                 title: 'Transaction wise Tax',
-                info: 'Applies store-wide KRA tax rules (No Tax, 1.5% KRA TOT, or 16% VAT) to the transaction summary during checkout.',
+                info: 'Optional store-wide Sales Tax / Levy calculation (None, 1.5% Turnover Levy, or 16% Standard Tax) during checkout.',
                 checked: settings.enableTransactionWiseTax,
                 onToggle: () => toggleBoolean('enableTransactionWiseTax', 'Transaction wise Tax'),
                 accent: 'blue',
                 subtext:
                   taxMode === 'none'
-                    ? 'Active KRA Profile: No Tax (Exempt)'
+                    ? 'Active Sales Tax / Levy: None (Off)'
                     : taxMode === 'tot'
-                      ? 'Active KRA Profile: 1.5% Turnover Tax (TOT)'
-                      : 'Active KRA Profile: 16% Standard VAT',
+                      ? 'Active Sales Tax / Levy: 1.5% Turnover Levy'
+                      : 'Active Sales Tax / Levy: 16% Standard Tax',
               })}
 
               {settings.enableTransactionWiseTax &&
-                matchesQuery('Transaction wise Tax', 'No Tax', 'KRA TOT', '16% VAT') && (
+                matchesQuery('Transaction wise Tax', 'Sales Tax', 'Levy', 'None', '1.5%', '16%') && (
                   <div className="px-4 py-3 bg-slate-950/60 flex flex-wrap items-center justify-between gap-2">
                     <span className="text-[11px] font-semibold text-slate-300">
-                      KRA Tax Profile Used at Checkout:
+                      Sales Tax / Levy Option:
                     </span>
                     <div className="flex items-center gap-1.5 flex-wrap">
                       {(
                         [
-                          { id: 'none', label: 'No Tax (0%)' },
-                          { id: 'tot', label: '1.5% KRA TOT' },
-                          { id: 'vat', label: '16% VAT' },
+                          { id: 'none', label: 'None (Off)' },
+                          { id: 'tot', label: '1.5% Turnover Levy' },
+                          { id: 'vat', label: '16% Standard Tax' },
                         ] as const
                       ).map((mode) => (
                         <button

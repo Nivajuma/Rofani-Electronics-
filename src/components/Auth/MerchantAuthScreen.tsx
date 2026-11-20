@@ -135,10 +135,10 @@ export const MerchantAuthScreen: React.FC<MerchantAuthScreenProps> = ({
                   : '30-Day Free Trial for New Shopkeepers'}
               </span>
               <h2 className="text-2xl sm:text-3xl font-extrabold text-white leading-tight">
-                Run your shop inventory, M-Pesa sales &amp; KRA reports privately.
+                Run fast sales, track live stock &amp; accept M-Pesa privately.
               </h2>
               <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
-                Every business owner gets an isolated private cloud workspace under their own account — your stock, daily sales, expenses, and customer balances stay 100% private.
+                Every business owner gets an isolated private cloud workspace — fast checkout, real-time stock tracking, M-Pesa options, multi-shop support, and local/email backups stay 100% yours.
               </p>
             </div>
 
@@ -149,7 +149,7 @@ export const MerchantAuthScreen: React.FC<MerchantAuthScreenProps> = ({
                   <span className="text-xs font-extrabold text-sky-400">KSh 500/mo</span>
                 </div>
                 <p className="text-[11px] text-slate-400">
-                  Full POS, Cloud Sync, Inventory &amp; KRA Turnover Tax Reports.
+                  Fast POS, Stock Tracking, M-Pesa Options, Multi-Shop &amp; Backups.
                 </p>
               </div>
               <div className="bg-[#0f172a]/80 border border-emerald-500/30 rounded-2xl p-3.5 space-y-1">
@@ -167,15 +167,15 @@ export const MerchantAuthScreen: React.FC<MerchantAuthScreenProps> = ({
           <div className="flex flex-wrap items-center gap-4 text-[11px] text-slate-400 pt-2 border-t border-slate-800">
             <span className="inline-flex items-center gap-1.5">
               <Lock className="w-3.5 h-3.5 text-sky-400" />
-              Strict Store Isolation
+              Multi-Shop Isolation
             </span>
             <span className="inline-flex items-center gap-1.5">
               <Cloud className="w-3.5 h-3.5 text-emerald-400" />
-              Real-Time Firestore Sync
+              Local &amp; Email Backups
             </span>
             <span className="inline-flex items-center gap-1.5">
               <ShieldCheck className="w-3.5 h-3.5 text-amber-400" />
-              M-Pesa STK Integration
+              M-Pesa Till &amp; STK
             </span>
           </div>
         </div>
@@ -264,7 +264,7 @@ export const MerchantAuthScreen: React.FC<MerchantAuthScreenProps> = ({
               <span>What happens next?</span>
             </div>
             <p className="leading-relaxed">
-              • <strong className="text-white">New shopkeepers:</strong> Enter your Store Name, Phone, KRA PIN &amp; M-Pesa Till to start your {referralInput.trim() ? '45-day referral trial' : '30-day free trial'} immediately.
+              • <strong className="text-white">New shopkeepers:</strong> Enter your Store Name, Phone &amp; optional M-Pesa Till/Paybill to start your {referralInput.trim() ? '45-day referral trial' : '30-day free trial'} immediately.
             </p>
             <p className="leading-relaxed">
               • <strong className="text-white">Existing owners:</strong> Your private store catalog, sales &amp; settings load automatically.

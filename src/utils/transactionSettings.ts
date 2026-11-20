@@ -115,7 +115,7 @@ export const TRANSACTION_SETTINGS_DEFAULT: TransactionSettingsState = {
   enableBarcodeScanning: true,
 
   // Section 3
-  enableTransactionWiseTax: true,
+  enableTransactionWiseTax: false,
   enableTransactionWiseDiscount: true,
   roundOffTransactionAmount: false,
 

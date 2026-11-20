@@ -16,11 +16,13 @@ import { TransactionSmsModal } from './TransactionSmsModal';
 import { getSmsDeliveryLogs, SmsDeliveryRecord } from '../../utils/smsService';
 import { safeGetJSON, safeSetJSON } from '../../utils/safeStorage';
 import { useTransactionSettings } from '../../utils/transactionSettings';
+import { resolveActiveStoreKraPin } from '../../utils/supportConfig';
 
 interface ReceiptModalProps {
   transaction: Transaction;
   storeName?: string;
   activeStoreId?: string;
+  storeKraPin?: string;
   onClose: () => void;
 }
 
@@ -38,6 +40,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
   transaction,
   storeName,
   activeStoreId,
+  storeKraPin,
   onClose,
 }) => {
   const [txSettings] = useTransactionSettings(activeStoreId);
@@ -46,6 +49,8 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
   const [latestSms, setLatestSms] = useState<SmsDeliveryRecord | null>(null);
   const [showSharePicker, setShowSharePicker] = useState(false);
   const [receiptToast, setReceiptToast] = useState<string | null>(null);
+
+  const resolvedStoreKraPin = resolveActiveStoreKraPin(storeKraPin);
 
   const customShopName = safeGetJSON<string>('rofani_settings_shop_name', '');
   const resolvedStoreName = (() => {
@@ -263,7 +268,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
   const handleSmartShare = () => {
     const mode = txSettings.shareTransactionAs || 'ask';
     if (mode === 'pdf') {
-      exportReceiptPDF(currentTx, { storeName: resolvedStoreName });
+      exportReceiptPDF(currentTx, { storeName: resolvedStoreName, storeKraPin: resolvedStoreKraPin });
     } else if (mode === 'thermal') {
       handleDownloadThermalImage();
     } else if (mode === 'whatsapp') {
@@ -552,11 +557,11 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
               </div>
             )}
 
-            {/* KRA eTIMS vs Standard Retail Receipt Section */}
+            {/* Optional Tax Invoice vs Standard Retail Receipt Section */}
             {isEtims ? (
               <div className="pt-2 border-t border-dashed border-slate-300 text-[10px] text-slate-700 space-y-1 bg-amber-50/50 p-2.5 rounded-lg border border-amber-200">
                 <div className="font-extrabold text-amber-900 flex items-center justify-between">
-                  <span>KRA eTIMS Tax Invoice</span>
+                  <span>Tax Invoice Details</span>
                   <span className="text-[9px] bg-emerald-100 text-emerald-800 px-1.5 py-0.2 rounded font-bold">
                     Verified ✓
                   </span>
@@ -573,13 +578,15 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                     {currentTx.cusn || 'CUSN-KENYA-44910293'}
                   </span>
                 </div>
-                <div className="flex justify-between font-mono text-[9px]">
-                  <span className="text-slate-500">Store KRA PIN:</span>
-                  <span className="font-bold text-slate-900">P051234567X</span>
-                </div>
+                {resolvedStoreKraPin && (
+                  <div className="flex justify-between font-mono text-[9px]">
+                    <span className="text-slate-500">Store Tax PIN:</span>
+                    <span className="font-bold text-slate-900">{resolvedStoreKraPin}</span>
+                  </div>
+                )}
                 {currentTx.customerKraPin && (
                   <div className="flex justify-between font-mono text-[9px]">
-                    <span className="text-slate-500">Buyer KRA PIN:</span>
+                    <span className="text-slate-500">Buyer Tax PIN:</span>
                     <span className="font-bold text-amber-900">{currentTx.customerKraPin}</span>
                   </div>
                 )}
@@ -588,28 +595,25 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                     <div className="w-12 h-12 bg-white text-slate-950 p-0.5 flex items-center justify-center font-bold text-[7px] select-all">
                       QR: {currentTx.receiptNumber}
                     </div>
-                    <span className="text-[7px] text-amber-300">Scan to Verify iTax</span>
+                    <span className="text-[7px] text-amber-300">Scan to Verify</span>
                   </div>
                 </div>
               </div>
             ) : (
               <div className="pt-2 border-t border-dashed border-slate-300 text-[10px] text-slate-500 space-y-1.5 bg-slate-50 p-2.5 rounded-lg border border-slate-200">
                 <div className="flex items-center justify-between text-[9px] font-bold text-slate-700">
-                  <span>Standard Retail Cash Receipt</span>
+                  <span>Standard Retail Receipt</span>
                   <span className="text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.2 rounded">
-                    KRA TOT Inclusive
+                    Paid &amp; Verified
                   </span>
                 </div>
-                <p className="text-[9px] text-slate-400 leading-tight">
-                  Customer opted for standard receipt. Automatically registered for store monthly KRA Turnover Tax return.
-                </p>
                 <button
                   type="button"
                   onClick={handleConvertToEtims}
-                  className="w-full text-center py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 rounded-lg font-bold text-[10px] transition cursor-pointer flex items-center justify-center gap-1.5 shadow-sm active:scale-95"
+                  className="w-full text-center py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 rounded-lg font-semibold text-[10px] transition cursor-pointer flex items-center justify-center gap-1.5 shadow-sm active:scale-95"
                 >
-                  <QrCode className="w-3.5 h-3.5 text-amber-700" />
-                  <span>Customer Wants e-TIMS? Convert to KRA e-TIMS Invoice</span>
+                  <QrCode className="w-3.5 h-3.5 text-slate-600" />
+                  <span>Add Tax Invoice Details (Optional)</span>
                 </button>
               </div>
             )}
@@ -645,7 +649,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                 type="button"
                 onClick={() => {
                   setShowSharePicker(false);
-                  exportReceiptPDF(currentTx, { storeName: resolvedStoreName });
+                  exportReceiptPDF(currentTx, { storeName: resolvedStoreName, storeKraPin: resolvedStoreKraPin });
                 }}
                 className="py-2 px-2.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer"
               >
@@ -679,7 +683,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
         <div className="p-4 bg-slate-950 border-t border-slate-800 space-y-3">
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
             <button
-              onClick={() => exportReceiptPDF(currentTx, { storeName: resolvedStoreName })}
+              onClick={() => exportReceiptPDF(currentTx, { storeName: resolvedStoreName, storeKraPin: resolvedStoreKraPin })}
               className="flex items-center justify-center gap-1.5 bg-sky-600 hover:bg-sky-500 text-white py-2 px-3 rounded-xl text-xs font-semibold transition cursor-pointer"
             >
               <Download className="w-4 h-4" /> PDF

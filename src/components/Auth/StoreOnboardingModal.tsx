@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import {
   Store,
   Phone,
-  FileText,
   Smartphone,
   Sparkles,
   CheckCircle2,
@@ -39,7 +38,6 @@ export const StoreOnboardingModal: React.FC<StoreOnboardingModalProps> = ({
     userDisplayName ? `${userDisplayName}'s Shop` : ''
   );
   const [phone, setPhone] = useState('');
-  const [kraPin, setKraPin] = useState('');
   const [mpesaShortcodeType, setMpesaShortcodeType] = useState<'till' | 'paybill'>('till');
   const [mpesaShortcode, setMpesaShortcode] = useState('');
   const [referralCode, setReferralCode] = useState(normalizeReferralCode(initialReferralCode));
@@ -102,7 +100,7 @@ export const StoreOnboardingModal: React.FC<StoreOnboardingModalProps> = ({
       await onCreateStore({
         storeName: storeName.trim(),
         phone: phone.trim(),
-        kraPin: kraPin.trim().toUpperCase(),
+        kraPin: '',
         mpesaShortcode: mpesaShortcode.trim(),
         mpesaShortcodeType,
         referralCode: referralCode.trim() ? normalizeReferralCode(referralCode) : undefined,
@@ -163,8 +161,8 @@ export const StoreOnboardingModal: React.FC<StoreOnboardingModalProps> = ({
             </p>
             <p className="text-[11px] text-slate-300 mt-0.5 leading-relaxed">
               {hasValidReferral
-                ? `Your fellow merchant gave you +15 bonus days on top of the standard 30-day trial — and they will automatically earn +30 Days Free when you launch!`
-                : 'Your store starts completely empty and 100% isolated in Cloud Firestore. Only your account can view or edit your products and sales.'}
+                ? `Your fellow merchant gave you +15 bonus days on top of the standard 30-day free trial — enjoy fast sales, stock tracking, M-Pesa options, multi-shop support & local/email backups!`
+                : 'Your private workspace includes fast sales, live stock tracking, M-Pesa options, multi-shop support, and automatic local & email backups.'}
             </p>
           </div>
         </div>
@@ -194,38 +192,20 @@ export const StoreOnboardingModal: React.FC<StoreOnboardingModalProps> = ({
             </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-            <div>
-              <label className="block text-slate-300 font-semibold mb-1.5">
-                Business Phone Number <span className="text-rose-400">*</span>
-              </label>
-              <div className="relative">
-                <Phone className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
-                <input
-                  type="tel"
-                  required
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
-                  placeholder="0712 345 678"
-                  className="w-full bg-[#0f172a] border border-slate-700 rounded-xl pl-10 pr-3.5 py-2.5 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-sky-500"
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-slate-300 font-semibold mb-1.5">
-                KRA PIN (Optional)
-              </label>
-              <div className="relative">
-                <FileText className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
-                <input
-                  type="text"
-                  value={kraPin}
-                  onChange={(e) => setKraPin(e.target.value.toUpperCase())}
-                  placeholder="P051234567X"
-                  className="w-full bg-[#0f172a] border border-slate-700 rounded-xl pl-10 pr-3.5 py-2.5 text-white uppercase placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-sky-500"
-                />
-              </div>
+          <div>
+            <label className="block text-slate-300 font-semibold mb-1.5">
+              Business Phone Number <span className="text-rose-400">*</span>
+            </label>
+            <div className="relative">
+              <Phone className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
+              <input
+                type="tel"
+                required
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                placeholder="0712 345 678"
+                className="w-full bg-[#0f172a] border border-slate-700 rounded-xl pl-10 pr-3.5 py-2.5 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-sky-500"
+              />
             </div>
           </div>
 

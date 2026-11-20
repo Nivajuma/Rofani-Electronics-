@@ -33,15 +33,26 @@ import {
   Copy,
   RefreshCw,
   ShieldCheck,
-  MessageCircle,
-  ExternalLink,
   LogOut,
   Plus,
-  Gift
+  Gift,
+  MessageCircle,
+  Video,
+  Megaphone,
+  RotateCcw,
+  ExternalLink
 } from 'lucide-react';
 import { TabKey } from '../../utils/permissions';
 import { User, StoreSubscriptionProfile } from '../../types';
 import { generateStoreReferralCode } from '../../lib/cloudSync';
+import { CustomerCareSupportCard } from './CustomerCareSupportCard';
+import {
+  ROFANI_MASTER_KRA_PIN,
+  SUPPORT_EMAIL,
+  SUPPORT_PHONE_PRIMARY,
+  SUPPORT_PHONE_SECONDARY,
+  SUPPORT_WHATSAPP_NUMBER,
+} from '../../utils/supportConfig';
 
 export interface AppMenuViewProps {
   onSelectTab: (tab: TabKey) => void;
@@ -114,6 +125,70 @@ export const AppMenuView: React.FC<AppMenuViewProps> = ({
   const [ratingComment, setRatingComment] = useState('');
   const [ratingSubmitted, setRatingSubmitted] = useState(false);
 
+  const publicAppUrl = 'https://rofani-electronics.vercel.app/';
+
+  const hasAvailableReferralCode = Boolean(
+    storeProfile?.referralCode?.trim() || storeProfile?.id?.trim()
+  );
+
+  const merchantReferralCode =
+    storeProfile?.referralCode?.trim() ||
+    (storeProfile?.id
+      ? generateStoreReferralCode(storeProfile.storeName || storeName, storeProfile.id)
+      : 'ROFANI-SHOP01');
+
+  const referralInviteUrl = hasAvailableReferralCode
+    ? `${publicAppUrl}?ref=${encodeURIComponent(merchantReferralCode)}`
+    : publicAppUrl;
+
+  const buildStandardPromoCaption = () => {
+    const referralLine = hasAvailableReferralCode
+      ? `🎁 Use my Referral Code: ${merchantReferralCode} for a 45-Day Free Trial (+15 extra bonus days!)\n`
+      : '🎁 Start with a 30-Day Free Trial today!\n';
+    return (
+      `Run your shop smarter with Rofani POS! Fast counter sales, live stock tracking, M-Pesa Till & STK options, multi-shop support, and automatic local & email backups.\n\n` +
+      referralLine +
+      `🔗 Open App: ${referralInviteUrl}\n\n` +
+      `📞 Support & Onboarding:\n` +
+      `WhatsApp: ${SUPPORT_WHATSAPP_NUMBER}\n` +
+      `Call: ${SUPPORT_PHONE_PRIMARY} / ${SUPPORT_PHONE_SECONDARY}\n` +
+      `Email: ${SUPPORT_EMAIL}`
+    );
+  };
+
+  const buildTikTokPromoCaption = () => {
+    const referralShort = hasAvailableReferralCode
+      ? `Use code ${merchantReferralCode} for 45 Days Free! `
+      : 'Start with a 30-Day Free Trial! ';
+    return (
+      `Upgrade your shop with Rofani POS — fast sales, live stock tracking, M-Pesa options, multi-shop support & daily backups! ${referralShort}` +
+      `Link: ${referralInviteUrl} | WhatsApp: ${SUPPORT_WHATSAPP_NUMBER} | Call: ${SUPPORT_PHONE_PRIMARY} / ${SUPPORT_PHONE_SECONDARY} | ${SUPPORT_EMAIL} ` +
+      `#RofaniPOS #BiasharaKenya #ShopManagement #POSApp`
+    );
+  };
+
+  const [socialCaption, setSocialCaption] = useState<string>(() => buildStandardPromoCaption());
+  const [socialNotice, setSocialNotice] = useState<string | null>(null);
+
+  const openShareAppModal = () => {
+    setSocialCaption(buildStandardPromoCaption());
+    setSocialNotice(null);
+    setActiveModal('share_app');
+  };
+
+  const showSocialHelperNotice = (msg: string) => {
+    setSocialNotice(msg);
+    setTimeout(() => {
+      setSocialNotice((curr) => (curr === msg ? null : curr));
+    }, 4500);
+  };
+
+  const copyTextSafe = (text: string) => {
+    if (typeof navigator !== 'undefined' && navigator.clipboard) {
+      navigator.clipboard.writeText(text).catch(() => {});
+    }
+  };
+
   const toggleAccordion = (key: string) => {
     setAccordions((prev) => ({ ...prev, [key]: !prev[key] }));
   };
@@ -141,41 +216,60 @@ export const AppMenuView: React.FC<AppMenuViewProps> = ({
     }
   };
 
-  const liveAppUrl =
-    typeof window !== 'undefined' ? window.location.origin : 'https://rofani-pos.vercel.app';
-
-  const merchantReferralCode =
-    storeProfile?.referralCode ||
-    (storeProfile?.id
-      ? generateStoreReferralCode(storeProfile.storeName || storeName, storeProfile.id)
-      : 'ROFANI-SHOP01');
-  const referralInviteUrl = `${liveAppUrl}/?ref=${encodeURIComponent(merchantReferralCode)}`;
-
   const handleCopyShareInstructions = () => {
-    const text = `Join me on Rofani POS! Use my Referral Code ${merchantReferralCode} to get a 45-Day Free Trial (+15 extra days):\n${referralInviteUrl}\n\nWorker Sign-In: Open link, sign in with your store PIN or Google account, and tap Cloud Sync to stay synced across devices.`;
-    if (typeof navigator !== 'undefined' && navigator.clipboard) {
-      navigator.clipboard.writeText(text).catch(() => {});
-    }
+    const workerNote = `\n\nWorker Sign-In: Open link, sign in with your store PIN or Google account, and tap Cloud Sync to stay synced across devices.`;
+    copyTextSafe(`${socialCaption.trim() || buildStandardPromoCaption()}${workerNote}`);
     setCopiedShareLink(true);
+    showSocialHelperNotice('Promo caption, link & invite guide copied to clipboard!');
     setTimeout(() => setCopiedShareLink(false), 2500);
   };
 
   const handleShareInviteNative = async () => {
-    const shareText = `Manage your shop stock, sales & M-Pesa with Rofani POS! Sign up using my referral code ${merchantReferralCode} for a 45-Day Free Trial:\n${referralInviteUrl}`;
+    const textToShare = socialCaption.trim() || buildStandardPromoCaption();
     if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
       try {
         await navigator.share({
-          title: 'Join Rofani POS (45 Days Free)',
-          text: shareText,
+          title: hasAvailableReferralCode
+            ? 'Rofani POS — 45-Day Referral Trial'
+            : 'Rofani POS — 30-Day Free Trial',
+          text: textToShare,
           url: referralInviteUrl,
         });
+        showSocialHelperNotice('Shared successfully!');
         return;
       } catch {
         // Fallback to clipboard copy
       }
     }
-    handleCopyShareInstructions();
+    copyTextSafe(textToShare);
+    setCopiedShareLink(true);
+    showSocialHelperNotice('Promo caption & link copied—ready to paste anywhere!');
+    setTimeout(() => setCopiedShareLink(false), 2500);
   };
+
+  const handleFacebookShareClick = () => {
+    const textToCopy = socialCaption.trim() || buildStandardPromoCaption();
+    copyTextSafe(textToCopy);
+    showSocialHelperNotice('Promo caption copied—paste it into your Facebook post!');
+  };
+
+  const handleTikTokShareClick = () => {
+    const current = socialCaption.trim();
+    const hasHashtags = /#RofaniPOS/i.test(current);
+    const tikTokText = hasHashtags
+      ? current
+      : `${current ? `${current}\n\n` : `${buildTikTokPromoCaption()}\n\n`}#RofaniPOS #BiasharaKenya #ShopManagement #POSApp`;
+    copyTextSafe(tikTokText);
+    showSocialHelperNotice('Caption copied—paste it when uploading your TikTok video or photo!');
+  };
+
+  const whatsappShareUrl = `https://wa.me/?text=${encodeURIComponent(
+    socialCaption.trim() || buildStandardPromoCaption()
+  )}`;
+  const facebookShareUrl = `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(
+    referralInviteUrl
+  )}&quote=${encodeURIComponent(socialCaption.trim() || buildStandardPromoCaption())}`;
+  const tiktokShareUrl = 'https://www.tiktok.com/';
 
   const displayName = storeName || 'Rofani POS';
 
@@ -692,6 +786,25 @@ export const AppMenuView: React.FC<AppMenuViewProps> = ({
             </div>
           </button>
 
+          <button
+            type="button"
+            onClick={openShareAppModal}
+            className="w-full min-h-[52px] px-4 py-3 flex items-center justify-between hover:bg-slate-800/70 transition text-left cursor-pointer"
+          >
+            <div className="flex items-center gap-3.5 min-w-0">
+              <Megaphone className="w-4 h-4 text-sky-400 shrink-0" strokeWidth={1.75} />
+              <span className="text-[13px] font-semibold text-white truncate">
+                Share App &amp; Social Media
+              </span>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <span className="px-2 py-0.5 rounded-md bg-emerald-500/15 border border-emerald-500/30 text-[10px] font-bold text-emerald-300">
+                WhatsApp · FB · TikTok
+              </span>
+              <ChevronRight className="w-4 h-4 text-slate-400 shrink-0" />
+            </div>
+          </button>
+
           {isOwnerAccount && onOpenSuperAdmin && (
             <button
               type="button"
@@ -767,6 +880,17 @@ export const AppMenuView: React.FC<AppMenuViewProps> = ({
                   className="w-full min-h-[44px] py-2.5 flex items-center justify-between text-slate-200 hover:text-[#38bdf8] transition cursor-pointer"
                 >
                   <span className="font-medium">Customer Loyalty</span>
+                  <ChevronRight className="w-4 h-4 text-slate-500" />
+                </button>
+                <button
+                  type="button"
+                  onClick={openShareAppModal}
+                  className="w-full min-h-[44px] py-2.5 flex items-center justify-between text-sky-300 hover:text-sky-200 transition cursor-pointer"
+                >
+                  <span className="font-semibold flex items-center gap-2">
+                    <Megaphone className="w-3.5 h-3.5 text-sky-400" />
+                    Share on Social Media
+                  </span>
                   <ChevronRight className="w-4 h-4 text-slate-500" />
                 </button>
               </div>
@@ -848,15 +972,18 @@ export const AppMenuView: React.FC<AppMenuViewProps> = ({
                 </button>
                 <button
                   type="button"
-                  onClick={() => setActiveModal('share_app')}
+                  onClick={openShareAppModal}
                   className="w-full min-h-[44px] py-2.5 flex items-center justify-between text-slate-200 hover:text-[#38bdf8] transition cursor-pointer"
                 >
                   <span className="font-medium flex items-center gap-2.5">
                     <Share2 className="w-3.5 h-3.5 text-slate-400" />
-                    Share App Details
+                    Share App Details &amp; Social Media
                   </span>
                   <ChevronRight className="w-4 h-4 text-slate-500" />
                 </button>
+                <div className="py-3 pr-1">
+                  <CustomerCareSupportCard compact title="Quick Support Desk" />
+                </div>
               </div>
             )}
           </div>
@@ -930,7 +1057,7 @@ export const AppMenuView: React.FC<AppMenuViewProps> = ({
           onClick={() => setActiveModal(null)}
         >
           <div
-            className="w-full max-w-md bg-[#1e293b] border border-slate-700 rounded-2xl p-5 text-slate-100 shadow-2xl space-y-4"
+            className="w-full max-w-lg max-h-[90vh] overflow-y-auto bg-[#1e293b] border border-slate-700 rounded-2xl p-5 text-slate-100 shadow-2xl space-y-4"
             onClick={(e) => e.stopPropagation()}
           >
             {activeModal === 'plans' && (
@@ -954,9 +1081,14 @@ export const AppMenuView: React.FC<AppMenuViewProps> = ({
                     <span className="text-[#38bdf8] font-mono font-bold">Active License</span>
                   </div>
                   <p className="text-slate-400 leading-relaxed">
-                    Includes multi-device Firestore Cloud Sync, M-Pesa Daraja STK Push &amp; Till integration, KRA eTIMS / TOT reports, unlimited SKUs, and worker PIN access control.
+                    Includes fast POS sales, live stock tracking, M-Pesa STK Push &amp; Till/Paybill options, multi-shop support, local &amp; email backups, unlimited SKUs, and worker PIN access control — starting with a 30-day free trial.
                   </p>
+                  <div className="pt-2 border-t border-slate-800 flex items-center justify-between text-[11px]">
+                    <span className="text-slate-400">Rofani POS Official KRA PIN</span>
+                    <span className="font-mono font-bold text-sky-300">{ROFANI_MASTER_KRA_PIN}</span>
+                  </div>
                 </div>
+                <CustomerCareSupportCard compact title="Billing & Plan Support" />
                 <button
                   type="button"
                   onClick={() => setActiveModal(null)}
@@ -982,34 +1114,11 @@ export const AppMenuView: React.FC<AppMenuViewProps> = ({
                     <X className="w-4 h-4" />
                   </button>
                 </div>
-                <div className="space-y-2.5 text-xs">
+                <div className="space-y-3 text-xs">
                   <p className="text-slate-300">
                     Need help with inventory setup, M-Pesa Daraja keys, or multi-device sync? Contact Rofani POS technical support:
                   </p>
-                  <div className="bg-[#0f172a] border border-slate-700/70 rounded-xl p-3 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <span className="text-slate-400">Support Line</span>
-                      <a
-                        href="tel:+254700000000"
-                        className="font-mono font-bold text-white hover:text-[#38bdf8]"
-                      >
-                        +254 700 000 000
-                      </a>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-slate-400">WhatsApp Desk</span>
-                      <a
-                        href="https://wa.me/254700000000"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1 font-semibold text-emerald-400 hover:underline"
-                      >
-                        <MessageCircle className="w-3.5 h-3.5" />
-                        Chat on WhatsApp
-                        <ExternalLink className="w-3 h-3" />
-                      </a>
-                    </div>
-                  </div>
+                  <CustomerCareSupportCard />
                 </div>
                 <button
                   type="button"
@@ -1026,66 +1135,196 @@ export const AppMenuView: React.FC<AppMenuViewProps> = ({
                 <div className="flex items-center justify-between border-b border-slate-700/70 pb-3">
                   <div className="flex items-center gap-2.5">
                     <Share2 className="w-5 h-5 text-[#38bdf8]" />
-                    <h3 className="text-base font-bold text-white">Share App Details</h3>
+                    <div>
+                      <h3 className="text-base font-bold text-white leading-tight">
+                        Share App Details
+                      </h3>
+                      <p className="text-[11px] text-slate-400">
+                        Advertise Rofani POS &amp; share your invite link
+                      </p>
+                    </div>
                   </div>
                   <button
                     type="button"
                     onClick={() => setActiveModal(null)}
                     className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 cursor-pointer"
+                    aria-label="Close Share App Details"
                   >
                     <X className="w-4 h-4" />
                   </button>
                 </div>
+
                 <div className="space-y-3 text-xs">
                   {/* Referral Code & +30d Bonus Card */}
-                  <div className="bg-gradient-to-br from-[#0f172a] to-[#16233b] border border-amber-500/40 rounded-xl p-3 space-y-2">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="inline-flex items-center gap-1.5 font-bold text-amber-300">
-                        <Gift className="w-4 h-4 text-amber-400" />
-                        Your Store Referral Code
-                      </span>
-                      <span className="px-2 py-0.5 rounded bg-amber-500/15 border border-amber-500/30 text-amber-200 text-[10px] font-bold tabular-nums">
-                        {storeProfile?.referralCount || 0} Joined
-                      </span>
+                  {hasAvailableReferralCode && (
+                    <div className="bg-gradient-to-br from-[#0f172a] to-[#16233b] border border-amber-500/40 rounded-xl p-3 space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="inline-flex items-center gap-1.5 font-bold text-amber-300">
+                          <Gift className="w-4 h-4 text-amber-400" />
+                          Your Store Referral Code
+                        </span>
+                        <span className="px-2 py-0.5 rounded bg-amber-500/15 border border-amber-500/30 text-amber-200 text-[10px] font-bold tabular-nums">
+                          {storeProfile?.referralCount || 0} Joined
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between gap-2 bg-[#1e293b] border border-slate-700 rounded-lg px-3 py-2">
+                        <span className="font-mono font-extrabold text-sm text-white tracking-wider">
+                          {merchantReferralCode}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            copyTextSafe(merchantReferralCode);
+                            showSocialHelperNotice(`Referral code ${merchantReferralCode} copied!`);
+                          }}
+                          className="text-[11px] font-bold text-[#38bdf8] hover:text-sky-300 cursor-pointer"
+                        >
+                          Copy Code
+                        </button>
+                      </div>
+                      <p className="text-[11px] text-slate-300 leading-relaxed">
+                        Invite fellow shop owners: they get <strong className="text-emerald-300">45 Days Free</strong> and you automatically get <strong className="text-amber-300">+30 Days Free (+1 Month)</strong>!
+                      </p>
                     </div>
-                    <div className="flex items-center justify-between gap-2 bg-[#1e293b] border border-slate-700 rounded-lg px-3 py-2">
-                      <span className="font-mono font-extrabold text-sm text-white tracking-wider">
-                        {merchantReferralCode}
-                      </span>
+                  )}
+
+                  {/* Share on Social Media Hub */}
+                  <div className="bg-slate-900 border border-slate-700/80 rounded-2xl p-3.5 space-y-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <Megaphone className="w-4 h-4 text-sky-400 shrink-0" />
+                        <span className="font-bold text-white text-xs sm:text-sm">
+                          Share on Social Media
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setSocialCaption(buildStandardPromoCaption())}
+                          className="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-[10px] font-semibold text-slate-200 cursor-pointer transition"
+                        >
+                          Standard Pitch
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setSocialCaption(buildTikTokPromoCaption())}
+                          className="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-[10px] font-semibold text-pink-300 cursor-pointer transition"
+                        >
+                          TikTok + #Tags
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSocialCaption(buildStandardPromoCaption());
+                            setSocialNotice(null);
+                          }}
+                          title="Reset promo caption"
+                          className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 cursor-pointer transition"
+                        >
+                          <RotateCcw className="w-3 h-3" />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Editable Caption Preview Box */}
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between text-[11px] text-slate-400">
+                        <span>Editable Promo Caption Preview</span>
+                        <span className="font-mono text-[10px] text-slate-500">
+                          {socialCaption.length} chars
+                        </span>
+                      </div>
+                      <textarea
+                        rows={6}
+                        value={socialCaption}
+                        onChange={(e) => setSocialCaption(e.target.value)}
+                        placeholder="Customize your Rofani POS promo message or add a seasonal note..."
+                        className="w-full bg-slate-800 border border-slate-700 rounded-xl p-3 text-sm text-slate-100 placeholder-slate-400 leading-relaxed focus:outline-none focus:ring-2 focus:ring-sky-500 resize-y"
+                      />
+                    </div>
+
+                    {socialNotice && (
+                      <div className="bg-emerald-950/70 border border-emerald-500/40 text-emerald-200 rounded-xl px-3 py-2 text-[11px] font-semibold flex items-center gap-2">
+                        <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                        <span>{socialNotice}</span>
+                      </div>
+                    )}
+
+                    {/* Dedicated Social Platform Buttons */}
+                    <div className="grid grid-cols-2 gap-2">
+                      <a
+                        href={whatsappShareUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="min-h-[42px] px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-sm transition"
+                      >
+                        <MessageCircle className="w-4 h-4 shrink-0" />
+                        <span>WhatsApp</span>
+                        <ExternalLink className="w-3 h-3 opacity-80 shrink-0" />
+                      </a>
+
+                      <a
+                        href={facebookShareUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={handleFacebookShareClick}
+                        className="min-h-[42px] px-3 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-sm transition"
+                      >
+                        <Globe className="w-4 h-4 shrink-0" />
+                        <span>Facebook</span>
+                        <ExternalLink className="w-3 h-3 opacity-80 shrink-0" />
+                      </a>
+
+                      <a
+                        href={tiktokShareUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={handleTikTokShareClick}
+                        className="min-h-[42px] px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-pink-500/50 text-pink-200 font-bold text-xs flex items-center justify-center gap-1.5 shadow-sm transition"
+                      >
+                        <Video className="w-4 h-4 text-pink-400 shrink-0" />
+                        <span>TikTok</span>
+                        <ExternalLink className="w-3 h-3 opacity-80 shrink-0" />
+                      </a>
+
                       <button
                         type="button"
-                        onClick={() => {
-                          if (typeof navigator !== 'undefined' && navigator.clipboard) {
-                            navigator.clipboard.writeText(merchantReferralCode).catch(() => {});
-                          }
-                          setCopiedShareLink(true);
-                          setTimeout(() => setCopiedShareLink(false), 2000);
-                        }}
-                        className="text-[11px] font-bold text-[#38bdf8] hover:text-sky-300 cursor-pointer"
+                        onClick={handleShareInviteNative}
+                        className="min-h-[42px] px-3 py-2 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-extrabold text-xs flex items-center justify-center gap-1.5 shadow-sm cursor-pointer transition"
                       >
-                        Copy Code
+                        <Share2 className="w-4 h-4 shrink-0" />
+                        <span>Copy / Share Anywhere</span>
                       </button>
                     </div>
-                    <p className="text-[11px] text-slate-300 leading-relaxed">
-                      Invite fellow shop owners: they get <strong className="text-emerald-300">45 Days Free</strong> and you automatically get <strong className="text-amber-300">+30 Days Free (+1 Month)</strong>!
-                    </p>
                   </div>
 
                   <div className="bg-[#0f172a] border border-slate-700/70 rounded-xl p-3 space-y-1.5">
-                    <div className="text-slate-400">Your Personalized Invite Link</div>
+                    <div className="text-slate-400">App &amp; Invite Link</div>
                     <div className="font-mono text-[#38bdf8] break-all">{referralInviteUrl}</div>
                   </div>
+
                   <div className="bg-[#0f172a] border border-slate-700/70 rounded-xl p-3 space-y-1 text-slate-300">
                     <div className="font-semibold text-white">Store &amp; Staff Sign-In Instructions</div>
                     <p className="text-slate-400 leading-relaxed">
-                      1. Open your invite link in Chrome or Safari on your mobile phone.
+                      1. Open the link in Chrome or Safari on your mobile phone.
                       <br />
-                      2. Shop owners: Sign in with your Google account and confirm referral code <span className="font-mono text-amber-300">{merchantReferralCode}</span> for 45 days free.
+                      2. Shop owners: Sign in with Google
+                      {hasAvailableReferralCode ? (
+                        <>
+                          {' '}and enter referral code{' '}
+                          <span className="font-mono text-amber-300">{merchantReferralCode}</span> for 45 days free.
+                        </>
+                      ) : (
+                        ' to start your 30-day free trial.'
+                      )}
                       <br />
                       3. Cashiers/staff: Sign in with the store Google account and enter your assigned worker PIN.
                     </p>
                   </div>
+                  <CustomerCareSupportCard compact title="Onboarding & Referral Support" />
                 </div>
+
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   <button
                     type="button"
@@ -1199,9 +1438,10 @@ export const AppMenuView: React.FC<AppMenuViewProps> = ({
                     Rofani POS stores catalog items, transactions, and customer balances locally for offline continuity and syncs strictly to your authenticated Firebase Firestore workspace.
                   </p>
                   <p className="text-slate-400">
-                    Access is protected by authenticated Google sign-in and staff terminal PIN permissions.
+                    Access is protected by authenticated Google sign-in and staff terminal PIN permissions. For data privacy inquiries or workspace deletion requests, contact our support desk below.
                   </p>
                 </div>
+                <CustomerCareSupportCard compact title="Data & Privacy Support" />
                 <button
                   type="button"
                   onClick={() => setActiveModal(null)}

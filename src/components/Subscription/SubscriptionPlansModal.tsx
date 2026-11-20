@@ -17,6 +17,8 @@ import {
   LayoutGrid,
   Calculator,
   X,
+  Download,
+  FileText,
 } from 'lucide-react';
 import { StoreSubscriptionProfile, SubscriptionPlanType } from '../../types';
 import {
@@ -27,6 +29,9 @@ import {
 } from '../../utils/mpesa';
 import { activateStoreSubscription, generateStoreReferralCode } from '../../lib/cloudSync';
 import { signOutFromCloud } from '../../lib/firebase';
+import { ROFANI_MASTER_KRA_PIN } from '../../utils/supportConfig';
+import { exportSubscriptionInvoicePDF } from '../../utils/pdfGenerator';
+import { CustomerCareSupportCard } from '../Common/CustomerCareSupportCard';
 
 export type PaidSubscriptionPlanKey = Exclude<SubscriptionPlanType, 'trial'>;
 
@@ -189,7 +194,7 @@ export const SubscriptionPlansModal: React.FC<SubscriptionPlansModalProps> = ({
   };
 
   const handleShareInviteLink = async () => {
-    const shareText = `Join me on Rofani POS! Use my referral code ${referralCode} to get 45 Days Free Trial (15 extra bonus days):\n${inviteUrl}`;
+    const shareText = `Run your shop with Rofani POS — fast sales, live stock tracking, M-Pesa options, multi-shop support & local/email backups! Use my referral code ${referralCode} for 45 Days Free (30-day standard free trial + 15 bonus days):\n${inviteUrl}`;
     if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
       try {
         await navigator.share({
@@ -489,6 +494,15 @@ export const SubscriptionPlansModal: React.FC<SubscriptionPlansModalProps> = ({
             </span>
           </div>
 
+          <div className="bg-slate-800/70 border border-slate-700/70 rounded-2xl px-4 py-3 mb-4 text-[11px] text-slate-300 flex flex-wrap items-center gap-x-4 gap-y-1.5">
+            <span>• Fast POS Sales</span>
+            <span>• Live Stock Tracking</span>
+            <span>• M-Pesa STK &amp; Till</span>
+            <span>• Multi-Shop Support</span>
+            <span>• Local &amp; Email Backups</span>
+            <span>• 30-Day Free Trial</span>
+          </div>
+
           {/* Stacked Subscription Plan Cards */}
           <div className="space-y-0">
             {PLAN_LIST.map((item) => {
@@ -754,6 +768,87 @@ export const SubscriptionPlansModal: React.FC<SubscriptionPlansModalProps> = ({
                 </button>
               </div>
             </div>
+
+            {/* Official Rofani POS Subscription Invoice & Master KRA PIN */}
+            <div className="bg-slate-800/90 border border-slate-700/80 rounded-2xl p-4 space-y-3 text-xs shadow-lg">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-700/80 pb-2.5">
+                <div className="flex items-center gap-2">
+                  <FileText className="w-4 h-4 text-sky-400 shrink-0" />
+                  <div>
+                    <h3 className="font-bold text-white text-sm">
+                      Subscription Tax Invoice
+                    </h3>
+                    <p className="text-[11px] text-slate-400">
+                      Issued by Rofani POS • KRA PIN:{' '}
+                      <strong className="font-mono text-sky-300">{ROFANI_MASTER_KRA_PIN}</strong>
+                    </p>
+                  </div>
+                </div>
+                <span className="px-2.5 py-1 rounded-lg bg-sky-500/15 border border-sky-500/30 text-sky-300 font-mono text-[11px] font-bold">
+                  PIN: {ROFANI_MASTER_KRA_PIN}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2.5 bg-slate-900/90 border border-slate-700/70 rounded-xl p-3 text-[11px]">
+                <div>
+                  <span className="text-slate-400 block">Billed To Store</span>
+                  <span className="font-bold text-white truncate block">{activeStoreTitle}</span>
+                </div>
+                <div>
+                  <span className="text-slate-400 block">Selected / Active Plan</span>
+                  <span className="font-bold text-orange-300">
+                    {storeProfile?.lastPaymentAmount
+                      ? `${currentPlanLabel} (KE ${storeProfile.lastPaymentAmount.toLocaleString()})`
+                      : `${plan.name} (KE ${plan.price.toLocaleString()})`}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-slate-400 block">Store Tax PIN (Optional)</span>
+                  <span className="font-mono font-semibold text-slate-200">
+                    {storeProfile?.kraPin || 'Not Required'}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-slate-400 block">Payment Ref / Till</span>
+                  <span className="font-mono font-semibold text-emerald-300">
+                    {storeProfile?.lastPaymentRef || 'Till 1833804'}
+                  </span>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  const invNo = storeProfile?.lastPaymentRef
+                    ? `ROF-${storeProfile.lastPaymentRef}`
+                    : `ROF-${Date.now().toString().slice(-6)}`;
+                  exportSubscriptionInvoicePDF({
+                    invoiceNumber: invNo,
+                    storeName: activeStoreTitle,
+                    storeEmail: storeProfile?.ownerEmail,
+                    storePhone: storeProfile?.phone || mpesaPhone,
+                    customerKraPin: storeProfile?.kraPin,
+                    planName: storeProfile?.lastPaymentAmount ? currentPlanLabel : plan.name,
+                    durationDays: plan.durationDays,
+                    amount: storeProfile?.lastPaymentAmount || plan.price,
+                    paymentRef: storeProfile?.lastPaymentRef || `TILL-1833804-${selectedPlan.toUpperCase()}`,
+                    paymentMethod: storeProfile?.lastPaymentMethod || 'mpesa_till',
+                    issuedAt: storeProfile?.lastPaymentAt || new Date().toISOString(),
+                    expiresAt: storeProfile?.expiresAt,
+                  });
+                }}
+                className="w-full min-h-[42px] px-4 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs inline-flex items-center justify-center gap-2 transition cursor-pointer shadow-sm"
+              >
+                <Download className="w-4 h-4 shrink-0" />
+                <span>Download Subscription Invoice (PDF · KRA PIN {ROFANI_MASTER_KRA_PIN})</span>
+              </button>
+            </div>
+
+            {/* Rofani POS Customer Care */}
+            <CustomerCareSupportCard
+              title="Need Help Extending Usage or Setting Up M-Pesa?"
+              subtitle="Reach Rofani POS support directly via WhatsApp, phone call, or email"
+            />
           </div>
         </div>
       </main>

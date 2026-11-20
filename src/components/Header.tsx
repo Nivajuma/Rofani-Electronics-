@@ -136,7 +136,7 @@ export const Header: React.FC<HeaderProps> = ({
               <h1 className="font-bold text-sm sm:text-base text-slate-100 leading-tight">
                 Rofani <span className="text-sky-400 font-semibold">POS</span>
               </h1>
-              <p className="text-[10px] text-slate-400 hidden sm:block">POS, Stock, KRA 1.5% Tax & Attendance</p>
+              <p className="text-[10px] text-slate-400 hidden sm:block">Fast Sales, Stock Tracking, M-Pesa &amp; Attendance</p>
             </div>
           </div>
 
@@ -318,15 +318,6 @@ export const Header: React.FC<HeaderProps> = ({
                 <span>{lowStockCount} Low</span>
               </button>
             )}
-
-            {/* eTIMS Status Pill */}
-            <div
-              title="KRA eTIMS Tax Control Unit Status: Connected and Live"
-              className="hidden xl:flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-amber-950/60 border border-amber-800/80 text-amber-300 text-xs font-semibold"
-            >
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-              <span className="text-[11px]">eTIMS Connected</span>
-            </div>
 
             {/* Live Active Worker Status Badge */}
             {onOpenStaffManagement && (

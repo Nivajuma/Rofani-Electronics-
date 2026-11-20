@@ -124,6 +124,7 @@ interface POSViewProps {
   externalClearDiscountTrigger?: number;
   storeName?: string;
   activeStoreId?: string;
+  storeKraPin?: string;
   requirePinOnStartup?: boolean;
 }
 
@@ -152,6 +153,7 @@ export const POSView: React.FC<POSViewProps> = ({
   externalClearDiscountTrigger,
   storeName = 'Rofani POS',
   activeStoreId,
+  storeKraPin,
   requirePinOnStartup = true,
 }) => {
   const [txSettings] = useTransactionSettings(activeStoreId);
@@ -1045,6 +1047,20 @@ export const POSView: React.FC<POSViewProps> = ({
     safeSetJSON('retail_pos_pos_payment_entries', paymentEntries);
   }, [paymentEntries]);
 
+  useEffect(() => {
+    if (cart.length === 0 && !showCheckoutModal) {
+      const preferred: PaymentMethod = txSettings.cashSaleByDefault
+        ? 'cash'
+        : ((txSettings.defaultPaymentMethod as PaymentMethod) || 'mpesa');
+      setPaymentEntries((prev) => {
+        if (prev.length === 1 && prev[0].amount === 0 && prev[0].method !== preferred) {
+          return [{ ...prev[0], method: preferred }];
+        }
+        return prev;
+      });
+    }
+  }, [txSettings.cashSaleByDefault, txSettings.defaultPaymentMethod, cart.length, showCheckoutModal]);
+
   const [saleNotes, setSaleNotes] = useState<string>(
     () => initialSavedDraftRef.current?.saleNotes ?? ''
   );
@@ -1825,11 +1841,15 @@ export const POSView: React.FC<POSViewProps> = ({
 
     const cuin = isEtimsRequested ? `CUIN-2026-${Math.floor(100000 + Math.random() * 900000)}` : undefined;
     const cusn = isEtimsRequested ? `CUSN-KENYA-${Math.floor(10000000 + Math.random() * 90000000)}` : undefined;
+    const isTaxEnabled = txSettings.enableTransactionWiseTax && kraTaxModeSetting !== 'none';
     const taxBreakdown = {
-      vat16Total: kraTaxModeSetting === 'vat' ? Number((grandTotal - grandTotal / 1.16).toFixed(2)) : grandTotal * 0.16,
+      vat16Total:
+        isTaxEnabled && kraTaxModeSetting === 'vat'
+          ? Number((grandTotal - grandTotal / 1.16).toFixed(2))
+          : 0,
       zeroRatedTotal: 0,
-      exemptTotal: kraTaxModeSetting === 'none' ? grandTotal : 0,
-      totTotal: kraTaxModeSetting === 'tot' || kraTaxModeSetting === 'none' ? grandTotal * 0.015 : 0,
+      exemptTotal: !isTaxEnabled ? grandTotal : 0,
+      totTotal: isTaxEnabled && kraTaxModeSetting === 'tot' ? Number((grandTotal * 0.015).toFixed(2)) : 0,
     };
 
     const newTx: Transaction = {
@@ -2005,11 +2025,15 @@ export const POSView: React.FC<POSViewProps> = ({
 
     const cuin = isEtimsRequested ? `CUIN-2026-${Math.floor(100000 + Math.random() * 900000)}` : undefined;
     const cusn = isEtimsRequested ? `CUSN-KENYA-${Math.floor(10000000 + Math.random() * 90000000)}` : undefined;
+    const isTaxEnabled = txSettings.enableTransactionWiseTax && kraTaxModeSetting !== 'none';
     const taxBreakdown = {
-      vat16Total: kraTaxModeSetting === 'vat' ? Number((grandTotal - grandTotal / 1.16).toFixed(2)) : grandTotal * 0.16,
+      vat16Total:
+        isTaxEnabled && kraTaxModeSetting === 'vat'
+          ? Number((grandTotal - grandTotal / 1.16).toFixed(2))
+          : 0,
       zeroRatedTotal: 0,
-      exemptTotal: kraTaxModeSetting === 'none' ? grandTotal : 0,
-      totTotal: kraTaxModeSetting === 'tot' || kraTaxModeSetting === 'none' ? grandTotal * 0.015 : 0,
+      exemptTotal: !isTaxEnabled ? grandTotal : 0,
+      totTotal: isTaxEnabled && kraTaxModeSetting === 'tot' ? Number((grandTotal * 0.015).toFixed(2)) : 0,
     };
 
     const effectiveCustomerName = selectedCustomer.name;
@@ -2853,18 +2877,18 @@ export const POSView: React.FC<POSViewProps> = ({
               <span className="flex items-center gap-1.5">
                 <span>
                   {kraTaxModeSetting === 'vat'
-                    ? 'KRA VAT (16%):'
+                    ? 'Standard Tax (16%):'
                     : kraTaxModeSetting === 'none'
-                      ? 'Tax Mode (Exempt):'
-                      : 'KRA Turnover Tax (1.5% TOT):'}
+                      ? 'Tax (Off):'
+                      : 'Turnover Levy (1.5%):'}
                 </span>
                 <button
                   type="button"
                   onClick={() => setShowKraTotModal(true)}
                   className="text-[10px] text-amber-300 hover:text-white font-bold underline cursor-pointer"
-                  title="View KRA Monthly Turnover Tax Return & iTax Filing Status"
+                  title="View Optional Sales Tax & Levy Summary"
                 >
-                  Month-End Return ↗
+                  Tax Summary ↗
                 </button>
               </span>
               <span className="font-mono font-bold">
@@ -4257,9 +4281,13 @@ export const POSView: React.FC<POSViewProps> = ({
                 <div>
                   <div className="text-xs text-slate-400">Total Bill Amount</div>
                   <div className="text-2xl font-extrabold text-sky-400 font-mono">KSh {grandTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</div>
-                  <div className="text-[11px] text-amber-400 font-mono mt-0.5">
-                    Incl. KRA TOT (1.5%): KSh {(grandTotal * 0.015).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                  </div>
+                  {txSettings.enableTransactionWiseTax && kraTaxModeSetting !== 'none' && (
+                    <div className="text-[11px] text-amber-400 font-mono mt-0.5">
+                      {kraTaxModeSetting === 'vat'
+                        ? `Incl. Standard Tax (16%): KSh ${(exclusiveVatAddOn > 0 ? exclusiveVatAddOn : grandTotal - grandTotal / 1.16).toLocaleString(undefined, { minimumFractionDigits: 2 })}`
+                        : `Incl. Turnover Levy (1.5%): KSh ${(grandTotal * 0.015).toLocaleString(undefined, { minimumFractionDigits: 2 })}`}
+                    </div>
+                  )}
                 </div>
                 <div className="text-right text-xs space-y-1">
                   <div>
@@ -4601,7 +4629,7 @@ export const POSView: React.FC<POSViewProps> = ({
                 </span>
               </div>
 
-              {/* Optional KRA e-TIMS Tax Invoice Toggle */}
+              {/* Optional Tax / Fiscal Invoice Toggle */}
               <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 space-y-2">
                 <div className="flex items-center justify-between">
                   <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-slate-200">
@@ -4613,7 +4641,7 @@ export const POSView: React.FC<POSViewProps> = ({
                     />
                     <span className="flex items-center gap-1.5">
                       <ReceiptText className="w-3.5 h-3.5 text-amber-400" />
-                      <span>Issue Official KRA e-TIMS Tax Invoice</span>
+                      <span>Include Tax Invoice Details (Optional)</span>
                     </span>
                   </label>
                   <span
@@ -4623,16 +4651,16 @@ export const POSView: React.FC<POSViewProps> = ({
                         : 'bg-slate-800 text-slate-400'
                     }`}
                   >
-                    {isEtimsRequested ? 'e-TIMS Active (CUIN)' : 'Standard Receipt'}
+                    {isEtimsRequested ? 'Tax Invoice Active' : 'Standard Receipt'}
                   </span>
                 </div>
 
                 {isEtimsRequested ? (
                   <div className="pt-2 border-t border-slate-800/80 flex items-center gap-2">
-                    <span className="text-[11px] text-slate-400 whitespace-nowrap">Buyer KRA PIN (Optional):</span>
+                    <span className="text-[11px] text-slate-400 whitespace-nowrap">Buyer Tax PIN (Optional):</span>
                     <input
                       type="text"
-                      placeholder="e.g. A012345678Z (Leave blank for walk-in shopper)"
+                      placeholder="Optional buyer Tax PIN"
                       value={customerKraPin}
                       onChange={(e) => setCustomerKraPin(e.target.value.toUpperCase())}
                       className="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1 text-xs text-amber-300 font-mono font-bold focus:outline-none focus:border-amber-500"
@@ -4640,7 +4668,7 @@ export const POSView: React.FC<POSViewProps> = ({
                   </div>
                 ) : (
                   <p className="text-[10px] text-slate-500 pl-6 leading-tight">
-                    Standard retail cash receipt will be printed without fiscal QR code. (Sale is automatically counted toward your mandatory monthly KRA Turnover Tax return).
+                    Standard customer receipt. Optional sales tax / levy rules can be configured anytime in Settings.
                   </p>
                 )}
               </div>
@@ -4808,6 +4836,7 @@ export const POSView: React.FC<POSViewProps> = ({
           transaction={completedTx}
           storeName={resolvedStoreName}
           activeStoreId={activeStoreId}
+          storeKraPin={storeKraPin}
           onClose={() => {
             setCompletedTx(null);
             executeNewSale();
@@ -5092,10 +5121,10 @@ export const POSView: React.FC<POSViewProps> = ({
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <div className="flex items-center gap-2">
                 <span className="w-8 h-8 rounded-xl bg-amber-500/20 text-amber-400 font-bold flex items-center justify-center text-xs">
-                  KRA
+                  TAX
                 </span>
                 <h3 className="font-extrabold text-base text-white">
-                  KRA Monthly Turnover Tax (TOT) Compliance Center
+                  Sales Tax &amp; Levy Summary Center
                 </h3>
               </div>
               <button

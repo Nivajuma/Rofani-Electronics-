@@ -196,7 +196,7 @@ export function readCurrentStoreSettingsSnapshot(overrides?: Partial<StoreSettin
     enableVat: safeGetJSON<boolean>('rofani_settings_enable_vat', false),
     pricingMode: safeGetJSON<string>('rofani_settings_pricing_mode', 'tax_inclusive'),
     currency: safeGetJSON<string>('rofani_settings_currency', 'KES (KSh)'),
-    taxMode: safeGetJSON<string>('rofani_settings_tax_mode', 'tot'),
+    taxMode: safeGetJSON<string>('rofani_settings_tax_mode', 'none'),
     mpesaShortcode: savedMpesa?.shortcode || '',
     mpesaStoreNumber: savedMpesa?.storeNumber || '',
     mpesaShortcodeType: savedMpesa?.shortcodeType || 'till',

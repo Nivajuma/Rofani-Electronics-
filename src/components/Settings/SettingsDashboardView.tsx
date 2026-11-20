@@ -72,6 +72,8 @@ interface SettingsDashboardViewProps {
   onLockNow?: () => void;
   onOpenAuditLogs?: () => void;
   onOpenCategoryManager?: () => void;
+  storeKraPin?: string;
+  onUpdateStoreKraPin?: (kraPin: string) => Promise<void> | void;
 }
 
 type SettingCategoryKey =
@@ -312,6 +314,8 @@ export const SettingsDashboardView: React.FC<SettingsDashboardViewProps> = ({
   onLockNow,
   onOpenAuditLogs,
   onOpenCategoryManager,
+  storeKraPin,
+  onUpdateStoreKraPin,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [activeSubPanel, setActiveSubPanel] = useState<SettingCategoryKey | null>(null);
@@ -656,7 +660,7 @@ export const SettingsDashboardView: React.FC<SettingsDashboardViewProps> = ({
       icon: Database,
       color: 'text-cyan-400 bg-cyan-500/10 border-cyan-500/30',
       title: 'Data Settings, Sync & Backups',
-      description: 'Cloud Sync, Aggressive Auto-Sync, JSON/CSV export & restore, snapshot recovery, and KRA tax profile.',
+      description: 'Cloud Sync, Aggressive Auto-Sync, JSON/CSV export & restore, snapshot recovery, and store profile.',
       keywords: ['data', 'sync', 'cloud', 'backup', 'auto-sync', 'aggressive', 'export', 'import', 'restore', 'json', 'csv']
     },
     {
@@ -672,8 +676,8 @@ export const SettingsDashboardView: React.FC<SettingsDashboardViewProps> = ({
       icon: Printer,
       color: 'text-purple-400 bg-purple-500/10 border-purple-500/30',
       title: 'Invoice Print & Taxes',
-      description: 'Paper size selection, receipt header/footer, KRA Turnover Tax (TOT), VAT configuration, and KRA PIN.',
-      keywords: ['invoice', 'print', 'paper', '58mm', '80mm', 'a4', 'logo', 'thermal', 'tax', 'kra', 'tot', 'vat']
+      description: 'Paper size selection, receipt header/footer, optional Sales Tax / Levy, and business Tax PIN.',
+      keywords: ['invoice', 'print', 'paper', '58mm', '80mm', 'a4', 'logo', 'thermal', 'tax', 'levy', 'tot', 'vat']
     },
     {
       id: 'users' as SettingCategoryKey,
@@ -864,7 +868,11 @@ export const SettingsDashboardView: React.FC<SettingsDashboardViewProps> = ({
 
       {activeSubPanel === 'print_tax' && (
         <div className="fixed inset-0 z-50 bg-slate-950 overflow-y-auto">
-          <PrintAndTaxSettingsView onBack={() => setActiveSubPanel(null)} />
+          <PrintAndTaxSettingsView
+            onBack={() => setActiveSubPanel(null)}
+            storeKraPin={storeKraPin}
+            onSaveStoreKraPin={onUpdateStoreKraPin}
+          />
         </div>
       )}
 

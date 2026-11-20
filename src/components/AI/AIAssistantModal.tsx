@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { Product, Transaction } from '../../types';
 import { calculateReplenishmentPlan } from '../../utils/replenishment';
+import { CustomerCareSupportCard } from '../Common/CustomerCareSupportCard';
 
 interface AIAssistantModalProps {
   isOpen: boolean;
@@ -68,8 +69,8 @@ const QUICK_QUESTIONS = [
   },
   {
     icon: QrCode,
-    label: 'Generating KRA eTIMS invoice?',
-    prompt: 'Explain how to generate KRA TIMS / e-TIMS compliant tax receipts with QR code for customer sales.'
+    label: 'Customizing receipts & optional tax?',
+    prompt: 'Explain how to customize customer receipts and enable optional sales tax or levy settings if my shop needs them.'
   },
   {
     icon: ArrowRightLeft,
@@ -113,7 +114,7 @@ export const AIAssistantModal: React.FC<AIAssistantModalProps> = ({
         {
           id: 'init-1',
           sender: 'assistant',
-          text: `Hujambo! 👋 Welcome to **Rofani POS**.\n\nI am your **Gemini AI Staff Co-Pilot & Inventory Strategist**. I analyze real-time sales velocity across customer transactions to give you **predictive inventory replenishment suggestions**, stockout forecasts, and step-by-step guides for POS sales, KRA tax invoices, and branch transfers.\n\nClick any quick topic below or ask me any question!`,
+          text: `Hujambo! 👋 Welcome to **Rofani POS**.\n\nI am your **AI Staff Co-Pilot & Inventory Strategist**. I analyze real-time sales velocity across customer transactions to give you **predictive inventory replenishment suggestions**, stockout forecasts, and step-by-step guides for fast POS sales, M-Pesa payments, multi-shop transfers, and optional tax receipts.\n\nClick any quick topic below or ask me any question!`,
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
         }
       ],
@@ -250,7 +251,7 @@ export const AIAssistantModal: React.FC<AIAssistantModalProps> = ({
                 </span>
               </div>
               <p className="text-xs text-slate-400 hidden sm:block">
-                Instant training, POS workflow steps, KRA rules, and store guidance for staff
+                Instant training, POS workflow steps, stock alerts, and store guidance for staff
               </p>
             </div>
           </div>
@@ -384,8 +385,9 @@ export const AIAssistantModal: React.FC<AIAssistantModalProps> = ({
           )}
         </div>
 
-        {/* Input Bar */}
-        <div className="p-3 sm:p-4 bg-slate-950 border-t border-slate-800">
+        {/* Customer Care & Input Bar */}
+        <div className="p-3 sm:p-4 bg-slate-950 border-t border-slate-800 space-y-2.5">
+          <CustomerCareSupportCard compact title="Need Live Human Support?" />
           <form
             onSubmit={(e) => {
               e.preventDefault();

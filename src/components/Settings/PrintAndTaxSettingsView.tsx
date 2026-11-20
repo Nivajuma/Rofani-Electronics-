@@ -15,6 +15,8 @@ import { safeGetJSON, safeSetJSON } from '../../utils/safeStorage';
 
 interface PrintAndTaxSettingsViewProps {
   onBack: () => void;
+  storeKraPin?: string;
+  onSaveStoreKraPin?: (kraPin: string) => Promise<void> | void;
 }
 
 export interface PrintAndTaxSettingsState {
@@ -44,27 +46,38 @@ export const PRINT_AND_TAX_SETTINGS_DEFAULT: PrintAndTaxSettingsState = {
   customHeaderNote: 'Rofani POS - Official Receipt',
   customFooterNote: 'Thank you for shopping with us! Goods once sold are not returnable after 7 days.',
   showBarcodeQR: true,
-  enableKraTot: true,
+  enableKraTot: false,
   kraTotRate: 1.5,
   enableVat: false,
   vatRate: 16.0,
   taxCalculationType: 'inclusive',
-  kraPinNumber: 'P051234567X',
-  showTaxBreakdown: true,
-  defaultEtimsPolicy: 'optional_prompt',
+  kraPinNumber: '',
+  showTaxBreakdown: false,
+  defaultEtimsPolicy: 'standard_only',
 };
 
-export const PrintAndTaxSettingsView: React.FC<PrintAndTaxSettingsViewProps> = ({ onBack }) => {
+export const PrintAndTaxSettingsView: React.FC<PrintAndTaxSettingsViewProps> = ({
+  onBack,
+  storeKraPin,
+  onSaveStoreKraPin,
+}) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [successToast, setSuccessToast] = useState<string | null>(null);
   const [printerConnected, setPrinterConnected] = useState(false);
 
-  const [settings, setSettings] = useState<PrintAndTaxSettingsState>(() =>
-    safeGetJSON<PrintAndTaxSettingsState>('printAndTaxSettings', PRINT_AND_TAX_SETTINGS_DEFAULT)
-  );
+  const [settings, setSettings] = useState<PrintAndTaxSettingsState>(() => {
+    const loaded = safeGetJSON<PrintAndTaxSettingsState>('printAndTaxSettings', PRINT_AND_TAX_SETTINGS_DEFAULT);
+    if (storeKraPin && storeKraPin.trim()) {
+      return { ...loaded, kraPinNumber: storeKraPin.trim().toUpperCase() };
+    }
+    return loaded;
+  });
 
   useEffect(() => {
     safeSetJSON('printAndTaxSettings', settings);
+    if (settings.kraPinNumber?.trim()) {
+      safeSetJSON('retail_pos_kra_pin', settings.kraPinNumber.trim().toUpperCase());
+    }
   }, [settings]);
 
   const triggerToast = (msg: string) => {
@@ -101,8 +114,8 @@ export const PrintAndTaxSettingsView: React.FC<PrintAndTaxSettingsViewProps> = (
             <ArrowLeft className="w-5 h-5" />
           </button>
           <div>
-            <h1 className="font-bold text-base sm:text-lg tracking-tight">Print & Tax Settings</h1>
-            <p className="text-[10px] text-slate-400">Receipt Design & KRA Compliance Rules</p>
+            <h1 className="font-bold text-base sm:text-lg tracking-tight">Print &amp; Tax Settings</h1>
+            <p className="text-[10px] text-slate-400">Receipt Design &amp; Optional Sales Tax / Levy Rules</p>
           </div>
         </div>
 
@@ -279,26 +292,26 @@ export const PrintAndTaxSettingsView: React.FC<PrintAndTaxSettingsViewProps> = (
           </div>
         </div>
 
-        {/* Section 2: Taxes & KRA Compliance Settings */}
+        {/* Section 2: Optional Sales Tax / Levy Settings */}
         <div className="bg-slate-900 rounded-2xl shadow-sm border border-slate-800 overflow-hidden">
           <div className="px-5 py-3 bg-slate-900/90 border-b border-slate-800 text-[11px] font-extrabold text-slate-400 uppercase tracking-wider flex items-center gap-2">
             <Percent className="w-4 h-4 text-amber-400" />
-            <span>Section 2: Taxes & KRA Compliance Settings</span>
+            <span>Section 2: Optional Sales Tax / Levy Settings</span>
           </div>
 
           <div className="divide-y divide-slate-800">
-            {/* Enable KRA Turnover Tax (TOT) */}
-            <div className="p-4 space-y-3 bg-amber-950/20 border-l-4 border-amber-500">
+            {/* Enable Optional Turnover Levy */}
+            <div className="p-4 space-y-3 bg-slate-900/60">
               <div className="flex items-center justify-between">
                 <div className="space-y-0.5 pr-4">
                   <div className="font-bold text-slate-100 flex items-center gap-1.5">
-                    <span>KRA Monthly Turnover Tax (TOT) Compliance</span>
-                    <span className="text-[10px] bg-amber-500/20 text-amber-300 font-bold px-2 py-0.5 rounded border border-amber-500/40">
-                      Mandatory Month-End Filing
+                    <span>1.5% Turnover Levy (Optional)</span>
+                    <span className="text-[10px] bg-slate-800 text-slate-300 font-bold px-2 py-0.5 rounded border border-slate-700">
+                      Off by Default
                     </span>
                   </div>
-                  <div className="text-[11px] text-slate-300">
-                    KRA requires every registered retail business under TOT to file a monthly return on all gross sales by the 20th of the following month on KRA iTax.
+                  <div className="text-[11px] text-slate-400">
+                    Optional gross sales turnover levy calculation for businesses that choose to track it.
                   </div>
                 </div>
                 <label className="relative inline-flex items-center cursor-pointer">
@@ -314,7 +327,7 @@ export const PrintAndTaxSettingsView: React.FC<PrintAndTaxSettingsViewProps> = (
 
               {settings.enableKraTot && (
                 <div className="flex items-center gap-3 pt-2 pl-2">
-                  <label className="font-semibold text-slate-300 text-xs">Standard TOT Rate (%):</label>
+                  <label className="font-semibold text-slate-300 text-xs">Turnover Levy Rate (%):</label>
                   <input
                     type="number"
                     step="0.1"
@@ -325,45 +338,45 @@ export const PrintAndTaxSettingsView: React.FC<PrintAndTaxSettingsViewProps> = (
                     className="w-24 bg-slate-950 border border-slate-700 rounded-xl px-3 py-1.5 font-bold text-slate-100 focus:outline-none focus:ring-2 focus:ring-amber-500 text-xs"
                   />
                   <span className="text-[11px] text-slate-400">
-                    Applied on total monthly gross turnover (default 1.5% - 3.0%)
+                    Applied on monthly gross turnover when enabled (e.g. 1.5%)
                   </span>
                 </div>
               )}
             </div>
 
-            {/* KRA e-TIMS Customer Policy (Optional per customer) */}
+            {/* Tax Invoice Receipt Policy (Optional per customer) */}
             <div className="p-4 flex items-center justify-between hover:bg-slate-800/60 transition">
               <div className="space-y-0.5 flex-1 pr-4">
                 <div className="font-bold text-slate-100 flex items-center gap-1.5">
-                  <span>KRA e-TIMS Receipt Policy</span>
+                  <span>Receipt &amp; Tax Invoice Policy</span>
                   <span className="text-[10px] bg-sky-950 text-sky-300 font-semibold px-2 py-0.5 rounded border border-sky-800">
-                    Customer Preference
+                    Optional
                   </span>
                 </div>
                 <div className="text-[11px] text-slate-400">
-                  Not all walk-in retail customers need fiscal e-TIMS invoices. Choose when to generate CUIN & QR codes.
+                  Choose whether walk-in sales issue standard retail receipts or include optional tax invoice codes.
                 </div>
               </div>
               <select
-                value={settings.defaultEtimsPolicy || 'optional_prompt'}
+                value={settings.defaultEtimsPolicy || 'standard_only'}
                 onChange={(e) => updateSetting('defaultEtimsPolicy', e.target.value as any)}
                 className="bg-slate-950 border border-slate-700 rounded-xl px-3 py-1.5 text-xs font-semibold text-slate-100 focus:outline-none focus:ring-2 focus:ring-amber-500"
               >
-                <option value="optional_prompt">⚡ Optional per Customer (Prompt at Checkout)</option>
-                <option value="always">Always Issue e-TIMS (Every Customer)</option>
-                <option value="standard_only">Standard Receipts Only (e-TIMS on demand)</option>
+                <option value="standard_only">Standard Receipts Only (Default)</option>
+                <option value="optional_prompt">Optional per Customer (Prompt at Checkout)</option>
+                <option value="always">Always Include Tax Invoice Details</option>
               </select>
             </div>
 
-            {/* Enable VAT */}
+            {/* Enable Standard Tax (16%) */}
             <div className="p-4 space-y-3">
               <div className="flex items-center justify-between">
                 <div className="space-y-0.5 pr-4">
                   <div className="font-bold text-slate-100 flex items-center gap-1.5">
-                    <span>Enable VAT (Value Added Tax)</span>
-                    <span title="Standard VAT rate calculation for registered businesses"><Info className="w-3.5 h-3.5 text-slate-400" /></span>
+                    <span>Enable Standard Sales Tax (16%)</span>
+                    <span title="Optional standard tax rate calculation"><Info className="w-3.5 h-3.5 text-slate-400" /></span>
                   </div>
-                  <div className="text-[11px] text-slate-400">Apply standard VAT rate on taxable catalog items</div>
+                  <div className="text-[11px] text-slate-400">Apply optional standard tax rate on taxable catalog items</div>
                 </div>
                 <label className="relative inline-flex items-center cursor-pointer">
                   <input
@@ -411,19 +424,35 @@ export const PrintAndTaxSettingsView: React.FC<PrintAndTaxSettingsViewProps> = (
               </select>
             </div>
 
-            {/* Tax Identification Number (KRA PIN) */}
+            {/* Business Tax PIN (Optional) */}
             <div className="p-4 space-y-1.5">
               <div className="font-bold text-slate-100 flex items-center gap-1.5">
-                <span>Tax Identification Number (KRA PIN)</span>
-                <span title="Enter business KRA PIN to display on official tax invoices"><Info className="w-3.5 h-3.5 text-slate-400" /></span>
+                <span>Business Tax PIN (Optional)</span>
+                <span title="Optional Tax PIN to display on receipts when enabled"><Info className="w-3.5 h-3.5 text-slate-400" /></span>
               </div>
-              <input
-                type="text"
-                value={settings.kraPinNumber}
-                onChange={(e) => updateSetting('kraPinNumber', e.target.value)}
-                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 font-mono font-bold focus:outline-none focus:ring-2 focus:ring-amber-500"
-                placeholder="E.g. P051234567X"
-              />
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={settings.kraPinNumber}
+                  onChange={(e) => updateSetting('kraPinNumber', e.target.value.toUpperCase())}
+                  className="flex-1 bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 font-mono font-bold uppercase focus:outline-none focus:ring-2 focus:ring-amber-500"
+                  placeholder="Optional business Tax PIN"
+                />
+                {onSaveStoreKraPin && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const clean = (settings.kraPinNumber || '').trim().toUpperCase();
+                      Promise.resolve(onSaveStoreKraPin(clean))
+                        .then(() => triggerToast('Store Tax PIN saved to cloud store profile!'))
+                        .catch(() => triggerToast('Store Tax PIN saved locally.'));
+                    }}
+                    className="px-3.5 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs cursor-pointer shrink-0 transition"
+                  >
+                    Save PIN
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* Show Tax Breakdown on Receipt */}

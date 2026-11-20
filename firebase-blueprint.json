@@ -30,6 +30,8 @@
         "trialDaysGranted": { "type": "number" },
         "lastReferralBonusAt": { "type": "string", "maxLength": 64 },
         "lastReferralRewardStoreName": { "type": "string", "maxLength": 200 },
+        "taxMode": { "type": "string", "enum": ["none", "tot", "vat"] },
+        "transactionWiseTax": { "type": "boolean" },
         "createdAt": { "type": "string", "maxLength": 64 },
         "updatedAt": { "type": "string", "maxLength": 64 }
       },

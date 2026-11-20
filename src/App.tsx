@@ -213,6 +213,7 @@ import {
   normalizeReferralCode,
   subscribeToTransactionSettings,
   deleteTransactionFromCloud,
+  updateStoreProfileDetails,
 } from './lib/cloudSync';
 import { loadMpesaConfig, saveMpesaConfig } from './utils/mpesa';
 import {
@@ -5392,6 +5393,7 @@ export default function App() {
           externalClearDiscountTrigger={externalClearDiscountTrigger}
           storeName={stores.find((s) => s.id === activeStoreId)?.name || storeProfile?.storeName || 'Rofani POS'}
           activeStoreId={activeCloudStoreId || getActiveTenantStoreId()}
+          storeKraPin={storeProfile?.kraPin}
           requirePinOnStartup={requirePinOnStartup}
         />
       )}
@@ -5641,6 +5643,16 @@ export default function App() {
           onCloudSyncError={() =>
             setCloudSyncStatus(typeof navigator !== 'undefined' && !navigator.onLine ? 'offline' : 'error')
           }
+          storeKraPin={storeProfile?.kraPin}
+          onUpdateStoreKraPin={async (nextKraPin) => {
+            const cleanPin = nextKraPin.trim().toUpperCase();
+            if (!cleanPin) return;
+            setStoreProfile((prev) => (prev ? { ...prev, kraPin: cleanPin } : prev));
+            const targetCloudStoreId = activeCloudStoreId || getActiveTenantStoreId();
+            if (targetCloudStoreId && isAuthorizedCloudUser(firebaseUser)) {
+              await updateStoreProfileDetails(targetCloudStoreId, { kraPin: cleanPin });
+            }
+          }}
         />
       )}
 
@@ -5751,6 +5763,8 @@ export default function App() {
           updatePendingReferralCode('');
           setStoreProfile(created);
           safeSetJSON('rofani_pos_store_profile', created);
+          safeSetJSON('rofani_settings_tax_mode', created.taxMode || 'none');
+          safeSetJSON('rofani_settings_enable_vat', false);
           if (created.referredBy) {
             setReferralRewardToast({
               kind: 'welcome',
@@ -6488,7 +6502,7 @@ export default function App() {
 
           <button
             onClick={() => setActiveTab('settings')}
-            title="Data Management & KRA Settings"
+            title="Data Management & Store Settings"
             className={`w-full flex items-center ${isSidebarCollapsed ? 'justify-center px-2' : 'justify-between px-3'} py-2.5 rounded-lg transition ${
               activeTab === 'settings'
                 ? 'bg-blue-600 text-white shadow-md'
@@ -6497,7 +6511,7 @@ export default function App() {
           >
             <div className="flex items-center gap-3">
               <Database className="w-4 h-4 opacity-90 shrink-0" />
-              {!isSidebarCollapsed && <span>Data & KRA Settings</span>}
+              {!isSidebarCollapsed && <span>Data &amp; Store Settings</span>}
             </div>
           </button>
 
@@ -6552,6 +6566,26 @@ export default function App() {
                 {isOwnerAccount ? 'Owner' : storeProfile?.planType || 'Trial'}
               </span>
             )}
+          </button>
+
+          {/* Menu & Share on Social Media Hub */}
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab('menu');
+              setIsMobileMenuOpen(false);
+            }}
+            title="App Menu, Referral Code & Share on Social Media"
+            className={`w-full flex items-center ${isSidebarCollapsed ? 'justify-center px-2' : 'justify-between px-3'} py-2.5 rounded-lg transition cursor-pointer ${
+              activeTab === 'menu'
+                ? 'bg-blue-600 text-white shadow-md'
+                : 'hover:bg-slate-800 text-slate-300'
+            }`}
+          >
+            <div className="flex items-center gap-3">
+              <Share2 className="w-4 h-4 shrink-0 text-sky-400" />
+              {!isSidebarCollapsed && <span>Share &amp; Menu Hub</span>}
+            </div>
           </button>
 
           {/* Owner-Only Super Admin Subscribers Panel */}

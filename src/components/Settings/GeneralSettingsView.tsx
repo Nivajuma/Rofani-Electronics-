@@ -791,7 +791,7 @@ export const GeneralSettingsView: React.FC<GeneralSettingsViewProps> = ({
                   <div className="space-y-0.5">
                     <div className="font-bold text-slate-100">Data Management, Import/Export & Recovery Tools</div>
                     <div className="text-[11px] text-slate-400">
-                      Jump to JSON/CSV exports, restore from backup file, duplicate cleanup & KRA tax profile
+                      Jump to JSON/CSV exports, restore from backup file, duplicate cleanup &amp; store profile
                     </div>
                   </div>
                 </div>

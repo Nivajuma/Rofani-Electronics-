@@ -713,6 +713,8 @@ export interface StoreSubscriptionProfile {
   trialDaysGranted?: number;
   lastReferralBonusAt?: string;
   lastReferralRewardStoreName?: string;
+  taxMode?: 'none' | 'tot' | 'vat';
+  transactionWiseTax?: boolean;
   createdAt: string;
   updatedAt: string;
 }

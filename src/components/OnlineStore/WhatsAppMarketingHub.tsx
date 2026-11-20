@@ -107,7 +107,7 @@ export const WhatsAppMarketingHub: React.FC<WhatsAppMarketingHubProps> = ({
       `Hello! Browse our full catalog of electronics, smartphones, and boutique wear from your phone:\n\n` +
       `🌐 *Online Store:* ${storeLink}\n` +
       `📱 *Direct WhatsApp Orders:* ${businessWhatsApp}\n\n` +
-      `Fast delivery & KRA eTIMS compliant receipts with every purchase!`;
+      `Fast delivery & instant digital receipts with every purchase!`;
   };
 
   const [customMessage, setCustomMessage] = useState(generateInitialMessage());
@@ -159,7 +159,7 @@ export const WhatsAppMarketingHub: React.FC<WhatsAppMarketingHubProps> = ({
         `Hello! Browse our full catalog of electronics, smartphones, and boutique wear from your phone:\n\n` +
         `🌐 *Online Store:* ${storeLink}\n` +
         `📱 *Direct WhatsApp Orders:* ${businessWhatsApp}\n\n` +
-        `Fast delivery & KRA eTIMS compliant receipts with every purchase!`;
+        `Fast delivery & instant digital receipts with every purchase!`;
     }
 
     setCustomMessage(msg);

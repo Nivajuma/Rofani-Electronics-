@@ -29,6 +29,7 @@ import {
   ArrowRightLeft,
   Building2,
   RefreshCw,
+  Video,
   VideoOff,
   FolderTree,
   ChevronDown,
@@ -70,8 +71,14 @@ import { ProductQrCodeModal } from './ProductQrCodeModal';
 import { ItemAuditMiniPage } from './ItemAuditMiniPage';
 import { detectDuplicateProducts, deduplicateProducts } from '../../utils/deduplicate';
 import { optimizeImageFile, optimizeImageDataUrl } from '../../utils/imageOptimizer';
+import {
+  isRateLimitTextOrStatus,
+  parseAiHttpResponse,
+  RATE_LIMIT_SCANNER_MESSAGE,
+} from '../../utils/aiErrorHandling';
 import { BarcodeScanHistoryModal, BarcodeScanHistoryView } from './BarcodeScanHistoryModal';
 import { computeProductsPerformance, computePerformanceSummary, ProductPerformanceInfo } from '../../utils/salesPerformance';
+import { useShopProtectionSettings, evaluateProductExpiry } from '../../utils/shopProtectionSettings';
 import {
   findConflictingProductWithImage,
   detectRepeatedItemPhotos,
@@ -115,6 +122,7 @@ interface InventoryViewProps {
   onAdjustStockQuantity?: (productId: string, newQuantity: number, reason: string) => void;
   onOpenItemAuditMiniPage?: (product: Product) => void;
   onOpenCategoryManager?: () => void;
+  activeStoreId?: string;
 }
 
 export const InventoryView: React.FC<InventoryViewProps> = ({
@@ -147,7 +155,23 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   onAdjustStockQuantity,
   onOpenItemAuditMiniPage,
   onOpenCategoryManager,
+  activeStoreId,
 }) => {
+  const [shopControls] = useShopProtectionSettings(activeStoreId);
+  const [showExpiringOnly, setShowExpiringOnly] = useState(false);
+
+  const expiringSummary = React.useMemo(() => {
+    let expired = 0;
+    let expiringSoon = 0;
+    products.forEach((p) => {
+      if (!p.expiryDate) return;
+      const exp = evaluateProductExpiry(p.expiryDate);
+      if (exp.status === 'expired') expired++;
+      else if (exp.status === 'expiring_soon') expiringSoon++;
+    });
+    return { expired, expiringSoon, total: expired + expiringSoon };
+  }, [products]);
+
   const [searchTerm, setSearchTerm] = useState(() =>
     safeGetJSON<string>('retail_pos_inv_search', '', (val) => typeof val === 'string')
   );
@@ -472,6 +496,8 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const galleryInputRef = useRef<HTMLInputElement>(null);
   const batchGalleryInputRef = useRef<HTMLInputElement>(null);
+  const modalAiCameraInputRef = useRef<HTMLInputElement>(null);
+  const modalAiGalleryInputRef = useRef<HTMLInputElement>(null);
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
   const [isAiIdentifying, setIsAiIdentifying] = useState(false);
   const [isBatchScanning, setIsBatchScanning] = useState(false);
@@ -481,6 +507,41 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   });
   const [aiIdentifyResult, setAiIdentifyResult] = useState<string | null>(null);
   const [aiIdentifyError, setAiIdentifyError] = useState<string | null>(null);
+  const [aiCooldownSeconds, setAiCooldownSeconds] = useState<number>(0);
+  const aiScanInFlightRef = useRef<boolean>(false);
+  const lastAiScanTapRef = useRef<number>(0);
+  const lastFailedScanRef = useRef<{
+    mode: 'modalReview' | 'fullScan';
+    visionImageDataUrl: string;
+    thumbnailDataUrl: string;
+    targetProduct?: Partial<Product> | null;
+    isManualInModal?: boolean;
+    sourceFileName?: string;
+  } | null>(null);
+
+  useEffect(() => {
+    if (aiCooldownSeconds <= 0) return;
+    const timer = window.setTimeout(() => {
+      setAiCooldownSeconds((prev) => Math.max(0, prev - 1));
+    }, 1000);
+    return () => window.clearTimeout(timer);
+  }, [aiCooldownSeconds]);
+
+  const [aiModalReview, setAiModalReview] = useState<{
+    name: string;
+    category: string;
+    subcategory: string;
+    barcode: string;
+    sku: string;
+    unit: string;
+    costPrice: string;
+    sellingPrice: string;
+    notes: string;
+    attachThumbnail: boolean;
+    thumbnailDataUrl: string;
+    clarityWarning?: string;
+    existingMatchName?: string;
+  } | null>(null);
   const [autoSaveOnCameraSnap, setAutoSaveOnCameraSnap] = useState<boolean>(true);
   const [autoAddSuccessToast, setAutoAddSuccessToast] = useState<string | null>(null);
 
@@ -799,33 +860,36 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
       stopLiveCamera();
 
       if (dataUrl && dataUrl.length > 100) {
-        const activeSupplier = suppliers.find((s) => s.id === selectedScanSupplierId) || suppliers[0];
-        setEditingProduct((prev) => {
-          const base = prev || {
-            id: `prod-${Date.now()}`,
-            name: '',
-            sku: `SKU-${Math.floor(1000 + Math.random() * 9000)}`,
-            barcode: generateAutoBarcode(),
-            category: categories[0]?.name || 'Electronics',
-            subcategory: categories[0]?.subcategories[0] || 'General',
-            sizeCapacity: '',
-            costPrice: '' as any,
-            sellingPrice: '' as any,
-            stockQuantity: '' as any,
-            minStockAlert: '' as any,
-            unit: 'pcs',
-            supplierId: activeSupplier?.id || '',
-            supplierName: activeSupplier?.name || 'Direct Wholesale',
-            description: '',
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-          };
-          return { ...base, imageUrl: dataUrl };
-        });
-
-        // If user took camera snap inside the Quick AI Scan modal or add flow, run identification
         const snapLabel = `Camera_Product_${Date.now()}`;
-        handleAiIdentifyProduct(dataUrl, null, false, snapLabel);
+        if (showModal) {
+          runModalAiScanFromDataUrl(dataUrl, dataUrl, snapLabel);
+        } else {
+          const activeSupplier = suppliers.find((s) => s.id === selectedScanSupplierId) || suppliers[0];
+          setEditingProduct((prev) => {
+            const base = prev || {
+              id: `prod-${Date.now()}`,
+              name: '',
+              sku: `SKU-${Math.floor(1000 + Math.random() * 9000)}`,
+              barcode: generateAutoBarcode(),
+              category: categories[0]?.name || 'Electronics',
+              subcategory: categories[0]?.subcategories[0] || 'General',
+              sizeCapacity: '',
+              costPrice: '' as any,
+              sellingPrice: '' as any,
+              stockQuantity: '' as any,
+              minStockAlert: '' as any,
+              unit: 'pcs',
+              supplierId: activeSupplier?.id || '',
+              supplierName: activeSupplier?.name || 'Direct Wholesale',
+              description: '',
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+            };
+            return { ...base, imageUrl: dataUrl };
+          });
+
+          handleAiIdentifyProduct(dataUrl, null, false, snapLabel);
+        }
       }
     }
   };
@@ -836,16 +900,261 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     startLiveCamera(nextFacing);
   };
 
+  const normalizeAiUnit = (rawUnit?: string): string => {
+    const u = String(rawUnit || 'pcs').trim().toLowerCase();
+    if (u === 'piece' || u === 'pieces' || u === 'pc' || u === 'pcs') return 'pcs';
+    if (u === 'box' || u === 'boxes' || u === 'carton' || u === 'cartons') return 'box';
+    if (u === 'pack' || u === 'packs' || u === 'packet' || u === 'packets') return 'pack';
+    if (u === 'kg' || u === 'kgs' || u === 'kilogram' || u === 'kilograms') return 'kg';
+    if (u === 'm' || u === 'meter' || u === 'meters' || u === 'metre' || u === 'metres') return 'm';
+    if (u === 'l' || u === 'liter' || u === 'liters' || u === 'litre' || u === 'litres') return 'liters';
+    if (u === 'pair' || u === 'pairs') return 'pair';
+    if (u === 'bottle' || u === 'bottles') return 'bottle';
+    return u || 'pcs';
+  };
+
+  const runModalAiScanFromDataUrl = async (
+    visionImageDataUrl: string,
+    thumbnailDataUrl: string,
+    sourceFileName?: string
+  ) => {
+    const now = Date.now();
+    if (!visionImageDataUrl || aiScanInFlightRef.current || aiCooldownSeconds > 0) return;
+    if (now - lastAiScanTapRef.current < 800) return;
+
+    lastAiScanTapRef.current = now;
+    aiScanInFlightRef.current = true;
+    setIsAiIdentifying(true);
+    setAiIdentifyError(null);
+    setAiIdentifyResult(null);
+    lastFailedScanRef.current = {
+      mode: 'modalReview',
+      visionImageDataUrl,
+      thumbnailDataUrl,
+      sourceFileName,
+    };
+
+    try {
+      const storeCategories = Array.from(
+        new Set([
+          ...(consolidatedCategories || []).map((c) => c.name),
+          ...(products || []).map((p) => p.category).filter(Boolean),
+        ])
+      );
+
+      const controller = new AbortController();
+      const timeoutId = window.setTimeout(() => controller.abort(), 22000);
+      let response: Response;
+      try {
+        response = await fetch('/api/ai/identify-product', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          signal: controller.signal,
+          body: JSON.stringify({
+            imageBase64: visionImageDataUrl,
+            fileName: sourceFileName || '',
+            hintCategory: editingProduct?.category || storeCategories[0] || 'Electronics',
+            storeCategories,
+            allowPartialOnUnclear: true,
+            existingProducts: products.map((p) => ({
+              id: p.id,
+              name: p.name,
+              sku: p.sku,
+              barcode: p.barcode,
+              sellingPrice: p.sellingPrice,
+              costPrice: p.costPrice,
+              category: p.category,
+              stockQuantity: p.stockQuantity,
+              unit: p.unit,
+            })),
+          }),
+        });
+      } finally {
+        window.clearTimeout(timeoutId);
+      }
+
+      const parsed = await parseAiHttpResponse<any>(
+        response,
+        'Could not scan photo with AI. Ensure clear lighting or fill in the item fields manually.',
+        RATE_LIMIT_SCANNER_MESSAGE
+      );
+      if (!parsed.ok || !parsed.data) {
+        if (parsed.isRateLimited) {
+          setAiCooldownSeconds(5);
+        }
+        setAiIdentifyError(parsed.errorMessage);
+        return;
+      }
+
+      const data = parsed.data;
+      lastFailedScanRef.current = null;
+
+      const matchedCat =
+        storeCategories.find(
+          (c) => c.toLowerCase() === String(data.suggestedCategory || data.category || '').trim().toLowerCase()
+        ) ||
+        String(data.suggestedCategory || data.category || '').trim() ||
+        editingProduct?.category ||
+        storeCategories[0] ||
+        'Electronics';
+
+      const matchedProductObj = data.matchedProductId
+        ? products.find((p) => p.id === data.matchedProductId)
+        : undefined;
+
+      const parsedPrice = Number(data.suggestedPriceKSh);
+      const parsedCost = Number(data.suggestedCostKSh);
+
+      setAiModalReview({
+        name: String(data.suggestedName || data.name || '').trim(),
+        category: matchedCat,
+        subcategory: String(data.subcategory || '').trim() || editingProduct?.subcategory || 'General',
+        barcode: String(data.suggestedBarcode || '').replace(/[^0-9A-Za-z\-]/g, '').trim(),
+        sku: String(data.suggestedSku || '').trim(),
+        unit: normalizeAiUnit(data.suggestedUnit || data.unit || editingProduct?.unit),
+        costPrice: Number.isFinite(parsedCost) && parsedCost > 0 ? String(Math.round(parsedCost)) : '',
+        sellingPrice: Number.isFinite(parsedPrice) && parsedPrice > 0 ? String(Math.round(parsedPrice)) : '',
+        notes: String(data.suggestedNotes || data.description || '').trim(),
+        attachThumbnail: Boolean(thumbnailDataUrl && thumbnailDataUrl.length < 95000),
+        thumbnailDataUrl: thumbnailDataUrl || '',
+        clarityWarning: data.isUnclearImage
+          ? String(data.clarityMessage || '').trim() ||
+            'Photo looks blurry or obscured. Review or edit the fields below before applying, or retake a clearer photo.'
+          : undefined,
+        existingMatchName: matchedProductObj?.name,
+      });
+    } catch (err: any) {
+      const msg = String(err?.message || '');
+      const hitRateLimit = isRateLimitTextOrStatus(undefined, msg);
+      if (hitRateLimit) {
+        setAiCooldownSeconds(5);
+      }
+      console.warn('Modal AI scan error:', msg || err);
+      setAiIdentifyError(
+        hitRateLimit
+          ? RATE_LIMIT_SCANNER_MESSAGE
+          : err?.name === 'AbortError'
+          ? 'AI image scan timed out. Tap Retry or enter item details manually.'
+          : msg || 'Unable to scan photo right now. Check your connection or enter item details manually.'
+      );
+    } finally {
+      aiScanInFlightRef.current = false;
+      setIsAiIdentifying(false);
+    }
+  };
+
+  const handleModalAiFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+
+    if (!file.type.startsWith('image/') && !file.name.match(/\.(jpg|jpeg|png|webp|gif|heic|heif|bmp|svg|avif)$/i)) {
+      setAiIdentifyError('Please select a valid image file (JPG, PNG, WEBP, HEIC).');
+      return;
+    }
+
+    setIsAiIdentifying(true);
+    setAiIdentifyError(null);
+    setAiIdentifyResult(null);
+
+    try {
+      const [visionDataUrl, thumbnailDataUrl] = await Promise.all([
+        optimizeImageFile(file, 720, 0.8),
+        optimizeImageFile(file, 320, 0.62),
+      ]);
+
+      if (!visionDataUrl || visionDataUrl.length < 50) {
+        throw new Error('Could not read the selected photo.');
+      }
+
+      await runModalAiScanFromDataUrl(visionDataUrl, thumbnailDataUrl || visionDataUrl, file.name);
+    } catch (err: any) {
+      console.error('Error preparing image for AI scan:', err);
+      setIsAiIdentifying(false);
+      setAiIdentifyError('Could not process this image file. Please try taking a clearer photo.');
+    }
+  };
+
+  const handleApplyAiReviewToForm = () => {
+    if (!aiModalReview) return;
+    const catName = aiModalReview.category.trim();
+    const catInList = consolidatedCategories.find((c) => c.name.toLowerCase() === catName.toLowerCase());
+    if (catName && !catInList) {
+      setIsCustomCategoryInput(true);
+      setCustomCategoryName(catName);
+    } else if (catInList) {
+      setIsCustomCategoryInput(false);
+      setCustomCategoryName('');
+    }
+
+    const parsedCost = parseFloat(aiModalReview.costPrice);
+    const parsedSelling = parseFloat(aiModalReview.sellingPrice);
+    const hasCost = Number.isFinite(parsedCost) && parsedCost > 0;
+    const hasSelling = Number.isFinite(parsedSelling) && parsedSelling > 0;
+
+    setEditingProduct((prev) => {
+      if (!prev) return prev;
+      const nextCost = hasCost ? Math.round(parsedCost) : prev.costPrice;
+      const nextSelling = hasSelling ? Math.round(parsedSelling) : prev.sellingPrice;
+      const numericCost = Number(nextCost) || 0;
+      const numericSelling = Number(nextSelling) || 0;
+      const nextMargin =
+        numericCost > 0 && numericSelling > 0
+          ? Math.round(((numericSelling - numericCost) / numericCost) * 100)
+          : prev.profitMargin;
+
+      return {
+        ...prev,
+        name: aiModalReview.name.trim() || prev.name || '',
+        category: (catInList ? catInList.name : catName) || prev.category || 'Electronics',
+        subcategory:
+          aiModalReview.subcategory.trim() ||
+          catInList?.subcategories?.[0] ||
+          prev.subcategory ||
+          'General',
+        unit: aiModalReview.unit || prev.unit || 'pcs',
+        barcode: aiModalReview.barcode.trim() || prev.barcode || '',
+        sku: aiModalReview.sku.trim() || prev.sku || '',
+        costPrice: nextCost,
+        sellingPrice: nextSelling,
+        profitMargin: nextMargin,
+        description: aiModalReview.notes.trim() || prev.description || '',
+        imageUrl:
+          aiModalReview.attachThumbnail && aiModalReview.thumbnailDataUrl
+            ? aiModalReview.thumbnailDataUrl
+            : prev.imageUrl,
+      };
+    });
+
+    const appliedLabel = aiModalReview.name.trim() || 'AI suggested fields';
+    setAiModalReview(null);
+    setAiIdentifyError(null);
+    setAiIdentifyResult(`Applied verified AI details for "${appliedLabel}" to the form.`);
+  };
+
   const handleAiIdentifyProduct = async (
     imageDataUrl: string,
     targetProduct?: Partial<Product> | null,
     isManualInModal: boolean = false,
     sourceFileName?: string
   ) => {
-    if (!imageDataUrl) return;
+    const now = Date.now();
+    if (!imageDataUrl || aiScanInFlightRef.current || aiCooldownSeconds > 0) return;
+    if (now - lastAiScanTapRef.current < 800) return;
+
+    lastAiScanTapRef.current = now;
+    aiScanInFlightRef.current = true;
     setIsAiIdentifying(true);
     setAiIdentifyResult(null);
     setAiIdentifyError(null);
+    lastFailedScanRef.current = {
+      mode: 'fullScan',
+      visionImageDataUrl: imageDataUrl,
+      thumbnailDataUrl: imageDataUrl,
+      targetProduct,
+      isManualInModal,
+      sourceFileName,
+    };
 
     try {
       const activeSupplier = suppliers.find((s) => s.id === selectedScanSupplierId) || suppliers[0];
@@ -859,39 +1168,52 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
       );
 
       // Send existing product catalog from local React state/IndexedDB as context (ZERO Firestore reads)
-      const response = await fetch('/api/ai/identify-product', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          imageBase64: imageDataUrl,
-          fileName: sourceFileName || '',
-          hintCategory: storeCategories[0] || 'Electronics',
-          storeCategories,
-          existingProducts: products.map((p) => ({
-            id: p.id,
-            name: p.name,
-            sku: p.sku,
-            barcode: p.barcode,
-            sellingPrice: p.sellingPrice,
-            costPrice: p.costPrice,
-            category: p.category,
-            stockQuantity: p.stockQuantity,
-            unit: p.unit,
-          })),
-        }),
-      });
+      const controller = new AbortController();
+      const timeoutId = window.setTimeout(() => controller.abort(), 22000);
+      let response: Response;
+      try {
+        response = await fetch('/api/ai/identify-product', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          signal: controller.signal,
+          body: JSON.stringify({
+            imageBase64: imageDataUrl,
+            fileName: sourceFileName || '',
+            hintCategory: storeCategories[0] || 'Electronics',
+            storeCategories,
+            existingProducts: products.map((p) => ({
+              id: p.id,
+              name: p.name,
+              sku: p.sku,
+              barcode: p.barcode,
+              sellingPrice: p.sellingPrice,
+              costPrice: p.costPrice,
+              category: p.category,
+              stockQuantity: p.stockQuantity,
+              unit: p.unit,
+            })),
+          }),
+        });
+      } finally {
+        window.clearTimeout(timeoutId);
+      }
 
-      const data: any = await response.json().catch(() => null);
+      const parsed = await parseAiHttpResponse<any>(
+        response,
+        `AI Vision could not identify this photo (HTTP ${response.status}). Ensure clear lighting or enter details manually.`,
+        RATE_LIMIT_SCANNER_MESSAGE
+      );
+      const data = parsed.data;
 
-      if (!response.ok || !data || !data.name) {
-        const errMsg =
-          data?.error ||
-          (response.status === 503
-            ? 'Gemini AI Vision is not configured on the server. Add GEMINI_API_KEY in Settings > Secrets (or Vercel Environment Variables).'
-            : `AI Vision could not identify this photo (HTTP ${response.status}). Ensure clear lighting or enter details manually.`);
-        setAiIdentifyError(errMsg);
+      if (!parsed.ok || !data || !data.name) {
+        if (parsed.isRateLimited) {
+          setAiCooldownSeconds(5);
+        }
+        setAiIdentifyError(parsed.errorMessage);
         return;
       }
+
+      lastFailedScanRef.current = null;
 
       const current = targetProduct || editingProduct;
       const itemName = String(data.name).trim();
@@ -993,12 +1315,38 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
         );
       }
     } catch (err: any) {
-      console.error('Error running AI Camera product identification:', err);
+      const msg = String(err?.message || '');
+      const hitRateLimit = isRateLimitTextOrStatus(undefined, msg);
+      if (hitRateLimit) {
+        setAiCooldownSeconds(5);
+      }
+      console.warn('Error running AI Camera product identification:', msg || err);
       setAiIdentifyError(
-        err?.message || 'Unable to reach AI Vision service. Check your internet connection and GEMINI_API_KEY configuration, or enter details manually.'
+        hitRateLimit
+          ? RATE_LIMIT_SCANNER_MESSAGE
+          : err?.name === 'AbortError'
+          ? 'AI image scan timed out. Tap Retry or enter item details manually.'
+          : msg || 'Unable to reach AI Vision service. Check your connection or enter details manually.'
       );
     } finally {
+      aiScanInFlightRef.current = false;
       setIsAiIdentifying(false);
+    }
+  };
+
+  const handleRetryFailedAiScan = () => {
+    if (aiScanInFlightRef.current || isAiIdentifying || aiCooldownSeconds > 0) return;
+    const last = lastFailedScanRef.current;
+    if (!last) return;
+    if (last.mode === 'modalReview') {
+      runModalAiScanFromDataUrl(last.visionImageDataUrl, last.thumbnailDataUrl, last.sourceFileName);
+    } else {
+      handleAiIdentifyProduct(
+        last.visionImageDataUrl,
+        last.targetProduct,
+        Boolean(last.isManualInModal),
+        last.sourceFileName
+      );
     }
   };
 
@@ -1016,7 +1364,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   const processImageFile = async (file: File) => {
     if (!file) return;
     if (!file.type.startsWith('image/') && !file.name.match(/\.(jpg|jpeg|png|webp|gif|heic|heif|bmp|svg|avif)$/i)) {
-      alert('Please select a valid image file (JPG, PNG, WEBP, GIF, SVG, HEIC, etc.).');
+      setAiIdentifyError('Please select a valid image file (JPG, PNG, WEBP, GIF, HEIC).');
       return;
     }
 
@@ -1025,10 +1373,17 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
 
     try {
       // 1. Optimize directly for crisp OCR/packaging recognition within compact payload size
-      const compressedDataUrl = await optimizeImageFile(file, 800, 0.82);
+      const compressedDataUrl = await optimizeImageFile(file, 720, 0.8);
+      const thumbnailDataUrl = await optimizeImageFile(file, 320, 0.62);
 
       if (!compressedDataUrl || compressedDataUrl.length < 50) {
         throw new Error('Image could not be compressed');
+      }
+
+      if (showModal && !showAiScanModal) {
+        setIsUploadingPhoto(false);
+        await runModalAiScanFromDataUrl(compressedDataUrl, thumbnailDataUrl || compressedDataUrl, file.name);
+        return;
       }
 
       // 2. Set the compressed image preview without fabricating a placeholder product name
@@ -1052,7 +1407,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         };
-        return { ...base, imageUrl: compressedDataUrl };
+        return { ...base, imageUrl: thumbnailDataUrl || compressedDataUrl };
       });
 
       setIsUploadingPhoto(false);
@@ -1064,7 +1419,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     } catch (err) {
       console.error('Error optimizing image file:', err);
       setIsUploadingPhoto(false);
-      alert('Could not process this image file. Please try taking a fresh photo.');
+      setAiIdentifyError('Could not process this image file. Please try taking a fresh photo.');
     }
   };
 
@@ -1131,15 +1486,20 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           }),
         });
 
-        const data: any = await response.json().catch(() => null);
-        if (!response.ok || !data || !data.name) {
+        const parsed = await parseAiHttpResponse<any>(
+          response,
+          `AI Vision returned HTTP ${response.status}.`,
+          RATE_LIMIT_SCANNER_MESSAGE
+        );
+        const data = parsed.data;
+        if (!parsed.ok || !data || !data.name) {
           failedCount++;
           if (!firstErrorMessage) {
-            firstErrorMessage =
-              data?.error ||
-              (response.status === 503
-                ? 'Gemini AI Vision is not configured on the server. Add GEMINI_API_KEY in Settings > Secrets or Vercel Environment Variables.'
-                : `AI Vision returned HTTP ${response.status}.`);
+            firstErrorMessage = parsed.errorMessage;
+          }
+          if (parsed.isRateLimited) {
+            setAiCooldownSeconds(5);
+            break;
           }
           continue;
         }
@@ -1408,6 +1768,10 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
       const matchesCat = selectedCategory === 'All' || p.category === selectedCategory;
       const matchesSubCat = selectedSubcategory === 'All' || p.subcategory === selectedSubcategory;
       const matchesLowStock = !showLowStockOnly || p.stockQuantity <= p.minStockAlert;
+      const matchesExpiring = !showExpiringOnly || (() => {
+        const exp = evaluateProductExpiry(p.expiryDate);
+        return exp.status === 'expired' || exp.status === 'expiring_soon';
+      })();
       const matchesOutOfStockPerm = hasWorkerPermission(currentUser, 'canViewOutOfStock') || p.stockQuantity > 0;
 
       const matchesSupplier =
@@ -1449,6 +1813,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
         matchesCat &&
         matchesSubCat &&
         matchesLowStock &&
+        matchesExpiring &&
         matchesOutOfStockPerm &&
         matchesSupplier &&
         matchesPrice &&
@@ -1569,6 +1934,9 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     setShowLiveCameraModal(false);
     setShowDeduplicateModal(false);
     setShowImageStudioModal(false);
+    setAiModalReview(null);
+    setAiIdentifyError(null);
+    setAiIdentifyResult(null);
 
     setEditingProduct({
       id: `prod-${Date.now()}`,
@@ -1609,6 +1977,9 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     setShowLiveCameraModal(false);
     setShowDeduplicateModal(false);
     setShowImageStudioModal(false);
+    setAiModalReview(null);
+    setAiIdentifyError(null);
+    setAiIdentifyResult(null);
     setEditingProduct({
       ...p,
       costPrice: (p.costPrice === 0 || (p.costPrice as any) === '0' ? '' : p.costPrice) as any,
@@ -1702,6 +2073,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
       profitMargin: parseNum(editingProduct.profitMargin, 30),
       stockQuantity: parseIntNum(editingProduct.stockQuantity, 0),
       minStockAlert: parseIntNum(editingProduct.minStockAlert, 0),
+      expiryDate: editingProduct.expiryDate ? editingProduct.expiryDate.trim() : undefined,
       imageUrl: editingProduct.imageUrl || '',
       createdAt: editingProduct.createdAt || nowIso,
       updatedAt: nowIso,
@@ -2780,15 +3152,35 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
               <span className="text-[11px] font-bold text-slate-400 mr-1">Performance Tier:</span>
               <button
                 type="button"
-                onClick={() => setPerformanceFilter('All')}
+                onClick={() => {
+                  setPerformanceFilter('All');
+                  setShowExpiringOnly(false);
+                }}
                 className={`px-2.5 py-1 rounded-lg text-xs font-bold transition ${
-                  performanceFilter === 'All'
+                  performanceFilter === 'All' && !showExpiringOnly
                     ? 'bg-slate-200 text-slate-950 shadow'
                     : 'bg-slate-950 text-slate-400 hover:text-slate-200 border border-slate-800'
                 }`}
               >
                 All Items ({products.length})
               </button>
+
+              {shopControls.enableExpiryAlerts && expiringSummary.total > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setShowExpiringOnly((prev) => !prev)}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                    showExpiringOnly
+                      ? 'bg-rose-500 text-white shadow-md font-black'
+                      : 'bg-rose-950/70 text-rose-300 hover:bg-rose-900/70 border border-rose-500/40'
+                  }`}
+                >
+                  <Calendar className="w-3 h-3" />
+                  <span>
+                    Expiry Alerts ({expiringSummary.expired} Expired / {expiringSummary.expiringSoon} Soon)
+                  </span>
+                </button>
+              )}
 
               <button
                 type="button"
@@ -3262,8 +3654,26 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                                             )}
                                             <div>
                                               <div className="font-bold text-slate-100">{p.name}</div>
-                                              <div className="text-[10px] text-slate-400 font-mono">
-                                                SKU: {p.sku} {p.supplierName ? `• ${p.supplierName}` : ''}
+                                              <div className="text-[10px] text-slate-400 font-mono flex items-center gap-1.5 flex-wrap">
+                                                <span>SKU: {p.sku} {p.supplierName ? `• ${p.supplierName}` : ''}</span>
+                                                {shopControls.enableExpiryAlerts && p.expiryDate && (() => {
+                                                  const exp = evaluateProductExpiry(p.expiryDate);
+                                                  if (exp.status === 'expired') {
+                                                    return (
+                                                      <span className="px-1.5 py-0.5 rounded bg-rose-950 text-rose-300 border border-rose-600/50 font-bold">
+                                                        Expired {exp.formattedDate}
+                                                      </span>
+                                                    );
+                                                  }
+                                                  if (exp.status === 'expiring_soon') {
+                                                    return (
+                                                      <span className="px-1.5 py-0.5 rounded bg-amber-950 text-amber-300 border border-amber-600/50 font-bold">
+                                                        Exp in {exp.daysRemaining}d ({exp.formattedDate})
+                                                      </span>
+                                                    );
+                                                  }
+                                                  return null;
+                                                })()}
                                               </div>
                                             </div>
                                           </div>
@@ -3659,10 +4069,28 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                         </h3>
 
                         {/* SKU & Barcode */}
-                        <div className="flex items-center gap-2 text-[10px] font-mono text-slate-400 mt-1">
+                        <div className="flex items-center gap-2 text-[10px] font-mono text-slate-400 mt-1 flex-wrap">
                           <span className="truncate">SKU: <strong className="text-slate-300">{p.sku}</strong></span>
                           <span>•</span>
                           <span className="truncate">Code: <strong className="text-sky-300">{p.barcode}</strong></span>
+                          {shopControls.enableExpiryAlerts && p.expiryDate && (() => {
+                            const exp = evaluateProductExpiry(p.expiryDate);
+                            if (exp.status === 'expired') {
+                              return (
+                                <span className="px-1.5 py-0.5 rounded bg-rose-950 text-rose-300 border border-rose-600/50 font-bold">
+                                  Expired {exp.formattedDate}
+                                </span>
+                              );
+                            }
+                            if (exp.status === 'expiring_soon') {
+                              return (
+                                <span className="px-1.5 py-0.5 rounded bg-amber-950 text-amber-300 border border-amber-600/50 font-bold">
+                                  Exp in {exp.daysRemaining}d
+                                </span>
+                              );
+                            }
+                            return null;
+                          })()}
                         </div>
                       </div>
 
@@ -4306,19 +4734,11 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                   onClick={(e) => {
                     e.preventDefault();
                     e.stopPropagation();
-                    startLiveCamera('environment');
-                  }}
-                  className="bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-extrabold px-3 py-1.5 rounded-xl text-xs flex items-center gap-1.5 transition shadow-lg shadow-emerald-600/20 cursor-pointer"
-                >
-                  <Camera className="w-4 h-4" /> Camera AI Scan
-                </button>
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
                     setShowModal(false);
                     setEditingProduct(null);
+                    setAiModalReview(null);
+                    setAiIdentifyError(null);
+                    setAiIdentifyResult(null);
                   }}
                   className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition cursor-pointer"
                   title="Close Modal"
@@ -4330,6 +4750,313 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
 
             <form onSubmit={handleSubmitProduct} className="flex flex-col flex-1 overflow-hidden min-h-0">
               <div className="flex-1 overflow-y-auto p-5 space-y-4 text-xs">
+                {/* AI Image Scanner Bar & Non-Destructive Review Card */}
+                <div className="bg-slate-950/90 border border-slate-800 rounded-2xl p-3.5 space-y-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                    <div className="min-w-0">
+                      <div className="text-xs font-bold text-white flex items-center gap-1.5">
+                        <Sparkles className="w-4 h-4 text-blue-400 shrink-0" />
+                        <span>AI Item Image Scanner</span>
+                      </div>
+                      <p className="text-[11px] text-slate-400 mt-0.5">
+                        Snap packaging or upload a photo to extract item name, category, barcode, unit &amp; notes for review before applying.
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2 shrink-0">
+                      <button
+                        type="button"
+                        disabled={isAiIdentifying || aiCooldownSeconds > 0}
+                        onClick={() => modalAiCameraInputRef.current?.click()}
+                        className="bg-blue-600/20 border border-blue-500/50 text-blue-300 hover:bg-blue-600/30 disabled:opacity-50 rounded-xl px-3 py-2 flex items-center gap-2 text-xs font-bold whitespace-nowrap cursor-pointer transition"
+                      >
+                        <Camera className="w-4 h-4 shrink-0" />
+                        <span>Scan with AI Camera</span>
+                      </button>
+                      <button
+                        type="button"
+                        disabled={isAiIdentifying || aiCooldownSeconds > 0}
+                        onClick={() => modalAiGalleryInputRef.current?.click()}
+                        className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 disabled:opacity-50 rounded-xl px-3 py-2 flex items-center gap-1.5 text-xs font-semibold whitespace-nowrap cursor-pointer transition"
+                      >
+                        <Upload className="w-3.5 h-3.5 shrink-0 text-sky-400" />
+                        <span>Upload Photo</span>
+                      </button>
+                      <button
+                        type="button"
+                        disabled={isAiIdentifying || aiCooldownSeconds > 0}
+                        onClick={() => startLiveCamera('environment')}
+                        className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 disabled:opacity-50 rounded-xl px-2.5 py-2 flex items-center gap-1 text-xs font-semibold whitespace-nowrap cursor-pointer transition"
+                        title="Open live camera viewfinder"
+                      >
+                        <Video className="w-3.5 h-3.5 shrink-0 text-emerald-400" />
+                        <span>Webcam</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {isAiIdentifying && (
+                    <div className="bg-blue-950/60 border border-blue-500/40 rounded-xl px-3 py-2.5 text-xs text-blue-200 flex items-center gap-2">
+                      <Loader2 className="w-4 h-4 animate-spin text-blue-400 shrink-0" />
+                      <span className="font-semibold">Scanning item with AI...</span>
+                    </div>
+                  )}
+
+                  {aiIdentifyError && !isAiIdentifying && (
+                    <div className="bg-rose-950/70 border border-rose-500/50 rounded-xl px-3 py-2.5 text-xs text-rose-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                      <div className="flex items-start gap-2 min-w-0">
+                        <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                        <span className="leading-relaxed">{aiIdentifyError}</span>
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0 self-end sm:self-center">
+                        {lastFailedScanRef.current && (
+                          <button
+                            type="button"
+                            onClick={handleRetryFailedAiScan}
+                            disabled={aiCooldownSeconds > 0 || isAiIdentifying}
+                            className="px-2.5 py-1 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 border border-rose-400/50 text-rose-100 font-bold text-[11px] disabled:opacity-50 transition cursor-pointer"
+                          >
+                            {aiCooldownSeconds > 0 ? `Retry in ${aiCooldownSeconds}s` : 'Retry'}
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => setAiIdentifyError(null)}
+                          className="text-rose-300 hover:text-white p-1 shrink-0 cursor-pointer"
+                          aria-label="Dismiss error"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {aiIdentifyResult && !isAiIdentifying && !aiModalReview && (
+                    <div className="bg-emerald-950/70 border border-emerald-500/40 rounded-xl px-3 py-2 text-xs text-emerald-200 flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <Check className="w-4 h-4 text-emerald-400 shrink-0" />
+                        <span>{aiIdentifyResult}</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setAiIdentifyResult(null)}
+                        className="text-emerald-300 hover:text-white p-1 shrink-0 cursor-pointer"
+                        aria-label="Dismiss notice"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  )}
+
+                  {aiModalReview && !isAiIdentifying && (
+                    <div className="bg-slate-900 border border-blue-500/40 rounded-xl p-3.5 space-y-3">
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <div className="text-xs font-bold text-blue-300 flex items-center gap-1.5">
+                            <Sparkles className="w-3.5 h-3.5" />
+                            <span>Review Extracted Details Before Applying</span>
+                          </div>
+                          {aiModalReview.existingMatchName && (
+                            <p className="text-[11px] text-emerald-300 mt-0.5">
+                              Matched catalog item: <strong>{aiModalReview.existingMatchName}</strong>
+                            </p>
+                          )}
+                        </div>
+                        {aiModalReview.thumbnailDataUrl && (
+                          <img
+                            src={aiModalReview.thumbnailDataUrl}
+                            alt="Scanned item thumbnail"
+                            className="w-11 h-11 rounded-lg object-cover border border-slate-700 shrink-0"
+                          />
+                        )}
+                      </div>
+
+                      {aiModalReview.clarityWarning && (
+                        <div className="bg-amber-950/60 border border-amber-500/40 rounded-lg px-2.5 py-2 text-[11px] text-amber-200 flex items-start gap-2">
+                          <AlertCircle className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
+                          <span>{aiModalReview.clarityWarning}</span>
+                        </div>
+                      )}
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                        <div className="sm:col-span-2">
+                          <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                            Extracted Item Name
+                          </label>
+                          <input
+                            type="text"
+                            value={aiModalReview.name}
+                            placeholder="Verify or type product name..."
+                            onChange={(e) =>
+                              setAiModalReview((prev) => (prev ? { ...prev, name: e.target.value } : prev))
+                            }
+                            className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-blue-500"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                            Suggested Category
+                          </label>
+                          <select
+                            value={aiModalReview.category}
+                            onChange={(e) =>
+                              setAiModalReview((prev) => (prev ? { ...prev, category: e.target.value } : prev))
+                            }
+                            className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-blue-500"
+                          >
+                            {consolidatedCategories.map((c) => (
+                              <option key={c.id} value={c.name}>
+                                {c.name}
+                              </option>
+                            ))}
+                            {aiModalReview.category &&
+                              !consolidatedCategories.some(
+                                (c) => c.name.toLowerCase() === aiModalReview.category.toLowerCase()
+                              ) && (
+                                <option value={aiModalReview.category}>
+                                  {aiModalReview.category} (New)
+                                </option>
+                              )}
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                            Suggested Unit
+                          </label>
+                          <select
+                            value={aiModalReview.unit}
+                            onChange={(e) =>
+                              setAiModalReview((prev) => (prev ? { ...prev, unit: e.target.value } : prev))
+                            }
+                            className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-blue-500"
+                          >
+                            <option value="pcs">pcs (Pieces)</option>
+                            <option value="box">box (Boxes)</option>
+                            <option value="pack">pack (Packs)</option>
+                            <option value="kg">kg (Kilograms)</option>
+                            <option value="m">m (Meters)</option>
+                            <option value="liters">liters (L)</option>
+                            <option value="pair">pair (Pairs)</option>
+                            <option value="bottle">bottle (Bottles)</option>
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                            Barcode (if visible)
+                          </label>
+                          <input
+                            type="text"
+                            value={aiModalReview.barcode}
+                            placeholder="Keep existing if blank"
+                            onChange={(e) =>
+                              setAiModalReview((prev) => (prev ? { ...prev, barcode: e.target.value } : prev))
+                            }
+                            className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs font-mono text-white focus:outline-none focus:border-blue-500"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                            SKU Code
+                          </label>
+                          <input
+                            type="text"
+                            value={aiModalReview.sku}
+                            placeholder="Auto SKU"
+                            onChange={(e) =>
+                              setAiModalReview((prev) => (prev ? { ...prev, sku: e.target.value } : prev))
+                            }
+                            className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs font-mono text-white focus:outline-none focus:border-blue-500"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                            Est. Cost Price (KSh)
+                          </label>
+                          <input
+                            type="number"
+                            min="0"
+                            value={aiModalReview.costPrice}
+                            placeholder="Leave blank to keep typed"
+                            onChange={(e) =>
+                              setAiModalReview((prev) => (prev ? { ...prev, costPrice: e.target.value } : prev))
+                            }
+                            className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs font-mono tabular-nums text-white focus:outline-none focus:border-blue-500"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                            Est. Selling Price (KSh)
+                          </label>
+                          <input
+                            type="number"
+                            min="0"
+                            value={aiModalReview.sellingPrice}
+                            placeholder="Leave blank to keep typed"
+                            onChange={(e) =>
+                              setAiModalReview((prev) => (prev ? { ...prev, sellingPrice: e.target.value } : prev))
+                            }
+                            className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs font-mono tabular-nums text-white focus:outline-none focus:border-blue-500"
+                          />
+                        </div>
+
+                        <div className="sm:col-span-2">
+                          <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                            Short Notes / Description
+                          </label>
+                          <input
+                            type="text"
+                            value={aiModalReview.notes}
+                            placeholder="Specifications or variant notes..."
+                            onChange={(e) =>
+                              setAiModalReview((prev) => (prev ? { ...prev, notes: e.target.value } : prev))
+                            }
+                            className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-blue-500"
+                          />
+                        </div>
+                      </div>
+
+                      {aiModalReview.thumbnailDataUrl && (
+                        <label className="flex items-center gap-2 text-[11px] text-slate-300 cursor-pointer select-none">
+                          <input
+                            type="checkbox"
+                            checked={aiModalReview.attachThumbnail}
+                            onChange={(e) =>
+                              setAiModalReview((prev) =>
+                                prev ? { ...prev, attachThumbnail: e.target.checked } : prev
+                              )
+                            }
+                            className="rounded border-slate-600 bg-slate-950 text-blue-500"
+                          />
+                          <span>Attach compressed photo thumbnail (lightweight &amp; sync-safe)</span>
+                        </label>
+                      )}
+
+                      <div className="flex items-center justify-end gap-2 pt-1">
+                        <button
+                          type="button"
+                          onClick={() => setAiModalReview(null)}
+                          className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold cursor-pointer transition"
+                        >
+                          Discard
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleApplyAiReviewToForm}
+                          className="px-3.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer transition"
+                        >
+                          <Check className="w-3.5 h-3.5" />
+                          <span>Apply to Item Form</span>
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   {/* Name */}
                   <div className="sm:col-span-2">
@@ -4839,11 +5566,47 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 focus:outline-none focus:border-sky-500"
                   >
                     <option value="pcs">Pieces (pcs)</option>
+                    <option value="box">Box (box)</option>
+                    <option value="pack">Pack (pack)</option>
                     <option value="kg">Kilograms (kg)</option>
+                    <option value="m">Meters (m)</option>
                     <option value="liters">Liters (L)</option>
-                    <option value="boxes">Boxes</option>
-                    <option value="packs">Packs</option>
+                    <option value="pair">Pair (pair)</option>
+                    <option value="bottle">Bottle (bottle)</option>
+                    <option value="boxes">Boxes (boxes)</option>
+                    <option value="packs">Packs (packs)</option>
                   </select>
+                </div>
+
+                {/* Optional Expiry Date for Perishables / Tracked Items */}
+                <div className="sm:col-span-2">
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-slate-300 font-semibold flex items-center gap-1.5">
+                      <Calendar className="w-3.5 h-3.5 text-amber-400" />
+                      <span>Expiry Date <span className="text-slate-500 font-normal">(Optional)</span></span>
+                    </label>
+                    {editingProduct.expiryDate && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setEditingProduct((prev) => (prev ? { ...prev, expiryDate: '' } : prev))
+                        }
+                        className="text-[11px] text-slate-400 hover:text-rose-400 cursor-pointer"
+                      >
+                        Clear Date
+                      </button>
+                    )}
+                  </div>
+                  <input
+                    type="date"
+                    value={editingProduct.expiryDate || ''}
+                    onChange={(e) =>
+                      setEditingProduct((prev) =>
+                        prev ? { ...prev, expiryDate: e.target.value } : prev
+                      )
+                    }
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 font-mono focus:outline-none focus:border-amber-500"
+                  />
                 </div>
 
                 {/* KRA eTIMS Tax Classification Selector */}
@@ -5065,9 +5828,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                               })
                             }
                             onError={(e) => {
-                              // Fallback on broken image link
-                              (e.target as HTMLImageElement).src =
-                                'https://images.unsplash.com/photo-1526170375885-4d8ecf77b99f?w=300&auto=format&fit=crop&q=60';
+                              e.currentTarget.style.display = 'none';
                             }}
                           />
                           <button
@@ -5186,7 +5947,11 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                                 onClick={(e) => {
                                   e.preventDefault();
                                   e.stopPropagation();
-                                  handleAiIdentifyProduct(editingProduct.imageUrl!, null, true);
+                                  runModalAiScanFromDataUrl(
+                                    editingProduct.imageUrl!,
+                                    editingProduct.imageUrl!,
+                                    editingProduct.name || 'product-photo'
+                                  );
                                 }}
                                 className="text-[10px] text-emerald-400 hover:text-emerald-300 font-extrabold flex items-center gap-1 bg-emerald-950 border border-emerald-800 px-2.5 py-0.5 rounded-lg transition hover:bg-emerald-900 cursor-pointer"
                               >
@@ -5832,11 +6597,21 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
 
               {aiIdentifyError && (
                 <div className="bg-rose-950/85 border border-rose-500/60 p-3.5 rounded-2xl text-xs text-rose-200 flex items-start justify-between gap-2.5 shadow-md">
-                  <div className="flex items-start gap-2.5">
+                  <div className="flex items-start gap-2.5 min-w-0">
                     <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
-                    <div className="space-y-0.5">
-                      <p className="font-bold text-rose-100">AI Photo Scan Error</p>
+                    <div className="space-y-1.5 min-w-0">
+                      <p className="font-bold text-rose-100">AI Photo Scan Notice</p>
                       <p className="text-[11px] text-rose-200/90 leading-relaxed">{aiIdentifyError}</p>
+                      {lastFailedScanRef.current && (
+                        <button
+                          type="button"
+                          onClick={handleRetryFailedAiScan}
+                          disabled={aiCooldownSeconds > 0 || isAiIdentifying}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 border border-rose-400/50 text-rose-100 font-bold text-[11px] disabled:opacity-50 transition cursor-pointer"
+                        >
+                          {aiCooldownSeconds > 0 ? `Retry in ${aiCooldownSeconds}s` : 'Retry'}
+                        </button>
+                      )}
                     </div>
                   </div>
                   <button
@@ -6589,6 +7364,21 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
         multiple
         className="hidden"
         onChange={handleBatchGalleryFilesSelected}
+      />
+      <input
+        type="file"
+        ref={modalAiCameraInputRef}
+        accept="image/*"
+        capture="environment"
+        className="hidden"
+        onChange={handleModalAiFileSelected}
+      />
+      <input
+        type="file"
+        ref={modalAiGalleryInputRef}
+        accept="image/*"
+        className="hidden"
+        onChange={handleModalAiFileSelected}
       />
     </div>
   );

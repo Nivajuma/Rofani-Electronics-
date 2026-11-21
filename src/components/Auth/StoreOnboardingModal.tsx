@@ -156,12 +156,12 @@ export const StoreOnboardingModal: React.FC<StoreOnboardingModalProps> = ({
           <div>
             <p className="font-bold text-white">
               {hasValidReferral
-                ? `45-Day Free Trial Unlocked (Referred by ${matchedReferrer?.storeName})!`
-                : '30-Day Free Trial Activated Automatically'}
+                ? `22-Day Free Trial Unlocked (Referred by ${matchedReferrer?.storeName})!`
+                : '7-Day Free Trial Activated Automatically'}
             </p>
             <p className="text-[11px] text-slate-300 mt-0.5 leading-relaxed">
               {hasValidReferral
-                ? `Your fellow merchant gave you +15 bonus days on top of the standard 30-day free trial — enjoy fast sales, stock tracking, M-Pesa options, multi-shop support & local/email backups!`
+                ? `Your fellow merchant gave you +15 bonus days on top of the standard 7-day free trial — enjoy fast sales, stock tracking, M-Pesa options, multi-shop support & local/email backups!`
                 : 'Your private workspace includes fast sales, live stock tracking, M-Pesa options, multi-shop support, and automatic local & email backups.'}
             </p>
           </div>
@@ -234,7 +234,7 @@ export const StoreOnboardingModal: React.FC<StoreOnboardingModalProps> = ({
               type="text"
               value={referralCode}
               onChange={(e) => setReferralCode(normalizeReferralCode(e.target.value))}
-              placeholder="Enter friend's code (e.g. ROFANI-NIVA78) for 45 Days Free"
+              placeholder="Enter friend's code (e.g. ROFANI-NIVA78) for 22 Days Free"
               className="w-full bg-[#1e293b] border border-slate-700 rounded-xl px-3.5 py-2.5 text-white font-mono uppercase placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-400"
             />
           </div>
@@ -290,8 +290,8 @@ export const StoreOnboardingModal: React.FC<StoreOnboardingModalProps> = ({
               {isSubmitting
                 ? 'Creating Private Store...'
                 : hasValidReferral
-                ? 'Launch My Store (45-Day Referral Trial)'
-                : 'Launch My Store (30-Day Free Trial)'}
+                ? 'Launch My Store (22-Day Referral Trial)'
+                : 'Launch My Store (7-Day Free Trial)'}
             </span>
           </button>
         </form>

@@ -91,6 +91,7 @@ export const CustomerPromotionGeneratorModal: React.FC<CustomerPromotionGenerato
   // Results & View State
   const [activeTab, setActiveTab] = useState<'whatsapp' | 'sms' | 'email' | 'flyer'>('whatsapp');
   const [isGenerating, setIsGenerating] = useState(false);
+  const [generationError, setGenerationError] = useState<string | null>(null);
   const [promotion, setPromotion] = useState<GeneratedPromotion | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [savedCampaigns, setSavedCampaigns] = useState<GeneratedPromotion[]>([]);
@@ -148,6 +149,9 @@ export const CustomerPromotionGeneratorModal: React.FC<CustomerPromotionGenerato
   // Call Gemini Backend API
   const handleGenerate = async () => {
     setIsGenerating(true);
+    setGenerationError(null);
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), 28000);
     try {
       const response = await fetch('/api/ai/generate-promotion', {
         method: 'POST',
@@ -167,21 +171,33 @@ export const CustomerPromotionGeneratorModal: React.FC<CustomerPromotionGenerato
           storePhone,
           validityDays,
         }),
+        signal: controller.signal,
       });
 
-      if (response.ok) {
-        const data: GeneratedPromotion = await response.json();
-        data.createdAt = new Date().toISOString();
-        setPromotion(data);
+      const data = await response.json().catch(() => null);
+      if (response.ok && data) {
+        const promo: GeneratedPromotion = {
+          ...data,
+          createdAt: new Date().toISOString(),
+        };
+        setPromotion(promo);
 
         // Update history
-        const updated = [data, ...savedCampaigns.slice(0, 9)];
+        const updated = [promo, ...savedCampaigns.slice(0, 9)];
         setSavedCampaigns(updated);
         safeSetJSON('rofani_ai_promotions_history', updated);
+      } else {
+        setGenerationError(data?.error || `AI promotion service returned HTTP ${response.status}. Please try again.`);
       }
-    } catch (err) {
-      console.error('Failed to generate promotion:', err);
+    } catch (err: any) {
+      console.warn('Failed to generate promotion:', err);
+      setGenerationError(
+        err?.name === 'AbortError'
+          ? 'The AI request timed out. Please tap Generate Customer Campaign to try again.'
+          : 'Could not reach the AI service right now. Please check your connection and try again.'
+      );
     } finally {
+      window.clearTimeout(timeoutId);
       setIsGenerating(false);
     }
   };
@@ -550,8 +566,22 @@ export const CustomerPromotionGeneratorModal: React.FC<CustomerPromotionGenerato
                   Crafting Your Campaign Copy...
                 </h3>
                 <p className="text-xs text-slate-400 max-w-sm">
-                  Gemini 3.8 is analyzing audience context, optimizing SMS character counts, and drafting high-converting WhatsApp copy.
+                  Gemini AI is analyzing audience context, optimizing SMS character counts, and drafting high-converting WhatsApp copy.
                 </p>
+              </div>
+            ) : generationError ? (
+              <div className="flex-1 flex flex-col items-center justify-center p-10 text-center">
+                <div className="max-w-md w-full rounded-2xl bg-rose-950/30 border border-rose-500/40 p-5 space-y-3">
+                  <div className="text-sm font-bold text-rose-200">Could Not Generate Campaign</div>
+                  <p className="text-xs text-rose-300 leading-relaxed">{generationError}</p>
+                  <button
+                    type="button"
+                    onClick={handleGenerate}
+                    className="px-4 py-2 rounded-xl bg-rose-500/20 hover:bg-rose-500/30 border border-rose-500/40 text-xs font-bold text-white transition"
+                  >
+                    Try Again
+                  </button>
+                </div>
               </div>
             ) : !promotion ? (
               <div className="flex-1 flex flex-col items-center justify-center p-12 text-center">

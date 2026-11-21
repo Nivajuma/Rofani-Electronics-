@@ -40,7 +40,9 @@ import {
   Video,
   Megaphone,
   RotateCcw,
-  ExternalLink
+  ExternalLink,
+  Info,
+  QrCode
 } from 'lucide-react';
 import { TabKey } from '../../utils/permissions';
 import { User, StoreSubscriptionProfile } from '../../types';
@@ -74,6 +76,8 @@ export interface AppMenuViewProps {
   storeProfile?: StoreSubscriptionProfile | null;
   onOpenPlansPricing?: () => void;
   onOpenSuperAdmin?: () => void;
+  onOpenAboutUs?: () => void;
+  onOpenShopQrShare?: () => void;
   onSignOutCloud?: () => Promise<void> | void;
   cloudUserEmail?: string | null;
 }
@@ -105,6 +109,8 @@ export const AppMenuView: React.FC<AppMenuViewProps> = ({
   storeProfile = null,
   onOpenPlansPricing,
   onOpenSuperAdmin,
+  onOpenAboutUs,
+  onOpenShopQrShare,
   onSignOutCloud,
   cloudUserEmail = null
 }) => {
@@ -143,8 +149,8 @@ export const AppMenuView: React.FC<AppMenuViewProps> = ({
 
   const buildStandardPromoCaption = () => {
     const referralLine = hasAvailableReferralCode
-      ? `🎁 Use my Referral Code: ${merchantReferralCode} for a 45-Day Free Trial (+15 extra bonus days!)\n`
-      : '🎁 Start with a 30-Day Free Trial today!\n';
+      ? `🎁 Use my Referral Code: ${merchantReferralCode} for a 22-Day Free Trial (+15 extra bonus days!)\n`
+      : '🎁 Start with a 7-Day Free Trial today!\n';
     return (
       `Run your shop smarter with Rofani POS! Fast counter sales, live stock tracking, M-Pesa Till & STK options, multi-shop support, and automatic local & email backups.\n\n` +
       referralLine +
@@ -158,8 +164,8 @@ export const AppMenuView: React.FC<AppMenuViewProps> = ({
 
   const buildTikTokPromoCaption = () => {
     const referralShort = hasAvailableReferralCode
-      ? `Use code ${merchantReferralCode} for 45 Days Free! `
-      : 'Start with a 30-Day Free Trial! ';
+      ? `Use code ${merchantReferralCode} for 22 Days Free! `
+      : 'Start with a 7-Day Free Trial! ';
     return (
       `Upgrade your shop with Rofani POS — fast sales, live stock tracking, M-Pesa options, multi-shop support & daily backups! ${referralShort}` +
       `Link: ${referralInviteUrl} | WhatsApp: ${SUPPORT_WHATSAPP_NUMBER} | Call: ${SUPPORT_PHONE_PRIMARY} / ${SUPPORT_PHONE_SECONDARY} | ${SUPPORT_EMAIL} ` +
@@ -230,8 +236,8 @@ export const AppMenuView: React.FC<AppMenuViewProps> = ({
       try {
         await navigator.share({
           title: hasAvailableReferralCode
-            ? 'Rofani POS — 45-Day Referral Trial'
-            : 'Rofani POS — 30-Day Free Trial',
+            ? 'Rofani POS — 22-Day Referral Trial'
+            : 'Rofani POS — 7-Day Free Trial',
           text: textToShare,
           url: referralInviteUrl,
         });
@@ -805,6 +811,27 @@ export const AppMenuView: React.FC<AppMenuViewProps> = ({
             </div>
           </button>
 
+          {onOpenShopQrShare && (
+            <button
+              type="button"
+              onClick={onOpenShopQrShare}
+              className="w-full min-h-[52px] px-4 py-3 flex items-center justify-between hover:bg-slate-800/70 transition text-left cursor-pointer"
+            >
+              <div className="flex items-center gap-3.5 min-w-0">
+                <QrCode className="w-4 h-4 text-sky-400 shrink-0" strokeWidth={1.75} />
+                <span className="text-[13px] font-semibold text-white truncate">
+                  Shop QR &amp; Share Link
+                </span>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <span className="px-2 py-0.5 rounded-md bg-sky-500/15 border border-sky-500/30 text-[10px] font-bold text-sky-300">
+                  QR Badge
+                </span>
+                <ChevronRight className="w-4 h-4 text-slate-400 shrink-0" />
+              </div>
+            </button>
+          )}
+
           {isOwnerAccount && onOpenSuperAdmin && (
             <button
               type="button"
@@ -835,6 +862,22 @@ export const AppMenuView: React.FC<AppMenuViewProps> = ({
             <div className="flex items-center gap-3.5">
               <Monitor className="w-4 h-4 text-slate-300 shrink-0" strokeWidth={1.75} />
               <span className="text-[13px] font-semibold text-white">Get Desktop Billing Software</span>
+            </div>
+            <ChevronRight className="w-4 h-4 text-slate-400 shrink-0" />
+          </button>
+
+          <button
+            type="button"
+            id="btn-menu-about-us"
+            onClick={() => {
+              if (onOpenAboutUs) onOpenAboutUs();
+              else onSelectTab('about');
+            }}
+            className="w-full min-h-[52px] px-4 py-3 flex items-center justify-between hover:bg-slate-800/70 transition text-left cursor-pointer"
+          >
+            <div className="flex items-center gap-3.5 min-w-0">
+              <Info className="w-4 h-4 text-orange-400 shrink-0" strokeWidth={1.75} />
+              <span className="text-[13px] font-semibold text-white truncate">About Us &amp; Why Choose Us</span>
             </div>
             <ChevronRight className="w-4 h-4 text-slate-400 shrink-0" />
           </button>
@@ -981,6 +1024,21 @@ export const AppMenuView: React.FC<AppMenuViewProps> = ({
                   </span>
                   <ChevronRight className="w-4 h-4 text-slate-500" />
                 </button>
+                <button
+                  type="button"
+                  id="btn-help-about-us"
+                  onClick={() => {
+                    if (onOpenAboutUs) onOpenAboutUs();
+                    else onSelectTab('about');
+                  }}
+                  className="w-full min-h-[44px] py-2.5 flex items-center justify-between text-orange-300 hover:text-orange-200 transition cursor-pointer"
+                >
+                  <span className="font-semibold flex items-center gap-2.5">
+                    <Info className="w-3.5 h-3.5 text-orange-400" />
+                    About Us &amp; Why Choose Us
+                  </span>
+                  <ChevronRight className="w-4 h-4 text-slate-500" />
+                </button>
                 <div className="py-3 pr-1">
                   <CustomerCareSupportCard compact title="Quick Support Desk" />
                 </div>
@@ -1081,7 +1139,7 @@ export const AppMenuView: React.FC<AppMenuViewProps> = ({
                     <span className="text-[#38bdf8] font-mono font-bold">Active License</span>
                   </div>
                   <p className="text-slate-400 leading-relaxed">
-                    Includes fast POS sales, live stock tracking, M-Pesa STK Push &amp; Till/Paybill options, multi-shop support, local &amp; email backups, unlimited SKUs, and worker PIN access control — starting with a 30-day free trial.
+                    Includes fast POS sales, live stock tracking, M-Pesa STK Push &amp; Till/Paybill options, multi-shop support, local &amp; email backups, unlimited SKUs, and worker PIN access control — starting with a 7-day free trial.
                   </p>
                   <div className="pt-2 border-t border-slate-800 flex items-center justify-between text-[11px]">
                     <span className="text-slate-400">Rofani POS Official KRA PIN</span>
@@ -1183,7 +1241,7 @@ export const AppMenuView: React.FC<AppMenuViewProps> = ({
                         </button>
                       </div>
                       <p className="text-[11px] text-slate-300 leading-relaxed">
-                        Invite fellow shop owners: they get <strong className="text-emerald-300">45 Days Free</strong> and you automatically get <strong className="text-amber-300">+30 Days Free (+1 Month)</strong>!
+                        Invite fellow shop owners: they get <strong className="text-emerald-300">22 Days Free</strong> and you automatically get <strong className="text-amber-300">+30 Days Free (+1 Month)</strong>!
                       </p>
                     </div>
                   )}
@@ -1313,10 +1371,10 @@ export const AppMenuView: React.FC<AppMenuViewProps> = ({
                       {hasAvailableReferralCode ? (
                         <>
                           {' '}and enter referral code{' '}
-                          <span className="font-mono text-amber-300">{merchantReferralCode}</span> for 45 days free.
+                          <span className="font-mono text-amber-300">{merchantReferralCode}</span> for 22 days free.
                         </>
                       ) : (
-                        ' to start your 30-day free trial.'
+                        ' to start your 7-day free trial.'
                       )}
                       <br />
                       3. Cashiers/staff: Sign in with the store Google account and enter your assigned worker PIN.

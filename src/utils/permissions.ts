@@ -14,7 +14,8 @@ export type TabKey =
   | 'onlineorders'
   | 'settings'
   | 'auditlogs'
-  | 'menu';
+  | 'menu'
+  | 'about';
 
 export interface PermissionDefinition {
   key: keyof WorkerPermissions;
@@ -963,6 +964,7 @@ export function hasWorkerPermission(
  * Enhanced: checks both role baseline and custom worker permissions!
  */
 export function hasTabPermission(roleOrUser: Role | User, tab: TabKey): boolean {
+  if (tab === 'about') return true;
   if (typeof roleOrUser === 'string') {
     const config = ROLE_CONFIGURATIONS[roleOrUser];
     if (!config) return false;
@@ -1425,4 +1427,5 @@ export const TAB_LABELS: Record<TabKey, string> = {
   settings: 'System & KRA Fiscal Settings',
   auditlogs: 'Worker Role Authorization Audit Trail',
   menu: 'App Menu',
+  about: 'About Us & Why Choose Us',
 };

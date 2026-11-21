@@ -50,7 +50,8 @@ import {
   LayoutDashboard,
   Award,
   LogOut,
-  Gift
+  Gift,
+  Info
 } from 'lucide-react';
 import {
   Product,
@@ -133,6 +134,9 @@ import { StockAlertNotificationModal } from './components/Inventory/StockAlertNo
 import { CategoryManagerModal } from './components/Inventory/CategoryManagerModal';
 import { CameraStartupPrompt } from './components/Common/CameraStartupPrompt';
 import { AppMenuView } from './components/Common/AppMenuView';
+import { AboutUsView } from './components/Common/AboutUsView';
+import { ShopQrShareModal } from './components/Common/ShopQrShareModal';
+import { DailyEndOfDaySummaryModal } from './components/Common/DailyEndOfDaySummaryModal';
 import { DailyEmailBackupModal } from './components/Settings/DailyEmailBackupModal';
 import { MerchantAuthScreen } from './components/Auth/MerchantAuthScreen';
 import { StoreOnboardingModal } from './components/Auth/StoreOnboardingModal';
@@ -212,6 +216,7 @@ import {
   subscribeToReferralRewards,
   normalizeReferralCode,
   subscribeToTransactionSettings,
+  subscribeToShopProtectionSettings,
   deleteTransactionFromCloud,
   updateStoreProfileDetails,
 } from './lib/cloudSync';
@@ -220,6 +225,11 @@ import {
   saveTransactionSettingsLocal,
   normalizeTransactionSettings,
 } from './utils/transactionSettings';
+import {
+  useShopProtectionSettings,
+  saveShopProtectionSettingsLocal,
+  normalizeShopProtectionSettings,
+} from './utils/shopProtectionSettings';
 import {
   auth,
   isAuthorizedCloudUser,
@@ -405,6 +415,7 @@ export default function App() {
     'settings',
     'auditlogs',
     'menu',
+    'about',
   ] as const;
 
   type AppTab = (typeof VALID_TABS)[number];
@@ -588,6 +599,15 @@ export default function App() {
   useEffect(() => {
     safeSetJSON('retail_pos_terminal_locked', isTerminalLocked);
   }, [isTerminalLocked]);
+
+  const [showShopQrModal, setShowShopQrModal] = useState(false);
+  const [show9PmSummaryModal, setShow9PmSummaryModal] = useState(false);
+  const [activityAlertBanner, setActivityAlertBanner] = useState<{
+    id: string;
+    severity: 'info' | 'warning' | 'danger';
+    title: string;
+    message: string;
+  } | null>(null);
 
   // Target user when switching workers via PIN lock modal
   const [pinModalTargetUser, setPinModalTargetUser] = useState<User | null>(null);
@@ -2398,14 +2418,15 @@ export default function App() {
     };
   }, [isCloudAuthReady, firebaseUser?.uid, isOwnerAccount]);
 
-  // Real-time synchronization subscription for per-store Transaction Settings
+  // Real-time synchronization subscription for per-store Transaction Settings & Shop Protection Controls
   useEffect(() => {
     const activeUid = activeCloudStoreId || firebaseUser?.uid;
     if (!isCloudAuthReady || !activeUid) return;
     let isCancelled = false;
-    let unsubscribe: (() => void) | undefined;
+    let unsubscribeTx: (() => void) | undefined;
+    let unsubscribeControls: (() => void) | undefined;
     try {
-      unsubscribe = subscribeToTransactionSettings(
+      unsubscribeTx = subscribeToTransactionSettings(
         (remoteConfig) => {
           if (isCancelled) return;
           if (remoteConfig && typeof remoteConfig === 'object') {
@@ -2415,14 +2436,99 @@ export default function App() {
         (err) => console.warn('Transaction settings subscription notice:', err),
         activeUid
       );
+      unsubscribeControls = subscribeToShopProtectionSettings(
+        (remoteConfig) => {
+          if (isCancelled) return;
+          if (remoteConfig && typeof remoteConfig === 'object') {
+            saveShopProtectionSettingsLocal(normalizeShopProtectionSettings(remoteConfig), activeUid);
+          }
+        },
+        (err) => console.warn('Shop protection settings subscription notice:', err),
+        activeUid
+      );
     } catch (err) {
-      console.warn('Could not subscribe to transaction settings:', err);
+      console.warn('Could not subscribe to transaction/shop settings:', err);
     }
     return () => {
       isCancelled = true;
-      if (unsubscribe) unsubscribe();
+      if (unsubscribeTx) unsubscribeTx();
+      if (unsubscribeControls) unsubscribeControls();
     };
   }, [isCloudAuthReady, firebaseUser?.uid, activeCloudStoreId]);
+
+  const resolvedSettingsStoreId = activeCloudStoreId || getActiveTenantStoreId();
+  const [shopControls] = useShopProtectionSettings(resolvedSettingsStoreId);
+
+  const pushActivityAlert = (
+    severity: 'info' | 'warning' | 'danger',
+    title: string,
+    message: string
+  ) => {
+    const id = `act-alert-${Date.now()}`;
+    setActivityAlertBanner({ id, severity, title, message });
+    setTimeout(() => {
+      setActivityAlertBanner((curr) => (curr?.id === id ? null : curr));
+    }, severity === 'info' ? 5500 : 12000);
+  };
+
+  // Inactivity Auto-Lock Listener (when enabled in Shop Controls)
+  useEffect(() => {
+    if (!shopControls.enableInactivityLock || isTerminalLocked) return;
+    if (!isAuthorizedCloudUser(firebaseUser) && !allowOfflineOwnerMode) return;
+
+    const timeoutMs = Math.max(1, shopControls.inactivityTimeoutMinutes || 5) * 60 * 1000;
+    let idleTimer: number | undefined;
+
+    const resetIdleTimer = () => {
+      if (idleTimer !== undefined) window.clearTimeout(idleTimer);
+      idleTimer = window.setTimeout(() => {
+        setIsTerminalLocked(true);
+      }, timeoutMs);
+    };
+
+    resetIdleTimer();
+    const events: Array<keyof WindowEventMap> = ['pointerdown', 'keydown', 'touchstart', 'scroll'];
+    events.forEach((ev) => window.addEventListener(ev, resetIdleTimer, { passive: true }));
+    return () => {
+      if (idleTimer !== undefined) window.clearTimeout(idleTimer);
+      events.forEach((ev) => window.removeEventListener(ev, resetIdleTimer));
+    };
+  }, [
+    shopControls.enableInactivityLock,
+    shopControls.inactivityTimeoutMinutes,
+    isTerminalLocked,
+    firebaseUser,
+    allowOfflineOwnerMode,
+  ]);
+
+  // 9:00 PM Daily Summary Auto-Prompt (triggers once per evening at/after 21:00 local time unless dismissed)
+  useEffect(() => {
+    if (!shopControls.enable9PmDailySummary || isTerminalLocked) return;
+    if (!isAuthorizedCloudUser(firebaseUser) && !allowOfflineOwnerMode) return;
+
+    const checkEveningSummary = () => {
+      const now = new Date();
+      if (now.getHours() < 21) return;
+      const y = now.getFullYear();
+      const m = String(now.getMonth() + 1).padStart(2, '0');
+      const d = String(now.getDate()).padStart(2, '0');
+      const dismissKey = `rofani_9pm_dismissed_${resolvedSettingsStoreId}_${y}-${m}-${d}`;
+      const alreadyDismissed = safeGetJSON<boolean>(dismissKey, false);
+      if (!alreadyDismissed) {
+        setShow9PmSummaryModal(true);
+      }
+    };
+
+    checkEveningSummary();
+    const timer = window.setInterval(checkEveningSummary, 60000);
+    return () => window.clearInterval(timer);
+  }, [
+    shopControls.enable9PmDailySummary,
+    isTerminalLocked,
+    resolvedSettingsStoreId,
+    firebaseUser,
+    allowOfflineOwnerMode,
+  ]);
 
   // Real-time synchronization subscription for users & staff accounts
   useEffect(() => {
@@ -3713,6 +3819,13 @@ export default function App() {
       safeSetJSON('pos_store_sales', updated);
       return updated;
     });
+    if (shopControls.alertOnAnySale) {
+      pushActivityAlert(
+        'info',
+        'Sale Recorded',
+        `${stampedTx.salesRepName || stampedTx.cashierName || currentUser.name} completed ${stampedTx.receiptNumber} for KSh ${(stampedTx.grandTotal || 0).toLocaleString()}.`
+      );
+    }
     const soldProductIds = new Set((stampedTx.items || []).map((it) => it.product?.id || (it as any).productId));
 
     // Detect any sold product reaching or dropping below its minimum stock limit during this sale
@@ -5226,9 +5339,17 @@ export default function App() {
       return next;
     });
     setProducts(updatedProducts);
+    if (shopControls.alertOnSaleEditDelete) {
+      pushActivityAlert(
+        'warning',
+        'Attendant Edited a Sale',
+        `Receipt ${updatedTx.receiptNumber} (KSh ${(updatedTx.grandTotal || 0).toLocaleString()}) was modified by ${currentUser.name}.`
+      );
+    }
   };
 
   const handleDeleteTransaction = (txId: string, updatedProducts: Product[]) => {
+    const targetTx = transactions.find((t) => t.id === txId);
     setTransactions((prev) => {
       const next = prev.filter((t) => t.id !== txId);
       safeSetJSON('retail_pos_transactions', next);
@@ -5236,6 +5357,13 @@ export default function App() {
       return next;
     });
     setProducts(updatedProducts);
+    if (shopControls.alertOnSaleEditDelete) {
+      pushActivityAlert(
+        'danger',
+        'Attendant Deleted a Sale',
+        `Receipt ${targetTx?.receiptNumber || txId}${targetTx ? ` (KSh ${(targetTx.grandTotal || 0).toLocaleString()})` : ''} was deleted by ${currentUser.name}.`
+      );
+    }
     if (isCloudAuthReady && firebaseUser?.uid) {
       deleteTransactionFromCloud(txId, activeCloudStoreId || firebaseUser.uid).catch((err) =>
         console.warn('Cloud delete transaction notice:', err)
@@ -5395,6 +5523,11 @@ export default function App() {
           activeStoreId={activeCloudStoreId || getActiveTenantStoreId()}
           storeKraPin={storeProfile?.kraPin}
           requirePinOnStartup={requirePinOnStartup}
+          expenses={expenses}
+          restockRecords={restockRecords}
+          onlineOrders={onlineOrders}
+          purchaseOrders={purchaseOrders}
+          cashTransactions={cashTransactions}
         />
       )}
 
@@ -5435,6 +5568,7 @@ export default function App() {
             } catch {}
           }}
           onOpenCategoryManager={() => setShowCategoryManagerModal(true)}
+          activeStoreId={activeCloudStoreId || getActiveTenantStoreId()}
         />
       )}
 
@@ -5509,6 +5643,8 @@ export default function App() {
           onDeleteExpense={handleDeleteExpense}
           onBatchUpdateExpenses={setExpenses}
           onOpenAuditLogs={() => setActiveTab('auditlogs')}
+          allUsers={allUsers}
+          activeStoreId={activeCloudStoreId || getActiveTenantStoreId()}
         />
       )}
 
@@ -5536,6 +5672,10 @@ export default function App() {
           salaryPayouts={salaryPayouts}
           onPaySalary={handlePaySalary}
           onUpdateUserSalarySettings={handleUpdateUserSalarySettings}
+          expenses={expenses}
+          onAddExpense={handleAddExpense}
+          storeName={stores.find((s) => s.id === activeStoreId)?.name || storeProfile?.storeName || 'Rofani POS'}
+          activeStoreId={activeCloudStoreId || getActiveTenantStoreId()}
         />
       )}
 
@@ -5552,6 +5692,10 @@ export default function App() {
           activeStoreId={activeCloudStoreId || getActiveTenantStoreId()}
           masterPin={masterPin}
           allUsers={allUsers}
+          salaryPayouts={salaryPayouts}
+          commissionPayouts={commissionPayouts}
+          storeName={stores.find((s) => s.id === activeStoreId)?.name || storeProfile?.storeName || 'Rofani POS'}
+          onAddExpense={handleAddExpense}
         />
       )}
 
@@ -5653,6 +5797,8 @@ export default function App() {
               await updateStoreProfileDetails(targetCloudStoreId, { kraPin: cleanPin });
             }
           }}
+          onOpenShopQrShare={() => setShowShopQrModal(true)}
+          onPreview9PmSummary={() => setShow9PmSummaryModal(true)}
         />
       )}
 
@@ -5677,11 +5823,22 @@ export default function App() {
           storeProfile={storeProfile}
           onOpenPlansPricing={() => setShowPlansModal(true)}
           onOpenSuperAdmin={() => setShowSuperAdminModal(true)}
+          onOpenAboutUs={() => setActiveTab('about')}
+          onOpenShopQrShare={() => setShowShopQrModal(true)}
           onSignOutCloud={async () => {
             setAllowOfflineOwnerMode(false);
             await signOutFromCloud();
           }}
           cloudUserEmail={firebaseUser?.email}
+        />
+      )}
+
+      {activeTab === 'about' && (
+        <AboutUsView
+          onBack={() => setActiveTab(deviceFormat === 'phone' ? 'menu' : 'pos')}
+          onOpenPlansPricing={() => setShowPlansModal(true)}
+          onOpenAiAssistant={() => setShowAiAssistantModal(true)}
+          inPhoneFrame={deviceFormat === 'phone'}
         />
       )}
     </>
@@ -5768,8 +5925,8 @@ export default function App() {
           if (created.referredBy) {
             setReferralRewardToast({
               kind: 'welcome',
-              message: `🎁 Welcome Bonus! Referred by ${created.referredByStoreName || 'a fellow merchant'} — 45 Days Free unlocked!`,
-              subtext: `You received +15 extra free trial days on top of the 30-day standard trial.`,
+              message: `🎁 Welcome Bonus! Referred by ${created.referredByStoreName || 'a fellow merchant'} — 22 Days Free unlocked!`,
+              subtext: `You received +15 extra free trial days on top of the 7-day standard trial.`,
             });
           }
           setStores([
@@ -5829,7 +5986,7 @@ export default function App() {
   // If Mobile Phone Format is active, render PhoneDeviceFrame view
   if (deviceFormat === 'phone') {
     return (
-      <div className="min-h-dvh h-dvh sm:h-auto sm:min-h-dvh bg-slate-900 sm:bg-slate-950 text-slate-100 flex flex-col font-sans">
+      <div className="min-h-dvh h-dvh sm:h-auto sm:min-h-dvh bg-slate-900 sm:bg-slate-950 text-slate-100 flex flex-col font-sans print-unlock-overflow">
         <PhoneDeviceFrame
           activeTab={activeTab}
           onSelectTab={(tab) => {
@@ -6088,6 +6245,56 @@ export default function App() {
           onOpenStockDigest={() => setShowStockAlertModal(true)}
         />
 
+        {/* Live Sale & Edit/Delete Protection Alert Banner (Phone Mode) */}
+        {activityAlertBanner && (
+          <div
+            className={`fixed top-16 left-1/2 -translate-x-1/2 z-[265] w-[calc(100%-2rem)] max-w-md rounded-2xl p-3.5 shadow-2xl border flex items-start gap-3 text-xs ${
+              activityAlertBanner.severity === 'danger'
+                ? 'bg-rose-950/95 border-rose-500/60 text-rose-100'
+                : activityAlertBanner.severity === 'warning'
+                ? 'bg-amber-950/95 border-amber-500/60 text-amber-100'
+                : 'bg-slate-900/95 border-emerald-500/50 text-emerald-100'
+            }`}
+          >
+            <div className="flex-1 min-w-0">
+              <div className="font-extrabold">{activityAlertBanner.title}</div>
+              <div className="text-[11px] opacity-90 mt-0.5">{activityAlertBanner.message}</div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setActivityAlertBanner(null)}
+              className="p-1 rounded-lg hover:bg-black/25 text-slate-300 hover:text-white cursor-pointer"
+              aria-label="Dismiss alert"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+
+        <ShopQrShareModal
+          isOpen={showShopQrModal}
+          onClose={() => setShowShopQrModal(false)}
+          storeName={stores.find((s) => s.id === activeStoreId)?.name || storeProfile?.storeName || 'Rofani POS'}
+          storeId={resolvedSettingsStoreId}
+          referralCode={storeProfile?.referralCode}
+        />
+
+        <DailyEndOfDaySummaryModal
+          isOpen={show9PmSummaryModal}
+          onClose={() => setShow9PmSummaryModal(false)}
+          onDismissForToday={() => {
+            const now = new Date();
+            const key = `rofani_9pm_dismissed_${resolvedSettingsStoreId}_${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+            safeSetJSON(key, true);
+            setShow9PmSummaryModal(false);
+          }}
+          storeName={stores.find((s) => s.id === activeStoreId)?.name || storeProfile?.storeName || 'Rofani POS'}
+          transactions={transactions}
+          expenses={expenses}
+          restockRecords={restockRecords}
+          canViewProfit={canViewGrossProfit(currentUser)}
+        />
+
         {/* Referral Reward / Welcome Toast (Phone Mode) */}
         {referralRewardToast && (
           <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[260] w-[calc(100%-2rem)] max-w-md bg-slate-900 border border-amber-400/60 text-slate-100 rounded-2xl p-4 shadow-2xl flex items-start gap-3">
@@ -6130,18 +6337,18 @@ export default function App() {
   }
 
   return (
-    <div className={`flex min-h-dvh h-dvh w-full overflow-hidden font-sans ${themeContainerClass} ${fontScaleClass}`}>
+    <div className={`flex min-h-dvh h-dvh w-full overflow-hidden font-sans print-unlock-overflow ${themeContainerClass} ${fontScaleClass}`}>
       {/* Mobile Drawer Overlay Backdrop */}
       {isMobileMenuOpen && (
         <div
-          className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 lg:hidden cursor-pointer"
+          className="print:hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-40 lg:hidden cursor-pointer"
           onClick={() => setIsMobileMenuOpen(false)}
         />
       )}
 
       {/* Left Sidebar: Professional Polish Navigation */}
       <nav
-        className={`bg-slate-900 flex flex-col border-r border-slate-800 text-slate-300 shrink-0 transition-all duration-300 z-50 ${
+        className={`print:hidden bg-slate-900 flex flex-col border-r border-slate-800 text-slate-300 shrink-0 transition-all duration-300 z-50 ${
           isSidebarCollapsed ? 'lg:w-16' : 'lg:w-64'
         } ${
           isMobileMenuOpen
@@ -6588,6 +6795,27 @@ export default function App() {
             </div>
           </button>
 
+          {/* About Us & Why Choose Us Screen */}
+          <button
+            type="button"
+            id="btn-sidebar-about-us"
+            onClick={() => {
+              setActiveTab('about');
+              setIsMobileMenuOpen(false);
+            }}
+            title="About Rofani POS & Support"
+            className={`w-full flex items-center ${isSidebarCollapsed ? 'justify-center px-2' : 'justify-between px-3'} py-2.5 rounded-lg transition cursor-pointer ${
+              activeTab === 'about'
+                ? 'bg-blue-600 text-white shadow-md'
+                : 'hover:bg-slate-800 text-slate-300'
+            }`}
+          >
+            <div className="flex items-center gap-3">
+              <Info className="w-4 h-4 shrink-0 text-orange-400" />
+              {!isSidebarCollapsed && <span>About Us</span>}
+            </div>
+          </button>
+
           {/* Owner-Only Super Admin Subscribers Panel */}
           {isOwnerAccount && (
             <button
@@ -6741,14 +6969,16 @@ export default function App() {
       </nav>
 
       {/* Main Container */}
-      <main className="flex-1 flex flex-col min-w-0 overflow-hidden">
+      <main className="flex-1 flex flex-col min-w-0 overflow-hidden print-unlock-overflow">
         {/* Real-Time Offline and Pending Cloud Sync Notification Banner */}
-        <OfflineSyncBanner
-          onTriggerSync={syncPendingQueueToCloud}
-          onOpenCloudSync={() => setShowCloudSyncModal(true)}
-          conflictCount={syncConflicts.length}
-          onOpenConflictAssistant={() => setIsConflictModalOpen(true)}
-        />
+        <div className="print:hidden">
+          <OfflineSyncBanner
+            onTriggerSync={syncPendingQueueToCloud}
+            onOpenCloudSync={() => setShowCloudSyncModal(true)}
+            conflictCount={syncConflicts.length}
+            onOpenConflictAssistant={() => setIsConflictModalOpen(true)}
+          />
+        </div>
 
         {/* Firestore Quota Notice Banner */}
         {isCloudQuotaExceeded && showQuotaBanner && (
@@ -6825,7 +7055,7 @@ export default function App() {
           );
         })()}
 
-        {/* Referred Merchant 45-Day Welcome Banner */}
+        {/* Referred Merchant 22-Day Welcome Banner */}
         {storeProfile?.referredBy &&
           storeProfile.planType === 'trial' &&
           welcomeBannerDismissedForStore !== storeProfile.id &&
@@ -6846,7 +7076,7 @@ export default function App() {
                     <strong className="text-amber-300">
                       {storeProfile.referredByStoreName || 'a fellow merchant'}
                     </strong>{' '}
-                    — enjoy <strong className="text-emerald-300">45 Days Free Trial</strong> (+15 extra days)!
+                    — enjoy <strong className="text-emerald-300">22 Days Free Trial</strong> (+15 extra days)!
                   </span>
                 </div>
                 <button
@@ -6899,7 +7129,7 @@ export default function App() {
 
         {/* Responsive Mobile Top Header for Smartphones & Tablets (hidden on Menu tab which has its own compact header) */}
         {activeTab !== 'menu' && (
-        <div className="lg:hidden bg-slate-900 border-b border-slate-800 shrink-0 z-20 text-white">
+        <div className="print:hidden lg:hidden bg-slate-900 border-b border-slate-800 shrink-0 z-20 text-white">
           {/* Primary Row: Main Menu (left), Brand, and Quick Actions (right) */}
           <div className="px-3 py-2 flex items-center justify-between gap-2 overflow-hidden">
             <div className="flex items-center gap-2 min-w-0 flex-1 overflow-hidden">
@@ -7066,7 +7296,7 @@ export default function App() {
         )}
 
         {/* Top Header Stats Bar for Desktop & Laptop Viewports */}
-        <header className="hidden lg:flex min-h-16 h-auto py-2.5 lg:h-20 bg-white border-b border-slate-200 items-center justify-between px-4 xl:px-8 shrink-0 shadow-sm z-10 gap-3">
+        <header className="print:hidden hidden lg:flex min-h-16 h-auto py-2.5 lg:h-20 bg-white border-b border-slate-200 items-center justify-between px-4 xl:px-8 shrink-0 shadow-sm z-10 gap-3">
           <div className="flex items-center gap-4 xl:gap-8 min-w-0">
             <div className="flex flex-col shrink-0">
               <span className="text-[10px] xl:text-[11px] text-slate-500 uppercase tracking-widest font-bold">
@@ -7364,7 +7594,7 @@ export default function App() {
 
         {/* Dynamic Workspace Canvas for Computer Format */}
         <div
-          className={`flex-1 min-h-0 overflow-y-auto ${
+          className={`flex-1 min-h-0 overflow-y-auto print-unlock-overflow ${
             activeTab === 'pos' && isMobileSearchActive ? 'pb-4 lg:pb-0' : 'pb-28 lg:pb-0'
           } ${
             activeTab === 'menu'
@@ -7376,35 +7606,37 @@ export default function App() {
         </div>
 
         {/* Floating 9-Dot Shortcuts & Calculator Suite Trigger */}
-        <MobileQuickToolsBar
-          placement="responsiveMobile"
-          hidden={shouldHideMobileQuickTools}
-          activeTab={activeTab}
-          onMakeSale={handleMobileMakeSaleBarClick}
-          onNavigateTab={(tab) => setActiveTab(tab)}
-          onOpenAiAssistant={() => setShowAiAssistantModal(true)}
-          onOpenStoreManager={() => setShowStoreManagerModal(true)}
-          activeStoreName={stores.find((s) => s.id === activeStoreId)?.name || storeProfile?.storeName || 'Rofani POS'}
-          stores={stores}
-          activeStoreId={activeStoreId}
-          onSelectActiveStore={(id) => setActiveStoreId(id)}
-          onUseCalcAmountInPos={(_amt) => {
-            setActiveTab('pos');
-          }}
-          onOpenBarcodeScanner={handleMobileOpenBarcodeScanner}
-          onScanManualBarcode={handleMobileManualBarcode}
-          onOpenAiScanner={handleMobileOpenAiScanner}
-          onApplyQuickDiscount={handleMobileApplyQuickDiscount}
-          onClearQuickDiscount={handleMobileClearQuickDiscount}
-          cartSummary={mobileCartSummary}
-          canGiveDiscounts={hasWorkerPermission(currentUser, 'canGiveDiscounts')}
-        />
+        <div className="print:hidden">
+          <MobileQuickToolsBar
+            placement="responsiveMobile"
+            hidden={shouldHideMobileQuickTools}
+            activeTab={activeTab}
+            onMakeSale={handleMobileMakeSaleBarClick}
+            onNavigateTab={(tab) => setActiveTab(tab)}
+            onOpenAiAssistant={() => setShowAiAssistantModal(true)}
+            onOpenStoreManager={() => setShowStoreManagerModal(true)}
+            activeStoreName={stores.find((s) => s.id === activeStoreId)?.name || storeProfile?.storeName || 'Rofani POS'}
+            stores={stores}
+            activeStoreId={activeStoreId}
+            onSelectActiveStore={(id) => setActiveStoreId(id)}
+            onUseCalcAmountInPos={(_amt) => {
+              setActiveTab('pos');
+            }}
+            onOpenBarcodeScanner={handleMobileOpenBarcodeScanner}
+            onScanManualBarcode={handleMobileManualBarcode}
+            onOpenAiScanner={handleMobileOpenAiScanner}
+            onApplyQuickDiscount={handleMobileApplyQuickDiscount}
+            onClearQuickDiscount={handleMobileClearQuickDiscount}
+            cartSummary={mobileCartSummary}
+            canGiveDiscounts={hasWorkerPermission(currentUser, 'canGiveDiscounts')}
+          />
+        </div>
 
         {/* Fixed 5-Tab Dark Bottom Navigation Bar (Mobile Screens — hidden when POS search keyboard is active) */}
         {!(activeTab === 'pos' && isMobileSearchActive) && (
         <nav
           aria-label="Mobile Bottom Navigation"
-          className="lg:hidden fixed bottom-0 left-0 right-0 z-50 min-h-16 bg-slate-900 border-t border-slate-800 px-1 pt-1 pb-safe grid grid-cols-5 items-center"
+          className="print:hidden lg:hidden fixed bottom-0 left-0 right-0 z-50 min-h-16 bg-slate-900 border-t border-slate-800 px-1 pt-1 pb-safe grid grid-cols-5 items-center"
         >
           <button
             type="button"
@@ -7479,7 +7711,7 @@ export default function App() {
         )}
 
         {/* Bottom Status & Quick Action Bar (Desktop Screens) */}
-        <footer className="hidden lg:flex h-12 bg-white border-t border-slate-200 items-center px-6 justify-between shrink-0 text-xs font-semibold text-slate-600">
+        <footer className="print:hidden hidden lg:flex h-12 bg-white border-t border-slate-200 items-center px-6 justify-between shrink-0 text-xs font-semibold text-slate-600">
           <div className="flex items-center gap-5">
             <button
               onClick={() => setActiveTab('reports')}
@@ -7785,6 +8017,56 @@ export default function App() {
           </button>
         </div>
       )}
+
+      {/* Live Sale & Edit/Delete Protection Alert Banner (Desktop Mode) */}
+      {activityAlertBanner && (
+        <div
+          className={`fixed top-16 left-1/2 -translate-x-1/2 z-[265] w-[calc(100%-2rem)] max-w-md rounded-2xl p-3.5 shadow-2xl border flex items-start gap-3 text-xs ${
+            activityAlertBanner.severity === 'danger'
+              ? 'bg-rose-950/95 border-rose-500/60 text-rose-100'
+              : activityAlertBanner.severity === 'warning'
+              ? 'bg-amber-950/95 border-amber-500/60 text-amber-100'
+              : 'bg-slate-900/95 border-emerald-500/50 text-emerald-100'
+          }`}
+        >
+          <div className="flex-1 min-w-0">
+            <div className="font-extrabold">{activityAlertBanner.title}</div>
+            <div className="text-[11px] opacity-90 mt-0.5">{activityAlertBanner.message}</div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setActivityAlertBanner(null)}
+            className="p-1 rounded-lg hover:bg-black/25 text-slate-300 hover:text-white cursor-pointer"
+            aria-label="Dismiss alert"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
+      <ShopQrShareModal
+        isOpen={showShopQrModal}
+        onClose={() => setShowShopQrModal(false)}
+        storeName={stores.find((s) => s.id === activeStoreId)?.name || storeProfile?.storeName || 'Rofani POS'}
+        storeId={resolvedSettingsStoreId}
+        referralCode={storeProfile?.referralCode}
+      />
+
+      <DailyEndOfDaySummaryModal
+        isOpen={show9PmSummaryModal}
+        onClose={() => setShow9PmSummaryModal(false)}
+        onDismissForToday={() => {
+          const now = new Date();
+          const key = `rofani_9pm_dismissed_${resolvedSettingsStoreId}_${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+          safeSetJSON(key, true);
+          setShow9PmSummaryModal(false);
+        }}
+        storeName={stores.find((s) => s.id === activeStoreId)?.name || storeProfile?.storeName || 'Rofani POS'}
+        transactions={transactions}
+        expenses={expenses}
+        restockRecords={restockRecords}
+        canViewProfit={canViewGrossProfit(currentUser)}
+      />
 
       {/* Automatic Camera Authorization on App Launch */}
       <CameraStartupPrompt />

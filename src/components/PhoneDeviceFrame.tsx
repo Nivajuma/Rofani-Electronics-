@@ -107,16 +107,16 @@ export const PhoneDeviceFrame: React.FC<PhoneDeviceFrameProps> = ({
       : '';
 
   return (
-    <div className="min-h-dvh h-dvh sm:h-auto sm:min-h-dvh bg-slate-900 sm:bg-slate-950 text-slate-100 flex flex-col items-center justify-center p-0 sm:py-4 sm:px-4 overflow-hidden sm:overflow-x-hidden selection:bg-blue-600 selection:text-white relative">
+    <div className="min-h-dvh h-dvh sm:h-auto sm:min-h-dvh bg-slate-900 sm:bg-slate-950 text-slate-100 flex flex-col items-center justify-center p-0 sm:py-4 sm:px-4 overflow-hidden sm:overflow-x-hidden selection:bg-blue-600 selection:text-white relative print-unlock-overflow">
       {/* SMARTPHONE DEVICE CONTAINER FRAME */}
       <div
-        className={`relative transition-all duration-300 ease-in-out bg-slate-900 border-0 sm:border-[12px] border-slate-800 rounded-none sm:rounded-[52px] shadow-2xl shadow-blue-900/30 overflow-hidden flex flex-col ${getFrameDimensions()}`}
+        className={`relative transition-all duration-300 ease-in-out bg-slate-900 border-0 sm:border-[12px] border-slate-800 rounded-none sm:rounded-[52px] shadow-2xl shadow-blue-900/30 overflow-hidden flex flex-col print-unlock-overflow ${getFrameDimensions()}`}
         style={{
           boxShadow: '0 25px 60px -15px rgba(0, 0, 0, 0.8), inset 0 0 0 2px rgba(255, 255, 255, 0.08)'
         }}
       >
         {/* SINGLE COMPACT MOBILE HEADER */}
-        <header className="bg-slate-900 border-b border-slate-800 py-2 px-3 flex items-center justify-between gap-2 shrink-0 z-30">
+        <header className="print:hidden bg-slate-900 border-b border-slate-800 py-2 px-3 flex items-center justify-between gap-2 shrink-0 z-30">
           <div className="flex items-center gap-2.5 min-w-0 flex-1">
             <div className="w-8 h-8 rounded-full bg-slate-800 border border-slate-700/80 flex items-center justify-center text-sky-400 shrink-0">
               <Store className="w-4 h-4" />
@@ -199,7 +199,7 @@ export const PhoneDeviceFrame: React.FC<PhoneDeviceFrameProps> = ({
         {cloudSyncStatus === 'quota_exceeded' && onOpenCloudSync && (
           <div
             onClick={onOpenCloudSync}
-            className="bg-amber-500 hover:bg-amber-400 text-slate-950 px-3 py-1.5 text-[11px] font-bold flex items-center justify-between shrink-0 cursor-pointer shadow-sm transition"
+            className="print:hidden bg-amber-500 hover:bg-amber-400 text-slate-950 px-3 py-1.5 text-[11px] font-bold flex items-center justify-between shrink-0 cursor-pointer shadow-sm transition"
             title="Click to view Cloud Quota status & upgrade info"
           >
             <span className="flex items-center gap-1.5 truncate">
@@ -211,7 +211,7 @@ export const PhoneDeviceFrame: React.FC<PhoneDeviceFrameProps> = ({
         )}
 
         {/* Sticky Offline Notification Banner (only renders space when offline/pending) */}
-        <div className="empty:hidden bg-slate-950 px-3 pt-1.5 shrink-0 z-20">
+        <div className="print:hidden empty:hidden bg-slate-950 px-3 pt-1.5 shrink-0 z-20">
           <OfflineSyncBanner
             compact
             onTriggerSync={onTriggerSync}
@@ -223,7 +223,7 @@ export const PhoneDeviceFrame: React.FC<PhoneDeviceFrameProps> = ({
 
         {/* MOBILE MAIN VIEWPORT CONTENT CONTAINER */}
         <div
-          className={`flex-1 min-h-0 overflow-y-auto bg-[#0f172a] text-slate-100 p-3 sm:p-4 scrollbar-thin scrollbar-thumb-slate-800 ${
+          className={`flex-1 min-h-0 overflow-y-auto bg-[#0f172a] text-slate-100 p-3 sm:p-4 scrollbar-thin scrollbar-thumb-slate-800 print-unlock-overflow ${
             hideBottomNav ? 'pb-6' : 'pb-28'
           }`}
         >
@@ -231,16 +231,16 @@ export const PhoneDeviceFrame: React.FC<PhoneDeviceFrameProps> = ({
         </div>
 
         {/* FLOATING QUICK TOOLS & MAKE SALE BAR */}
-        {!hideBottomNav && quickToolsBar}
+        {!hideBottomNav && <div className="print:hidden">{quickToolsBar}</div>}
 
         {/* PORTAL ROOT FOR POS FLOATING CART PILL & SLIDE-UP DRAWER */}
-        <div id="phone-frame-overlay-root" className="pointer-events-none absolute inset-0 z-[105]" />
+        <div id="phone-frame-overlay-root" className="print:hidden pointer-events-none absolute inset-0 z-[105]" />
 
         {/* TOUCH-OPTIMIZED 5-TAB DARK MOBILE BOTTOM NAVIGATION BAR */}
         {!hideBottomNav && (
         <nav
           aria-label="Mobile Bottom Navigation"
-          className="absolute bottom-0 left-0 right-0 z-50 min-h-16 bg-slate-900/95 backdrop-blur-md border-t border-slate-800 px-1 pt-1 pb-safe grid grid-cols-5 items-center shrink-0"
+          className="print:hidden absolute bottom-0 left-0 right-0 z-50 min-h-16 bg-slate-900/95 backdrop-blur-md border-t border-slate-800 px-1 pt-1 pb-safe grid grid-cols-5 items-center shrink-0"
         >
           <button
             type="button"
@@ -300,7 +300,7 @@ export const PhoneDeviceFrame: React.FC<PhoneDeviceFrameProps> = ({
       </div>
 
       {/* FLOATING QUICK-SWITCH BUTTON ON DESKTOP SIMULATOR VIEWPORTS */}
-      <div className="hidden sm:block fixed bottom-5 right-5 z-50">
+      <div className="print:hidden hidden sm:block fixed bottom-5 right-5 z-50">
         <button
           type="button"
           id="btn-floating-switch-to-computer"

@@ -68,6 +68,7 @@ export const PredictiveRestockModal: React.FC<PredictiveRestockModalProps> = ({
   const [editableQtys, setEditableQtys] = useState<Record<string, number>>({});
   const [aiReport, setAiReport] = useState<AiStrategyReport | null>(null);
   const [loadingAi, setLoadingAi] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
   const [restockedIds, setRestockedIds] = useState<Set<string>>(new Set());
 
   // 1. Calculate Replenishment Plan from actual inventory & transactions
@@ -93,6 +94,9 @@ export const PredictiveRestockModal: React.FC<PredictiveRestockModalProps> = ({
 
   const fetchAiForecast = async () => {
     setLoadingAi(true);
+    setAiError(null);
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), 28000);
     try {
       const response = await fetch('/api/ai/replenishment-forecast', {
         method: 'POST',
@@ -103,15 +107,24 @@ export const PredictiveRestockModal: React.FC<PredictiveRestockModalProps> = ({
           storeName,
           targetDaysCover,
         }),
+        signal: controller.signal,
       });
 
-      if (response.ok) {
-        const data = await response.json();
+      const data = await response.json().catch(() => null);
+      if (response.ok && data) {
         setAiReport(data);
+      } else {
+        setAiError(data?.error || `Unable to load AI strategy briefing (HTTP ${response.status}).`);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.warn('Could not fetch AI forecast:', err);
+      setAiError(
+        err?.name === 'AbortError'
+          ? 'AI forecast timed out. Tap Refresh AI Strategy to try again.'
+          : 'Could not reach AI forecast service. Please try again.'
+      );
     } finally {
+      window.clearTimeout(timeoutId);
       setLoadingAi(false);
     }
   };
@@ -392,6 +405,18 @@ export const PredictiveRestockModal: React.FC<PredictiveRestockModalProps> = ({
         </div>
 
         {/* AI Strategic Intelligence Banner */}
+        {aiError && !aiReport && !loadingAi && (
+          <div className="px-4 sm:px-5 py-3 bg-rose-950/30 border-b border-rose-500/30 flex items-center justify-between gap-3 text-xs text-rose-200">
+            <span>{aiError}</span>
+            <button
+              type="button"
+              onClick={fetchAiForecast}
+              className="px-3 py-1 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 border border-rose-500/40 text-rose-100 font-bold shrink-0 transition"
+            >
+              Retry AI Briefing
+            </button>
+          </div>
+        )}
         {aiReport && (
           <div className="p-4 sm:p-5 bg-gradient-to-r from-purple-950/40 via-indigo-950/40 to-slate-900 border-b border-indigo-900/50">
             <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-3 mb-2.5">

@@ -51,13 +51,28 @@ import {
   ArrowDown,
   ArrowUp
 } from 'lucide-react';
-import { Product, CartItem, Customer, PaymentMethod, PaymentBreakdown, Transaction, User as Employee, BarcodeScanLog } from '../../types';
+import {
+  Product,
+  CartItem,
+  Customer,
+  PaymentMethod,
+  PaymentBreakdown,
+  Transaction,
+  User as Employee,
+  BarcodeScanLog,
+  Expense,
+  RestockRecord,
+  OnlineOrder,
+  PurchaseOrder,
+  CashTransaction,
+} from '../../types';
 import { BarcodeScannerModal } from './BarcodeScannerModal';
 import { AiReceiptScannerModal } from './AiReceiptScannerModal';
 import { ReceiptModal } from './ReceiptModal';
 import { MpesaPromptModal } from './MpesaPromptModal';
 import { SmsDeliveryLogsModal } from './SmsDeliveryLogsModal';
 import { KraTotComplianceCenter } from '../Reports/KraTotComplianceCenter';
+import { HomepageSummaryStrip } from './HomepageSummaryStrip';
 import { isAutoSmsEnabled, setAutoSmsEnabled, sendTransactionSummarySms } from '../../utils/smsService';
 import { computeProductsPerformance, ProductPerformanceInfo } from '../../utils/salesPerformance';
 import { hasWorkerPermission } from '../../utils/permissions';
@@ -72,6 +87,11 @@ import {
   formatDocumentNumberWithPrefix,
   getLast5SalePricesForProduct,
 } from '../../utils/transactionSettings';
+import {
+  useShopProtectionSettings,
+  loadShopProtectionSettings,
+  evaluateProductExpiry,
+} from '../../utils/shopProtectionSettings';
 
 const SEARCH_RESULT_PAGE_SIZE = 25;
 const ACTIVE_SALE_DRAFT_KEY = 'retail_pos_active_sale_draft';
@@ -126,6 +146,11 @@ interface POSViewProps {
   activeStoreId?: string;
   storeKraPin?: string;
   requirePinOnStartup?: boolean;
+  expenses?: Expense[];
+  restockRecords?: RestockRecord[];
+  onlineOrders?: OnlineOrder[];
+  purchaseOrders?: PurchaseOrder[];
+  cashTransactions?: CashTransaction[];
 }
 
 export const POSView: React.FC<POSViewProps> = ({
@@ -155,8 +180,14 @@ export const POSView: React.FC<POSViewProps> = ({
   activeStoreId,
   storeKraPin,
   requirePinOnStartup = true,
+  expenses = [],
+  restockRecords = [],
+  onlineOrders = [],
+  purchaseOrders = [],
+  cashTransactions = [],
 }) => {
   const [txSettings] = useTransactionSettings(activeStoreId);
+  const [shopControls] = useShopProtectionSettings(activeStoreId);
   const isNonAdminCashierLocked =
     currentUser.role !== 'Admin' && (requirePinOnStartup || currentUser.role === 'Cashier');
   const canViewCostAndProfit = !isNonAdminCashierLocked;
@@ -234,26 +265,76 @@ export const POSView: React.FC<POSViewProps> = ({
 
   const initialSavedDraftRef = useRef<ActiveSaleDraft | null>(null);
   if (initialSavedDraftRef.current === null) {
-    initialSavedDraftRef.current = safeGetJSON<ActiveSaleDraft | null>(
-      ACTIVE_SALE_DRAFT_KEY,
-      null,
-      (val) => Boolean(val && typeof val === 'object' && Array.isArray(val.cart))
-    ) || {
-      cart: safeGetJSON<CartItem[]>('retail_pos_active_cart', [], (val) => Array.isArray(val)),
-      selectedCustomer: safeGetJSON<Customer | null>('retail_pos_active_pos_customer', null, (val) => Boolean(val && val.id)),
-      selectedCartItemId: null,
-      mobileTab: safeGetJSON<'catalog' | 'cart'>('retail_pos_pos_mobile_tab', 'catalog', (val) => val === 'catalog' || val === 'cart'),
-      discountAmount: safeGetJSON<number>('retail_pos_pos_discount_amount', 0, (val) => typeof val === 'number'),
-      discountMode: safeGetJSON<'fixed' | 'percentage'>('retail_pos_pos_discount_mode', 'fixed', (val) => val === 'fixed' || val === 'percentage'),
-      discountInputVal: safeGetJSON<string>('retail_pos_pos_discount_input', '', (val) => typeof val === 'string'),
-      saleMarkupAmount: safeGetJSON<number>('retail_pos_pos_markup_amount', 0, (val) => typeof val === 'number'),
-      saleMarkupInputVal: safeGetJSON<string>('retail_pos_pos_markup_input', '', (val) => typeof val === 'string'),
-      taxRate: safeGetJSON<number>('retail_pos_pos_tax_rate', 0, (val) => typeof val === 'number'),
-      saleNotes: safeGetJSON<string>('retail_pos_pos_sale_notes', '', (val) => typeof val === 'string'),
-      saleDate: '',
-      selectedSalesRepId: safeGetJSON<string>('retail_pos_pos_sales_rep_id', currentUser.id, (val) => typeof val === 'string'),
-      updatedAt: Date.now(),
-    };
+    const initialCartCacheEnabled = loadShopProtectionSettings(activeStoreId).enableCacheOnCart;
+    initialSavedDraftRef.current = initialCartCacheEnabled
+      ? safeGetJSON<ActiveSaleDraft | null>(
+          ACTIVE_SALE_DRAFT_KEY,
+          null,
+          (val) => Boolean(val && typeof val === 'object' && Array.isArray(val.cart))
+        ) || {
+          cart: safeGetJSON<CartItem[]>('retail_pos_active_cart', [], (val) => Array.isArray(val)),
+          selectedCustomer: safeGetJSON<Customer | null>(
+            'retail_pos_active_pos_customer',
+            null,
+            (val) => Boolean(val && val.id)
+          ),
+          selectedCartItemId: null,
+          mobileTab: safeGetJSON<'catalog' | 'cart'>(
+            'retail_pos_pos_mobile_tab',
+            'catalog',
+            (val) => val === 'catalog' || val === 'cart'
+          ),
+          discountAmount: safeGetJSON<number>(
+            'retail_pos_pos_discount_amount',
+            0,
+            (val) => typeof val === 'number'
+          ),
+          discountMode: safeGetJSON<'fixed' | 'percentage'>(
+            'retail_pos_pos_discount_mode',
+            'fixed',
+            (val) => val === 'fixed' || val === 'percentage'
+          ),
+          discountInputVal: safeGetJSON<string>(
+            'retail_pos_pos_discount_input',
+            '',
+            (val) => typeof val === 'string'
+          ),
+          saleMarkupAmount: safeGetJSON<number>(
+            'retail_pos_pos_markup_amount',
+            0,
+            (val) => typeof val === 'number'
+          ),
+          saleMarkupInputVal: safeGetJSON<string>(
+            'retail_pos_pos_markup_input',
+            '',
+            (val) => typeof val === 'string'
+          ),
+          taxRate: safeGetJSON<number>('retail_pos_pos_tax_rate', 0, (val) => typeof val === 'number'),
+          saleNotes: safeGetJSON<string>('retail_pos_pos_sale_notes', '', (val) => typeof val === 'string'),
+          saleDate: '',
+          selectedSalesRepId: safeGetJSON<string>(
+            'retail_pos_pos_sales_rep_id',
+            currentUser.id,
+            (val) => typeof val === 'string'
+          ),
+          updatedAt: Date.now(),
+        }
+      : {
+          cart: [],
+          selectedCustomer: null,
+          selectedCartItemId: null,
+          mobileTab: 'catalog',
+          discountAmount: 0,
+          discountMode: 'fixed',
+          discountInputVal: '',
+          saleMarkupAmount: 0,
+          saleMarkupInputVal: '',
+          taxRate: 0,
+          saleNotes: '',
+          saleDate: '',
+          selectedSalesRepId: currentUser.id,
+          updatedAt: Date.now(),
+        };
   }
 
   // Mobile responsive view mode ('catalog' or 'cart') for effortless mobile POS operation
@@ -628,6 +709,13 @@ export const POSView: React.FC<POSViewProps> = ({
   const [adminAuthError, setAdminAuthError] = useState<string>('');
   const [supervisorDiscountMode, setSupervisorDiscountMode] = useState<'fixed' | 'percentage'>('fixed');
   const [tempDiscountVal, setTempDiscountVal] = useState<number>(100);
+
+  // Guard state for selling below buying price when shopControls.canSellBelowBuyingPrice is OFF
+  const [belowCostOverrideAuthorizedBy, setBelowCostOverrideAuthorizedBy] = useState<string | null>(null);
+  const [showBelowCostOverrideModal, setShowBelowCostOverrideModal] = useState(false);
+  const [belowCostPinInput, setBelowCostPinInput] = useState('');
+  const [belowCostPinError, setBelowCostPinError] = useState('');
+  const [pendingBelowCostPayments, setPendingBelowCostPayments] = useState<PaymentBreakdown[] | undefined>(undefined);
 
   // Sales Representative Attributed to this Sale (defaults to current logged-in user)
   const [selectedSalesRepId, setSelectedSalesRepId] = useState<string>(
@@ -1127,8 +1215,16 @@ export const POSView: React.FC<POSViewProps> = ({
     updatedAt: Date.now(),
   };
 
-  // Persist unified draft immediately whenever any cart item, custom price, customer, or active tab state changes
+  // Persist unified draft immediately when Cache on Cart is enabled; otherwise clear stale cache keys
   useEffect(() => {
+    if (!shopControls.enableCacheOnCart) {
+      safeRemove(ACTIVE_SALE_DRAFT_KEY);
+      safeRemove('retail_pos_active_cart');
+      safeRemove('retail_pos_active_pos_customer');
+      safeRemove('retail_pos_pos_discount_amount');
+      safeRemove('retail_pos_pos_discount_input');
+      return;
+    }
     safeSetJSON(ACTIVE_SALE_DRAFT_KEY, {
       cart,
       selectedCustomer,
@@ -1146,6 +1242,7 @@ export const POSView: React.FC<POSViewProps> = ({
       updatedAt: Date.now(),
     } satisfies ActiveSaleDraft);
   }, [
+    shopControls.enableCacheOnCart,
     cart,
     selectedCustomer,
     selectedCartItemId,
@@ -1164,6 +1261,7 @@ export const POSView: React.FC<POSViewProps> = ({
   // Flush unsaved draft on sleep/background (`visibilityState === 'hidden'`) & refresh Firestore on wake (`visible`)
   useEffect(() => {
     const flushActiveDraftToStorage = () => {
+      if (!shopControls.enableCacheOnCart) return;
       try {
         const snapshot = {
           ...latestDraftRef.current,
@@ -1181,7 +1279,7 @@ export const POSView: React.FC<POSViewProps> = ({
         flushActiveDraftToStorage();
       } else if (document.visibilityState === 'visible') {
         // Guard: if browser somehow suspended and dropped in-memory cart while saved draft exists, restore without wiping
-        if (cartRef.current.length === 0) {
+        if (shopControls.enableCacheOnCart && cartRef.current.length === 0) {
           const savedDraft = safeGetJSON<ActiveSaleDraft | null>(
             ACTIVE_SALE_DRAFT_KEY,
             null,
@@ -1208,7 +1306,7 @@ export const POSView: React.FC<POSViewProps> = ({
       document.removeEventListener('visibilitychange', handlePosVisibilityChange);
       window.removeEventListener('pagehide', flushActiveDraftToStorage);
     };
-  }, []);
+  }, [shopControls.enableCacheOnCart]);
 
   const mainDateInputRef = useRef<HTMLInputElement>(null);
   const modalDateInputRef = useRef<HTMLInputElement>(null);
@@ -1361,6 +1459,21 @@ export const POSView: React.FC<POSViewProps> = ({
         return;
       }
 
+      if (shopControls.enableExpiryAlerts && product.expiryDate) {
+        const expiryInfo = evaluateProductExpiry(product.expiryDate);
+        if (expiryInfo.status === 'expired') {
+          setPosNotice({
+            type: 'warning',
+            message: `Expiry Alert: "${product.name}" expired on ${expiryInfo.formattedDate}. Inspect stock before selling.`,
+          });
+        } else if (expiryInfo.status === 'expiring_soon') {
+          setPosNotice({
+            type: 'warning',
+            message: `Expiring Soon: "${product.name}" expires in ${expiryInfo.daysRemaining} day(s) (${expiryInfo.formattedDate}).`,
+          });
+        }
+      }
+
       setSelectedCartItemId(product.id);
       playItemSelectAudioCue();
 
@@ -1397,7 +1510,7 @@ export const POSView: React.FC<POSViewProps> = ({
         }
       });
     },
-    [playItemSelectAudioCue]
+    [playItemSelectAudioCue, shopControls.enableExpiryAlerts]
   );
 
   // Barcode Scanned Handler with smart normalization (trim, leading zeros, UPC/EAN, and QR audit links)
@@ -1992,11 +2105,42 @@ export const POSView: React.FC<POSViewProps> = ({
     }
   };
 
+  // Items currently priced below buying cost (for Margin Protection)
+  const belowCostCartItems = React.useMemo(() => {
+    return cart.filter((item) => {
+      const cost = Number(item.product.costPrice) || 0;
+      if (cost <= 0) return false;
+      const netUnitRate = item.unitPrice - (item.discount || 0);
+      return netUnitRate < cost;
+    });
+  }, [cart]);
+
+  useEffect(() => {
+    if (belowCostCartItems.length === 0 && belowCostOverrideAuthorizedBy) {
+      setBelowCostOverrideAuthorizedBy(null);
+    }
+  }, [belowCostCartItems.length, belowCostOverrideAuthorizedBy]);
+
   // Process Final Sale (supports optional direct override payments e.g. 1-tap Mobile Cash checkout)
-  const handleFinalizeSale = (overridePayments?: PaymentBreakdown[] | unknown) => {
+  const handleFinalizeSale = (overridePayments?: PaymentBreakdown[] | unknown, skipBelowCostGuard?: boolean) => {
     if (!cart || cart.length === 0) {
       setPosNotice({ message: 'Cannot complete sale: Receipt cart is empty. Please add items first.', type: 'warning' });
       setShowCheckoutModal(false);
+      return;
+    }
+
+    if (
+      !skipBelowCostGuard &&
+      !shopControls.canSellBelowBuyingPrice &&
+      belowCostCartItems.length > 0 &&
+      !belowCostOverrideAuthorizedBy
+    ) {
+      setPendingBelowCostPayments(
+        Array.isArray(overridePayments) ? (overridePayments as PaymentBreakdown[]) : undefined
+      );
+      setBelowCostPinInput('');
+      setBelowCostPinError('');
+      setShowBelowCostOverrideModal(true);
       return;
     }
 
@@ -2393,7 +2537,7 @@ export const POSView: React.FC<POSViewProps> = ({
                 }`}
               >
                 <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2 flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-1 min-w-0 flex-wrap">
                     {isSelected && (
                       <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-black bg-sky-500 text-slate-950 shadow-sm shrink-0 animate-pulse">
                         ● Selected
@@ -2402,6 +2546,31 @@ export const POSView: React.FC<POSViewProps> = ({
                     <h4 className={`font-bold text-xs sm:text-sm leading-snug break-words truncate ${isSelected ? 'text-sky-200 font-black' : 'text-slate-100'}`}>
                       {item.product.name}
                     </h4>
+                    {!shopControls.canSellBelowBuyingPrice &&
+                      (Number(item.product.costPrice) || 0) > 0 &&
+                      item.unitPrice - (item.discount || 0) < Number(item.product.costPrice) && (
+                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-950/90 text-rose-300 border border-rose-500/40 shrink-0">
+                          Below Buying Cost
+                        </span>
+                      )}
+                    {shopControls.enableExpiryAlerts && item.product.expiryDate && (() => {
+                      const exp = evaluateProductExpiry(item.product.expiryDate);
+                      if (exp.status === 'expired') {
+                        return (
+                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-950/90 text-rose-300 border border-rose-500/40 shrink-0">
+                            Expired ({exp.formattedDate})
+                          </span>
+                        );
+                      }
+                      if (exp.status === 'expiring_soon') {
+                        return (
+                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-950/90 text-amber-300 border border-amber-500/40 shrink-0">
+                            Expires in {exp.daysRemaining}d
+                          </span>
+                        );
+                      }
+                      return null;
+                    })()}
                   </div>
                   <button
                     onClick={(e) => {
@@ -3158,6 +3327,21 @@ export const POSView: React.FC<POSViewProps> = ({
             Local Safe Mode
           </span>
         </div>
+      )}
+
+      {/* Live Customizable Shop Summary Cards */}
+      {!isMobileSearchActive && (
+        <HomepageSummaryStrip
+          toggles={shopControls.homepageSummaryCards}
+          transactions={transactions}
+          customers={customers}
+          expenses={expenses}
+          restockRecords={restockRecords}
+          onlineOrders={onlineOrders}
+          purchaseOrders={purchaseOrders}
+          cashTransactions={cashTransactions}
+          canViewProfit={canViewCostAndProfit}
+        />
       )}
 
       {/* MOBILE SEGMENTED VIEW SWITCHER: CATALOG VS CART/CHECKOUT (Hidden while compact mobile search is active) */}
@@ -5194,6 +5378,108 @@ export const POSView: React.FC<POSViewProps> = ({
             >
               Done
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* BELOW BUYING PRICE PROTECTION PIN OVERRIDE MODAL */}
+      {showBelowCostOverrideModal && (
+        <div className="fixed inset-0 z-[140] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-rose-500/40 rounded-2xl w-full max-w-sm p-5 shadow-2xl space-y-4">
+            <div className="flex items-start justify-between gap-2 border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-rose-500/15 border border-rose-500/35 text-rose-400 flex items-center justify-center shrink-0">
+                  <Lock className="w-4 h-4" />
+                </div>
+                <div>
+                  <h4 className="font-extrabold text-sm text-white">Below Buying Price Protected</h4>
+                  <p className="text-[11px] text-slate-400">
+                    {belowCostCartItems.length} item(s) priced below buying cost
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowBelowCostOverrideModal(false)}
+                className="p-1 text-slate-400 hover:text-white rounded-lg cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="bg-slate-950 border border-slate-800 rounded-xl p-3 space-y-1.5 max-h-36 overflow-y-auto text-xs">
+              {belowCostCartItems.map((it) => {
+                const netPrice = it.unitPrice - (it.discount || 0);
+                return (
+                  <div key={it.product.id} className="flex items-center justify-between gap-2">
+                    <span className="text-slate-200 font-semibold truncate">{it.product.name}</span>
+                    <span className="font-mono text-[11px] text-rose-300 shrink-0">
+                      KSh {netPrice.toLocaleString()} &lt; Cost KSh {(it.product.costPrice || 0).toLocaleString()}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                const cleanPin = belowCostPinInput.trim();
+                const matchedApprover = allUsers.find(
+                  (u) =>
+                    (u.role === 'Admin' || u.role === 'Manager' || hasWorkerPermission(u, 'canGiveDiscounts')) &&
+                    u.pin === cleanPin
+                );
+                if (!matchedApprover) {
+                  setBelowCostPinError('Invalid Admin or Manager Security PIN.');
+                  return;
+                }
+                const authLabel = `${matchedApprover.name} (${matchedApprover.role})`;
+                setBelowCostOverrideAuthorizedBy(authLabel);
+                setShowBelowCostOverrideModal(false);
+                setBelowCostPinInput('');
+                setBelowCostPinError('');
+                handleFinalizeSale(pendingBelowCostPayments, true);
+              }}
+              className="space-y-3"
+            >
+              <div>
+                <label className="text-xs font-semibold text-slate-300 block mb-1">
+                  Enter Admin / Manager PIN to Authorize Sale
+                </label>
+                <input
+                  type="password"
+                  inputMode="numeric"
+                  autoFocus
+                  value={belowCostPinInput}
+                  onChange={(e) => {
+                    setBelowCostPinInput(e.target.value);
+                    setBelowCostPinError('');
+                  }}
+                  placeholder="Enter 4-digit PIN"
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-sm font-mono text-white focus:outline-none focus:border-rose-500"
+                />
+                {belowCostPinError && (
+                  <p className="text-[11px] text-rose-400 font-semibold mt-1">{belowCostPinError}</p>
+                )}
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowBelowCostOverrideModal(false)}
+                  className="flex-1 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold cursor-pointer"
+                >
+                  Adjust Prices
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold cursor-pointer"
+                >
+                  Authorize Sale
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

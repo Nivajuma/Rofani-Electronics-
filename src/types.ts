@@ -145,6 +145,7 @@ export interface Product {
   imageUrl?: string;
   storeStock?: Record<string, number>; // Mapping from store location ID to stock quantity
   kraTaxType?: KraTaxClassification;
+  expiryDate?: string; // Optional YYYY-MM-DD expiry date for perishable or tracked inventory
   createdAt: string;
   updatedAt: string;
 }
@@ -399,6 +400,10 @@ export interface Expense {
   isRecurring?: boolean;
   status?: 'Paid' | 'Due' | 'Overdue';
   updatedAt?: string;
+  workerId?: string;
+  workerName?: string;
+  entryType?: 'daily_wage' | 'salary_payout' | 'commission_payout' | 'general_expense';
+  storeId?: string;
 }
 
 export interface RestockRecord {

@@ -194,11 +194,11 @@ export const SubscriptionPlansModal: React.FC<SubscriptionPlansModalProps> = ({
   };
 
   const handleShareInviteLink = async () => {
-    const shareText = `Run your shop with Rofani POS — fast sales, live stock tracking, M-Pesa options, multi-shop support & local/email backups! Use my referral code ${referralCode} for 45 Days Free (30-day standard free trial + 15 bonus days):\n${inviteUrl}`;
+    const shareText = `Run your shop with Rofani POS — fast sales, live stock tracking, M-Pesa options, multi-shop support & local/email backups! Use my referral code ${referralCode} for 22 Days Free (7-day standard free trial + 15 bonus days):\n${inviteUrl}`;
     if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
       try {
         await navigator.share({
-          title: 'Join Rofani POS — Get 45 Days Free!',
+          title: 'Join Rofani POS — Get 22 Days Free!',
           text: shareText,
           url: inviteUrl,
         });
@@ -394,9 +394,9 @@ export const SubscriptionPlansModal: React.FC<SubscriptionPlansModalProps> = ({
     ? '3 Months Unlimited'
     : storeProfile?.planType === 'monthly'
     ? '30 Days Unlimited'
-    : storeProfile?.referredBy || (storeProfile?.trialDaysGranted && storeProfile.trialDaysGranted >= 45)
-    ? '45-Day Referral Trial'
-    : '30-Day Free Trial';
+    : storeProfile?.referredBy || (storeProfile?.trialDaysGranted && storeProfile.trialDaysGranted >= 22)
+    ? '22-Day Referral Trial'
+    : '7-Day Free Trial';
 
   const activeStoreTitle = (storeProfile?.storeName || 'Rofani POS').trim();
 
@@ -500,7 +500,7 @@ export const SubscriptionPlansModal: React.FC<SubscriptionPlansModalProps> = ({
             <span>• M-Pesa STK &amp; Till</span>
             <span>• Multi-Shop Support</span>
             <span>• Local &amp; Email Backups</span>
-            <span>• 30-Day Free Trial</span>
+            <span>• 7-Day Free Trial</span>
           </div>
 
           {/* Stacked Subscription Plan Cards */}
@@ -720,7 +720,7 @@ export const SubscriptionPlansModal: React.FC<SubscriptionPlansModalProps> = ({
                       Refer a Friend · Earn +30 Days Free!
                     </h3>
                     <p className="text-[11px] text-slate-400">
-                      Your friend gets <strong className="text-emerald-300">45 Days Free</strong> and you automatically earn <strong className="text-orange-300">+1 Month Free</strong> on signup.
+                      Your friend gets <strong className="text-emerald-300">22 Days Free</strong> and you automatically earn <strong className="text-orange-300">+1 Month Free</strong> on signup.
                     </p>
                   </div>
                 </div>

@@ -13,6 +13,8 @@ interface ExpensesViewProps {
   onDeleteExpense: (expenseId: string) => void;
   onBatchUpdateExpenses?: (expenses: Expense[]) => void;
   onOpenAuditLogs?: () => void;
+  allUsers?: User[];
+  activeStoreId?: string;
 }
 
 export const ExpensesView: React.FC<ExpensesViewProps> = ({
@@ -22,6 +24,8 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
   onDeleteExpense,
   onBatchUpdateExpenses,
   onOpenAuditLogs,
+  allUsers = [],
+  activeStoreId,
 }) => {
   const [showModal, setShowModal] = useState<boolean>(() =>
     safeGetJSON<boolean>('retail_pos_expenses_show_modal', false, (val) => typeof val === 'boolean')
@@ -93,7 +97,14 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
     safeSetJSON('retail_pos_expenses_draft_rec', recurringType);
   }, [recurringType]);
 
-  const todayStr = new Date().toISOString().slice(0, 10);
+  const localTodayYmd = (() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  })();
+  const [expenseDate, setExpenseDate] = useState<string>(localTodayYmd);
+  const [selectedWorkerId, setSelectedWorkerId] = useState<string>('');
+
+  const todayStr = localTodayYmd;
 
   // Duplicate expenses detection
   const duplicateExpenseGroups = detectDuplicateExpenses(expenses);
@@ -161,17 +172,21 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
   const handleCreateExpense = (e: React.FormEvent) => {
     e.preventDefault();
     const parsedAmt = parseFloat(amount);
-    if (!description.trim() || isNaN(parsedAmt) || parsedAmt <= 0) return;
+    const matchedWorker = category === 'Salaries' && selectedWorkerId
+      ? allUsers.find((u) => u.id === selectedWorkerId)
+      : undefined;
+    const effectiveDesc = description.trim() || (matchedWorker ? `Daily Wage - ${matchedWorker.name}` : '');
+    if (!effectiveDesc || isNaN(parsedAmt) || parsedAmt <= 0) return;
 
-    const todayStr = new Date().toISOString().slice(0, 10);
+    const chosenDate = (expenseDate || todayStr).slice(0, 10);
     const isRec = recurringType !== 'One-Time';
-    const nextDue = isRec ? computeNextDueDate(todayStr, recurringType) : undefined;
+    const nextDue = isRec ? computeNextDueDate(chosenDate, recurringType) : undefined;
 
     const newExp: Expense = {
-      id: `exp-${Date.now()}`,
-      date: todayStr,
+      id: category === 'Salaries' && matchedWorker ? `exp-wage-${Date.now()}` : `exp-${Date.now()}`,
+      date: chosenDate,
       category,
-      description: description.trim(),
+      description: effectiveDesc,
       amount: parsedAmt,
       paymentMethod,
       recordedBy: currentUser.name,
@@ -179,7 +194,9 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
       recurringType,
       isRecurring: isRec,
       nextDueDate: nextDue,
-      status: 'Paid'
+      status: 'Paid',
+      ...(matchedWorker ? { workerId: matchedWorker.id, workerName: matchedWorker.name, entryType: 'daily_wage' as const } : {}),
+      ...(activeStoreId ? { storeId: activeStoreId } : {}),
     };
 
     onAddExpense(newExp);
@@ -188,6 +205,8 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
     setAmount('');
     setReceiptNo('');
     setRecurringType('One-Time');
+    setExpenseDate(todayStr);
+    setSelectedWorkerId('');
   };
 
   const handleProcessNextCycle = (exp: Expense) => {
@@ -258,13 +277,36 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
           )}
 
           {hasWorkerPermission(currentUser, 'canAddExpenses') && (
-            <button
-              id="btn-add-expense"
-              onClick={() => setShowModal(true)}
-              className="bg-sky-600 hover:bg-sky-500 text-white font-bold px-4 py-2.5 rounded-xl text-xs transition flex items-center gap-2 shadow-lg shadow-sky-600/20"
-            >
-              <Plus className="w-4 h-4" /> Log Expense
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={() => {
+                  setCategory('Salaries');
+                  setRecurringType('One-Time');
+                  setExpenseDate(todayStr);
+                  if (allUsers.length > 0 && !selectedWorkerId) {
+                    setSelectedWorkerId(allUsers[0].id);
+                    if (!description.trim()) {
+                      setDescription(`Daily Wage - ${allUsers[0].name}`);
+                    }
+                  }
+                  setShowModal(true);
+                }}
+                className="bg-emerald-700 hover:bg-emerald-600 text-white font-bold px-3.5 py-2.5 rounded-xl text-xs transition flex items-center gap-1.5 shadow-lg cursor-pointer"
+              >
+                <Plus className="w-4 h-4" /> Log Daily Wage
+              </button>
+              <button
+                id="btn-add-expense"
+                onClick={() => {
+                  setExpenseDate(todayStr);
+                  setShowModal(true);
+                }}
+                className="bg-sky-600 hover:bg-sky-500 text-white font-bold px-4 py-2.5 rounded-xl text-xs transition flex items-center gap-2 shadow-lg shadow-sky-600/20"
+              >
+                <Plus className="w-4 h-4" /> Log Expense
+              </button>
+            </>
           )}
 
           {onOpenAuditLogs && (
@@ -609,22 +651,59 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
             </div>
 
             <form onSubmit={handleCreateExpense} className="space-y-3 text-xs">
-              <div>
-                <label className="block text-slate-400 mb-1">Expense Category *</label>
-                <select
-                  value={category}
-                  onChange={(e) => setCategory(e.target.value as any)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 focus:outline-none"
-                >
-                  <option value="Rent">Rent</option>
-                  <option value="Utilities">Utilities</option>
-                  <option value="Salaries">Salaries</option>
-                  <option value="Transport">Transport</option>
-                  <option value="Restock">Restock</option>
-                  <option value="Maintenance">Maintenance</option>
-                  <option value="Miscellaneous">Miscellaneous</option>
-                </select>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-slate-400 mb-1">Expense Date (Backdate OK) *</label>
+                  <input
+                    type="date"
+                    required
+                    value={expenseDate}
+                    onChange={(e) => setExpenseDate(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 font-mono focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-slate-400 mb-1">Expense Category *</label>
+                  <select
+                    value={category}
+                    onChange={(e) => setCategory(e.target.value as any)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 focus:outline-none"
+                  >
+                    <option value="Rent">Rent</option>
+                    <option value="Utilities">Utilities</option>
+                    <option value="Salaries">Salaries &amp; Wages</option>
+                    <option value="Transport">Transport</option>
+                    <option value="Restock">Restock</option>
+                    <option value="Maintenance">Maintenance</option>
+                    <option value="Miscellaneous">Miscellaneous</option>
+                  </select>
+                </div>
               </div>
+
+              {category === 'Salaries' && allUsers.length > 0 && (
+                <div>
+                  <label className="block text-slate-400 mb-1">Worker / Attendant (Links to Wages Report)</label>
+                  <select
+                    value={selectedWorkerId}
+                    onChange={(e) => {
+                      const nextId = e.target.value;
+                      setSelectedWorkerId(nextId);
+                      const w = allUsers.find((u) => u.id === nextId);
+                      if (w && (!description.trim() || description.startsWith('Daily Wage - '))) {
+                        setDescription(`Daily Wage - ${w.name}`);
+                      }
+                    }}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 focus:outline-none"
+                  >
+                    <option value="">General / Specify in Description</option>
+                    {allUsers.map((u) => (
+                      <option key={u.id} value={u.id}>
+                        {u.name} ({u.role})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
 
               <div>
                 <label className="block text-slate-400 mb-1">Recurring Schedule / Frequency *</label>
@@ -645,7 +724,7 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
                 <input
                   type="text"
                   required
-                  placeholder="e.g. July shop electricity & water bill"
+                  placeholder={category === 'Salaries' ? 'e.g. Daily Wage - Mary Wanjiku' : 'e.g. July shop electricity & water bill'}
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 focus:outline-none"

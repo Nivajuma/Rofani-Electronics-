@@ -1252,6 +1252,68 @@ export async function saveTransactionSettingsToCloud(
   }
 }
 
+// ---------------- SHOP PROTECTION & SUMMARY CONTROLS SYNC (stores/{storeId}/settings/shop_controls) ----------------
+
+export function subscribeToShopProtectionSettings(
+  onUpdate: (config: Record<string, any>) => void,
+  onError?: (err: any) => void,
+  storeId?: string
+) {
+  const sid = resolveCloudStoreId(storeId);
+  const path = `${getScopedCollectionPath('settings', sid)}/shop_controls`;
+  const docRef = getScopedDocRef('settings', 'shop_controls', sid);
+  return onSnapshot(
+    docRef,
+    (snapshot) => {
+      if (snapshot.exists()) {
+        onUpdate(snapshot.data() as Record<string, any>);
+      }
+    },
+    (error) => {
+      handleFirestoreError(error, OperationType.GET, path);
+      if (onError) onError(error);
+    }
+  );
+}
+
+export async function saveShopProtectionSettingsToCloud(
+  config: Record<string, any>,
+  storeId?: string
+): Promise<void> {
+  const sid = resolveCloudStoreId(storeId);
+  const scopedColPath = getScopedCollectionPath('settings', sid);
+  const path = `${scopedColPath}/shop_controls`;
+  const cleaned = cleanForFirestore({
+    ...config,
+    updatedAt: new Date().toISOString(),
+  });
+  try {
+    const docRef = getScopedDocRef('settings', 'shop_controls', sid);
+    await withFirestoreTimeout(setDoc(docRef, cleaned, { merge: true }), 'saving shop protection controls');
+  } catch (error) {
+    if (
+      !isQuotaExceededError(error) &&
+      isTransportStallError(error) &&
+      (typeof navigator === 'undefined' || navigator.onLine)
+    ) {
+      try {
+        await commitChunkViaRest(
+          scopedColPath,
+          [{ ...cleaned, id: 'shop_controls' }],
+          (item) => cleanForFirestore(item),
+          'saving shop protection controls'
+        );
+        return;
+      } catch (restError) {
+        handleFirestoreError(restError, OperationType.WRITE, path);
+        throw restError;
+      }
+    }
+    handleFirestoreError(error, OperationType.WRITE, path);
+    throw error;
+  }
+}
+
 // ---------------- USERS (STAFF & WORKERS) LIVE SYNC ----------------
 
 export function subscribeToUsers(
@@ -1408,8 +1470,8 @@ export function subscribeToStoreProfile(
   );
 }
 
-export const STANDARD_FREE_TRIAL_DAYS = 30;
-export const REFERRED_FREE_TRIAL_DAYS = 45;
+export const STANDARD_FREE_TRIAL_DAYS = 7;
+export const REFERRED_FREE_TRIAL_DAYS = 22;
 export const REFERRER_BONUS_DAYS = 30;
 
 export function normalizeReferralCode(raw: string): string {

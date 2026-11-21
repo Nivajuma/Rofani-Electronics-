@@ -131,8 +131,8 @@ export const MerchantAuthScreen: React.FC<MerchantAuthScreenProps> = ({
               <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-[11px] font-bold">
                 <Sparkles className="w-3.5 h-3.5" />
                 {referralInput.trim()
-                  ? '45-Day Free Trial (Referral Bonus Applied!)'
-                  : '30-Day Free Trial for New Shopkeepers'}
+                  ? '22-Day Free Trial (Referral Bonus Applied!)'
+                  : '7-Day Free Trial for New Shopkeepers'}
               </span>
               <h2 className="text-2xl sm:text-3xl font-extrabold text-white leading-tight">
                 Run fast sales, track live stock &amp; accept M-Pesa privately.
@@ -185,7 +185,7 @@ export const MerchantAuthScreen: React.FC<MerchantAuthScreenProps> = ({
           <div className="space-y-1.5">
             <h3 className="text-lg font-bold text-white">Sign In or Register Shop</h3>
             <p className="text-xs text-slate-400 leading-relaxed">
-              Sign in with your Google account to open your existing shop or create a brand-new private store with a 30-day free trial (45 days with a referral code).
+              Sign in with your Google account to open your existing shop or create a brand-new private store with a 7-day free trial (22 days with a referral code).
             </p>
           </div>
 
@@ -264,7 +264,7 @@ export const MerchantAuthScreen: React.FC<MerchantAuthScreenProps> = ({
               <span>What happens next?</span>
             </div>
             <p className="leading-relaxed">
-              • <strong className="text-white">New shopkeepers:</strong> Enter your Store Name, Phone &amp; optional M-Pesa Till/Paybill to start your {referralInput.trim() ? '45-day referral trial' : '30-day free trial'} immediately.
+              • <strong className="text-white">New shopkeepers:</strong> Enter your Store Name, Phone &amp; optional M-Pesa Till/Paybill to start your {referralInput.trim() ? '22-day referral trial' : '7-day free trial'} immediately.
             </p>
             <p className="leading-relaxed">
               • <strong className="text-white">Existing owners:</strong> Your private store catalog, sales &amp; settings load automatically.

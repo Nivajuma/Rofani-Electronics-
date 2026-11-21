@@ -2,7 +2,7 @@ import express from 'express';
 import http from 'http';
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
-import { GoogleGenAI, Type } from '@google/genai';
+import { GoogleGenAI, ThinkingLevel, Type } from '@google/genai';
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -17,11 +17,12 @@ async function startServer() {
 
   // Initialize Gemini AI Client
   const getGeminiClient = () => {
-    const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY || process.env.VITE_GEMINI_API_KEY;
+    const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
     if (!apiKey) return null;
     return new GoogleGenAI({
       apiKey,
       httpOptions: {
+        timeout: 18000,
         headers: {
           'User-Agent': 'aistudio-build',
         },
@@ -29,58 +30,146 @@ async function startServer() {
     });
   };
 
-  // Helper to generate content using recommended Gemini models with automatic retry & fallback on transient 503 / 429 errors
+  // Map upstream Gemini errors to clear HTTP status & user-actionable error messages
+  const mapGeminiHttpError = (err: any, fallbackMessage: string): { status: number; error: string } => {
+    const errMsg = String(err?.message || '');
+    const rawStatus = Number(err?.status || err?.code || 0);
+    const name = String(err?.name || '');
+
+    if (
+      name === 'TimeoutError' ||
+      name === 'AbortError' ||
+      /timeout|timed out|aborted/i.test(errMsg)
+    ) {
+      return {
+        status: 504,
+        error: 'The AI service took too long to respond. Please tap retry in a moment.',
+      };
+    }
+
+    if (rawStatus === 403 || /PERMISSION_DENIED/i.test(errMsg)) {
+      return {
+        status: 403,
+        error: 'Gemini API permission denied. Please check your GEMINI_API_KEY in Settings > Secrets.',
+      };
+    }
+
+    if (rawStatus === 400 && /API_KEY_INVALID|API key not valid/i.test(errMsg)) {
+      return {
+        status: 400,
+        error: 'The configured GEMINI_API_KEY appears invalid. Please update it in Settings > Secrets.',
+      };
+    }
+
+    if (
+      rawStatus === 429 ||
+      /RESOURCE_EXHAUSTED|ResourceExhausted|rate[\s_-]*exceeded|rate[\s_-]*limit|too many requests|quota/i.test(
+        errMsg
+      )
+    ) {
+      return {
+        status: 429,
+        error:
+          'AI assistant is busy right now due to high traffic/rate limits. Please wait a moment and tap Retry.',
+      };
+    }
+
+    if (rawStatus === 404 || /NOT_FOUND|is not found/i.test(errMsg)) {
+      return {
+        status: 404,
+        error: errMsg || 'Requested AI model could not be found.',
+      };
+    }
+
+    if (rawStatus === 503 || /UNAVAILABLE|high demand/i.test(errMsg)) {
+      return {
+        status: 503,
+        error: 'AI service is temporarily busy. Please try again shortly.',
+      };
+    }
+
+    return {
+      status: 502,
+      error: errMsg || fallbackMessage,
+    };
+  };
+
+  // Helper to generate content using recommended Gemini models with low-latency thinking, bounded timeouts, and fallback
   const generateContentWithFallback = async (
     ai: GoogleGenAI,
     requestParams: {
       contents: any;
       config?: any;
+      timeoutMs?: number;
     }
   ) => {
-    // Try recommended gemini-4-hydrogen first, then fallback to gemini-3.1-flash-lite
+    // Try recommended gemini-4-hydrogen (with ThinkingLevel.LOW for fast responsiveness), then fallback to gemini-3.1-flash-lite
     const candidateModels = ['gemini-4-hydrogen', 'gemini-3.1-flash-lite'];
+    const perAttemptTimeoutMs = requestParams.timeoutMs || 15000;
     let lastError: any = null;
 
     for (const model of candidateModels) {
-      for (let attempt = 1; attempt <= 2; attempt++) {
-        try {
-          const response = await ai.models.generateContent({
-            model,
-            contents: requestParams.contents,
-            config: requestParams.config,
-          });
-          return response;
-        } catch (err: any) {
-          lastError = err;
-          const errMsg = err?.message || '';
-          const status = err?.status || err?.code || (errMsg.includes('503') ? 503 : errMsg.includes('429') ? 429 : 0);
-          const isTransient =
-            status === 503 ||
-            status === 429 ||
-            errMsg.includes('high demand') ||
-            errMsg.includes('UNAVAILABLE') ||
-            errMsg.includes('ResourceExhausted') ||
-            errMsg.includes('RESOURCE_EXHAUSTED') ||
-            errMsg.includes('temporarily unavailable');
-
-          if (isTransient) {
-            if (attempt === 1) {
-              // Wait 600ms before second attempt
-              await new Promise((resolve) => setTimeout(resolve, 600));
-              continue;
-            } else {
-              console.warn(`[Gemini API] Model ${model} is experiencing high demand (attempt ${attempt}). Trying fallback model...`);
-              break; // Try next candidate model
-            }
-          } else {
-            // If model is not available/supported, fall through to next model
-            if (status === 404 || errMsg.includes('not found') || errMsg.includes('is not supported')) {
-              console.warn(`[Gemini API] Model ${model} unavailable (${errMsg}). Trying fallback model...`);
-              break;
-            }
-            throw err;
-          }
+      const attemptTimeoutMs =
+        requestParams.timeoutMs || (model === 'gemini-4-hydrogen' ? 8000 : 15000);
+      try {
+        const baseConfig = requestParams.config ? { ...requestParams.config } : {};
+        if (!baseConfig.abortSignal) {
+          baseConfig.abortSignal = AbortSignal.timeout(attemptTimeoutMs);
         }
+        // Avoid default ThinkingLevel.HIGH multi-second reasoning stalls on interactive requests
+        if (model === 'gemini-4-hydrogen' && !baseConfig.thinkingConfig) {
+          baseConfig.thinkingConfig = { thinkingLevel: ThinkingLevel.LOW };
+        }
+
+        const response = await ai.models.generateContent({
+          model,
+          contents: requestParams.contents,
+          config: baseConfig,
+        });
+        return response;
+      } catch (err: any) {
+        lastError = err;
+        const errMsg = String(err?.message || '');
+        const name = String(err?.name || '');
+        const status = Number(
+          err?.status || err?.code || (errMsg.includes('503') ? 503 : errMsg.includes('429') ? 429 : 0)
+        );
+        const isTimeout =
+          name === 'TimeoutError' ||
+          name === 'AbortError' ||
+          /timeout|timed out|aborted/i.test(errMsg);
+        const isRateLimit =
+          status === 429 ||
+          /RESOURCE_EXHAUSTED|ResourceExhausted|rate[\s_-]*exceeded|rate[\s_-]*limit|too many requests|quota/i.test(
+            errMsg
+          );
+        const isTransient =
+          status === 503 ||
+          errMsg.includes('high demand') ||
+          errMsg.includes('UNAVAILABLE') ||
+          errMsg.includes('temporarily unavailable');
+
+        if (isTimeout) {
+          console.warn(`[Gemini API] Model ${model} timed out after ${attemptTimeoutMs}ms (limit ${perAttemptTimeoutMs}ms). Switching to fallback model...`);
+          continue;
+        }
+
+        if (isRateLimit) {
+          console.warn(`[Gemini API] Model ${model} hit rate limit (429). Switching to fallback model once...`);
+          continue;
+        }
+
+        if (isTransient) {
+          console.warn(`[Gemini API] Model ${model} temporarily busy (${status || 'transient'}). Trying fallback model...`);
+          continue;
+        }
+
+        if (status === 404 || errMsg.includes('not found') || errMsg.includes('is not supported')) {
+          console.warn(`[Gemini API] Model ${model} unavailable (${errMsg}). Trying fallback model...`);
+          continue;
+        }
+
+        throw err;
       }
     }
 
@@ -163,7 +252,13 @@ async function startServer() {
   // API Endpoint: AI Multimodal Product Camera Identification with Local Catalog Context Matching (0 Firestore Reads)
   app.post('/api/ai/identify-product', async (req, res) => {
     try {
-      const { imageBase64, existingProducts, fileName, storeCategories } = req.body || {};
+      const {
+        imageBase64,
+        existingProducts,
+        fileName,
+        storeCategories,
+        allowPartialOnUnclear = false,
+      } = req.body || {};
 
       if (!imageBase64 || typeof imageBase64 !== 'string') {
         res.status(400).json({ error: 'imageBase64 is required' });
@@ -234,28 +329,30 @@ async function startServer() {
         catalogContextStr = `\nExisting Local Product Catalog (Total: ${existingProducts.length} items):\n${sample}\n\nIf the photographed item clearly matches an existing item above, set "isExistingMatch": true, "matchedProductId" to its ID, and match its exact name/price unless a new price sticker is visible.\n`;
       }
 
-      const prompt = `Inspect this product photo carefully for a retail shop in Kenya ("Rofani Electronics & Boutique").
-Read EVERY visible word, brand logo, model number, size/volume/wattage/capacity label, barcode digits, and price sticker in the image.
+      const prompt = `Inspect this product photo carefully for a retail shop in Kenya ("Rofani POS").
+Read EVERY visible word, brand logo, model number, size/volume/wattage/capacity label, barcode/SKU digits, and price sticker in the image.
 
-Select "category" strictly from this store category list:
+Select "category" strictly from this store category list whenever possible:
 ${allowedCategories.map((c) => `- ${c}`).join('\n')}
 ${catalogContextStr}
 ${fileName && !/^(Camera_Product|IMG|PXL|PHOTO|Screenshot)/i.test(fileName) ? `Original file/photo label hint: "${fileName}"\n` : ''}
 CRITICAL REQUIREMENTS:
 1. "name": Exact, specific product name including brand, model, variant, color, or capacity visible in the photo (e.g. "Samsung 25W USB-C Super Fast Wall Charger", "Oraimo FreePods 4 ANC Earbuds - Black", "Nivea Perfect & Radiant Body Lotion 400ml", "Ramtons RM/329 Cordless Kettle 1.7L", "Men Slim Fit Stretch Jeans - Dark Blue").
-   NEVER return vague labels like "Household Product", "New Household Product", "Scanned Item", "Unknown Product", or "Item".
-2. "category": Must be one exact category from the store category list above matching what is actually shown in the photo.
+   If the photo is too blurry, dark, or obstructed to read clearly, set "isUnclearImage": true, explain why briefly in "clarityMessage", and leave "name" empty "" or provide only a verified visible partial name — NEVER invent random text.
+2. "category": Exact category from the store category list above matching what is shown.
 3. "subcategory": Specific subcategory matching the category (e.g. "Audio & Earbuds", "Chargers & Cables", "Skincare & Lotions", "Kitchen Appliances", "Footwear").
 4. "sizeCapacity": Exact size, capacity, wattage, storage, volume, or apparel/shoe size visible or standard for the item (e.g. "400ml", "1.7L", "25W", "128GB", "Size 42", "Standard").
-5. "unit": Retail selling unit (e.g. "pcs", "pack", "bottle", "pair", "box").
-6. "suggestedPriceKSh": If a price tag/sticker is visible in the photo, use that exact number. Otherwise estimate a realistic Kenyan retail selling price in KSh specifically for THIS exact item and brand (e.g. USB cable ~350, lotion ~650, electric kettle ~2500, smartphone ~18500 — DO NOT default everything to 1200). Must be a positive integer.
-7. "suggestedCostKSh": Realistic wholesale/buying cost in KSh (roughly 65-75% of suggestedPriceKSh). Must be a positive integer.
-8. "description": 1-2 concrete sentences detailing the visible product specifications, brand/model, material, color, capacity/size, and usage based strictly on what is seen in the image.
+5. "unit": Retail selling unit — prefer one of "pcs", "box", "pack", "kg", "m", "liters", "pair", "bottle".
+6. "suggestedPriceKSh": If a price tag/sticker is visible in the photo, use that exact number. Otherwise estimate a realistic Kenyan retail selling price in KSh specifically for THIS exact item (or 0 if image is unclear).
+7. "suggestedCostKSh": Realistic wholesale/buying cost in KSh (roughly 65-75% of suggestedPriceKSh, or 0 if image is unclear).
+8. "description": 1-2 short descriptive notes detailing visible specifications, brand/model, material, color, or usage based strictly on what is seen.
 9. "suggestedSku": Clean uppercase stock SKU code tailored to the product (e.g. "ROF-SAM-25W").
 10. "suggestedBarcode": Exact numeric barcode if clearly readable in the photo, otherwise "".
 11. "confidenceScore": Confidence score between 0.0 and 1.0.
 12. "isExistingMatch": Boolean indicating if it matches an item from the local catalog context.
-13. "matchedProductId": String ID of the matched product if isExistingMatch is true, otherwise "".`;
+13. "matchedProductId": String ID of the matched product if isExistingMatch is true, otherwise "".
+14. "isUnclearImage": Boolean true if the image is too blurry, dark, cropped, or lacks an identifiable retail item.
+15. "clarityMessage": Friendly 1-sentence guidance if isUnclearImage is true, otherwise "".`;
 
       const response = await generateContentWithFallback(ai, {
         contents: {
@@ -289,6 +386,8 @@ CRITICAL REQUIREMENTS:
               confidenceScore: { type: Type.NUMBER },
               isExistingMatch: { type: Type.BOOLEAN },
               matchedProductId: { type: Type.STRING },
+              isUnclearImage: { type: Type.BOOLEAN },
+              clarityMessage: { type: Type.STRING },
             },
             required: [
               'name',
@@ -305,36 +404,82 @@ CRITICAL REQUIREMENTS:
 
       const replyText = (response.text || '').trim();
       if (!replyText) {
+        if (allowPartialOnUnclear) {
+          res.json({
+            isUnclearImage: true,
+            clarityMessage: 'Photo could not be read clearly. You can fill in the item fields manually or retake the photo.',
+            name: '',
+            suggestedName: '',
+            category: allowedCategories[0] || 'Electronics',
+            suggestedCategory: allowedCategories[0] || 'Electronics',
+            subcategory: 'General',
+            unit: 'pcs',
+            suggestedUnit: 'pcs',
+            suggestedBarcode: '',
+            suggestedSku: '',
+            suggestedPriceKSh: 0,
+            suggestedCostKSh: 0,
+            description: '',
+            suggestedNotes: '',
+            needsNameReview: true,
+          });
+          return;
+        }
         res.status(502).json({ error: 'Gemini AI returned an empty response. Please capture a clearer product photo.' });
         return;
       }
 
       const parsed = JSON.parse(replyText);
-      const finalName = String(parsed.name || '').trim();
-      if (!finalName || /^(new\s+household\s+product|scanned\s+item|unknown\s+product|item)$/i.test(finalName)) {
+      const rawName = String(parsed.name || '').trim();
+      const isVague = !rawName || /^(new\s+household\s+product|scanned\s+item|unknown\s+product|unknown|item)$/i.test(rawName);
+      const isUnclear = Boolean(parsed.isUnclearImage) || isVague;
+
+      if (isVague && !allowPartialOnUnclear) {
         res.status(422).json({
           error: 'Could not clearly identify the product from this photo. Please retake with better lighting or label focus.',
         });
         return;
       }
 
-      const sellingPrice = Math.max(1, Math.round(Number(parsed.suggestedPriceKSh) || 0));
-      const costPrice = Math.max(1, Math.round(Number(parsed.suggestedCostKSh) || Math.round(sellingPrice * 0.7)));
+      const finalName = isVague ? '' : rawName;
+      const finalCategory = String(parsed.category || '').trim() || allowedCategories[0] || 'Electronics';
+      const rawUnit = String(parsed.unit || 'pcs').trim().toLowerCase();
+      const finalUnit = rawUnit || 'pcs';
+      const finalBarcode = String(parsed.suggestedBarcode || '').replace(/[^0-9A-Za-z\-]/g, '').trim();
+      const finalSku = String(parsed.suggestedSku || '').trim();
+      const finalNotes = String(parsed.description || '').trim();
+      const sellingPrice = Math.max(0, Math.round(Number(parsed.suggestedPriceKSh) || 0));
+      const costPrice = Math.max(
+        0,
+        Math.round(Number(parsed.suggestedCostKSh) || (sellingPrice > 0 ? Math.round(sellingPrice * 0.7) : 0))
+      );
 
       res.json({
         ...parsed,
         name: finalName,
-        suggestedPriceKSh: sellingPrice,
-        suggestedCostKSh: costPrice,
+        suggestedName: finalName,
+        category: finalCategory,
+        suggestedCategory: finalCategory,
+        unit: finalUnit,
+        suggestedUnit: finalUnit,
+        suggestedBarcode: finalBarcode,
+        suggestedSku: finalSku,
+        description: finalNotes,
+        suggestedNotes: finalNotes,
+        suggestedPriceKSh: isUnclear && sellingPrice === 0 ? 0 : Math.max(isUnclear ? 0 : 1, sellingPrice),
+        suggestedCostKSh: isUnclear && costPrice === 0 ? 0 : Math.max(isUnclear ? 0 : 1, costPrice),
         matchedProductId: parsed.isExistingMatch && parsed.matchedProductId ? parsed.matchedProductId : null,
-        needsNameReview: false,
+        isUnclearImage: isUnclear,
+        clarityMessage: isUnclear
+          ? String(parsed.clarityMessage || '').trim() ||
+            'Photo looks blurry or obscured. Review or type any missing fields below before applying.'
+          : '',
+        needsNameReview: isUnclear,
       });
     } catch (err: any) {
       console.error('Gemini Product Vision error:', err?.message || err);
-      const status = err?.status === 429 ? 429 : err?.status === 403 ? 403 : 502;
-      res.status(status).json({
-        error: err?.message || 'AI product vision failed to analyze the photo. Please retry.',
-      });
+      const mapped = mapGeminiHttpError(err, 'AI product vision failed to analyze the photo. Please retry.');
+      res.status(mapped.status).json({ error: mapped.error });
     }
   });
 
@@ -482,10 +627,8 @@ TASK:
       res.json(parsed);
     } catch (err: any) {
       console.error('Gemini Receipt Vision Scanner error:', err?.message || err);
-      const status = err?.status === 429 ? 429 : err?.status === 403 ? 403 : 502;
-      res.status(status).json({
-        error: err?.message || 'AI vision service could not analyze the photo. Please retry.',
-      });
+      const mapped = mapGeminiHttpError(err, 'AI vision service could not analyze the photo. Please retry.');
+      res.status(mapped.status).json({ error: mapped.error });
     }
   });
 
@@ -501,101 +644,55 @@ TASK:
 
       const ai = getGeminiClient();
 
-      const replenishmentContext = context?.replenishmentSummary
-        ? `\n- Inventory Replenishment & Velocity Status:
-  • Health Score: ${context.replenishmentSummary.overallHealthScore ?? 85}/100
-  • Out of Stock Items: ${context.replenishmentSummary.outOfStockCount ?? 0}
-  • Critical Items (<4 days stock left): ${context.replenishmentSummary.criticalCount ?? 0}
-  • Reorder Soon Items: ${context.replenishmentSummary.reorderSoonCount ?? 0}
-  • Recommended Total Units to Order: ${context.replenishmentSummary.totalRecommendedUnits ?? 0} units
-  • Estimated Restock Capital Required: KSh ${Number(context.replenishmentSummary.totalWorkingCapitalNeeded || 0).toLocaleString()}
-  • Top Critical Items: ${context.criticalItemsText || 'None currently critical'}
-  • Fast Moving Items: ${context.fastMoversText || 'None'}`
+      const lowStockSummary = context?.topLowStockText
+        ? `\n- Low Stock Preview: ${context.topLowStockText}`
+        : context?.criticalItemsText
+        ? `\n- Critical Stock: ${context.criticalItemsText}`
         : '';
 
-      // System instruction for staff assistant
-      const systemInstruction = `You are "ROFANI Gemini AI Co-Pilot", an expert, patient, and ultra-helpful staff assistant and retail inventory strategist powered by Gemini AI to guide cashiers, store clerks, and managers at ROFANI Electronics & Boutique.
-You give step-by-step instructions on:
-1. Smart Inventory Replenishment & Stock Velocity: Analyze stock levels, sales velocity (units/day and units/week), days of stock runway remaining, supplier reorder quantities, lead times, working capital requirements, and prioritization of fast movers vs slow/stagnant stock.
-2. Processing POS sales (Cash, M-Pesa, Card, Split Payments, Layby / Debt balance).
-3. KRA TIMS / e-TIMS Tax Compliance & Invoice QR codes.
-4. Multi-Store Branch Operations & Inter-Branch Stock Transfers.
-5. Inventory Management, Barcode Printing, and Restocking.
-6. Customer Credit, Debt Settlement, and Return/Refund guidelines.
-7. Daily Sales Reports, Cash Drawer Reconciliation, and Expense Tracking.
+      const systemInstruction = `You are "ROFANI AI Co-Pilot", a concise, practical POS tutor & retail strategist for Rofani POS in Kenya.
+Help users with:
+1. Sales & Checkout (Cash, M-Pesa STK Push/Till/Paybill, Card, Split Payments, Customer Credit/Layby, Calculator Give Change).
+2. Inventory & Low Stock (restocking, AI product photo scan, barcode labels, inter-branch stock transfers).
+3. Multi-Shop Management (adding new branches, switching stores, cloud + local/email backups).
+4. Reports & Taxes (daily sales, expenses, profit, staff wages/commissions; optional tax is Off by default in Settings -> Transaction).
+5. Plans & Referrals: 7-day free trial (22 days with a referral code), +30 days free per referred shop, paid plans 30d KSh 500 / 3m KSh 1,350 / 6m KSh 2,650 / 12m KSh 5,000. Support: rofanipos@gmail.com, WhatsApp +254 734 128 888, Calls +254 734 128 888 / +254 713 128 888.
 
-Context about current session:
-- Store Branch: ${context?.storeName || 'ROFANI Flagship Store'}
-- Worker Role: ${context?.role || 'New Staff / Cashier'}
-- Current View: ${context?.activeTab || 'General Store View'}
-- Low Stock Items: ${context?.lowStockCount ?? 'N/A'}
-- Total Products Registered: ${context?.totalProducts ?? 'N/A'}
-- Today's Sales Volume: KSh ${context?.totalSalesToday ? context.totalSalesToday.toLocaleString() : '0'}${replenishmentContext}
+Active Store Context:
+- Store: ${context?.storeName || 'Rofani POS'} | Role: ${context?.role || 'Staff'} | View: ${context?.activeTab || 'POS'}
+- Products: ${context?.totalProducts ?? 0} | Low Stock: ${context?.lowStockCount ?? 0} | Out of Stock: ${context?.outOfStockCount ?? 0} | Today Sales: KSh ${Number(context?.totalSalesToday || 0).toLocaleString()}${lowStockSummary}
 
-Style Guidelines:
-- Keep answers practical, clear, and actionable for a retail worker or manager on shift.
-- When answering inventory or replenishment questions, cite specific product names, current stock, burn rate (sales velocity), days of runway, and exact recommended reorder quantities in Kenya Shillings (KSh).
-- Use bullet points, bold key terms, and short paragraphs.
-- Offer practical Kenya retail tips (e.g., verifying M-Pesa transaction reference code, checking supplier minimum order quantities, clearing slow-moving boutique fashion).
-- Include friendly English / Swahili greetings when appropriate (e.g. "Hujambo! Here's how to handle that...").`;
+Formatting Rules:
+- Be concise and mobile-friendly (under ~180 words unless detailed steps are requested).
+- Use short bullet points (- ) and **bold** key actions or menu paths.
+- Mention exact KSh figures or product names from context when relevant.`;
 
       if (!ai) {
-        // Safe fallback response if API key is missing
-        const isReplenishmentQuery =
-          prompt.toLowerCase().includes('replenish') ||
-          prompt.toLowerCase().includes('restock') ||
-          prompt.toLowerCase().includes('velocity') ||
-          prompt.toLowerCase().includes('stock') ||
-          prompt.toLowerCase().includes('reorder');
-
-        if (isReplenishmentQuery && context?.replenishmentSummary) {
-          res.json({
-            reply: `**ROFANI AI Inventory Replenishment Guide (Calculated Analysis)**\n\n` +
-              `Based on current sales velocity and stock levels across **${context?.storeName || 'ROFANI'}**:\n\n` +
-              `• **Inventory Health Score:** ${context.replenishmentSummary.overallHealthScore || 85}/100\n` +
-              `• **Urgent Stockouts:** ${context.replenishmentSummary.outOfStockCount || 0} products currently empty\n` +
-              `• **Critical (<4 Days Runway):** ${context.replenishmentSummary.criticalCount || 0} items burning through stock rapidly\n` +
-              `• **Reorder Soon:** ${context.replenishmentSummary.reorderSoonCount || 0} items below minimum safety threshold\n` +
-              `• **Recommended Capital to Restock:** **KSh ${Number(context.replenishmentSummary.totalWorkingCapitalNeeded || 0).toLocaleString()}** for ~${context.replenishmentSummary.totalRecommendedUnits || 0} units\n\n` +
-              `**Immediate Priorities:**\n${context.criticalItemsText ? `• ${context.criticalItemsText}` : '• All core lines currently have sufficient runway.'}\n\n` +
-              `💡 *Pro-tip: Open the **"Predictive Restock"** tool in the Inventory tab to generate a one-click supplier purchase order sheet.*`
-          });
-          return;
-        }
-
-        res.json({
-          reply: `**ROFANI AI Staff Assistant (Offline / Quick Guide)**\n\nHere are quick guidelines for workers at ROFANI Electronics & Boutique:\n\n` +
-            `• **Smart Replenishment:** Click the **"Predictive Restock"** button in Inventory to view sales velocity, days of stock remaining, and automatic reorder quantities.\n` +
-            `• **Processing a Sale:** Scan item barcode or click product card -> Select payment method (Cash, M-Pesa, Card, Debt) -> Click Complete Order.\n` +
-            `• **M-Pesa Payments:** Verify M-Pesa code on customer phone before handing over receipt.\n` +
-            `• **Stock Transfers:** Click 'Transfer Stock / Outlets' in top bar -> Choose source & target store -> Specify quantity -> Dispatched.\n` +
-            `• **KRA Invoices:** In Sales History or POS checkout, select KRA e-TIMS button to auto-generate KRA QR invoice code.\n\n` +
-            `*(Note: To unlock live conversational Gemini AI capabilities, ensure GEMINI_API_KEY is configured in AI Studio Secrets).*`
+        res.status(503).json({
+          error:
+            'GEMINI_API_KEY is not configured on the server. Add GEMINI_API_KEY in Settings > Secrets or your deployment environment variables to use the AI Assistant.',
         });
         return;
       }
 
       const response = await generateContentWithFallback(ai, {
         contents: prompt,
+        timeoutMs: 5500,
         config: {
           systemInstruction,
         },
       });
 
-      const replyText = response.text || 'I apologize, I could not generate a response right now. Please try again or ask your shift manager.';
+      const replyText = (response.text || '').trim();
+      if (!replyText) {
+        res.status(502).json({ error: 'Gemini AI returned an empty response. Please try asking again.' });
+        return;
+      }
       res.json({ reply: replyText });
     } catch (err: any) {
-      console.warn('Gemini AI Assistant notice (safe fallback applied):', err?.message || err);
-      res.json({
-        reply: `**ROFANI AI Staff Assistant (Standby / Operational Guide)**\n\n` +
-          `*Notice: The AI service is currently experiencing high demand. Here are essential shift guidelines:*\n\n` +
-          `• **Predictive Restock:** Click 'Predictive Restock' in the Inventory toolbar to view live stock velocity and auto-computed reorder purchase orders.\n` +
-          `• **Processing a Sale:** Scan barcode or click product card -> Select payment method (Cash, M-Pesa, Card, Debt) -> Click Complete Order.\n` +
-          `• **M-Pesa Payments:** Verify M-Pesa transaction reference code on customer phone before handing over receipt.\n` +
-          `• **Stock Transfers:** Click 'Transfer Stock / Outlets' in top bar -> Choose source & target store -> Specify quantity -> Dispatched.\n` +
-          `• **KRA Invoices:** In Sales History or POS checkout, select KRA e-TIMS button to auto-generate KRA QR invoice code.\n\n` +
-          `*(Please re-ask your question in a moment once server traffic settles).*`
-      });
+      console.error('Gemini AI Assistant error:', err?.message || err);
+      const mapped = mapGeminiHttpError(err, 'Unable to get a response from Gemini AI right now. Please try again.');
+      res.status(mapped.status).json({ error: mapped.error });
     }
   });
 
@@ -621,16 +718,9 @@ Style Guidelines:
       }));
 
       if (!ai) {
-        // Safe offline response calculated directly from mathematical velocity data
-        res.json({
-          executiveSummary: `Inventory analysis for ${storeName || 'ROFANI Store'} indicates an overall inventory health score of ${summary?.overallHealthScore ?? 82}/100. There are ${summary?.outOfStockCount ?? 0} out-of-stock items and ${summary?.criticalCount ?? 0} items at critical depletion risk within 4 days. A total working capital investment of KSh ${(summary?.totalWorkingCapitalNeeded ?? 0).toLocaleString()} is recommended to secure ~${summary?.totalRecommendedUnits ?? 0} units for a ${targetDaysCover || 21}-day demand horizon.`,
-          priorityActions: [
-            `Submit immediate purchase orders for top critical fast-movers to avoid revenue loss.`,
-            `Negotiate bulk supplier discounts for high-volume items to optimize profit margins.`,
-            `Review ${summary?.stagnantCount ?? 0} slow-moving inventory lines to avoid capital lockup.`
-          ],
-          workingCapitalTip: `Focus immediate cash reserves on high-velocity items with profit margins above 25% to maximize stock turn.`,
-          demandOutlook: 'Stable retail demand observed. Electronics accessories and core boutique lines show consistent weekly turnover.',
+        res.status(503).json({
+          error:
+            'GEMINI_API_KEY is not configured on the server. Add GEMINI_API_KEY in Settings > Secrets to generate AI replenishment insights.',
         });
         return;
       }
@@ -678,32 +768,17 @@ Provide a concise, high-value strategic replenishment briefing for the store man
         },
       });
 
-      const replyText = response.text || '{}';
-      try {
-        const parsed = JSON.parse(replyText);
-        res.json(parsed);
-      } catch (parseErr) {
-        res.json({
-          executiveSummary: `Inventory analysis shows ${summary?.criticalCount ?? 0} items requiring urgent replenishment with KSh ${(summary?.totalWorkingCapitalNeeded ?? 0).toLocaleString()} in capital required.`,
-          priorityActions: [
-            `Prioritize purchase orders for items with less than 4 days of stock remaining.`,
-            `Restock high-velocity products before weekend shopping peaks.`
-          ],
-          workingCapitalTip: `Channel cash flow into fast-depleting SKUs to prevent lost sales.`,
-          demandOutlook: 'Consistent demand across core electronics and apparel categories.',
-        });
+      const replyText = (response.text || '').trim();
+      if (!replyText) {
+        res.status(502).json({ error: 'Gemini AI returned an empty replenishment forecast. Please retry.' });
+        return;
       }
+      const parsed = JSON.parse(replyText);
+      res.json(parsed);
     } catch (err: any) {
-      console.warn('Gemini Replenishment Forecast notice (safe fallback applied):', err?.message || err);
-      res.json({
-        executiveSummary: `Current catalog analysis identifies ${req.body.summary?.criticalCount ?? 0} items requiring replenishment to maintain continuous retail operations.`,
-        priorityActions: [
-          `Review critical stockouts in the Predictive Restock table.`,
-          `Place supplier orders for items under 5 days of runway.`
-        ],
-        workingCapitalTip: `Keep a minimum 2-week safety buffer for best-selling electronics and fashion items.`,
-        demandOutlook: 'Steady customer demand.',
-      });
+      console.error('Gemini Replenishment Forecast error:', err?.message || err);
+      const mapped = mapGeminiHttpError(err, 'Unable to generate AI replenishment forecast right now.');
+      res.status(mapped.status).json({ error: mapped.error });
     }
   });
 
@@ -752,24 +827,9 @@ Provide a concise, high-value strategic replenishment briefing for the store man
           : `${discountValue || 10}% Discount + Free Delivery / Gift`;
 
       if (!ai) {
-        // High quality offline fallback tailored to Kenya retail
-        const code = promoCode || 'ROFANI15';
-        const namePart = customerName ? `Hello ${customerName}` : 'Dear Valued Customer';
-        res.json({
-          headline: `🔥 Special Store Offer: ${offerDescription} at ${storeName || 'ROFANI'}!`,
-          whatsappMessage: `🎉 *EXCLUSIVE OFFER FROM ${storeName ? storeName.toUpperCase() : 'ROFANI ELECTRONICS & BOUTIQUE'}* 🎉\n\n` +
-            `${namePart}! We appreciate you shopping with us. Enjoy *${offerDescription}* on our latest electronics, boutique fashion & accessories.\n\n` +
-            `🏷️ *Promo Code:* *${code}*\n` +
-            `⏳ *Valid For:* Next ${validityDays || 3} days only\n` +
-            `📍 *Store Location:* Flagship Store, Nairobi\n` +
-            `📲 *To Claim:* Show this message at the counter or reply to this WhatsApp to reserve your items!\n\n` +
-            `*Hurry while stocks last!* 🛍️✨`,
-          smsMessage: `${namePart}! Enjoy ${offerDescription} at ${storeName || 'ROFANI'}. Use Code: ${code} within ${validityDays || 3} days. Call/WhatsApp: ${storePhone || '0700000000'}. T&Cs apply.`,
-          emailSubject: `Exclusive for you: ${offerDescription} at ${storeName || 'ROFANI Electronics & Boutique'}!`,
-          emailBody: `Dear ${customerName || 'Shopper'},\n\nWe are excited to bring you an exclusive promotion! For the next ${validityDays || 3} days, enjoy ${offerDescription} across selected electronics and boutique arrivals.\n\nSimply present coupon code "${code}" at our checkout counter or mention it during your order.\n\nWe look forward to serving you!\n\nBest regards,\nThe ${storeName || 'ROFANI'} Team`,
-          socialFlyerCopy: `✨ MEGA PROMO: ${offerDescription} ✨\nUse code: ${code}\nValid for ${validityDays || 3} days only at ${storeName || 'ROFANI Electronics & Boutique'}.\nVisit us today or WhatsApp to order!`,
-          suggestedCallToAction: `Show code ${code} at the counter or WhatsApp to reserve`,
-          marketingTip: `Send WhatsApp messages between 10:00 AM - 1:00 PM or 5:00 PM - 7:30 PM for peak response rates in Kenya.`,
+        res.status(503).json({
+          error:
+            'GEMINI_API_KEY is not configured on the server. Add GEMINI_API_KEY in Settings > Secrets to generate AI promotions.',
         });
         return;
       }
@@ -827,34 +887,17 @@ Generate high-converting, realistic copy in JSON format with these exact keys:
         },
       });
 
-      const replyText = response.text || '{}';
-      try {
-        const parsed = JSON.parse(replyText);
-        res.json(parsed);
-      } catch (parseErr) {
-        res.json({
-          headline: `🔥 Special Offer: ${offerDescription}!`,
-          whatsappMessage: `🎉 *SPECIAL OFFER FROM ${storeName || 'ROFANI'}!*\n\nEnjoy *${offerDescription}* on our best items!\nUse code: *${promoCode || 'ROFANI15'}*\nValid for ${validityDays || 3} days only.\n\nReply to this chat to order now! 🛍️`,
-          smsMessage: `Special Offer: ${offerDescription} at ${storeName || 'ROFANI'}. Code: ${promoCode || 'ROFANI15'}. Valid ${validityDays || 3} days. Call/WhatsApp ${storePhone || '0700000000'}.`,
-          emailSubject: `Exclusive: ${offerDescription} at ${storeName || 'ROFANI'}!`,
-          emailBody: `Dear Shopper,\n\nEnjoy ${offerDescription} with promo code "${promoCode || 'ROFANI15'}". Visit our store today!`,
-          socialFlyerCopy: `✨ SPECIAL SALE ✨\n${offerDescription}\nCode: ${promoCode || 'ROFANI15'}\nVisit ${storeName || 'ROFANI'} today!`,
-          suggestedCallToAction: `Visit store or WhatsApp to order`,
-          marketingTip: `Broadcast this offer to active customers on Friday afternoon.`,
-        });
+      const replyText = (response.text || '').trim();
+      if (!replyText) {
+        res.status(502).json({ error: 'Gemini AI returned an empty promotion response. Please retry.' });
+        return;
       }
+      const parsed = JSON.parse(replyText);
+      res.json(parsed);
     } catch (err: any) {
-      console.warn('Gemini Promotion Generator error (fallback applied):', err?.message || err);
-      res.json({
-        headline: 'Special Customer Offer',
-        whatsappMessage: `🎉 *EXCLUSIVE OFFER FROM ROFANI!*\n\nEnjoy special store discounts on electronics & fashion!\nUse code: *ROFANI-DEAL*\n\nVisit us today or WhatsApp to claim!`,
-        smsMessage: `Special discounts at ROFANI Electronics & Boutique! Use code ROFANI-DEAL today. Call 0700000000.`,
-        emailSubject: 'Exclusive Deals at ROFANI!',
-        emailBody: 'Dear Customer,\n\nWe have exclusive savings waiting for you at ROFANI Electronics & Boutique.',
-        socialFlyerCopy: 'Special Store Offers at ROFANI Electronics & Boutique!',
-        suggestedCallToAction: 'Visit us in-store today',
-        marketingTip: 'Follow up with customers within 48 hours.',
-      });
+      console.error('Gemini Promotion Generator error:', err?.message || err);
+      const mapped = mapGeminiHttpError(err, 'Unable to generate promotion copy right now. Please try again.');
+      res.status(mapped.status).json({ error: mapped.error });
     }
   });
 

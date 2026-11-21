@@ -24,7 +24,8 @@ import {
   KeyRound,
   RefreshCw,
   Database,
-  Clock
+  Clock,
+  QrCode
 } from 'lucide-react';
 import { Product, Customer, Supplier, Transaction, Expense, AttendanceRecord, User, StoreLocation, Role, WorkerPermissions } from '../../types';
 import { safeGetJSON, safeSetJSON } from '../../utils/safeStorage';
@@ -34,6 +35,7 @@ import { ItemSettingsView } from './ItemSettingsView';
 import { GeneralSettingsView } from './GeneralSettingsView';
 import { PrintAndTaxSettingsView } from './PrintAndTaxSettingsView';
 import { TransactionSettingsView } from './TransactionSettingsView';
+import { ShopControlsSettingsView } from './ShopControlsSettingsView';
 
 interface SettingsDashboardViewProps {
   products: Product[];
@@ -74,12 +76,15 @@ interface SettingsDashboardViewProps {
   onOpenCategoryManager?: () => void;
   storeKraPin?: string;
   onUpdateStoreKraPin?: (kraPin: string) => Promise<void> | void;
+  onOpenShopQrShare?: () => void;
+  onPreview9PmSummary?: () => void;
 }
 
 type SettingCategoryKey =
   | 'general'
   | 'data'
   | 'transaction'
+  | 'shop_controls'
   | 'print_tax'
   | 'users'
   | 'reminders'
@@ -316,6 +321,8 @@ export const SettingsDashboardView: React.FC<SettingsDashboardViewProps> = ({
   onOpenCategoryManager,
   storeKraPin,
   onUpdateStoreKraPin,
+  onOpenShopQrShare,
+  onPreview9PmSummary,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [activeSubPanel, setActiveSubPanel] = useState<SettingCategoryKey | null>(null);
@@ -672,6 +679,14 @@ export const SettingsDashboardView: React.FC<SettingsDashboardViewProps> = ({
       keywords: ['payment', 'cash', 'mpesa', 'receipt', 'print', 'sales rep', 'transaction', 'prefix', 'invoice', 'barcode', 'profit', 'round off', 'passcode', 'terms', 'transport', 'charges']
     },
     {
+      id: 'shop_controls' as SettingCategoryKey,
+      icon: ShieldCheck,
+      color: 'text-amber-400 bg-amber-500/10 border-amber-500/30',
+      title: 'Shop Controls, Protection & Summary',
+      description: 'Cart cache, homepage live summary cards, below-cost sale guard, expiry alerts, inactivity lock & 9 PM summary.',
+      keywords: ['cart', 'cache', 'homepage', 'summary', 'below cost', 'buying price', 'expiry', 'inactivity', 'lock', '9pm', 'daily summary', 'qr', 'alert', 'notification', 'protect']
+    },
+    {
       id: 'print_tax' as SettingCategoryKey,
       icon: Printer,
       color: 'text-purple-400 bg-purple-500/10 border-purple-500/30',
@@ -747,16 +762,28 @@ export const SettingsDashboardView: React.FC<SettingsDashboardViewProps> = ({
           </div>
         </div>
 
-        {/* Top Search Bar */}
-        <div className="w-full md:w-72 relative">
-          <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search settings (e.g. Tax, M-Pesa)..."
-            className="w-full bg-slate-950 border border-slate-700/80 rounded-xl pl-10 pr-4 py-2.5 text-xs text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-inner"
-          />
+        {/* Top Search & Quick Shop QR */}
+        <div className="w-full md:w-auto flex items-center gap-2.5 flex-wrap sm:flex-nowrap">
+          {onOpenShopQrShare && (
+            <button
+              type="button"
+              onClick={onOpenShopQrShare}
+              className="px-3 py-2.5 rounded-xl bg-sky-600/20 hover:bg-sky-600/30 border border-sky-500/40 text-sky-300 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shrink-0 whitespace-nowrap"
+            >
+              <QrCode className="w-4 h-4" />
+              <span>Shop QR / Link</span>
+            </button>
+          )}
+          <div className="w-full md:w-72 relative">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search settings (e.g. Tax, Cart, Lock)..."
+              className="w-full bg-slate-950 border border-slate-700/80 rounded-xl pl-10 pr-4 py-2.5 text-xs text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-inner"
+            />
+          </div>
         </div>
       </div>
 
@@ -888,8 +915,24 @@ export const SettingsDashboardView: React.FC<SettingsDashboardViewProps> = ({
         </div>
       )}
 
+      {activeSubPanel === 'shop_controls' && (
+        <div className="fixed inset-0 z-50 bg-slate-950 overflow-y-auto">
+          <ShopControlsSettingsView
+            onBack={() => setActiveSubPanel(null)}
+            activeStoreId={activeStoreId}
+            activeStoreName={activeStoreName}
+            onOpenShopQrShare={() => {
+              if (onOpenShopQrShare) onOpenShopQrShare();
+            }}
+            onPreview9PmSummary={() => {
+              if (onPreview9PmSummary) onPreview9PmSummary();
+            }}
+          />
+        </div>
+      )}
+
       {/* Sub-Panel Modal Overlay */}
-      {activeSubPanel && activeSubPanel !== 'inventory' && activeSubPanel !== 'general' && activeSubPanel !== 'print_tax' && activeSubPanel !== 'data' && activeSubPanel !== 'transaction' && (
+      {activeSubPanel && activeSubPanel !== 'inventory' && activeSubPanel !== 'general' && activeSubPanel !== 'print_tax' && activeSubPanel !== 'data' && activeSubPanel !== 'transaction' && activeSubPanel !== 'shop_controls' && (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
             {/* Modal Header */}

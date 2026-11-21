@@ -130,6 +130,8 @@ interface DataManagementViewProps {
   onCloudSyncError?: () => void;
   storeKraPin?: string;
   onUpdateStoreKraPin?: (kraPin: string) => Promise<void> | void;
+  onOpenShopQrShare?: () => void;
+  onPreview9PmSummary?: () => void;
 }
 
 export const DataManagementView: React.FC<DataManagementViewProps> = ({
@@ -177,6 +179,8 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
   onCloudSyncError,
   storeKraPin,
   onUpdateStoreKraPin,
+  onOpenShopQrShare,
+  onPreview9PmSummary,
 }) => {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -852,6 +856,8 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
             }
           }
         }}
+        onOpenShopQrShare={onOpenShopQrShare}
+        onPreview9PmSummary={onPreview9PmSummary}
         deviceFormat={deviceFormat}
         onChangeDeviceFormat={onChangeDeviceFormat}
         requirePinOnStartup={requirePinOnStartup}

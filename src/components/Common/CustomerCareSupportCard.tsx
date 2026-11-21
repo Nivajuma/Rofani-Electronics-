@@ -27,10 +27,10 @@ export const CustomerCareSupportCard: React.FC<CustomerCareSupportCardProps> = (
   if (compact) {
     return (
       <div
-        className={`bg-slate-900/90 border border-slate-700/80 rounded-xl p-3 space-y-2.5 text-xs ${className}`}
+        className={`bg-slate-900/90 border border-slate-700/80 rounded-xl p-2.5 space-y-1.5 text-xs shrink-0 ${className}`}
       >
         <div className="flex items-center justify-between gap-2 flex-wrap">
-          <span className="inline-flex items-center gap-1.5 font-bold text-slate-200">
+          <span className="inline-flex items-center gap-1.5 font-bold text-slate-200 text-[11px]">
             <Headphones className="w-3.5 h-3.5 text-sky-400 shrink-0" />
             <span>{title}</span>
           </span>
@@ -38,35 +38,35 @@ export const CustomerCareSupportCard: React.FC<CustomerCareSupportCardProps> = (
             href={SUPPORT_WHATSAPP_URL}
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[11px] shadow-sm transition whitespace-nowrap"
+            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[11px] shadow-sm transition whitespace-nowrap"
           >
-            <MessageCircle className="w-3.5 h-3.5 shrink-0" />
+            <MessageCircle className="w-3 h-3 shrink-0" />
             <span>WhatsApp Support: {SUPPORT_WHATSAPP_NUMBER}</span>
-            <ExternalLink className="w-3 h-3 opacity-80 shrink-0" />
+            <ExternalLink className="w-2.5 h-2.5 opacity-80 shrink-0" />
           </a>
         </div>
 
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11px] text-slate-300">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-300">
           <a
             href={SUPPORT_PHONE_PRIMARY_HREF}
-            className="inline-flex items-center gap-1 hover:text-sky-400 font-mono font-semibold transition"
+            className="inline-flex items-center gap-1 hover:text-sky-400 font-mono font-semibold transition whitespace-nowrap"
           >
             <Phone className="w-3 h-3 text-sky-400 shrink-0" />
             <span>{SUPPORT_PHONE_PRIMARY}</span>
           </a>
           <a
             href={SUPPORT_PHONE_SECONDARY_HREF}
-            className="inline-flex items-center gap-1 hover:text-sky-400 font-mono font-semibold transition"
+            className="inline-flex items-center gap-1 hover:text-sky-400 font-mono font-semibold transition whitespace-nowrap"
           >
             <Phone className="w-3 h-3 text-sky-400 shrink-0" />
             <span>{SUPPORT_PHONE_SECONDARY}</span>
           </a>
           <a
             href={SUPPORT_EMAIL_HREF}
-            className="inline-flex items-center gap-1 hover:text-sky-400 font-medium transition"
+            className="inline-flex items-center gap-1 hover:text-sky-400 font-medium transition truncate"
           >
             <Mail className="w-3 h-3 text-amber-400 shrink-0" />
-            <span>{SUPPORT_EMAIL}</span>
+            <span className="truncate">{SUPPORT_EMAIL}</span>
           </a>
         </div>
       </div>

@@ -29,9 +29,10 @@ import {
   Lock,
   Trash2
 } from 'lucide-react';
-import { Transaction, Product, Customer, Supplier, Expense, PurchaseOrder, User } from '../../types';
+import { Transaction, Product, Customer, Supplier, Expense, PurchaseOrder, User, WorkerSalaryPayout, StaffCommissionPayout } from '../../types';
 import { KraTotComplianceCenter } from './KraTotComplianceCenter';
 import { DailyOverviewCard } from './DailyOverviewCard';
+import { WorkersWagesCommissionsReport } from '../Attendance/WorkersWagesCommissionsReport';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { useTransactionSettings } from '../../utils/transactionSettings';
@@ -50,6 +51,10 @@ interface ReportsViewProps {
   activeStoreId?: string;
   masterPin?: string;
   allUsers?: User[];
+  salaryPayouts?: WorkerSalaryPayout[];
+  commissionPayouts?: StaffCommissionPayout[];
+  storeName?: string;
+  onAddExpense?: (expense: Expense) => void;
 }
 
 interface ReportItem {
@@ -74,6 +79,10 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   activeStoreId,
   masterPin = '1234',
   allUsers = [],
+  salaryPayouts = [],
+  commissionPayouts = [],
+  storeName,
+  onAddExpense,
 }) => {
   const [txSettings] = useTransactionSettings(activeStoreId);
   const [searchQuery, setSearchQuery] = useState('');
@@ -257,6 +266,16 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
         { id: 'balance_sheet', title: 'Balance Sheet', description: 'Total store assets (inventory valuation, receivables) vs liabilities.' },
         { id: 'trial_balance', title: 'Trial Balance', description: 'Verification of debit and credit balancing across financial ledgers.' },
         { id: 'kra_etims_report', title: 'KRA Tax & Monthly Turnover Tax (TOT) Center', description: 'Mandatory Monthly KRA Turnover Tax (TOT) returns, iTax filing exports, PRN payment tracking, and optional e-TIMS invoice manager.' },
+      ],
+    },
+    {
+      categoryTitle: 'Staff, Wages & Commissions Reports',
+      reports: [
+        {
+          id: 'workers_wages_commissions',
+          title: 'Workers Wages & Commissions Statement',
+          description: 'Filter by custom date range (e.g. 21st–30th) to view worker wages, sales commissions, combined pay due, share, or print.',
+        },
       ],
     },
     {
@@ -701,9 +720,9 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
 
       {/* 100% Full-Screen Report Modal Overlay */}
       {selectedReport && reportData && (
-        <div className="fixed inset-0 w-full h-[100dvh] max-h-[100dvh] z-[60] bg-white flex flex-col m-0 p-0 rounded-none overflow-hidden animate-fade-in">
+        <div className={`fixed inset-0 w-full h-[100dvh] max-h-[100dvh] z-[60] flex flex-col m-0 p-0 rounded-none overflow-hidden animate-fade-in print-unlock-overflow ${selectedReport.id === 'workers_wages_commissions' ? 'bg-slate-950 print:bg-white' : 'bg-white'}`}>
           {/* Sticky Full-Width Header */}
-          <div className="w-full bg-slate-900 text-white px-4 py-3 z-10 flex items-center justify-between shadow-md shrink-0">
+          <div className="print:hidden w-full bg-slate-900 text-white px-4 py-3 z-10 flex items-center justify-between shadow-md shrink-0">
             <div className="flex items-center gap-3 min-w-0">
               <button
                 onClick={() => setSelectedReport(null)}
@@ -726,8 +745,9 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
           </div>
 
           {/* Modal Body - 100% Edge-to-Edge */}
-          <div className="w-full min-h-0 flex-1 px-3 sm:px-6 py-4 space-y-5 overflow-y-auto text-xs pb-6">
-            {/* Date Filter Presets & Instant Search Bar */}
+          <div className="w-full min-h-0 flex-1 px-3 sm:px-6 py-4 space-y-5 overflow-y-auto text-xs pb-6 print-unlock-overflow">
+            {/* Date Filter Presets & Instant Search Bar (hidden for custom self-filtering reports) */}
+            {selectedReport.id !== 'workers_wages_commissions' && (
             <div className="w-full grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-2">
                 <label className="block font-bold text-slate-700">Date Range Filter</label>
@@ -784,9 +804,27 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                   />
                 </div>
               </div>
+            {/* Date Filter Presets & Instant Search Bar closing wrapper */}
             </div>
+            )}
 
             {/* DEDICATED & SPECIALIZED LAYOUTS FOR ALL REPORT TYPES */}
+
+            {/* WORKERS WAGES & COMMISSIONS STATEMENT */}
+            {selectedReport.id === 'workers_wages_commissions' && (
+              <div className="max-w-7xl mx-auto">
+                <WorkersWagesCommissionsReport
+                  allUsers={allUsers}
+                  transactions={transactions}
+                  expenses={expenses}
+                  salaryPayouts={salaryPayouts}
+                  commissionPayouts={commissionPayouts}
+                  storeName={storeName}
+                  activeStoreId={activeStoreId}
+                  onAddExpense={onAddExpense}
+                />
+              </div>
+            )}
 
             {/* KRA eTIMS & MONTHLY TURNOVER TAX (TOT) CENTER */}
             {selectedReport.id === 'kra_etims_report' && (
@@ -1381,8 +1419,9 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             )}
           </div>
 
-          {/* Docked Bottom Export Bar (always 100% visible inside 100dvh) */}
-          <div className="w-full bg-white border-t border-slate-200 px-3 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] z-40 shadow-lg shrink-0 flex flex-col gap-2">
+          {/* Docked Bottom Export Bar (always 100% visible inside 100dvh, hidden on print and custom wages view) */}
+          {selectedReport.id !== 'workers_wages_commissions' && (
+          <div className="print:hidden w-full bg-white border-t border-slate-200 px-3 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] z-40 shadow-lg shrink-0 flex flex-col gap-2">
             <span className="text-xs font-semibold text-slate-600">Export & Share Options:</span>
             <div className="grid grid-cols-3 gap-2 w-full">
               <button
@@ -1411,6 +1450,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
               </button>
             </div>
           </div>
+          )}
         </div>
       )}
 

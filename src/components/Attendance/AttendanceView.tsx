@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { UserCheck, Clock, CheckCircle2, AlertCircle, Calendar, Plus, User, FileSpreadsheet, Award, Percent, CreditCard, Users, BarChart3, ArrowUpRight, Wallet } from 'lucide-react';
-import { AttendanceRecord, User as Employee, Transaction, StaffCommissionPayout, WorkerLoan, WorkerLoanRepayment, WorkerSalaryPayout } from '../../types';
+import { AttendanceRecord, User as Employee, Transaction, StaffCommissionPayout, WorkerLoan, WorkerLoanRepayment, WorkerSalaryPayout, Expense } from '../../types';
 import { StaffCommissionView } from './StaffCommissionView';
 import { WorkerLoansView } from './WorkerLoansView';
 import { WorkerDirectoryView } from './WorkerDirectoryView';
 import { StaffPerformanceDashboard } from './StaffPerformanceDashboard';
 import { WorkerPayrollView } from './WorkerPayrollView';
+import { WorkersWagesCommissionsReport } from './WorkersWagesCommissionsReport';
 import { safeGetJSON, safeSetJSON } from '../../utils/safeStorage';
 
 interface AttendanceViewProps {
@@ -31,6 +32,10 @@ interface AttendanceViewProps {
   salaryPayouts?: WorkerSalaryPayout[];
   onPaySalary?: (payout: WorkerSalaryPayout) => void;
   onUpdateUserSalarySettings?: (userId: string, settings: Partial<Employee>) => void;
+  expenses?: Expense[];
+  onAddExpense?: (expense: Expense) => void;
+  storeName?: string;
+  activeStoreId?: string;
 }
 
 export const AttendanceView: React.FC<AttendanceViewProps> = ({
@@ -56,8 +61,12 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
   salaryPayouts = [],
   onPaySalary,
   onUpdateUserSalarySettings,
+  expenses = [],
+  onAddExpense,
+  storeName,
+  activeStoreId,
 }) => {
-  const VALID_ATTENDANCE_TABS = ['attendance', 'performance', 'workers', 'commission', 'payroll', 'loans'] as const;
+  const VALID_ATTENDANCE_TABS = ['attendance', 'performance', 'workers', 'commission', 'payroll', 'wages_commissions', 'loans'] as const;
   type AttendanceTab = (typeof VALID_ATTENDANCE_TABS)[number];
 
   const [activeTab, setActiveTab] = useState<AttendanceTab>(() =>
@@ -152,9 +161,9 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
   };
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6 print:max-w-none print:p-0 print:space-y-4">
       {/* View Switcher Tabs */}
-      <div className="flex bg-slate-900 p-1.5 rounded-2xl border border-slate-800 w-fit gap-2 shadow-md flex-wrap">
+      <div className="print:hidden flex bg-slate-900 p-1.5 rounded-2xl border border-slate-800 w-fit gap-2 shadow-md flex-wrap">
         <button
           onClick={() => setActiveTab('attendance')}
           className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 ${
@@ -204,6 +213,18 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
         >
           <Wallet className="w-4 h-4 text-emerald-300" />
           <span>Salaries &amp; Wages Payroll</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('wages_commissions')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 ${
+            activeTab === 'wages_commissions'
+              ? 'bg-sky-600 text-white shadow-lg shadow-sky-600/30'
+              : 'text-slate-400 hover:text-white hover:bg-slate-800'
+          }`}
+        >
+          <FileSpreadsheet className="w-4 h-4 text-sky-300" />
+          <span>Wages &amp; Commissions Report</span>
         </button>
 
         <button
@@ -273,6 +294,17 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
           salaryPayouts={salaryPayouts}
           onPaySalary={(payout) => onPaySalary?.(payout)}
           onUpdateUserSalarySettings={onUpdateUserSalarySettings || onUpdateUserCommissionSettings}
+        />
+      ) : activeTab === 'wages_commissions' ? (
+        <WorkersWagesCommissionsReport
+          allUsers={allUsers}
+          transactions={transactions}
+          expenses={expenses}
+          salaryPayouts={salaryPayouts}
+          commissionPayouts={commissionPayouts}
+          storeName={storeName}
+          activeStoreId={activeStoreId}
+          onAddExpense={onAddExpense}
         />
       ) : activeTab === 'commission' ? (
         <StaffCommissionView

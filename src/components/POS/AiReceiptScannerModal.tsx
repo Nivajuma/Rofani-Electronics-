@@ -26,6 +26,11 @@ import {
 } from 'lucide-react';
 import { Product } from '../../types';
 import { optimizeImageFile } from '../../utils/imageOptimizer';
+import {
+  isRateLimitTextOrStatus,
+  parseAiHttpResponse,
+  RATE_LIMIT_SCANNER_MESSAGE,
+} from '../../utils/aiErrorHandling';
 
 export interface ScannedNewItem {
   id: string;
@@ -80,6 +85,7 @@ export const AiReceiptScannerModal: React.FC<AiReceiptScannerModalProps> = ({
   const [scannedNewItems, setScannedNewItems] = useState<ScannedNewItem[]>([]);
   const [summaryNote, setSummaryNote] = useState<string | null>(null);
   const [scanError, setScanError] = useState<string | null>(null);
+  const [cooldownSeconds, setCooldownSeconds] = useState(0);
   const [autoAddDirectly, setAutoAddDirectly] = useState(true);
   const [addedSuccessMessage, setAddedSuccessMessage] = useState<string | null>(null);
   const [showManualNewItemForm, setShowManualNewItemForm] = useState(false);
@@ -95,6 +101,16 @@ export const AiReceiptScannerModal: React.FC<AiReceiptScannerModalProps> = ({
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const scanInFlightRef = useRef(false);
+  const lastScanTapRef = useRef(0);
+
+  useEffect(() => {
+    if (cooldownSeconds <= 0) return;
+    const timer = window.setTimeout(() => {
+      setCooldownSeconds((prev) => Math.max(0, prev - 1));
+    }, 1000);
+    return () => window.clearTimeout(timer);
+  }, [cooldownSeconds]);
 
   // Unique category names list for category dropdowns
   const availableCategories = React.useMemo(() => {
@@ -264,12 +280,21 @@ export const AiReceiptScannerModal: React.FC<AiReceiptScannerModalProps> = ({
 
   // Call Gemini multimodal vision endpoint to identify items and match catalog
   const analyzeImageWithAi = async (base64Image: string) => {
+    const now = Date.now();
+    if (!base64Image || scanInFlightRef.current || isAnalyzing || cooldownSeconds > 0) return;
+    if (now - lastScanTapRef.current < 800) return;
+
+    lastScanTapRef.current = now;
+    scanInFlightRef.current = true;
     setIsAnalyzing(true);
     setDetectedItems([]);
     setScannedNewItems([]);
     setSummaryNote(null);
     setScanError(null);
     setAddedSuccessMessage(null);
+
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), 24000);
 
     try {
       const payload = {
@@ -291,17 +316,21 @@ export const AiReceiptScannerModal: React.FC<AiReceiptScannerModalProps> = ({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
+        signal: controller.signal,
       });
 
-      const data = await res.json().catch(() => null);
-      if (!res.ok || !data) {
-        throw new Error(
-          data?.error ||
-            (res.status === 503
-              ? 'Gemini AI Vision is not configured on the server. Add GEMINI_API_KEY in Settings > Secrets or Vercel Environment Variables.'
-              : `Server returned HTTP ${res.status}`)
-        );
+      const parsed = await parseAiHttpResponse<any>(
+        res,
+        `Server returned HTTP ${res.status}`,
+        RATE_LIMIT_SCANNER_MESSAGE
+      );
+      if (!parsed.ok || !parsed.data) {
+        if (parsed.isRateLimited) {
+          setCooldownSeconds(5);
+        }
+        throw new Error(parsed.errorMessage);
       }
+      const data = parsed.data;
 
       const rawMatches: any[] = data.matchedItems || [];
       const rawUnmatched: any[] = data.unmatchedItems || [];
@@ -387,9 +416,19 @@ export const AiReceiptScannerModal: React.FC<AiReceiptScannerModalProps> = ({
         }
       }
     } catch (err: any) {
-      console.error('AI receipt scan error:', err);
-      setScanError(err?.message || 'Could not identify items. Please ensure good lighting and try again.');
+      const msg = String(err?.message || '');
+      if (isRateLimitTextOrStatus(undefined, msg)) {
+        setCooldownSeconds(5);
+        setScanError(RATE_LIMIT_SCANNER_MESSAGE);
+      } else if (err?.name === 'AbortError') {
+        setScanError('AI receipt scan timed out. Tap Retry or enter items manually.');
+      } else {
+        setScanError(msg || 'Could not identify items. Please ensure good lighting and try again.');
+      }
+      console.warn('AI receipt scan notice:', msg || err);
     } finally {
+      window.clearTimeout(timeoutId);
+      scanInFlightRef.current = false;
       setIsAnalyzing(false);
     }
   };
@@ -705,18 +744,24 @@ export const AiReceiptScannerModal: React.FC<AiReceiptScannerModalProps> = ({
             <div className="flex items-center gap-2">
               <button
                 type="button"
+                disabled={isAnalyzing || cooldownSeconds > 0}
                 onClick={handleCaptureFromCamera}
-                className="flex-1 bg-gradient-to-r from-purple-600 via-indigo-600 to-sky-600 hover:from-purple-500 hover:to-sky-500 active:scale-95 text-white font-extrabold py-3 px-4 rounded-xl text-xs transition flex items-center justify-center gap-2 shadow-lg shadow-purple-600/30 cursor-pointer"
+                className="flex-1 bg-gradient-to-r from-purple-600 via-indigo-600 to-sky-600 hover:from-purple-500 hover:to-sky-500 active:scale-95 disabled:opacity-50 text-white font-extrabold py-3 px-4 rounded-xl text-xs transition flex items-center justify-center gap-2 shadow-lg shadow-purple-600/30 cursor-pointer"
               >
                 <Camera className="w-4 h-4" />
-                <span>📸 Snap & Scan Receipt with AI</span>
+                <span>
+                  {cooldownSeconds > 0
+                    ? `Please wait (${cooldownSeconds}s)...`
+                    : '📸 Snap & Scan Receipt with AI'}
+                </span>
               </button>
 
               <button
                 type="button"
+                disabled={isAnalyzing || cooldownSeconds > 0}
                 onClick={() => fileInputRef.current?.click()}
                 title="Choose receipt image from phone gallery"
-                className="bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white p-3 rounded-xl border border-slate-700 transition shrink-0 cursor-pointer"
+                className="bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-300 hover:text-white p-3 rounded-xl border border-slate-700 transition shrink-0 cursor-pointer"
               >
                 <ImageIcon className="w-4 h-4" />
               </button>
@@ -762,12 +807,22 @@ export const AiReceiptScannerModal: React.FC<AiReceiptScannerModalProps> = ({
             <div className="space-y-4 pt-1">
               {/* Error Notice */}
               {scanError && (
-                <div className="bg-rose-950/85 border border-rose-500/60 p-3 rounded-xl text-xs text-rose-200 flex items-start gap-2.5 shadow-sm">
-                  <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
-                  <div className="space-y-0.5">
-                    <p className="font-bold text-rose-100">AI Receipt Scan Notice</p>
-                    <p className="text-[11px] leading-relaxed text-rose-200/90">{scanError}</p>
+                <div className="bg-rose-950/85 border border-rose-500/60 p-3 rounded-xl text-xs text-rose-200 flex items-start justify-between gap-2.5 shadow-sm">
+                  <div className="flex items-start gap-2.5 min-w-0">
+                    <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                    <div className="space-y-1 min-w-0">
+                      <p className="font-bold text-rose-100">AI Receipt Scan Notice</p>
+                      <p className="text-[11px] leading-relaxed text-rose-200/90">{scanError}</p>
+                    </div>
                   </div>
+                  <button
+                    type="button"
+                    disabled={isAnalyzing || cooldownSeconds > 0}
+                    onClick={() => analyzeImageWithAi(capturedImage)}
+                    className="px-2.5 py-1 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 border border-rose-400/50 text-rose-100 font-bold text-[11px] disabled:opacity-50 shrink-0 transition cursor-pointer"
+                  >
+                    {cooldownSeconds > 0 ? `Retry in ${cooldownSeconds}s` : 'Retry'}
+                  </button>
                 </div>
               )}
 

@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
 import { Product } from '../../types';
+import { getSharedAudioContext } from '../../utils/uiFeedback';
 
 interface BarcodeScannerModalProps {
   onScan: (barcode: string) => void;
@@ -86,12 +87,8 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
     // 2. High-Confidence Dual-Tone POS Audio Chime (Web Audio API)
     if (soundEnabled) {
       try {
-        const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-        if (AudioCtx) {
-          const ctx = new AudioCtx();
-          if (ctx.state === 'suspended') {
-            ctx.resume().catch(() => {});
-          }
+        const ctx = getSharedAudioContext();
+        if (ctx) {
           const now = ctx.currentTime;
 
           // First fundamental tone (1046.5Hz - C6)
@@ -259,15 +256,21 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
           }
         );
 
-        if (isMounted) {
-          setIsScanning(true);
-          // Check torch capability
+        if (!isMounted) {
           try {
-            const capabilities = (scanner as any).getRunningTrackCapabilities?.() || {};
-            setHasTorch(Boolean(capabilities && 'torch' in capabilities && capabilities.torch));
-          } catch (_) {
-            setHasTorch(false);
-          }
+            await scanner.stop();
+            scanner.clear();
+          } catch (_) {}
+          return;
+        }
+
+        setIsScanning(true);
+        // Check torch capability
+        try {
+          const capabilities = (scanner as any).getRunningTrackCapabilities?.() || {};
+          setHasTorch(Boolean(capabilities && 'torch' in capabilities && capabilities.torch));
+        } catch (_) {
+          setHasTorch(false);
         }
       } catch (err: any) {
         console.error('Mobile camera barcode scanner error:', err);

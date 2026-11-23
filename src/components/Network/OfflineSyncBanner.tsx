@@ -58,6 +58,9 @@ export const OfflineSyncBanner: React.FC<OfflineSyncBannerProps> = ({
     message: string;
   } | null>(null);
 
+  const onTriggerSyncRef = React.useRef(onTriggerSync);
+  onTriggerSyncRef.current = onTriggerSync;
+
   // Monitor network transitions to show reconnection notification & optionally trigger automatic flush
   useEffect(() => {
     if (!isOnline) {
@@ -67,8 +70,8 @@ export const OfflineSyncBanner: React.FC<OfflineSyncBannerProps> = ({
       setWasOffline(false);
       setIsDismissed(false);
 
-      if (aggressiveAutoSync && onTriggerSync) {
-        Promise.resolve(onTriggerSync()).catch((err) => {
+      if (aggressiveAutoSync && onTriggerSyncRef.current) {
+        Promise.resolve(onTriggerSyncRef.current()).catch((err) => {
           console.warn('Auto-sync on reconnect error:', err);
         });
       }
@@ -78,7 +81,7 @@ export const OfflineSyncBanner: React.FC<OfflineSyncBannerProps> = ({
       }, 5000);
       return () => clearTimeout(timer);
     }
-  }, [isOnline, wasOffline, aggressiveAutoSync, onTriggerSync]);
+  }, [isOnline, wasOffline, aggressiveAutoSync]);
 
   // Clear stale error feedback once queue drains completely
   useEffect(() => {

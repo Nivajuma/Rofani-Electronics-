@@ -48,6 +48,7 @@ import { TabKey } from '../../utils/permissions';
 import { User, StoreSubscriptionProfile } from '../../types';
 import { generateStoreReferralCode } from '../../lib/cloudSync';
 import { CustomerCareSupportCard } from './CustomerCareSupportCard';
+import { PromoFlyerGeneratorCard } from './PromoFlyerGeneratorCard';
 import {
   ROFANI_MASTER_KRA_PIN,
   SUPPORT_EMAIL,
@@ -1284,6 +1285,15 @@ export const AppMenuView: React.FC<AppMenuViewProps> = ({
                         </button>
                       </div>
                     </div>
+
+                    {/* Built-in HTML5 Canvas Rofani POS Promo Flyer Generator */}
+                    <PromoFlyerGeneratorCard
+                      referralCode={merchantReferralCode}
+                      hasReferralCode={hasAvailableReferralCode}
+                      inviteUrl={referralInviteUrl}
+                      promoCaption={socialCaption.trim() || buildStandardPromoCaption()}
+                      onNotify={showSocialHelperNotice}
+                    />
 
                     {/* Editable Caption Preview Box */}
                     <div className="space-y-1">

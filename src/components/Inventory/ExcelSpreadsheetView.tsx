@@ -43,6 +43,7 @@ interface ExcelSpreadsheetViewProps {
   transactions?: Transaction[];
   onSaveProduct: (product: Product) => void;
   onDeleteProduct: (productId: string) => void;
+  onBatchDeleteProducts?: (productIds: string[], summaryLabel?: string) => Promise<void> | void;
   onBatchImportProducts?: (importedProducts: Product[], replaceExisting: boolean) => void;
   showLowStockOnly?: boolean;
   onToggleLowStockOnly?: () => void;
@@ -56,6 +57,7 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
   transactions = [],
   onSaveProduct,
   onDeleteProduct,
+  onBatchDeleteProducts,
   onBatchImportProducts,
   showLowStockOnly = false,
   onToggleLowStockOnly,
@@ -217,9 +219,14 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
   };
 
   // Delete Selected Excel Rows
-  const handleDeleteSelected = () => {
+  const handleDeleteSelected = async () => {
     if (selectedRowIds.size === 0) return;
-    selectedRowIds.forEach((id) => onDeleteProduct(id));
+    const ids = Array.from(selectedRowIds);
+    if (onBatchDeleteProducts) {
+      await onBatchDeleteProducts(ids, `Spreadsheet Bulk Delete: ${ids.length} item(s)`);
+    } else {
+      ids.forEach((id) => onDeleteProduct(id));
+    }
     setSelectedRowIds(new Set());
   };
 

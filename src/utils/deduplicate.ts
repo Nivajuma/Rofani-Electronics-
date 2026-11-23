@@ -196,8 +196,120 @@ export function processDueRecurringExpenses(expenses: Expense[], currentUserName
   };
 }
 
-export function detectDuplicateProducts(products: Product[]): DuplicateGroup[] {
+export interface DetectDuplicateOptions {
+  matchNameAcrossCategories?: boolean;
+  stripCopySuffix?: boolean;
+}
+
+function getProductStockQty(p: Product): number {
+  return Number(p.stockQuantity ?? p.stock ?? 0) || 0;
+}
+
+function normalizeProductNameForDedupe(name?: string, stripCopySuffix = true): string {
+  if (!name) return '';
+  let cleaned = name.trim().toLowerCase().replace(/\s+/g, ' ');
+  if (stripCopySuffix) {
+    cleaned = cleaned
+      .replace(/\s*\(\s*copy(?:\s*\d+)?\s*\)\s*$/i, '')
+      .replace(/\s*[-–—]\s*copy(?:\s*\d+)?\s*$/i, '')
+      .trim();
+  }
+  return cleaned;
+}
+
+export function mergeProductGroup(
+  primaryItem: Product,
+  itemsToMerge: Product[],
+  options: { combineStock?: boolean } = {}
+): { mergedProduct: Product; removedIds: string[]; mergedStockUnits: number } {
+  const combineStock = options.combineStock !== false;
+  const uniqueMerged = itemsToMerge.filter((item) => item && item.id && item.id !== primaryItem.id);
+  const removedIds = uniqueMerged.map((d) => d.id);
+
+  const primaryStock = getProductStockQty(primaryItem);
+  const addedStock = uniqueMerged.reduce((sum, dup) => sum + getProductStockQty(dup), 0);
+  const totalCombinedStock = combineStock ? primaryStock + addedStock : primaryStock;
+
+  const combinedStoreStock: Record<string, number> = { ...(primaryItem.storeStock || {}) };
+  let finalImageUrl = primaryItem.imageUrl || '';
+  let finalBarcode = primaryItem.barcode || '';
+  let finalSku = primaryItem.sku || '';
+  let finalDescription = primaryItem.description || '';
+  let finalSizeCapacity = primaryItem.sizeCapacity || '';
+  let finalSupplierId = primaryItem.supplierId || '';
+  let finalSupplierName = primaryItem.supplierName || '';
+  let finalCostPrice = Number(primaryItem.costPrice ?? primaryItem.buyingPrice ?? 0) || 0;
+  let finalSellingPrice = Number(primaryItem.sellingPrice ?? 0) || 0;
+
+  uniqueMerged.forEach((dup) => {
+    if (!finalImageUrl && dup.imageUrl) {
+      finalImageUrl = dup.imageUrl;
+    }
+    if ((!finalBarcode || /^(n\/a|auto|none)$/i.test(finalBarcode.trim())) && dup.barcode) {
+      finalBarcode = dup.barcode;
+    }
+    if ((!finalSku || /^(n\/a|auto|none)$/i.test(finalSku.trim())) && dup.sku) {
+      finalSku = dup.sku;
+    }
+    if (!finalDescription && dup.description) {
+      finalDescription = dup.description;
+    }
+    if (!finalSizeCapacity && dup.sizeCapacity) {
+      finalSizeCapacity = dup.sizeCapacity;
+    }
+    if (!finalSupplierId && dup.supplierId) {
+      finalSupplierId = dup.supplierId;
+    }
+    if (!finalSupplierName && dup.supplierName) {
+      finalSupplierName = dup.supplierName;
+    }
+    if (finalCostPrice <= 0) {
+      const dupCost = Number(dup.costPrice ?? dup.buyingPrice ?? 0) || 0;
+      if (dupCost > 0) finalCostPrice = dupCost;
+    }
+    if (finalSellingPrice <= 0) {
+      const dupSell = Number(dup.sellingPrice ?? 0) || 0;
+      if (dupSell > 0) finalSellingPrice = dupSell;
+    }
+
+    if (combineStock && dup.storeStock) {
+      Object.entries(dup.storeStock).forEach(([storeId, qty]) => {
+        combinedStoreStock[storeId] = (combinedStoreStock[storeId] || 0) + (Number(qty) || 0);
+      });
+    }
+  });
+
+  const mergedProduct: Product = {
+    ...primaryItem,
+    barcode: finalBarcode,
+    sku: finalSku,
+    description: finalDescription,
+    sizeCapacity: finalSizeCapacity || primaryItem.sizeCapacity,
+    supplierId: finalSupplierId || primaryItem.supplierId,
+    supplierName: finalSupplierName || primaryItem.supplierName,
+    costPrice: finalCostPrice,
+    sellingPrice: finalSellingPrice,
+    stockQuantity: totalCombinedStock,
+    ...(primaryItem.stock !== undefined ? { stock: totalCombinedStock } : {}),
+    imageUrl: finalImageUrl,
+    storeStock: Object.keys(combinedStoreStock).length > 0 ? combinedStoreStock : primaryItem.storeStock,
+    updatedAt: new Date().toISOString(),
+  };
+
+  return {
+    mergedProduct,
+    removedIds,
+    mergedStockUnits: combineStock ? addedStock : 0,
+  };
+}
+
+export function detectDuplicateProducts(
+  products: Product[],
+  options: DetectDuplicateOptions = {}
+): DuplicateGroup[] {
   if (!products || products.length <= 1) return [];
+
+  const { matchNameAcrossCategories = false, stripCopySuffix = true } = options;
 
   // Union-Find / Disjoint Set structure for grouping connected duplicate items
   const parent = products.map((_, idx) => idx);
@@ -220,7 +332,7 @@ export function detectDuplicateProducts(products: Product[]): DuplicateGroup[] {
   const skuMap = new Map<string, number>();
   const nameCategoryMap = new Map<string, number>();
 
-  const matchReasons = new Map<string, 'Barcode Match' | 'SKU Match' | 'Name & Category Match'>();
+  const matchReasons = new Map<number, 'Barcode Match' | 'SKU Match' | 'Name & Category Match'>();
 
   products.forEach((p, idx) => {
     // 1. Barcode normalization
@@ -229,7 +341,7 @@ export function detectDuplicateProducts(products: Product[]): DuplicateGroup[] {
       if (barcodeMap.has(normalizedBarcode)) {
         const prevIdx = barcodeMap.get(normalizedBarcode)!;
         union(idx, prevIdx);
-        matchReasons.set(`${find(idx)}`, 'Barcode Match');
+        matchReasons.set(find(idx), 'Barcode Match');
       } else {
         barcodeMap.set(normalizedBarcode, idx);
       }
@@ -241,24 +353,29 @@ export function detectDuplicateProducts(products: Product[]): DuplicateGroup[] {
       if (skuMap.has(normalizedSku)) {
         const prevIdx = skuMap.get(normalizedSku)!;
         union(idx, prevIdx);
-        if (!matchReasons.has(`${find(idx)}`)) {
-          matchReasons.set(`${find(idx)}`, 'SKU Match');
+        const root = find(idx);
+        if (!matchReasons.has(root)) {
+          matchReasons.set(root, 'SKU Match');
         }
       } else {
         skuMap.set(normalizedSku, idx);
       }
     }
 
-    // 3. Name & Category normalization
-    const normalizedName = p.name ? p.name.trim().toLowerCase().replace(/\s+/g, ' ') : '';
+    // 3. Name (& Category) normalization
+    const normalizedName = normalizeProductNameForDedupe(p.name, stripCopySuffix);
     const normalizedCat = p.category ? p.category.trim().toLowerCase() : '';
+    const normalizedSize = p.sizeCapacity ? p.sizeCapacity.trim().toLowerCase() : '';
     if (normalizedName) {
-      const nameKey = `${normalizedCat}:::${normalizedName}`;
+      const nameKey = matchNameAcrossCategories
+        ? `${normalizedName}:::${normalizedSize}`
+        : `${normalizedCat}:::${normalizedName}:::${normalizedSize}`;
       if (nameCategoryMap.has(nameKey)) {
         const prevIdx = nameCategoryMap.get(nameKey)!;
         union(idx, prevIdx);
-        if (!matchReasons.has(`${find(idx)}`)) {
-          matchReasons.set(`${find(idx)}`, 'Name & Category Match');
+        const root = find(idx);
+        if (!matchReasons.has(root)) {
+          matchReasons.set(root, 'Name & Category Match');
         }
       } else {
         nameCategoryMap.set(nameKey, idx);
@@ -280,7 +397,7 @@ export function detectDuplicateProducts(products: Product[]): DuplicateGroup[] {
 
   clusters.forEach((items, root) => {
     if (items.length > 1) {
-      // Pick primary item: item with image or longest description or earlier creation date
+      // Pick primary item: item with image or longest description or higher stock or earlier creation date
       const sorted = [...items].sort((a, b) => {
         const aHasImg = a.imageUrl ? 1 : 0;
         const bHasImg = b.imageUrl ? 1 : 0;
@@ -288,18 +405,20 @@ export function detectDuplicateProducts(products: Product[]): DuplicateGroup[] {
         if ((a.description || '').length !== (b.description || '').length) {
           return (b.description || '').length - (a.description || '').length;
         }
+        const stockDiff = getProductStockQty(b) - getProductStockQty(a);
+        if (stockDiff !== 0) return stockDiff;
         return (a.createdAt || '').localeCompare(b.createdAt || '');
       });
 
       const primaryItem = sorted[0];
       const duplicateItems = sorted.slice(1);
 
-      const totalStockToMerge = duplicateItems.reduce((sum, item) => sum + (item.stockQuantity || 0), 0);
+      const totalStockToMerge = duplicateItems.reduce((sum, item) => sum + getProductStockQty(item), 0);
 
-      const reason = matchReasons.get(`${root}`) || 'Name & Category Match';
+      const reason = matchReasons.get(root) || 'Name & Category Match';
 
       duplicateGroups.push({
-        id: `dup-group-${root}-${Date.now()}`,
+        id: `dup-group-${primaryItem.id}`,
         matchReason: reason,
         matchKey: primaryItem.name,
         primaryItem,
@@ -312,8 +431,11 @@ export function detectDuplicateProducts(products: Product[]): DuplicateGroup[] {
   return duplicateGroups;
 }
 
-export function deduplicateProducts(products: Product[]): DeduplicationResult {
-  const groups = detectDuplicateProducts(products);
+export function deduplicateProducts(
+  products: Product[],
+  options: DetectDuplicateOptions = {}
+): DeduplicationResult {
+  const groups = detectDuplicateProducts(products, options);
 
   if (groups.length === 0) {
     return {
@@ -333,41 +455,16 @@ export function deduplicateProducts(products: Product[]): DeduplicationResult {
   let totalMergedStockUnits = 0;
 
   groups.forEach((group) => {
-    const { primaryItem, duplicateItems, totalStockToMerge } = group;
+    const { mergedProduct, removedIds, mergedStockUnits } = mergeProductGroup(
+      group.primaryItem,
+      group.duplicateItems,
+      { combineStock: true }
+    );
 
-    // Combine stock quantities
-    const totalCombinedStock = (primaryItem.stockQuantity || 0) + totalStockToMerge;
-
-    // Combine store stock dictionaries
-    const combinedStoreStock: Record<string, number> = { ...(primaryItem.storeStock || {}) };
-
-    let finalImageUrl = primaryItem.imageUrl || '';
-
-    duplicateItems.forEach((dup) => {
-      idsToRemoveSet.add(dup.id);
-      totalRemovedCount += 1;
-      totalMergedStockUnits += dup.stockQuantity || 0;
-
-      if (!finalImageUrl && dup.imageUrl) {
-        finalImageUrl = dup.imageUrl;
-      }
-
-      if (dup.storeStock) {
-        Object.entries(dup.storeStock).forEach(([storeId, qty]) => {
-          combinedStoreStock[storeId] = (combinedStoreStock[storeId] || 0) + (qty || 0);
-        });
-      }
-    });
-
-    const updatedPrimary: Product = {
-      ...primaryItem,
-      stockQuantity: totalCombinedStock,
-      imageUrl: finalImageUrl,
-      storeStock: Object.keys(combinedStoreStock).length > 0 ? combinedStoreStock : primaryItem.storeStock,
-      updatedAt: new Date().toISOString().slice(0, 10),
-    };
-
-    primaryUpdatesMap.set(primaryItem.id, updatedPrimary);
+    removedIds.forEach((id) => idsToRemoveSet.add(id));
+    totalRemovedCount += removedIds.length;
+    totalMergedStockUnits += mergedStockUnits;
+    primaryUpdatesMap.set(group.primaryItem.id, mergedProduct);
   });
 
   // Construct cleaned products array

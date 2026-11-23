@@ -26,6 +26,7 @@ import {
   Landmark,
   Layers,
   ShoppingCart,
+  ShoppingBag,
   Lock,
   Trash2
 } from 'lucide-react';
@@ -55,6 +56,8 @@ interface ReportsViewProps {
   commissionPayouts?: StaffCommissionPayout[];
   storeName?: string;
   onAddExpense?: (expense: Expense) => void;
+  onSell?: () => void;
+  inPhoneFrame?: boolean;
 }
 
 interface ReportItem {
@@ -83,6 +86,8 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   commissionPayouts = [],
   storeName,
   onAddExpense,
+  onSell,
+  inPhoneFrame = false,
 }) => {
   const [txSettings] = useTransactionSettings(activeStoreId);
   const [searchQuery, setSearchQuery] = useState('');
@@ -620,33 +625,33 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 pb-28 font-sans">
+    <div className={`${inPhoneFrame ? '-m-3 sm:-m-4 min-h-full pb-6' : 'min-h-screen pb-28'} bg-slate-950 text-slate-100 font-sans`}>
       {/* Sticky Header Bar */}
-      <div className="sticky top-0 z-30 bg-slate-900 text-white shadow-md px-4 py-3.5 flex items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
+      <div className="sticky top-0 z-30 bg-slate-900 text-white shadow-md border-b border-slate-800/80 px-3 sm:px-4 py-3 flex items-center justify-between gap-2.5">
+        <div className="flex items-center gap-2.5 min-w-0 flex-1">
           {onBack && (
             <button
               onClick={onBack}
-              className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl transition cursor-pointer"
+              className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl transition cursor-pointer shrink-0"
             >
               <ArrowLeft className="w-5 h-5" />
             </button>
           )}
-          <div>
-            <h1 className="font-bold text-base sm:text-lg tracking-tight">Reports & Business Analytics</h1>
-            <p className="text-[10px] text-slate-400">Rofani POS • Tap any report to view specialized views</p>
+          <div className="min-w-0 flex-1">
+            <h1 className="font-bold text-sm sm:text-lg tracking-tight truncate">Reports & Business Analytics</h1>
+            <p className="text-[10px] text-slate-400 truncate">Rofani POS • Tap any report to view specialized views</p>
           </div>
         </div>
 
         {/* Search Bar */}
-        <div className="relative w-44 sm:w-64">
-          <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+        <div className="relative w-32 sm:w-56 md:w-64 shrink-0">
+          <Search className="w-4 h-4 text-slate-400 absolute left-2.5 sm:left-3 top-2.5" />
           <input
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search reports..."
-            className="w-full bg-slate-950 border border-slate-700 rounded-xl pl-9 pr-3 py-2 text-xs text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="w-full bg-slate-950 border border-slate-700 rounded-xl pl-8 sm:pl-9 pr-2.5 sm:pr-3 py-2 text-xs text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
         </div>
       </div>
@@ -659,8 +664,37 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
         </div>
       )}
 
-      {/* Main Content: Daily Overview & Grouped Cards */}
-      <div className="max-w-4xl mx-auto px-4 py-6 space-y-6 mb-12">
+      {/* Main Content: Mobile Quick Sell CTA, Daily Overview & Grouped Cards */}
+      <div className={`max-w-4xl mx-auto ${inPhoneFrame ? 'px-3 pt-3 pb-4 space-y-4' : 'px-4 pt-3 sm:pt-6 pb-6 space-y-6'} mb-12`}>
+        {onSell && (
+          <div className={inPhoneFrame ? 'block pt-0.5' : 'lg:hidden pt-0.5'}>
+            <button
+              type="button"
+              id="btn-mobile-dashboard-sell"
+              onClick={onSell}
+              className="w-full min-h-[48px] px-4 py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-500 active:scale-[0.99] text-white font-bold text-sm shadow-lg shadow-emerald-950/50 border border-emerald-400/30 flex items-center justify-between gap-3 transition cursor-pointer"
+            >
+              <span className="flex items-center gap-3 min-w-0">
+                <span className="w-9 h-9 rounded-xl bg-white/15 flex items-center justify-center shrink-0">
+                  <ShoppingBag className="w-5 h-5 text-white" />
+                </span>
+                <span className="text-left min-w-0">
+                  <span className="block font-extrabold text-sm leading-tight truncate">
+                    Sell
+                  </span>
+                  <span className="block text-[11px] font-medium text-emerald-100/90 leading-tight truncate">
+                    Open POS register &amp; ring up a sale
+                  </span>
+                </span>
+              </span>
+              <span className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-slate-950/25 text-xs font-bold whitespace-nowrap shrink-0">
+                <span>New Sale</span>
+                <ChevronRight className="w-4 h-4" />
+              </span>
+            </button>
+          </div>
+        )}
+
         <DailyOverviewCard
           transactions={transactions}
           products={products}

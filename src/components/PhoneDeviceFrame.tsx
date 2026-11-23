@@ -55,7 +55,7 @@ export const PhoneDeviceFrame: React.FC<PhoneDeviceFrameProps> = ({
   lowStockCount,
   onLockTerminal: _onLockTerminal,
   onOpenStaffModal: _onOpenStaffModal,
-  onNewSale: _onNewSale,
+  onNewSale,
   onOpenCloudSync,
   onOpenStockAlerts,
   cloudSyncStatus = 'synced',
@@ -106,6 +106,16 @@ export const PhoneDeviceFrame: React.FC<PhoneDeviceFrameProps> = ({
       ? storeName.trim()
       : '';
 
+  const handleHeaderSellClick = () => {
+    if (activeTab !== 'pos') {
+      onSelectTab('pos');
+    } else if (onNewSale) {
+      onNewSale();
+    } else {
+      onSelectTab('pos');
+    }
+  };
+
   return (
     <div className="min-h-dvh h-dvh sm:h-auto sm:min-h-dvh bg-slate-900 sm:bg-slate-950 text-slate-100 flex flex-col items-center justify-center p-0 sm:py-4 sm:px-4 overflow-hidden sm:overflow-x-hidden selection:bg-blue-600 selection:text-white relative print-unlock-overflow">
       {/* SMARTPHONE DEVICE CONTAINER FRAME */}
@@ -115,14 +125,14 @@ export const PhoneDeviceFrame: React.FC<PhoneDeviceFrameProps> = ({
           boxShadow: '0 25px 60px -15px rgba(0, 0, 0, 0.8), inset 0 0 0 2px rgba(255, 255, 255, 0.08)'
         }}
       >
-        {/* SINGLE COMPACT MOBILE HEADER */}
-        <header className="print:hidden bg-slate-900 border-b border-slate-800 py-2 px-3 flex items-center justify-between gap-2 shrink-0 z-30">
-          <div className="flex items-center gap-2.5 min-w-0 flex-1">
-            <div className="w-8 h-8 rounded-full bg-slate-800 border border-slate-700/80 flex items-center justify-center text-sky-400 shrink-0">
+        {/* SINGLE COMPACT STICKY MOBILE HEADER */}
+        <header className="print:hidden sticky top-0 bg-slate-900 border-b border-slate-800 flex items-center justify-between gap-1.5 px-3 py-2 shrink-0 z-30">
+          <div className="flex items-center gap-2 min-w-0 flex-1">
+            <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-slate-800 border border-slate-700/80 flex items-center justify-center text-sky-400 shrink-0">
               <Store className="w-4 h-4" />
             </div>
             <div className="min-w-0 flex-1">
-              <h1 className="text-sm font-bold text-white truncate leading-tight">
+              <h1 className="text-sm font-bold text-white truncate min-w-0 leading-tight">
                 Rofani POS
               </h1>
               {normalizedCustomStore && (
@@ -133,7 +143,19 @@ export const PhoneDeviceFrame: React.FC<PhoneDeviceFrameProps> = ({
             </div>
           </div>
 
-          <div className="flex items-center gap-2 shrink-0 flex-nowrap pr-0.5">
+          <div className="flex items-center gap-1.5 shrink-0 flex-nowrap pr-0.5">
+            <button
+              type="button"
+              id="btn-mobile-header-sell"
+              onClick={handleHeaderSellClick}
+              className="bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white font-semibold text-xs px-2.5 py-1.5 rounded-full flex items-center gap-1 shrink-0 shadow-sm transition cursor-pointer whitespace-nowrap"
+              title="Open POS Register / New Sale"
+              aria-label="Sell — Open POS Register"
+            >
+              <ShoppingBag className="w-3.5 h-3.5 shrink-0" />
+              <span>Sell</span>
+            </button>
+
             {onOpenCloudSync && (
               <button
                 type="button"

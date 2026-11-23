@@ -57,7 +57,9 @@ import {
   Calendar,
   RotateCcw,
   ArrowDown,
-  ArrowUp
+  ArrowUp,
+  CheckSquare,
+  GitMerge
 } from 'lucide-react';
 import { Product, Supplier, BarcodeScanLog, User, Transaction, RestockRecord } from '../../types';
 import { generateAutoBarcode, printBarcodeLabels, printBatchBarcodes } from '../../utils/barcode';
@@ -69,7 +71,12 @@ import { StockDensityHeatmap } from './StockDensityHeatmap';
 import { ImageGeneratorModal } from './ImageGeneratorModal';
 import { ProductQrCodeModal } from './ProductQrCodeModal';
 import { ItemAuditMiniPage } from './ItemAuditMiniPage';
-import { detectDuplicateProducts, deduplicateProducts } from '../../utils/deduplicate';
+import {
+  detectDuplicateProducts,
+  deduplicateProducts,
+  mergeProductGroup,
+  DuplicateGroup,
+} from '../../utils/deduplicate';
 import { optimizeImageFile, optimizeImageDataUrl } from '../../utils/imageOptimizer';
 import {
   isRateLimitTextOrStatus,
@@ -90,6 +97,8 @@ import { AiReceiptScannerModal } from '../POS/AiReceiptScannerModal';
 import { safeGetJSON, safeSetJSON } from '../../utils/safeStorage';
 import { batchSaveProductsToCloud } from '../../lib/cloudSync';
 import { LowStockTrendsCard } from './LowStockTrendsCard';
+import { BulkEditProductsModal } from './BulkEditProductsModal';
+import { InventoryAuditorModal } from './InventoryAuditorModal';
 
 interface InventoryViewProps {
   products: Product[];
@@ -98,7 +107,14 @@ interface InventoryViewProps {
   transactions?: Transaction[];
   onSaveProduct: (product: Product) => void;
   onDeleteProduct: (productId: string) => void;
+  onBatchDeleteProducts?: (productIds: string[], summaryLabel?: string) => Promise<void> | void;
   onBatchImportProducts?: (importedProducts: Product[], replaceExisting: boolean) => void;
+  onBatchUpdateProducts?: (updatedProducts: Product[], summaryLabel?: string) => Promise<void> | void;
+  onMergeAndDeleteProducts?: (
+    updatedPrimaries: Product[],
+    removedProductIds: string[],
+    summaryLabel?: string
+  ) => Promise<void> | void;
   onAddSupplier?: (supplier: Supplier) => void;
   initialShowLowStockOnly?: boolean;
   onViewProductHistory?: (product: Product) => void;
@@ -132,7 +148,10 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   transactions = [],
   onSaveProduct,
   onDeleteProduct,
+  onBatchDeleteProducts,
   onBatchImportProducts,
+  onBatchUpdateProducts,
+  onMergeAndDeleteProducts,
   onAddSupplier,
   initialShowLowStockOnly = false,
   onViewProductHistory,
@@ -358,6 +377,102 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     setQuickRestockReason('Supplier Delivery');
   };
 
+  // Bulk Edit Selection State & Handlers
+  const canBulkEditInventory = canEditInventory(currentUser.role);
+  const [isBulkSelectMode, setIsBulkSelectMode] = useState<boolean>(false);
+  const [selectedProductIds, setSelectedProductIds] = useState<Set<string>>(() => new Set());
+  const [showBulkEditModal, setShowBulkEditModal] = useState<boolean>(false);
+  const [confirmBulkDelete, setConfirmBulkDelete] = useState<boolean>(false);
+  const [isBulkDeleting, setIsBulkDeleting] = useState<boolean>(false);
+
+  useEffect(() => {
+    setSelectedProductIds((prev) => {
+      if (prev.size === 0) return prev;
+      const validIds = new Set(products.map((p) => p.id));
+      let changed = false;
+      const next = new Set<string>();
+      prev.forEach((id) => {
+        if (validIds.has(id)) next.add(id);
+        else changed = true;
+      });
+      return changed ? next : prev;
+    });
+  }, [products]);
+
+  const selectedProductsList = React.useMemo(
+    () => products.filter((p) => selectedProductIds.has(p.id)),
+    [products, selectedProductIds]
+  );
+
+  const toggleProductSelection = (productId: string) => {
+    setConfirmBulkDelete(false);
+    setSelectedProductIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(productId)) {
+        next.delete(productId);
+      } else {
+        next.add(productId);
+      }
+      return next;
+    });
+  };
+
+  const handleClearSelection = () => {
+    setConfirmBulkDelete(false);
+    setSelectedProductIds(new Set());
+    setIsBulkSelectMode(false);
+  };
+
+  const handleApplyBulkUpdate = async (updatedProducts: Product[], summaryLabel: string) => {
+    if (onBatchUpdateProducts) {
+      await onBatchUpdateProducts(updatedProducts, summaryLabel);
+    } else {
+      await batchSaveProductsToCloud(updatedProducts).catch(() => {});
+      updatedProducts.forEach((p) => onSaveProduct(p));
+    }
+    setShowBulkEditModal(false);
+    setSelectedProductIds(new Set());
+    setIsBulkSelectMode(false);
+    setAutoAddSuccessToast(
+      `Batch updated ${updatedProducts.length} product(s): ${summaryLabel}.`
+    );
+    setTimeout(() => setAutoAddSuccessToast(null), 6000);
+  };
+
+  // Inventory Auditor (Loss-Making & Zero-Margin Items) State & Handlers
+  const [showInventoryAuditorModal, setShowInventoryAuditorModal] = useState<boolean>(false);
+
+  const lossMakingProductsCount = React.useMemo(
+    () =>
+      products.filter(
+        (p) =>
+          Number(p.sellingPrice || 0) <= Number(p.costPrice ?? p.buyingPrice ?? 0)
+      ).length,
+    [products]
+  );
+
+  const handleAuditorQuickMarkupSingle = async (updatedProduct: Product) => {
+    const label = `Quick Mark-up: ${updatedProduct.name} → KSh ${updatedProduct.sellingPrice.toLocaleString()}`;
+    if (onBatchUpdateProducts) {
+      await onBatchUpdateProducts([updatedProduct], label);
+    } else {
+      onSaveProduct(updatedProduct);
+    }
+  };
+
+  const handleAuditorQuickMarkupBatch = async (updatedProducts: Product[], summaryLabel: string) => {
+    if (onBatchUpdateProducts) {
+      await onBatchUpdateProducts(updatedProducts, summaryLabel);
+    } else {
+      await batchSaveProductsToCloud(updatedProducts).catch(() => {});
+      updatedProducts.forEach((p) => onSaveProduct(p));
+    }
+    setAutoAddSuccessToast(
+      `Inventory Auditor updated ${updatedProducts.length} product(s) to target minimum margin.`
+    );
+    setTimeout(() => setAutoAddSuccessToast(null), 6000);
+  };
+
   // Sync state when initialShowLowStockOnly prop changes from parent
   React.useEffect(() => {
     if (initialShowLowStockOnly !== undefined) {
@@ -545,8 +660,17 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   const [autoSaveOnCameraSnap, setAutoSaveOnCameraSnap] = useState<boolean>(true);
   const [autoAddSuccessToast, setAutoAddSuccessToast] = useState<string | null>(null);
 
-  // Auto Deduplicate Repeated Items State
+  // Auto Deduplicate Repeated Items & Manual Merge State
   const [showDeduplicateModal, setShowDeduplicateModal] = useState<boolean>(false);
+  const [dedupeModalTab, setDedupeModalTab] = useState<'auto' | 'manual'>('auto');
+  const [matchDuplicatesAcrossCategories, setMatchDuplicatesAcrossCategories] = useState<boolean>(false);
+  const [customPrimaryByGroup, setCustomPrimaryByGroup] = useState<Record<string, string>>({});
+  const [manualMergeIds, setManualMergeIds] = useState<string[]>([]);
+  const [manualPrimaryId, setManualPrimaryId] = useState<string>('');
+  const [manualMergeCombineStock, setManualMergeCombineStock] = useState<boolean>(true);
+  const [manualMergeSearch, setManualMergeSearch] = useState<string>('');
+  const [isDedupeBusy, setIsDedupeBusy] = useState<boolean>(false);
+  const [dedupeError, setDedupeError] = useState<string | null>(null);
   const [showAiScanModal, setShowAiScanModal] = useState<boolean>(false);
   const [showReceiptScanModal, setShowReceiptScanModal] = useState<boolean>(false);
   const [isDragOverPhoto, setIsDragOverPhoto] = useState<boolean>(false);
@@ -631,9 +755,35 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     }
   };
 
-  const duplicateGroups = detectDuplicateProducts(products);
+  const duplicateGroups = React.useMemo(
+    () =>
+      detectDuplicateProducts(products, {
+        matchNameAcrossCategories: matchDuplicatesAcrossCategories,
+        stripCopySuffix: true,
+      }),
+    [products, matchDuplicatesAcrossCategories]
+  );
+
+  const getStockNum = (p: Product) => Number(p.stockQuantity ?? p.stock ?? 0) || 0;
+
+  const resolveClusterMembers = (group: DuplicateGroup) => {
+    const allMembers = [group.primaryItem, ...group.duplicateItems];
+    const overridePrimaryId = customPrimaryByGroup[group.id];
+    const chosenPrimary = allMembers.find((item) => item.id === overridePrimaryId) || group.primaryItem;
+    const duplicates = allMembers.filter((item) => item.id !== chosenPrimary.id);
+    const stockToMerge = duplicates.reduce((sum, item) => sum + getStockNum(item), 0);
+    return {
+      primaryItem: chosenPrimary,
+      duplicateItems: duplicates,
+      totalStockToMerge: stockToMerge,
+    };
+  };
+
   const totalDuplicateItemsToDelete = duplicateGroups.reduce((acc, g) => acc + g.duplicateItems.length, 0);
-  const totalStockToMerge = duplicateGroups.reduce((acc, g) => acc + g.totalStockToMerge, 0);
+  const totalStockToMerge = duplicateGroups.reduce(
+    (acc, g) => acc + resolveClusterMembers(g).totalStockToMerge,
+    0
+  );
 
   // Detect repeated photos across entire catalog
   const repeatedPhotoGroups = React.useMemo(() => {
@@ -670,15 +820,211 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     );
   };
 
-  const handleConfirmDeduplicate = () => {
-    const result = deduplicateProducts(products);
-    if (onBatchImportProducts) {
-      onBatchImportProducts(result.cleanedProducts, true);
+  const openDeduplicateModal = (tab: 'auto' | 'manual' = 'auto', preselectedIds?: string[]) => {
+    setDedupeError(null);
+    setDedupeModalTab(tab);
+    if (preselectedIds && preselectedIds.length > 0) {
+      const valid = products.filter((p) => preselectedIds.includes(p.id));
+      setManualMergeIds(valid.map((p) => p.id));
+      const bestDefault = [...valid].sort((a, b) => {
+        const imgDiff = (b.imageUrl ? 1 : 0) - (a.imageUrl ? 1 : 0);
+        if (imgDiff !== 0) return imgDiff;
+        return getStockNum(b) - getStockNum(a);
+      })[0];
+      setManualPrimaryId(bestDefault?.id || valid[0]?.id || '');
+    } else if (tab === 'manual' && manualMergeIds.length === 0 && selectedProductIds.size > 0) {
+      const valid = products.filter((p) => selectedProductIds.has(p.id));
+      setManualMergeIds(valid.map((p) => p.id));
+      setManualPrimaryId(valid[0]?.id || '');
     }
-    setShowDeduplicateModal(false);
-    setAutoAddSuccessToast(
-      `✨ Auto-deleted ${result.removedProductsCount} repeated items & merged ${result.mergedStockUnitsTotal} stock units into unique products!`
-    );
+    setShowDeduplicateModal(true);
+  };
+
+  const handleConfirmDeduplicate = async () => {
+    if (duplicateGroups.length === 0 || isDedupeBusy) return;
+    setIsDedupeBusy(true);
+    setDedupeError(null);
+    try {
+      const updatedPrimaries: Product[] = [];
+      const allRemovedIds: string[] = [];
+      let totalMergedUnits = 0;
+
+      duplicateGroups.forEach((group) => {
+        const { primaryItem, duplicateItems } = resolveClusterMembers(group);
+        const { mergedProduct, removedIds, mergedStockUnits } = mergeProductGroup(
+          primaryItem,
+          duplicateItems,
+          { combineStock: true }
+        );
+        updatedPrimaries.push(mergedProduct);
+        allRemovedIds.push(...removedIds);
+        totalMergedUnits += mergedStockUnits;
+      });
+
+      if (allRemovedIds.length === 0) {
+        setShowDeduplicateModal(false);
+        return;
+      }
+
+      if (onMergeAndDeleteProducts) {
+        await onMergeAndDeleteProducts(
+          updatedPrimaries,
+          allRemovedIds,
+          `Auto-Deleted ${allRemovedIds.length} Duplicate Item(s) & Merged +${totalMergedUnits} Stock`
+        );
+      } else if (onBatchImportProducts) {
+        const removedSet = new Set(allRemovedIds);
+        const primaryMap = new Map(updatedPrimaries.map((p) => [p.id, p]));
+        const cleaned = products
+          .filter((p) => !removedSet.has(p.id))
+          .map((p) => primaryMap.get(p.id) || p);
+        onBatchImportProducts(cleaned, true);
+      } else {
+        const fallback = deduplicateProducts(products, {
+          matchNameAcrossCategories: matchDuplicatesAcrossCategories,
+        });
+        fallback.groups.forEach((g) => {
+          g.duplicateItems.forEach((d) => onDeleteProduct(d.id));
+        });
+      }
+
+      setCustomPrimaryByGroup({});
+      handleClearSelection();
+      setShowDeduplicateModal(false);
+      setAutoAddSuccessToast(
+        `✨ Auto-deleted ${allRemovedIds.length} repeated items & merged +${totalMergedUnits} stock units into unique products!`
+      );
+      setTimeout(() => setAutoAddSuccessToast(null), 8000);
+    } catch (err) {
+      setDedupeError(err instanceof Error ? err.message : 'Failed to delete duplicate items. Please try again.');
+    } finally {
+      setIsDedupeBusy(false);
+    }
+  };
+
+  const handleMergeSingleCluster = async (group: DuplicateGroup) => {
+    if (isDedupeBusy) return;
+    setIsDedupeBusy(true);
+    setDedupeError(null);
+    try {
+      const { primaryItem, duplicateItems } = resolveClusterMembers(group);
+      const { mergedProduct, removedIds, mergedStockUnits } = mergeProductGroup(
+        primaryItem,
+        duplicateItems,
+        { combineStock: true }
+      );
+
+      if (onMergeAndDeleteProducts) {
+        await onMergeAndDeleteProducts(
+          [mergedProduct],
+          removedIds,
+          `Merged "${mergedProduct.name}" (${removedIds.length} duplicate removed, +${mergedStockUnits} stock)`
+        );
+      } else if (onBatchImportProducts) {
+        const removedSet = new Set(removedIds);
+        const cleaned = products
+          .filter((p) => !removedSet.has(p.id))
+          .map((p) => (p.id === mergedProduct.id ? mergedProduct : p));
+        onBatchImportProducts(cleaned, true);
+      }
+
+      setAutoAddSuccessToast(
+        `✨ Merged "${mergedProduct.name}" (+${mergedStockUnits} stock) & deleted ${removedIds.length} duplicate entry!`
+      );
+      setTimeout(() => setAutoAddSuccessToast(null), 7000);
+    } catch (err) {
+      setDedupeError(err instanceof Error ? err.message : 'Failed to merge duplicate group.');
+    } finally {
+      setIsDedupeBusy(false);
+    }
+  };
+
+  const handleDeleteSingleDuplicateOnly = async (dup: Product) => {
+    if (isDedupeBusy) return;
+    setIsDedupeBusy(true);
+    setDedupeError(null);
+    try {
+      if (onBatchDeleteProducts) {
+        await onBatchDeleteProducts([dup.id], `Deleted Duplicate Item: ${dup.name}`);
+      } else {
+        onDeleteProduct(dup.id);
+      }
+      setAutoAddSuccessToast(`🗑️ Deleted duplicate item "${dup.name}" cleanly.`);
+      setTimeout(() => setAutoAddSuccessToast(null), 6000);
+    } catch (err) {
+      setDedupeError(err instanceof Error ? err.message : `Failed to delete "${dup.name}".`);
+    } finally {
+      setIsDedupeBusy(false);
+    }
+  };
+
+  const handleConfirmManualMerge = async () => {
+    if (isDedupeBusy) return;
+    const selectedItems = products.filter((p) => manualMergeIds.includes(p.id));
+    if (selectedItems.length < 2) {
+      setDedupeError('Select at least 2 items to merge together.');
+      return;
+    }
+    const primaryItem = selectedItems.find((p) => p.id === manualPrimaryId) || selectedItems[0];
+    const itemsToMerge = selectedItems.filter((p) => p.id !== primaryItem.id);
+    if (itemsToMerge.length === 0) return;
+
+    setIsDedupeBusy(true);
+    setDedupeError(null);
+    try {
+      const { mergedProduct, removedIds, mergedStockUnits } = mergeProductGroup(
+        primaryItem,
+        itemsToMerge,
+        { combineStock: manualMergeCombineStock }
+      );
+
+      if (onMergeAndDeleteProducts) {
+        await onMergeAndDeleteProducts(
+          [mergedProduct],
+          removedIds,
+          `Merged ${selectedItems.length} items into "${mergedProduct.name}" (${manualMergeCombineStock ? `+${mergedStockUnits} stock` : 'primary stock kept'})`
+        );
+      } else if (onBatchImportProducts) {
+        const removedSet = new Set(removedIds);
+        const cleaned = products
+          .filter((p) => !removedSet.has(p.id))
+          .map((p) => (p.id === mergedProduct.id ? mergedProduct : p));
+        onBatchImportProducts(cleaned, true);
+      }
+
+      setManualMergeIds([]);
+      setManualPrimaryId('');
+      setManualMergeSearch('');
+      handleClearSelection();
+      setShowDeduplicateModal(false);
+      setAutoAddSuccessToast(
+        `✨ Merged ${itemsToMerge.length + 1} items into "${mergedProduct.name}" & deleted ${removedIds.length} duplicate(s)!`
+      );
+      setTimeout(() => setAutoAddSuccessToast(null), 8000);
+    } catch (err) {
+      setDedupeError(err instanceof Error ? err.message : 'Failed to merge selected items.');
+    } finally {
+      setIsDedupeBusy(false);
+    }
+  };
+
+  const handleBulkDeleteSelected = async () => {
+    if (selectedProductIds.size === 0 || isBulkDeleting) return;
+    const ids = Array.from(selectedProductIds);
+    setIsBulkDeleting(true);
+    try {
+      if (onBatchDeleteProducts) {
+        await onBatchDeleteProducts(ids, `Bulk Deleted ${ids.length} Inventory Item(s)`);
+      } else {
+        ids.forEach((id) => onDeleteProduct(id));
+      }
+      handleClearSelection();
+      setAutoAddSuccessToast(`🗑️ Permanently deleted ${ids.length} selected item(s) from inventory & cloud.`);
+      setTimeout(() => setAutoAddSuccessToast(null), 7000);
+    } finally {
+      setIsBulkDeleting(false);
+      setConfirmBulkDelete(false);
+    }
   };
 
   // In-App Live WebCam Stream State & Refs (Zero-heap-spike camera)
@@ -2272,9 +2618,9 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
 
           <button
             id="btn-inventory-autodelete-duplicates"
-            onClick={() => setShowDeduplicateModal(true)}
-            className="bg-amber-950/80 hover:bg-amber-900 border border-amber-600/80 text-amber-200 font-extrabold px-3.5 py-2 rounded-xl text-xs transition flex items-center gap-1.5 shadow-lg relative"
-            title="Scan inventory for repeated/duplicate items and auto-delete redundant copies while merging stock"
+            onClick={() => openDeduplicateModal(duplicateGroups.length > 0 ? 'auto' : 'manual')}
+            className="bg-amber-950/80 hover:bg-amber-900 border border-amber-600/80 text-amber-200 font-extrabold px-3.5 py-2 rounded-xl text-xs transition flex items-center gap-1.5 shadow-lg relative cursor-pointer"
+            title="Scan inventory for repeated/duplicate items, auto-delete redundant copies, or manually merge selected items"
           >
             <Trash2 className="w-4 h-4 text-amber-400" />
             <span>Auto Delete Duplicates</span>
@@ -2284,6 +2630,57 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
               </span>
             )}
           </button>
+
+          {canBulkEditInventory && (
+            <button
+              type="button"
+              id="btn-inventory-bulk-edit"
+              onClick={() => {
+                if (selectedProductIds.size > 0) {
+                  setShowBulkEditModal(true);
+                } else {
+                  setIsBulkSelectMode((prev) => !prev);
+                }
+              }}
+              className={`font-bold px-3.5 py-2 rounded-xl text-xs transition flex items-center gap-1.5 shadow-lg cursor-pointer border ${
+                isBulkSelectMode || selectedProductIds.size > 0
+                  ? 'bg-sky-500 hover:bg-sky-400 text-slate-950 border-sky-300 font-black'
+                  : 'bg-slate-800 hover:bg-slate-700 text-sky-300 border-sky-500/40'
+              }`}
+              title="Select multiple products to batch update selling prices or categories"
+            >
+              <CheckSquare className="w-4 h-4 shrink-0" />
+              <span>
+                {selectedProductIds.size > 0
+                  ? `Bulk Edit (${selectedProductIds.size})`
+                  : isBulkSelectMode
+                  ? 'Selecting Items...'
+                  : 'Bulk Edit'}
+              </span>
+            </button>
+          )}
+
+          {canBulkEditInventory && (
+            <button
+              type="button"
+              id="btn-inventory-auditor"
+              onClick={() => setShowInventoryAuditorModal(true)}
+              className={`font-bold px-3.5 py-2 rounded-xl text-xs transition flex items-center gap-1.5 shadow-lg cursor-pointer border relative ${
+                lossMakingProductsCount > 0
+                  ? 'bg-rose-950/85 hover:bg-rose-900 border-rose-500/60 text-rose-200'
+                  : 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-emerald-300'
+              }`}
+              title="Audit products selling at or below cost price and apply Quick Mark-up"
+            >
+              <ShieldAlert className={`w-4 h-4 shrink-0 ${lossMakingProductsCount > 0 ? 'text-rose-400' : 'text-emerald-400'}`} />
+              <span>Inventory Auditor</span>
+              {lossMakingProductsCount > 0 && (
+                <span className="bg-rose-500 text-white text-[10px] font-black px-1.5 py-0.2 rounded-full font-mono tabular-nums">
+                  {lossMakingProductsCount}
+                </span>
+              )}
+            </button>
+          )}
 
           {hasWorkerPermission(currentUser, 'canAddNewProducts') && (
             <>
@@ -2495,8 +2892,8 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           </div>
 
           <button
-            onClick={() => setShowDeduplicateModal(true)}
-            className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold px-4 py-2.5 rounded-xl text-xs transition flex items-center gap-1.5 shadow-lg shadow-amber-500/20 shrink-0"
+            onClick={() => openDeduplicateModal('auto')}
+            className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold px-4 py-2.5 rounded-xl text-xs transition flex items-center gap-1.5 shadow-lg shadow-amber-500/20 shrink-0 cursor-pointer"
           >
             <Sparkles className="w-4 h-4 text-slate-950" />
             <span>Auto Delete Repeated Items ({totalDuplicateItemsToDelete})</span>
@@ -2599,6 +2996,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           transactions={transactions}
           onSaveProduct={onSaveProduct}
           onDeleteProduct={onDeleteProduct}
+          onBatchDeleteProducts={onBatchDeleteProducts}
           onBatchImportProducts={onBatchImportProducts}
           showLowStockOnly={showLowStockOnly}
           onToggleLowStockOnly={() => setShowLowStockOnly(!showLowStockOnly)}
@@ -3411,6 +3809,149 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
             </div>
           )}
 
+      {/* Sticky Bulk Selection & Batch Edit Action Bar */}
+      {canBulkEditInventory &&
+        (isBulkSelectMode || selectedProductIds.size > 0) &&
+        (inventoryViewMode === 'standard' ||
+          inventoryViewMode === 'cards' ||
+          inventoryViewMode === 'grouped') && (() => {
+          const allPageSelected =
+            paginatedProducts.length > 0 &&
+            paginatedProducts.every((p) => selectedProductIds.has(p.id));
+          const allFilteredSelected =
+            filteredProducts.length > 0 &&
+            filteredProducts.every((p) => selectedProductIds.has(p.id));
+
+          return (
+            <div className="sticky top-2 z-30 bg-slate-900/95 backdrop-blur-md border border-sky-500/50 rounded-2xl p-3 flex flex-wrap items-center justify-between gap-2.5 shadow-xl text-xs">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-sky-500/15 border border-sky-500/40 text-sky-300 font-black font-mono tabular-nums">
+                  <CheckSquare className="w-3.5 h-3.5" />
+                  <span>{selectedProductIds.size} selected</span>
+                </span>
+
+                {inventoryViewMode !== 'grouped' && paginatedProducts.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedProductIds((prev) => {
+                        const next = new Set(prev);
+                        if (allPageSelected) {
+                          paginatedProducts.forEach((p) => next.delete(p.id));
+                        } else {
+                          paginatedProducts.forEach((p) => next.add(p.id));
+                        }
+                        return next;
+                      });
+                    }}
+                    className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 font-semibold cursor-pointer transition"
+                  >
+                    {allPageSelected
+                      ? `Deselect Page (${paginatedProducts.length})`
+                      : `Select Page (${paginatedProducts.length})`}
+                  </button>
+                )}
+
+                {filteredProducts.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (allFilteredSelected) {
+                        setSelectedProductIds(new Set());
+                      } else {
+                        setSelectedProductIds(new Set(filteredProducts.map((p) => p.id)));
+                      }
+                    }}
+                    className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-sky-300 font-semibold cursor-pointer transition"
+                  >
+                    {allFilteredSelected
+                      ? 'Deselect All Filtered'
+                      : `Select All Filtered (${filteredProducts.length})`}
+                  </button>
+                )}
+
+                {selectedProductIds.size > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setSelectedProductIds(new Set())}
+                    className="px-2.5 py-1.5 rounded-lg bg-slate-950 hover:bg-slate-800 border border-slate-800 text-slate-400 hover:text-white font-semibold cursor-pointer transition"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2 ml-auto">
+                <button
+                  type="button"
+                  onClick={handleClearSelection}
+                  className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold cursor-pointer transition"
+                >
+                  Done
+                </button>
+                <button
+                  type="button"
+                  id="btn-bulk-merge-selected"
+                  disabled={selectedProductIds.size < 2}
+                  onClick={() => openDeduplicateModal('manual', Array.from(selectedProductIds))}
+                  title={
+                    selectedProductIds.size < 2
+                      ? 'Select at least 2 items to merge into one'
+                      : `Merge ${selectedProductIds.size} selected items into 1 and combine stock`
+                  }
+                  className="px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-slate-950 font-black inline-flex items-center gap-1.5 shadow cursor-pointer transition"
+                >
+                  <GitMerge className="w-3.5 h-3.5" />
+                  <span>Merge Selected ({selectedProductIds.size})</span>
+                </button>
+                {canDeleteInventory(currentUser.role) && (
+                  confirmBulkDelete ? (
+                    <div className="inline-flex items-center gap-1.5 bg-rose-950/90 border border-rose-500/70 rounded-xl p-1">
+                      <button
+                        type="button"
+                        disabled={isBulkDeleting}
+                        onClick={handleBulkDeleteSelected}
+                        className="px-3 py-1 rounded-lg bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white font-black inline-flex items-center gap-1 cursor-pointer transition"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>{isBulkDeleting ? 'Deleting...' : `Confirm Delete (${selectedProductIds.size})`}</span>
+                      </button>
+                      <button
+                        type="button"
+                        disabled={isBulkDeleting}
+                        onClick={() => setConfirmBulkDelete(false)}
+                        className="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold cursor-pointer transition"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      id="btn-bulk-delete-selected"
+                      disabled={selectedProductIds.size === 0 || isBulkDeleting}
+                      onClick={() => setConfirmBulkDelete(true)}
+                      className="px-3.5 py-2 rounded-xl bg-rose-950 hover:bg-rose-900 border border-rose-700/80 disabled:opacity-40 text-rose-200 font-black inline-flex items-center gap-1.5 shadow cursor-pointer transition"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>Delete ({selectedProductIds.size})</span>
+                    </button>
+                  )
+                )}
+                <button
+                  type="button"
+                  disabled={selectedProductIds.size === 0}
+                  onClick={() => setShowBulkEditModal(true)}
+                  className="px-4 py-2 rounded-xl bg-sky-500 hover:bg-sky-400 disabled:opacity-40 text-slate-950 font-black inline-flex items-center gap-1.5 shadow cursor-pointer transition"
+                >
+                  <SlidersHorizontal className="w-3.5 h-3.5" />
+                  <span>Edit Prices / Categories ({selectedProductIds.size})</span>
+                </button>
+              </div>
+            </div>
+          );
+        })()}
+
       {/* GROUPED CATEGORY & SUBCATEGORY HIERARCHY ACCORDIONS OR STANDARD TABLE */}
       {inventoryViewMode === 'grouped' ? (
         <div className="space-y-6">
@@ -3590,6 +4131,28 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                               <table className="w-full text-left text-xs text-slate-300">
                                 <thead className="bg-slate-950/90 text-slate-400 text-[10px] uppercase font-bold tracking-wider border-b border-slate-800">
                                   <tr>
+                                    {canBulkEditInventory && (
+                                      <th className="p-2.5 w-10 text-center">
+                                        <input
+                                          type="checkbox"
+                                          checked={subProducts.length > 0 && subProducts.every((sp) => selectedProductIds.has(sp.id))}
+                                          onChange={() => {
+                                            const allSubSelected = subProducts.every((sp) => selectedProductIds.has(sp.id));
+                                            setSelectedProductIds((prev) => {
+                                              const next = new Set(prev);
+                                              if (allSubSelected) {
+                                                subProducts.forEach((sp) => next.delete(sp.id));
+                                              } else {
+                                                subProducts.forEach((sp) => next.add(sp.id));
+                                              }
+                                              return next;
+                                            });
+                                          }}
+                                          aria-label={`Select all items in ${subName}`}
+                                          className="w-4 h-4 rounded border-slate-600 bg-slate-900 text-sky-500 focus:ring-sky-500 cursor-pointer"
+                                        />
+                                      </th>
+                                    )}
                                     <th className="p-2.5">Product & SKU</th>
                                     <th className="p-2.5">Variant / Size</th>
                                     <th className="p-2.5">Barcode</th>
@@ -3607,9 +4170,21 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                                     const isOut = p.stockQuantity <= 0;
                                     const marginInfo = calculateProfitMargin(p.costPrice, p.sellingPrice);
                                     const perf = performanceMap[p.id];
+                                    const isRowSelected = selectedProductIds.has(p.id);
 
                                     return (
-                                      <tr key={p.id} className={`hover:bg-slate-800/50 transition ${perf ? perf.accentBorderLeft : ''} ${perf ? perf.tableRowHighlight : ''}`}>
+                                      <tr key={p.id} className={`hover:bg-slate-800/50 transition ${isRowSelected ? 'bg-sky-950/35' : ''} ${perf ? perf.accentBorderLeft : ''} ${perf ? perf.tableRowHighlight : ''}`}>
+                                        {canBulkEditInventory && (
+                                          <td className="p-2.5 text-center">
+                                            <input
+                                              type="checkbox"
+                                              checked={isRowSelected}
+                                              onChange={() => toggleProductSelection(p.id)}
+                                              aria-label={`Select ${p.name}`}
+                                              className="w-4 h-4 rounded border-slate-600 bg-slate-900 text-sky-500 focus:ring-sky-500 cursor-pointer"
+                                            />
+                                          </td>
+                                        )}
                                         <td className="p-2.5">
                                           <div className="flex items-center gap-3">
                                             {p.imageUrl ? (
@@ -3964,20 +4539,47 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                 const perf = performanceMap[p.id];
                 const margin = calculateProfitMargin(p.costPrice, p.sellingPrice);
                 const isNewest = currentPage === 1 && index === 0 && searchTerm === '' && selectedCategory === 'All' && selectedSubcategory === 'All' && !showLowStockOnly;
+                const isCardSelected = selectedProductIds.has(p.id);
 
                 return (
                   <div
                     key={p.id}
                     className={`bg-slate-900 border rounded-2xl overflow-hidden shadow-lg hover:shadow-xl transition flex flex-col justify-between group ${
-                      isNewest
+                      isCardSelected
+                        ? 'border-sky-400 ring-2 ring-sky-500/50 shadow-[0_0_20px_rgba(14,165,233,0.28)]'
+                        : isNewest
                         ? 'border-sky-500/80 ring-2 ring-sky-500/30 shadow-[0_0_25px_rgba(14,165,233,0.25)]'
                         : 'border-slate-800 hover:border-slate-700/80'
                     } ${perf ? perf.accentBorderLeft : ''}`}
                   >
                     {/* Card Top: Image & Status Badges */}
                     <div className="relative aspect-video sm:aspect-square bg-slate-950 flex items-center justify-center overflow-hidden border-b border-slate-800/80">
+                      {canBulkEditInventory && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleProductSelection(p.id);
+                          }}
+                          aria-label={isCardSelected ? `Deselect ${p.name}` : `Select ${p.name}`}
+                          className={`absolute top-2.5 right-2.5 z-30 w-8 h-8 rounded-xl border flex items-center justify-center shadow-lg transition cursor-pointer ${
+                            isCardSelected
+                              ? 'bg-sky-500 border-sky-300 text-slate-950'
+                              : isBulkSelectMode
+                              ? 'bg-slate-900/90 border-slate-500 text-slate-300 hover:border-sky-400'
+                              : 'bg-slate-900/80 border-slate-600/80 text-slate-300 sm:opacity-0 sm:group-hover:opacity-100 hover:border-sky-400'
+                          }`}
+                          title="Select for Bulk Edit"
+                        >
+                          {isCardSelected ? (
+                            <Check className="w-4 h-4 stroke-[3]" />
+                          ) : (
+                            <span className="w-3.5 h-3.5 rounded border-2 border-current" />
+                          )}
+                        </button>
+                      )}
                       {isNewest && (
-                        <div className="absolute top-2.5 right-2.5 z-20">
+                        <div className={`absolute top-2.5 z-20 ${canBulkEditInventory ? 'right-12' : 'right-2.5'}`}>
                           <span className="bg-sky-500 text-slate-950 font-black text-[10px] uppercase tracking-wider px-2.5 py-1 rounded-full shadow-lg border border-sky-300 flex items-center gap-1">
                             <Sparkles className="w-3 h-3 fill-slate-950" /> New Arrival
                           </span>
@@ -4382,6 +4984,34 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           <table className="w-full text-left text-xs text-slate-300">
             <thead className="bg-slate-950 text-slate-400 font-semibold uppercase tracking-wider border-b border-slate-800">
               <tr>
+                {canBulkEditInventory && (
+                  <th className="p-3.5 w-10 text-center">
+                    <input
+                      type="checkbox"
+                      checked={
+                        paginatedProducts.length > 0 &&
+                        paginatedProducts.every((p) => selectedProductIds.has(p.id))
+                      }
+                      onChange={() => {
+                        const allSelected =
+                          paginatedProducts.length > 0 &&
+                          paginatedProducts.every((p) => selectedProductIds.has(p.id));
+                        setSelectedProductIds((prev) => {
+                          const next = new Set(prev);
+                          if (allSelected) {
+                            paginatedProducts.forEach((p) => next.delete(p.id));
+                          } else {
+                            paginatedProducts.forEach((p) => next.add(p.id));
+                          }
+                          return next;
+                        });
+                      }}
+                      aria-label="Select all items on page"
+                      title="Select all items on page"
+                      className="w-4 h-4 rounded border-slate-600 bg-slate-900 text-sky-500 focus:ring-sky-500 cursor-pointer"
+                    />
+                  </th>
+                )}
                 <th className="p-3.5 w-16 text-center">Photo</th>
                 <th className="p-3.5">Product & SKU</th>
                 <th className="p-3.5">Category & Size</th>
@@ -4396,7 +5026,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
             <tbody className="divide-y divide-slate-800/60">
               {paginatedProducts.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="p-12 text-center text-slate-400">
+                  <td colSpan={canBulkEditInventory ? 10 : 9} className="p-12 text-center text-slate-400">
                     <div className="max-w-md mx-auto space-y-3">
                       <Package className="w-10 h-10 mx-auto text-slate-600" />
                       <div>
@@ -4443,9 +5073,21 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                   const isOut = p.stockQuantity <= 0;
                   const perf = performanceMap[p.id];
                   const isNewest = currentPage === 1 && index === 0 && searchTerm === '' && selectedCategory === 'All' && selectedSubcategory === 'All' && !showLowStockOnly;
+                  const isRowSelected = selectedProductIds.has(p.id);
 
                   return (
-                    <tr key={p.id} className={`hover:bg-slate-800/50 transition ${isNewest ? 'bg-sky-950/20' : ''} ${perf ? perf.accentBorderLeft : ''} ${perf ? perf.tableRowHighlight : ''}`}>
+                    <tr key={p.id} className={`hover:bg-slate-800/50 transition ${isRowSelected ? 'bg-sky-950/35' : isNewest ? 'bg-sky-950/20' : ''} ${perf ? perf.accentBorderLeft : ''} ${perf ? perf.tableRowHighlight : ''}`}>
+                      {canBulkEditInventory && (
+                        <td className="p-3.5 text-center">
+                          <input
+                            type="checkbox"
+                            checked={isRowSelected}
+                            onChange={() => toggleProductSelection(p.id)}
+                            aria-label={`Select ${p.name}`}
+                            className="w-4 h-4 rounded border-slate-600 bg-slate-900 text-sky-500 focus:ring-sky-500 cursor-pointer"
+                          />
+                        </td>
+                      )}
                       {/* Photo Thumbnail */}
                       <td className="p-3.5 text-center">
                         {p.imageUrl ? (
@@ -6381,139 +7023,477 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
         document.body
       )}
 
-      {/* MODAL: AUTO DELETE REPEATED ITEMS & MERGE INVENTORY */}
+      {/* MODAL: AUTO DELETE REPEATED ITEMS & MANUAL MERGE */}
       {showDeduplicateModal && (
-        <div className="fixed inset-0 z-[1050] bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+        <div
+          className="fixed inset-0 z-[1050] bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 overflow-y-auto"
+          onClick={() => !isDedupeBusy && setShowDeduplicateModal(false)}
+        >
           <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-2xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh]" onClick={(e) => e.stopPropagation()}>
             {/* Header */}
-            <div className="p-5 border-b border-slate-800 flex items-center justify-between bg-slate-950/60">
-              <div className="flex items-center gap-3">
-                <div className="p-2.5 bg-amber-500/20 text-amber-400 rounded-xl border border-amber-500/30">
-                  <Trash2 className="w-5 h-5 text-amber-400" />
+            <div className="p-4 sm:p-5 border-b border-slate-800 flex items-center justify-between bg-slate-950/60 gap-3">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="p-2.5 bg-amber-500/20 text-amber-400 rounded-xl border border-amber-500/30 shrink-0">
+                  <GitMerge className="w-5 h-5 text-amber-400" />
                 </div>
-                <div>
-                  <h3 className="text-base font-bold text-white flex items-center gap-2">
-                    Auto-Delete Repeated Items & Merge Stock
+                <div className="min-w-0">
+                  <h3 className="text-base font-bold text-white truncate">
+                    Delete Duplicate Items &amp; Merge Stock
                   </h3>
-                  <p className="text-xs text-slate-400">
-                    Removes duplicate catalog entries while preserving & combining inventory stock quantities
+                  <p className="text-xs text-slate-400 truncate">
+                    Removes duplicate items permanently across local storage &amp; Cloud Firestore
                   </p>
                 </div>
               </div>
               <button
                 type="button"
+                disabled={isDedupeBusy}
                 onClick={() => setShowDeduplicateModal(false)}
-                className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl transition"
+                className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl transition cursor-pointer shrink-0"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
+            {/* Mode Tabs */}
+            <div className="px-4 sm:px-5 pt-3 pb-2 bg-slate-950/40 border-b border-slate-800 flex flex-wrap items-center justify-between gap-2">
+              <div className="inline-flex bg-slate-950 border border-slate-800 rounded-xl p-1 gap-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDedupeModalTab('auto');
+                    setDedupeError(null);
+                  }}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
+                    dedupeModalTab === 'auto'
+                      ? 'bg-amber-500 text-slate-950'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>Auto-Detected ({duplicateGroups.length})</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDedupeModalTab('manual');
+                    setDedupeError(null);
+                  }}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
+                    dedupeModalTab === 'manual'
+                      ? 'bg-sky-500 text-slate-950'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <GitMerge className="w-3.5 h-3.5" />
+                  <span>Manual Merge ({manualMergeIds.length})</span>
+                </button>
+              </div>
+
+              {dedupeModalTab === 'auto' && (
+                <label className="inline-flex items-center gap-2 text-[11px] text-slate-300 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={matchDuplicatesAcrossCategories}
+                    onChange={(e) => setMatchDuplicatesAcrossCategories(e.target.checked)}
+                    className="w-3.5 h-3.5 rounded border-slate-600 bg-slate-950 text-amber-500 focus:ring-amber-500"
+                  />
+                  <span>Match same name across categories</span>
+                </label>
+              )}
+            </div>
+
+            {/* Error Notice */}
+            {dedupeError && (
+              <div className="mx-5 mt-3 bg-rose-950/70 border border-rose-700/80 text-rose-200 px-3.5 py-2.5 rounded-xl text-xs flex items-center justify-between gap-2">
+                <span>{dedupeError}</span>
+                <button
+                  type="button"
+                  onClick={() => setDedupeError(null)}
+                  className="text-rose-300 hover:text-white shrink-0"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            )}
+
             {/* Modal Body */}
-            <div className="p-5 overflow-y-auto space-y-4 flex-1">
-              {duplicateGroups.length === 0 ? (
-                <div className="py-10 text-center space-y-3">
-                  <div className="w-16 h-16 bg-emerald-500/20 text-emerald-400 rounded-full flex items-center justify-center mx-auto border border-emerald-500/30">
-                    <Sparkles className="w-8 h-8" />
-                  </div>
-                  <h4 className="text-lg font-bold text-white">No Repeated Items Found!</h4>
-                  <p className="text-xs text-slate-400 max-w-md mx-auto">
-                    All products in your inventory have unique barcodes, SKUs, and names. Your catalog is clean and free of duplicates.
-                  </p>
-                </div>
-              ) : (
-                <>
-                  <div className="bg-amber-950/40 border border-amber-800/60 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-amber-200">
-                    <div>
-                      <span className="font-extrabold text-amber-300 text-sm block">Deduplication Summary</span>
-                      <span>
-                        Found <strong className="text-white">{duplicateGroups.length} duplicate groups</strong> containing{' '}
-                        <strong className="text-amber-300">{totalDuplicateItemsToDelete} repeated entries</strong>.
-                      </span>
+            <div className="p-4 sm:p-5 overflow-y-auto space-y-4 flex-1">
+              {dedupeModalTab === 'auto' ? (
+                duplicateGroups.length === 0 ? (
+                  <div className="py-8 text-center space-y-3">
+                    <div className="w-14 h-14 bg-emerald-500/20 text-emerald-400 rounded-full flex items-center justify-center mx-auto border border-emerald-500/30">
+                      <Sparkles className="w-7 h-7" />
                     </div>
-                    <div className="text-right bg-amber-900/60 border border-amber-700/80 px-3 py-1.5 rounded-xl font-mono text-xs">
-                      <div className="text-amber-300 font-bold">+{totalStockToMerge} Units</div>
-                      <div className="text-[10px] text-amber-400/80">Stock to Merge</div>
-                    </div>
+                    <h4 className="text-base font-bold text-white">No Exact Auto-Detected Duplicates</h4>
+                    <p className="text-xs text-slate-400 max-w-md mx-auto">
+                      No exact barcode, SKU, or identical name matches found. If you have items with slightly different names or barcodes that you still want to merge or delete, use <strong className="text-sky-300">Manual Merge</strong>.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => setDedupeModalTab('manual')}
+                      className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-sky-500 hover:bg-sky-400 text-slate-950 font-black text-xs transition cursor-pointer"
+                    >
+                      <GitMerge className="w-4 h-4" />
+                      <span>Switch to Manual Merge / Delete</span>
+                    </button>
                   </div>
+                ) : (
+                  <>
+                    <div className="bg-amber-950/40 border border-amber-800/60 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-amber-200">
+                      <div>
+                        <span className="font-extrabold text-amber-300 text-sm block">Deduplication Summary</span>
+                        <span>
+                          Found <strong className="text-white">{duplicateGroups.length} duplicate groups</strong> containing{' '}
+                          <strong className="text-amber-300">{totalDuplicateItemsToDelete} repeated entries</strong>.
+                        </span>
+                      </div>
+                      <div className="text-right bg-amber-900/60 border border-amber-700/80 px-3 py-1.5 rounded-xl font-mono text-xs shrink-0">
+                        <div className="text-amber-300 font-bold">+{totalStockToMerge} Units</div>
+                        <div className="text-[10px] text-amber-400/80">Stock to Merge</div>
+                      </div>
+                    </div>
 
-                  <div className="space-y-3">
-                    <h5 className="text-xs font-bold text-slate-300 uppercase tracking-wider">
-                      Detected Duplicate Clusters ({duplicateGroups.length})
-                    </h5>
+                    <div className="space-y-3">
+                      <h5 className="text-xs font-bold text-slate-300 uppercase tracking-wider">
+                        Detected Duplicate Clusters ({duplicateGroups.length})
+                      </h5>
 
-                    <div className="space-y-3 max-h-80 overflow-y-auto pr-1">
-                      {duplicateGroups.map((group) => (
-                        <div key={group.id} className="bg-slate-950 border border-slate-800 rounded-2xl p-3.5 space-y-2">
-                          <div className="flex items-center justify-between text-xs border-b border-slate-800/80 pb-2">
-                            <span className="font-bold text-white flex items-center gap-2">
-                              <span>{group.primaryItem.name}</span>
-                              <span className="text-[10px] font-mono bg-slate-800 px-2 py-0.5 rounded text-sky-300">
-                                {group.matchReason}
-                              </span>
-                            </span>
-                            <span className="text-emerald-400 font-extrabold font-mono text-[11px]">
-                              Combined Stock: {group.primaryItem.stockQuantity + group.totalStockToMerge} {group.primaryItem.unit || 'pcs'}
-                            </span>
-                          </div>
-
-                          {/* Primary Item Kept */}
-                          <div className="flex items-center justify-between bg-emerald-950/30 border border-emerald-800/40 rounded-xl p-2.5 text-xs text-emerald-200">
-                            <div className="flex items-center gap-2">
-                              <span className="bg-emerald-500/20 text-emerald-400 font-extrabold text-[10px] px-2 py-0.5 rounded">
-                                KEEP (Primary)
-                              </span>
-                              <span className="font-semibold">{group.primaryItem.name}</span>
-                              <span className="text-[10px] text-slate-400 font-mono">({group.primaryItem.sku})</span>
-                            </div>
-                            <span className="font-bold font-mono text-emerald-400">
-                              Stock: {group.primaryItem.stockQuantity}
-                            </span>
-                          </div>
-
-                          {/* Duplicate Items Deleted */}
-                          <div className="space-y-1.5 pl-3 border-l-2 border-amber-500/40">
-                            {group.duplicateItems.map((dup) => (
-                              <div key={dup.id} className="flex items-center justify-between bg-rose-950/20 border border-rose-900/40 rounded-xl p-2 text-xs text-rose-300">
-                                <div className="flex items-center gap-2">
-                                  <span className="bg-rose-500/20 text-rose-400 font-bold text-[10px] px-2 py-0.5 rounded">
-                                    DELETE & MERGE
+                      <div className="space-y-3 max-h-80 overflow-y-auto pr-1">
+                        {duplicateGroups.map((group) => {
+                          const resolved = resolveClusterMembers(group);
+                          const primaryStock = getStockNum(resolved.primaryItem);
+                          return (
+                            <div key={group.id} className="bg-slate-950 border border-slate-800 rounded-2xl p-3.5 space-y-2.5">
+                              <div className="flex flex-wrap items-center justify-between gap-2 text-xs border-b border-slate-800/80 pb-2">
+                                <span className="font-bold text-white flex items-center gap-2 flex-wrap">
+                                  <span>{resolved.primaryItem.name}</span>
+                                  <span className="text-[10px] font-mono bg-slate-800 px-2 py-0.5 rounded text-sky-300">
+                                    {group.matchReason}
                                   </span>
-                                  <span>{dup.name}</span>
-                                  <span className="text-[10px] text-slate-400 font-mono">({dup.sku})</span>
+                                </span>
+                                <div className="flex items-center gap-2">
+                                  <span className="text-emerald-400 font-extrabold font-mono text-[11px]">
+                                    Combined: {primaryStock + resolved.totalStockToMerge} {resolved.primaryItem.unit || 'pcs'}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    disabled={isDedupeBusy}
+                                    onClick={() => handleMergeSingleCluster(group)}
+                                    className="px-2.5 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500 text-amber-300 hover:text-slate-950 border border-amber-500/40 font-bold text-[10px] transition cursor-pointer"
+                                    title="Merge and delete duplicates for this item only"
+                                  >
+                                    Merge Cluster
+                                  </button>
                                 </div>
-                                <span className="font-bold font-mono text-amber-400">
-                                  +{dup.stockQuantity} stock merged
+                              </div>
+
+                              {/* Primary Item Kept */}
+                              <div className="flex items-center justify-between gap-2 bg-emerald-950/30 border border-emerald-800/40 rounded-xl p-2.5 text-xs text-emerald-200">
+                                <div className="flex items-center gap-2 min-w-0 flex-wrap">
+                                  <span className="bg-emerald-500/20 text-emerald-400 font-extrabold text-[10px] px-2 py-0.5 rounded shrink-0">
+                                    KEEP (Primary)
+                                  </span>
+                                  <span className="font-semibold truncate">{resolved.primaryItem.name}</span>
+                                  <span className="text-[10px] text-slate-400 font-mono">
+                                    ({resolved.primaryItem.sku}) • KSh {resolved.primaryItem.sellingPrice}
+                                  </span>
+                                </div>
+                                <span className="font-bold font-mono text-emerald-400 shrink-0">
+                                  Stock: {primaryStock}
                                 </span>
                               </div>
-                            ))}
-                          </div>
-                        </div>
-                      ))}
+
+                              {/* Duplicate Items */}
+                              <div className="space-y-1.5 pl-3 border-l-2 border-amber-500/40">
+                                {resolved.duplicateItems.map((dup) => {
+                                  const dupStock = getStockNum(dup);
+                                  return (
+                                    <div key={dup.id} className="flex flex-wrap items-center justify-between gap-2 bg-rose-950/20 border border-rose-900/40 rounded-xl p-2 text-xs text-rose-300">
+                                      <div className="flex items-center gap-2 min-w-0 flex-wrap">
+                                        <span className="bg-rose-500/20 text-rose-400 font-bold text-[10px] px-2 py-0.5 rounded shrink-0">
+                                          DELETE &amp; MERGE
+                                        </span>
+                                        <span className="truncate">{dup.name}</span>
+                                        <span className="text-[10px] text-slate-400 font-mono">
+                                          ({dup.sku}) • KSh {dup.sellingPrice}
+                                        </span>
+                                      </div>
+                                      <div className="flex items-center gap-2 shrink-0">
+                                        <span className="font-bold font-mono text-amber-400 text-[11px]">
+                                          +{dupStock} stock
+                                        </span>
+                                        <button
+                                          type="button"
+                                          disabled={isDedupeBusy}
+                                          onClick={() =>
+                                            setCustomPrimaryByGroup((prev) => ({
+                                              ...prev,
+                                              [group.id]: dup.id,
+                                            }))
+                                          }
+                                          className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 text-[10px] font-semibold cursor-pointer transition"
+                                          title="Keep this item as Primary instead"
+                                        >
+                                          Keep Instead
+                                        </button>
+                                        <button
+                                          type="button"
+                                          disabled={isDedupeBusy}
+                                          onClick={() => handleDeleteSingleDuplicateOnly(dup)}
+                                          className="p-1 rounded bg-rose-950/80 hover:bg-rose-600 text-rose-300 hover:text-white border border-rose-800/60 cursor-pointer transition"
+                                          title="Delete this duplicate entry without adding its stock"
+                                        >
+                                          <Trash2 className="w-3 h-3" />
+                                        </button>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
                     </div>
-                  </div>
-                </>
+                  </>
+                )
+              ) : (
+                /* Manual Merge & Delete Tab */
+                (() => {
+                  const q = manualMergeSearch.trim().toLowerCase();
+                  const selectedManualItems = products.filter((p) => manualMergeIds.includes(p.id));
+                  const filteredManualPool = products
+                    .filter((p) => {
+                      if (!q) return true;
+                      return (
+                        (p.name || '').toLowerCase().includes(q) ||
+                        (p.sku || '').toLowerCase().includes(q) ||
+                        (p.barcode || '').toLowerCase().includes(q) ||
+                        (p.category || '').toLowerCase().includes(q)
+                      );
+                    })
+                    .slice(0, 60);
+                  const activePrimary =
+                    selectedManualItems.find((p) => p.id === manualPrimaryId) || selectedManualItems[0] || null;
+                  const mergedPreview =
+                    activePrimary && selectedManualItems.length >= 2
+                      ? mergeProductGroup(
+                          activePrimary,
+                          selectedManualItems.filter((p) => p.id !== activePrimary.id),
+                          { combineStock: manualMergeCombineStock }
+                        )
+                      : null;
+
+                  return (
+                    <div className="space-y-3.5 text-xs">
+                      <div className="bg-sky-950/35 border border-sky-800/50 rounded-2xl p-3.5 text-sky-100 space-y-1">
+                        <div className="font-bold text-sky-300">Merge Any 2+ Items Into One</div>
+                        <p className="text-[11px] text-slate-300">
+                          Pick 2 or more items below, choose which item to <strong className="text-emerald-300">KEEP as Primary</strong>, and permanently delete the duplicate copies.
+                        </p>
+                      </div>
+
+                      <div className="relative">
+                        <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                        <input
+                          type="text"
+                          value={manualMergeSearch}
+                          onChange={(e) => setManualMergeSearch(e.target.value)}
+                          placeholder="Search items by name, SKU, barcode, or category..."
+                          className="w-full bg-slate-950 border border-slate-800 focus:border-sky-500 rounded-xl pl-9 pr-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-none"
+                        />
+                      </div>
+
+                      {/* Selected Items to Merge + Primary Picker */}
+                      {selectedManualItems.length > 0 && (
+                        <div className="bg-slate-950 border border-slate-800 rounded-2xl p-3 space-y-2">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-bold text-slate-200">
+                              Selected Items ({selectedManualItems.length}) — Choose Primary to Keep:
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setManualMergeIds([]);
+                                setManualPrimaryId('');
+                              }}
+                              className="text-[11px] text-slate-400 hover:text-white cursor-pointer"
+                            >
+                              Clear Selection
+                            </button>
+                          </div>
+
+                          <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
+                            {selectedManualItems.map((item) => {
+                              const isPrimary = activePrimary?.id === item.id;
+                              return (
+                                <div
+                                  key={item.id}
+                                  className={`flex items-center justify-between gap-2 p-2 rounded-xl border ${
+                                    isPrimary
+                                      ? 'bg-emerald-950/35 border-emerald-700/60 text-emerald-100'
+                                      : 'bg-rose-950/20 border-rose-900/40 text-rose-200'
+                                  }`}
+                                >
+                                  <label className="flex items-center gap-2 min-w-0 flex-1 cursor-pointer">
+                                    <input
+                                      type="radio"
+                                      name="manual-merge-primary"
+                                      checked={isPrimary}
+                                      onChange={() => setManualPrimaryId(item.id)}
+                                      className="text-emerald-500 focus:ring-emerald-500 shrink-0"
+                                    />
+                                    <span className="truncate font-semibold">{item.name}</span>
+                                    <span className="text-[10px] text-slate-400 font-mono shrink-0">
+                                      {item.sku} • Stock: {getStockNum(item)} • KSh {item.sellingPrice}
+                                    </span>
+                                  </label>
+                                  <div className="flex items-center gap-1.5 shrink-0">
+                                    <span
+                                      className={`text-[10px] font-black px-2 py-0.5 rounded ${
+                                        isPrimary
+                                          ? 'bg-emerald-500/20 text-emerald-300'
+                                          : 'bg-rose-500/20 text-rose-300'
+                                      }`}
+                                    >
+                                      {isPrimary ? 'KEEP' : 'DELETE'}
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        setManualMergeIds((prev) => prev.filter((id) => id !== item.id))
+                                      }
+                                      className="p-0.5 text-slate-400 hover:text-white cursor-pointer"
+                                      title="Remove from selection"
+                                    >
+                                      <X className="w-3.5 h-3.5" />
+                                    </button>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+
+                          <label className="flex items-center gap-2 pt-1 text-[11px] text-slate-300 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={manualMergeCombineStock}
+                              onChange={(e) => setManualMergeCombineStock(e.target.checked)}
+                              className="w-3.5 h-3.5 rounded border-slate-600 bg-slate-900 text-sky-500"
+                            />
+                            <span>Combine stock quantities into Primary item</span>
+                          </label>
+
+                          {mergedPreview && (
+                            <div className="bg-emerald-950/30 border border-emerald-800/50 rounded-xl px-3 py-2 text-[11px] text-emerald-200 flex items-center justify-between gap-2">
+                              <span>
+                                Final kept item: <strong className="text-white">{mergedPreview.mergedProduct.name}</strong>
+                              </span>
+                              <span className="font-mono font-bold text-emerald-300">
+                                Final Stock: {mergedPreview.mergedProduct.stockQuantity} {mergedPreview.mergedProduct.unit || 'pcs'}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Searchable Catalog Pool */}
+                      <div className="space-y-1.5 max-h-52 overflow-y-auto pr-1 border border-slate-800 rounded-2xl p-2 bg-slate-950/60">
+                        {filteredManualPool.length === 0 ? (
+                          <div className="py-6 text-center text-slate-500">No items matching "{manualMergeSearch}".</div>
+                        ) : (
+                          filteredManualPool.map((item) => {
+                            const checked = manualMergeIds.includes(item.id);
+                            return (
+                              <label
+                                key={item.id}
+                                className={`flex items-center justify-between gap-2 p-2 rounded-xl cursor-pointer transition ${
+                                  checked ? 'bg-sky-950/40 border border-sky-700/60' : 'hover:bg-slate-800/60 border border-transparent'
+                                }`}
+                              >
+                                <div className="flex items-center gap-2.5 min-w-0">
+                                  <input
+                                    type="checkbox"
+                                    checked={checked}
+                                    onChange={() => {
+                                      setManualMergeIds((prev) => {
+                                        if (prev.includes(item.id)) {
+                                          const next = prev.filter((id) => id !== item.id);
+                                          if (manualPrimaryId === item.id) {
+                                            setManualPrimaryId(next[0] || '');
+                                          }
+                                          return next;
+                                        }
+                                        const next = [...prev, item.id];
+                                        if (!manualPrimaryId) setManualPrimaryId(item.id);
+                                        return next;
+                                      });
+                                    }}
+                                    className="w-4 h-4 rounded border-slate-600 bg-slate-900 text-sky-500 shrink-0"
+                                  />
+                                  <div className="min-w-0">
+                                    <div className="font-semibold text-slate-100 truncate">{item.name}</div>
+                                    <div className="text-[10px] text-slate-400 font-mono truncate">
+                                      {item.category} • SKU: {item.sku} • Barcode: {item.barcode}
+                                    </div>
+                                  </div>
+                                </div>
+                                <div className="text-right font-mono text-[11px] shrink-0">
+                                  <div className="text-sky-300 font-bold">KSh {item.sellingPrice}</div>
+                                  <div className="text-slate-400">Qty: {getStockNum(item)}</div>
+                                </div>
+                              </label>
+                            );
+                          })
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()
               )}
             </div>
 
             {/* Footer */}
-            <div className="p-4 bg-slate-950 border-t border-slate-800 flex items-center justify-end gap-3">
+            <div className="p-4 bg-slate-950 border-t border-slate-800 flex flex-wrap items-center justify-end gap-3">
               <button
                 type="button"
+                disabled={isDedupeBusy}
                 onClick={() => setShowDeduplicateModal(false)}
-                className="bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold px-4 py-2.5 rounded-xl text-xs transition"
+                className="bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold px-4 py-2.5 rounded-xl text-xs transition cursor-pointer"
               >
                 Close
               </button>
 
-              {duplicateGroups.length > 0 && (
+              {dedupeModalTab === 'auto' && duplicateGroups.length > 0 && (
                 <button
                   type="button"
+                  disabled={isDedupeBusy}
                   onClick={handleConfirmDeduplicate}
-                  className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold px-5 py-2.5 rounded-xl text-xs transition shadow-lg shadow-amber-500/20 flex items-center gap-2"
+                  className="bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 font-extrabold px-5 py-2.5 rounded-xl text-xs transition shadow-lg shadow-amber-500/20 flex items-center gap-2 cursor-pointer"
                 >
-                  <Sparkles className="w-4 h-4 text-slate-950" />
-                  <span>Confirm & Auto-Delete Repeated Items ({totalDuplicateItemsToDelete})</span>
+                  {isDedupeBusy ? <Loader2 className="w-4 h-4 animate-spin text-slate-950" /> : <Sparkles className="w-4 h-4 text-slate-950" />}
+                  <span>
+                    {isDedupeBusy
+                      ? 'Deleting & Merging...'
+                      : `Confirm & Auto-Delete Repeated Items (${totalDuplicateItemsToDelete})`}
+                  </span>
+                </button>
+              )}
+
+              {dedupeModalTab === 'manual' && manualMergeIds.length >= 2 && (
+                <button
+                  type="button"
+                  disabled={isDedupeBusy}
+                  onClick={handleConfirmManualMerge}
+                  className="bg-sky-500 hover:bg-sky-400 disabled:opacity-50 text-slate-950 font-extrabold px-5 py-2.5 rounded-xl text-xs transition shadow-lg shadow-sky-500/20 flex items-center gap-2 cursor-pointer"
+                >
+                  {isDedupeBusy ? <Loader2 className="w-4 h-4 animate-spin text-slate-950" /> : <GitMerge className="w-4 h-4 text-slate-950" />}
+                  <span>
+                    {isDedupeBusy
+                      ? 'Merging & Deleting...'
+                      : `Merge & Delete ${manualMergeIds.length - 1} Duplicate${manualMergeIds.length - 1 === 1 ? '' : 's'}`}
+                  </span>
                 </button>
               )}
             </div>
@@ -7339,6 +8319,30 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
             </form>
           </div>
         </div>
+      )}
+
+      {/* MODAL: BULK EDIT SELLING PRICES & CATEGORIES */}
+      {showBulkEditModal && selectedProductsList.length > 0 && (
+        <BulkEditProductsModal
+          selectedProducts={selectedProductsList}
+          categories={consolidatedCategories}
+          onClose={() => setShowBulkEditModal(false)}
+          onApplyBatch={handleApplyBulkUpdate}
+        />
+      )}
+
+      {/* MODAL: INVENTORY AUDITOR (LOSS-MAKING & ZERO-MARGIN ITEMS) */}
+      {showInventoryAuditorModal && (
+        <InventoryAuditorModal
+          products={products}
+          onClose={() => setShowInventoryAuditorModal(false)}
+          onQuickMarkupSingle={handleAuditorQuickMarkupSingle}
+          onQuickMarkupBatch={handleAuditorQuickMarkupBatch}
+          onEditProduct={(prod) => {
+            setShowInventoryAuditorModal(false);
+            handleOpenEditModal(prod);
+          }}
+        />
       )}
 
       {/* Permanently Mounted Hidden File Inputs for Device Camera & File Picker */}

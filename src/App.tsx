@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
 import {
   ShoppingBag,
@@ -170,6 +170,7 @@ import {
   subscribeToProducts,
   saveProductToCloud,
   deleteProductFromCloud,
+  batchDeleteProductsFromCloud,
   bulkUploadProductsToCloud,
   batchSaveProductsToCloud,
   subscribeToTransactions,
@@ -277,6 +278,76 @@ import {
 import { findRecoverableBackups, protectLargestBackup, getBackupDataByKey } from './utils/backupRecovery';
 import { isSoundEnabled, setSoundEnabled, subscribeToSoundPref, playButtonSound, playLowStockAlertSound } from './utils/uiFeedback';
 import { saveToIDB, getFromIDB } from './utils/idbStorage';
+import { deduplicateProducts } from './utils/deduplicate';
+import { ErrorBoundary } from './components/ErrorBoundary';
+
+function haveProductListsChanged(a: Product[], b: Product[]): boolean {
+  if (a === b) return false;
+  if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return true;
+  for (let i = 0; i < a.length; i++) {
+    const p1 = a[i];
+    const p2 = b[i];
+    if (
+      !p1 ||
+      !p2 ||
+      p1.id !== p2.id ||
+      p1.updatedAt !== p2.updatedAt ||
+      p1.stockQuantity !== p2.stockQuantity ||
+      p1.sellingPrice !== p2.sellingPrice ||
+      p1.costPrice !== p2.costPrice ||
+      p1.name !== p2.name ||
+      p1.category !== p2.category ||
+      p1.barcode !== p2.barcode ||
+      p1.sku !== p2.sku
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function haveTransactionListsChanged(a: Transaction[], b: Transaction[]): boolean {
+  if (a === b) return false;
+  if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return true;
+  for (let i = 0; i < a.length; i++) {
+    const t1 = a[i];
+    const t2 = b[i];
+    if (
+      !t1 ||
+      !t2 ||
+      t1.id !== t2.id ||
+      t1.updatedAt !== t2.updatedAt ||
+      t1.editedAt !== t2.editedAt ||
+      t1.grandTotal !== t2.grandTotal ||
+      t1.paymentStatus !== t2.paymentStatus
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function haveUserListsChanged(a: User[], b: User[]): boolean {
+  if (a === b) return false;
+  if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return true;
+  for (let i = 0; i < a.length; i++) {
+    const u1 = a[i];
+    const u2 = b[i];
+    if (
+      !u1 ||
+      !u2 ||
+      u1.id !== u2.id ||
+      u1.updatedAt !== u2.updatedAt ||
+      u1.name !== u2.name ||
+      u1.role !== u2.role ||
+      u1.pin !== u2.pin ||
+      u1.status !== u2.status
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
 
 const DELETED_PRODUCTS_STORAGE_KEY = 'retail_pos_deleted_products';
 
@@ -289,7 +360,16 @@ function markProductDeletedLocally(productId: string): void {
   if (!productId) return;
   const ids = getDeletedProductIds();
   ids.add(productId);
-  safeSetJSON(DELETED_PRODUCTS_STORAGE_KEY, Array.from(ids).slice(-500));
+  safeSetJSON(DELETED_PRODUCTS_STORAGE_KEY, Array.from(ids).slice(-2500));
+}
+
+function markProductsDeletedLocally(productIds: string[]): void {
+  if (!productIds || productIds.length === 0) return;
+  const ids = getDeletedProductIds();
+  productIds.forEach((pid) => {
+    if (pid) ids.add(pid);
+  });
+  safeSetJSON(DELETED_PRODUCTS_STORAGE_KEY, Array.from(ids).slice(-2500));
 }
 
 function unmarkProductDeletedLocally(productId: string): void {
@@ -652,6 +732,7 @@ export default function App() {
   } | null>(() => safeGetJSON(CACHED_CLOUD_SESSION_KEY, null));
   const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(() => auth.currentUser);
   const [isFirebaseAuthReady, setIsFirebaseAuthReady] = useState<boolean>(() => Boolean(auth.currentUser));
+  const [hasAuthSettledFromFirebase, setHasAuthSettledFromFirebase] = useState<boolean>(() => Boolean(auth.currentUser));
   const [allowOfflineOwnerMode, setAllowOfflineOwnerMode] = useState<boolean>(false);
   const [storeProfile, setStoreProfile] = useState<StoreSubscriptionProfile | null>(() =>
     safeGetJSON<StoreSubscriptionProfile | null>('rofani_pos_store_profile', null)
@@ -698,7 +779,8 @@ export default function App() {
 
   useEffect(() => {
     completeGoogleRedirectSignIn().catch(() => null);
-    // Strict 3-second failsafe so slow/offline networks never hang the startup gate
+    // Failsafe so new/unauthenticated visitors aren't stuck on loading screen;
+    // never marks auth settled as null so cached sessions are not prematurely kicked out.
     const authTimeoutId = setTimeout(() => {
       setIsFirebaseAuthReady(true);
     }, 3000);
@@ -706,6 +788,7 @@ export default function App() {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       clearTimeout(authTimeoutId);
       setFirebaseUser(user);
+      setHasAuthSettledFromFirebase(true);
       setIsFirebaseAuthReady(true);
       if (user && isAuthorizedCloudUser(user)) {
         const sessionSnapshot = {
@@ -729,7 +812,7 @@ export default function App() {
 
   const isOwnerAccount =
     isOwnerCloudUser(firebaseUser) ||
-    (!isFirebaseAuthReady && Boolean(cachedCloudSession?.isOwner)) ||
+    (!hasAuthSettledFromFirebase && Boolean(cachedCloudSession?.isOwner)) ||
     (allowOfflineOwnerMode && typeof window !== 'undefined' && localStorage.getItem(VERIFIED_OWNER_CACHE_KEY) === '1');
   const activeCloudStoreId = getStoreIdForUser(firebaseUser) || cachedCloudSession?.uid || null;
   const isCloudAuthReady = isFirebaseAuthReady && isAuthorizedCloudUser(firebaseUser);
@@ -900,6 +983,9 @@ export default function App() {
           localStorage.setItem(VERIFIED_OWNER_CACHE_KEY, '1');
         } catch {}
       }
+    } else if (!hasAuthSettledFromFirebase && cachedCloudSession?.uid) {
+      // Firebase Auth is still hydrating on a slow mobile/cold start — preserve cached session scope
+      nextLocalScope = cachedCloudSession.isOwner ? OWNER_PRIMARY_STORE_ID : cachedCloudSession.uid;
     } else if (
       allowOfflineOwnerMode &&
       typeof window !== 'undefined' &&
@@ -917,7 +1003,8 @@ export default function App() {
 
     if (!firebaseUser || !isAuthorizedCloudUser(firebaseUser) || !nextCloudStoreId || nextLocalScope === '__unauthenticated__') {
       setIsCheckingStoreProfile(false);
-      if (!allowOfflineOwnerMode) {
+      // Only wipe cached store profile once Firebase Auth has genuinely confirmed user === null
+      if (hasAuthSettledFromFirebase && !allowOfflineOwnerMode) {
         setStoreProfile(null);
         safeSetJSON('rofani_pos_store_profile', undefined);
       }
@@ -1093,7 +1180,7 @@ export default function App() {
       if (unsubscribeProfile) unsubscribeProfile();
       if (unsubscribeRewards) unsubscribeRewards();
     };
-  }, [isFirebaseAuthReady, firebaseUser?.uid, allowOfflineOwnerMode]);
+  }, [isFirebaseAuthReady, hasAuthSettledFromFirebase, firebaseUser?.uid, allowOfflineOwnerMode]);
 
   const [cloudSyncStatus, setCloudSyncStatus] = useState<'synced' | 'syncing' | 'offline' | 'error' | 'quota_exceeded'>('offline');
   // Strict 3-second maximum cap on any active cloud sync indicator
@@ -1184,10 +1271,8 @@ export default function App() {
     userMutatedProductsRef.current = true;
     setProductsState((prev) => {
       const next = typeof newVal === 'function' ? newVal(prev) : newVal;
+      productsRef.current = next;
       safeSetJSON('retail_pos_products', next);
-      try {
-        saveToIDB(resolveTenantStorageKey('retail_pos_products'), next);
-      } catch {}
       return next;
     });
   };
@@ -1196,8 +1281,13 @@ export default function App() {
   // Merges by item ID and newest `updatedAt` timestamp so neither newly added items nor recent edits are ever lost
   useEffect(() => {
     let isMounted = true;
+    let lastWakeCheckAt = 0;
 
-    const restoreAndMergeFromIDB = async () => {
+    const restoreAndMergeFromIDB = async (force = false) => {
+      const now = Date.now();
+      if (!force && now - lastWakeCheckAt < 2500) return;
+      lastWakeCheckAt = now;
+
       const activeScope = getActiveTenantStoreId();
       if (!activeScope || activeScope === '__unauthenticated__') {
         hasHydratedProductsFromIdbRef.current = true;
@@ -1211,17 +1301,9 @@ export default function App() {
           const pendingMap = getPendingProductMap();
           setProductsState((current) => {
             const merged = mergeProductListsByTimestamp(current, idbProducts, deletedIds, pendingMap);
-            const changed =
-              merged.length !== current.length ||
-              merged.some((m, i) => {
-                const cur = current[i];
-                return !cur || cur.id !== m.id || cur.updatedAt !== m.updatedAt || cur.stockQuantity !== m.stockQuantity || cur.sellingPrice !== m.sellingPrice || cur.name !== m.name;
-              });
-            if (changed) {
+            if (haveProductListsChanged(current, merged)) {
+              productsRef.current = merged;
               safeSetJSON('retail_pos_products', merged);
-              try {
-                saveToIDB(scopedIdbKey, merged);
-              } catch {}
               return merged;
             }
             return current;
@@ -1234,12 +1316,12 @@ export default function App() {
       }
     };
 
-    restoreAndMergeFromIDB();
+    restoreAndMergeFromIDB(true);
 
     // Chrome Sleep & Resume event listeners (Page Lifecycle API, visibilitychange, focus)
     const handleWakeFromSleep = () => {
       if (document.visibilityState === 'visible') {
-        restoreAndMergeFromIDB();
+        restoreAndMergeFromIDB(false);
       }
     };
 
@@ -1262,7 +1344,7 @@ export default function App() {
       .then((imageMap) => {
         if (!isMounted || !imageMap || Object.keys(imageMap).length === 0) return;
 
-        setProducts((currentProducts) => {
+        setProductsState((currentProducts) => {
           let hasNewImages = false;
           const merged = currentProducts.map((p) => {
             const storedImage = imageMap[p.id];
@@ -1272,7 +1354,11 @@ export default function App() {
             }
             return p;
           });
-          return hasNewImages ? merged : currentProducts;
+          if (hasNewImages) {
+            productsRef.current = merged;
+            return merged;
+          }
+          return currentProducts;
         });
       })
       .catch((err) => {
@@ -1668,17 +1754,12 @@ export default function App() {
     setTransactionsState((prev) => {
       const next = typeof newVal === 'function' ? newVal(prev) : newVal;
       const archivedChecked = checkAndRunRollingSalesArchive(next);
+      transactionsRef.current = archivedChecked;
       safeSetJSON('retail_pos_transactions', archivedChecked);
       safeSetJSON('pos_store_sales', archivedChecked);
       return archivedChecked;
     });
   };
-
-  useEffect(() => {
-    const archivedChecked = checkAndRunRollingSalesArchive(transactions);
-    safeSetJSON('retail_pos_transactions', archivedChecked);
-    safeSetJSON('pos_store_sales', archivedChecked);
-  }, [transactions]);
 
   const productsRef = useRef<Product[]>(products);
   productsRef.current = products;
@@ -1693,9 +1774,14 @@ export default function App() {
   const allUsersRef = useRef<User[]>(allUsers);
   allUsersRef.current = allUsers;
 
-  // Post-Sleep / Focus Rehydration Effect (strictly scoped by active tenant store)
+  // Post-Sleep / Focus Rehydration Effect (strictly scoped by active tenant store, throttled & diff-checked)
   useEffect(() => {
+    let lastFocusRehydrateAt = 0;
     const handleFocusAndVisibility = () => {
+      const now = Date.now();
+      if (now - lastFocusRehydrateAt < 2500) return;
+      lastFocusRehydrateAt = now;
+
       const activeScope = getActiveTenantStoreId();
       if (!activeScope || activeScope === '__unauthenticated__') return;
       if (document.visibilityState === 'visible') {
@@ -1723,13 +1809,7 @@ export default function App() {
               const pendingMap = getPendingProductMap();
               setProductsState((current) => {
                 const merged = mergeProductListsByTimestamp(current, parsed, deletedIds, pendingMap);
-                const changed =
-                  merged.length !== current.length ||
-                  merged.some((m, i) => {
-                    const cur = current[i];
-                    return !cur || cur.id !== m.id || cur.updatedAt !== m.updatedAt || cur.stockQuantity !== m.stockQuantity || cur.sellingPrice !== m.sellingPrice || cur.name !== m.name;
-                  });
-                return changed ? merged : current;
+                return haveProductListsChanged(current, merged) ? merged : current;
               });
             }
           }
@@ -1740,7 +1820,7 @@ export default function App() {
           if (freshUsers) {
             const parsed = JSON.parse(freshUsers);
             if (Array.isArray(parsed) && parsed.length > 0) {
-              setAllUsersState((current) => (parsed.length >= current.length ? parsed : current));
+              setAllUsersState((current) => (parsed.length > current.length ? parsed : current));
             }
           }
 
@@ -1748,7 +1828,7 @@ export default function App() {
           if (freshExpenses) {
             const parsed = JSON.parse(freshExpenses);
             if (Array.isArray(parsed) && parsed.length > 0) {
-              setExpensesState((current) => (parsed.length >= current.length ? parsed : current));
+              setExpensesState((current) => (parsed.length > current.length ? parsed : current));
             }
           }
 
@@ -1756,7 +1836,7 @@ export default function App() {
           if (freshPurchases) {
             const parsed = JSON.parse(freshPurchases);
             if (Array.isArray(parsed) && parsed.length > 0) {
-              setPurchaseOrdersState((current) => (parsed.length >= current.length ? parsed : current));
+              setPurchaseOrdersState((current) => (parsed.length > current.length ? parsed : current));
             }
           }
         } catch (e) {
@@ -2063,14 +2143,15 @@ export default function App() {
   useEffect(() => {
     const handleUrlAudit = () => {
       try {
-        if (typeof window === 'undefined') return;
+        if (typeof window === 'undefined' || !window.location.search.includes('itemAudit=')) return;
         const searchParams = new URLSearchParams(window.location.search);
         const auditId = searchParams.get('itemAudit');
-        if (auditId && products.length > 0) {
-          const match = products.find(
+        const list = productsRef.current;
+        if (auditId && list.length > 0) {
+          const match = list.find(
             (p) =>
               p.id === auditId ||
-              p.sku.toLowerCase() === auditId.toLowerCase() ||
+              (p.sku || '').toLowerCase() === auditId.toLowerCase() ||
               p.barcode === auditId
           );
           if (match) {
@@ -2085,7 +2166,7 @@ export default function App() {
     handleUrlAudit();
     window.addEventListener('popstate', handleUrlAudit);
     return () => window.removeEventListener('popstate', handleUrlAudit);
-  }, [products]);
+  }, [products.length]);
 
   // Save changes to LocalStorage
   useEffect(() => {
@@ -2107,6 +2188,19 @@ export default function App() {
   useEffect(() => {
     safeSetJSON('retail_pos_stock_transfers', stockTransfers);
   }, [stockTransfers]);
+
+  const cashTransactionsRef = useRef<CashTransaction[]>(cashTransactions);
+  cashTransactionsRef.current = cashTransactions;
+  const storesRef = useRef<StoreLocation[]>(stores);
+  storesRef.current = stores;
+  const activeStoreIdRef = useRef<string>(activeStoreId);
+  activeStoreIdRef.current = activeStoreId;
+  const activeTabRef = useRef<AppTab>(activeTab);
+  activeTabRef.current = activeTab;
+  const storeProfileRef = useRef<StoreSubscriptionProfile | null>(storeProfile);
+  storeProfileRef.current = storeProfile;
+  const securitySettingsRef = useRef({ requirePinOnStartup, masterPin, ownerRecoveryEmail });
+  securitySettingsRef.current = { requirePinOnStartup, masterPin, ownerRecoveryEmail };
 
   // Save changes to LocalStorage & IndexedDB only after initial IDB hydration or user mutation
   useEffect(() => {
@@ -2160,24 +2254,34 @@ export default function App() {
     safeSetJSON('retail_pos_active_user', currentUser);
   }, [currentUser]);
 
-  // Automatic Background Backup & Event-Driven Snapshots (beforeunload, pagehide, visibilitychange)
+  // Automatic Background Backup & Event-Driven Snapshots (reads refs so listeners never tear down on every sale/edit)
   useEffect(() => {
+    let lastWakeSyncAt = 0;
+
     const handleBackupSnapshot = () => {
       try {
+        const currentProducts = productsRef.current;
+        const currentSales = transactionsRef.current;
+        const currentCustomers = customersRef.current;
+        const currentSuppliers = suppliersRef.current;
+        const currentExpenses = expensesRef.current;
+        const currentUsers = allUsersRef.current;
+        const sec = securitySettingsRef.current;
+
         const backupPayload = {
           timestamp: Date.now(),
-          sales: transactions,
-          staff: allUsers,
-          products: products,
-          expenses: expenses,
+          sales: currentSales,
+          staff: currentUsers,
+          products: currentProducts,
+          expenses: currentExpenses,
           settings: {
-            activeStoreId,
-            requirePinOnStartup,
-            masterPin,
-            ownerRecoveryEmail,
+            activeStoreId: activeStoreIdRef.current,
+            requirePinOnStartup: sec.requirePinOnStartup,
+            masterPin: sec.masterPin,
+            ownerRecoveryEmail: sec.ownerRecoveryEmail,
           }
         };
-        protectLargestBackup(products, transactions, customers, suppliers, expenses, allUsers);
+        protectLargestBackup(currentProducts, currentSales, currentCustomers, currentSuppliers, currentExpenses, currentUsers);
         try {
           saveToIDB(resolveTenantStorageKey('rofani_pos_auto_backup'), backupPayload);
           saveToIDB(resolveTenantStorageKey('rofani_pos_last_snapshot'), backupPayload);
@@ -2190,21 +2294,23 @@ export default function App() {
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'hidden') {
         try {
-          safeSetJSON('retail_pos_active_tab', activeTab);
-          safeSetJSON('retail_pos_products', products);
-          safeSetJSON('retail_pos_transactions', transactions);
-          safeSetJSON('retail_pos_customers', customers);
-          safeSetJSON('retail_pos_suppliers', suppliers);
-          safeSetJSON('retail_pos_expenses', expenses);
-          safeSetJSON('retail_pos_users', allUsers);
+          safeSetJSON('retail_pos_active_tab', activeTabRef.current);
+          safeSetJSON('retail_pos_products', productsRef.current);
+          safeSetJSON('retail_pos_transactions', transactionsRef.current);
+          safeSetJSON('retail_pos_customers', customersRef.current);
+          safeSetJSON('retail_pos_suppliers', suppliersRef.current);
+          safeSetJSON('retail_pos_expenses', expensesRef.current);
+          safeSetJSON('retail_pos_users', allUsersRef.current);
         } catch {}
         handleBackupSnapshot();
       } else if (document.visibilityState === 'visible') {
-        // Silently refresh Firestore network connection on wake without wiping local cart/draft state
+        const now = Date.now();
+        if (now - lastWakeSyncAt < 3000) return;
+        lastWakeSyncAt = now;
         refreshFirestoreConnection()
           .then((ok) => {
             if (ok && getIsOnline() && isAuthorizedCloudUser(auth.currentUser) && getPendingSyncCount() > 0) {
-              syncPendingQueueToCloud().catch(() => {});
+              syncPendingQueueToCloudRef.current().catch(() => {});
             }
           })
           .catch(() => {});
@@ -2220,7 +2326,7 @@ export default function App() {
       window.removeEventListener('pagehide', handleBackupSnapshot);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [activeTab, transactions, allUsers, products, customers, suppliers, expenses, activeStoreId, requirePinOnStartup, masterPin, ownerRecoveryEmail]);
+  }, []);
 
   // Real-time synchronization subscription for transactions with conflict detection
   useEffect(() => {
@@ -2248,9 +2354,10 @@ export default function App() {
             sourceLabel: 'Cloud Firestore Live Sales Sync',
           });
           merged.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-          transactionsRef.current = merged;
-          setTransactions(merged);
-          safeSetJSON('retail_pos_transactions', merged);
+          if (haveTransactionListsChanged(transactionsRef.current, merged)) {
+            transactionsRef.current = merged;
+            setTransactions(merged);
+          }
           if (conflicts.length > 0) {
             enqueueSyncConflicts(conflicts, true);
           }
@@ -2278,9 +2385,10 @@ export default function App() {
             sourceLabel: 'Cloud Firestore Startup Sales Sync',
           });
           merged.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-          transactionsRef.current = merged;
-          setTransactions(merged);
-          safeSetJSON('retail_pos_transactions', merged);
+          if (haveTransactionListsChanged(transactionsRef.current, merged)) {
+            transactionsRef.current = merged;
+            setTransactions(merged);
+          }
           if (conflicts.length > 0) {
             enqueueSyncConflicts(conflicts, true);
           }
@@ -2322,12 +2430,10 @@ export default function App() {
               resolvedFingerprints: resolvedConflictFingerprintsRef.current,
               sourceLabel: 'Cloud Firestore Live Catalog Sync',
             });
-            productsRef.current = merged;
-            setProducts(merged);
-            safeSetJSON('retail_pos_products', merged);
-            try {
-              saveToIDB(resolveTenantStorageKey('retail_pos_products'), merged);
-            } catch {}
+            if (haveProductListsChanged(productsRef.current, merged)) {
+              productsRef.current = merged;
+              setProducts(merged);
+            }
             setCloudSyncStatus('synced');
             setLastSyncedTime(new Date().toLocaleTimeString());
             if (conflicts.length > 0) {
@@ -2362,12 +2468,10 @@ export default function App() {
             resolvedFingerprints: resolvedConflictFingerprintsRef.current,
             sourceLabel: 'Cloud Firestore Startup Catalog Sync',
           });
-          productsRef.current = merged;
-          setProducts(merged);
-          safeSetJSON('retail_pos_products', merged);
-          try {
-            saveToIDB(resolveTenantStorageKey('retail_pos_products'), merged);
-          } catch {}
+          if (haveProductListsChanged(productsRef.current, merged)) {
+            productsRef.current = merged;
+            setProducts(merged);
+          }
           setCloudSyncStatus('synced');
           setLastSyncedTime(new Date().toLocaleTimeString());
           if (conflicts.length > 0) {
@@ -2537,7 +2641,7 @@ export default function App() {
     let unsubscribe: (() => void) | undefined;
     try {
       unsubscribe = subscribeToUsers(
-        (incomingRemoteUsers) => {
+          (incomingRemoteUsers) => {
           if (incomingRemoteUsers && incomingRemoteUsers.length > 0) {
             const { merged, conflicts } = mergeRecordsWithConflictDetection<User>({
               recordType: 'user',
@@ -2547,10 +2651,10 @@ export default function App() {
               resolvedFingerprints: resolvedConflictFingerprintsRef.current,
               sourceLabel: 'Cloud Firestore Live Staff Sync',
             });
-            allUsersRef.current = merged;
-            setAllUsers(merged);
-            safeSetJSON('retail_pos_users', merged);
-            safeSetJSON('pos_store_staff_users', merged);
+            if (haveUserListsChanged(allUsersRef.current, merged)) {
+              allUsersRef.current = merged;
+              setAllUsers(merged);
+            }
             if (conflicts.length > 0) {
               enqueueSyncConflicts(conflicts, true);
             }
@@ -2567,200 +2671,217 @@ export default function App() {
     };
   }, [isCloudAuthReady, firebaseUser?.uid]);
 
-  // Offline and bidirectional cloud sync handler
-  const syncPendingQueueToCloud = async (): Promise<SyncRetryResult> => {
-    const initialQueue = getPendingSyncQueue();
-    if (!getIsOnline() || (typeof navigator !== 'undefined' && !navigator.onLine)) {
-      setCloudSyncStatus('offline');
-      const errMsg = 'Device is offline. Connect to Wi-Fi or mobile data and try again.';
-      if (initialQueue.length > 0) {
-        addSyncHistoryEntry({
-          operation: 'queue_flush',
-          status: 'failed',
-          syncedCount: 0,
-          failedCount: initialQueue.length,
-          summary: `Queue sync paused (${initialQueue.length} queued record${initialQueue.length === 1 ? '' : 's'})`,
-          errorDetails: errMsg,
-        });
-      }
-      return {
-        syncedCount: 0,
-        remainingCount: initialQueue.length,
-        errorMessage: errMsg,
-      };
-    }
-    if (!isAuthorizedCloudUser(auth.currentUser)) {
-      setCloudSyncStatus('offline');
-      const errMsg = 'Sign in with your verified Google account in Sync & Share to sync queued records.';
-      if (initialQueue.length > 0) {
-        addSyncHistoryEntry({
-          operation: 'queue_flush',
-          status: 'failed',
-          syncedCount: 0,
-          failedCount: initialQueue.length,
-          summary: `Queue sync blocked — authentication required (${initialQueue.length} queued)`,
-          errorDetails: errMsg,
-        });
-      }
-      return {
-        syncedCount: 0,
-        remainingCount: initialQueue.length,
-        errorMessage: errMsg,
-      };
+  const syncInFlightPromiseRef = useRef<Promise<SyncRetryResult> | null>(null);
+
+  // Offline and bidirectional cloud sync handler (serialized via in-flight promise lock to avoid race conditions)
+  const syncPendingQueueToCloud = useCallback((): Promise<SyncRetryResult> => {
+    if (syncInFlightPromiseRef.current) {
+      return syncInFlightPromiseRef.current;
     }
 
-    setCloudSyncStatus('syncing');
-    let hadError = false;
-    let syncedCount = 0;
-    let lastErrorMessage: string | undefined;
-
-    try {
-      // 1. Flush pendingSyncQueue first (oldest-to-newest so newest edits always win)
-      const chronologicalQueue = [...initialQueue].reverse();
-      for (const item of chronologicalQueue) {
-        try {
-          if (item.type === 'sale') {
-            await saveTransactionToCloud(item.data);
-          } else if (item.type === 'product') {
-            if (item.data?._deleted) {
-              await deleteProductFromCloud(item.data.id);
-            } else {
-              await saveProductToCloud(item.data);
-            }
-          } else if (item.type === 'customer') {
-            if (item.data?._deleted) {
-              await deleteCustomerFromCloud(item.data.id);
-            } else {
-              await saveCustomerToCloud(item.data);
-            }
-          } else if (item.type === 'supplier') {
-            if (item.data?._deleted) {
-              await deleteSupplierFromCloud(item.data.id);
-            } else {
-              await saveSupplierToCloud(item.data);
-            }
-          } else if (item.type === 'expense') {
-            await saveExpenseToCloud(item.data);
-          } else if (item.type === 'restock') {
-            await saveRestockRecordToCloud(item.data);
-          } else if (item.type === 'user') {
-            await saveUserToCloud(item.data);
-          }
-          removePendingSyncItem(item.id);
-          syncedCount += 1;
-        } catch (err) {
-          if (isQuotaExceededError(err)) {
-            setIsCloudQuotaExceeded(true);
-            setCloudSyncStatus('quota_exceeded');
-            return {
-              syncedCount,
-              remainingCount: getPendingSyncCount(),
-              errorMessage: 'Cloud Firestore daily free quota limit reached.',
-            };
-          }
-          hadError = true;
-          lastErrorMessage = err instanceof Error ? err.message : String(err);
-          console.warn(`[Sync Queue] Offline action ${item.id} waiting for stable connection:`, err);
-          // Continue trying remaining queued entries so one failing record does not block others
+    const runSync = async (): Promise<SyncRetryResult> => {
+      const initialQueue = getPendingSyncQueue();
+      if (!getIsOnline() || (typeof navigator !== 'undefined' && !navigator.onLine)) {
+        setCloudSyncStatus('offline');
+        const errMsg = 'Device is offline. Connect to Wi-Fi or mobile data and try again.';
+        if (initialQueue.length > 0) {
+          addSyncHistoryEntry({
+            operation: 'queue_flush',
+            status: 'failed',
+            syncedCount: 0,
+            failedCount: initialQueue.length,
+            summary: `Queue sync paused (${initialQueue.length} queued record${initialQueue.length === 1 ? '' : 's'})`,
+            errorDetails: errMsg,
+          });
         }
+        return {
+          syncedCount: 0,
+          remainingCount: initialQueue.length,
+          errorMessage: errMsg,
+        };
+      }
+      if (!isAuthorizedCloudUser(auth.currentUser)) {
+        setCloudSyncStatus('offline');
+        const errMsg = 'Sign in with your verified Google account in Sync & Share to sync queued records.';
+        if (initialQueue.length > 0) {
+          addSyncHistoryEntry({
+            operation: 'queue_flush',
+            status: 'failed',
+            syncedCount: 0,
+            failedCount: initialQueue.length,
+            summary: `Queue sync blocked — authentication required (${initialQueue.length} queued)`,
+            errorDetails: errMsg,
+          });
+        }
+        return {
+          syncedCount: 0,
+          remainingCount: initialQueue.length,
+          errorMessage: errMsg,
+        };
       }
 
-      // 2. Bidirectional Sync Guarantee: Batch-push recent local sales
-      const localSales = safeGetJSON<Transaction[]>('retail_pos_transactions', transactions);
-      if (localSales && localSales.length > 0) {
-        try {
-          await batchSaveTransactionsToCloud(localSales.slice(0, 100));
-        } catch (err) {
-          if (isQuotaExceededError(err)) {
-            setIsCloudQuotaExceeded(true);
-            setCloudSyncStatus('quota_exceeded');
-            return {
-              syncedCount,
-              remainingCount: getPendingSyncCount(),
-              errorMessage: 'Cloud Firestore daily free quota limit reached.',
-            };
-          }
-          hadError = true;
-          if (!lastErrorMessage) {
+      setCloudSyncStatus('syncing');
+      let hadError = false;
+      let syncedCount = 0;
+      let lastErrorMessage: string | undefined;
+
+      try {
+        // 1. Flush pendingSyncQueue first (oldest-to-newest so newest edits always win)
+        const chronologicalQueue = [...initialQueue].reverse();
+        for (const item of chronologicalQueue) {
+          try {
+            if (item.type === 'sale') {
+              await saveTransactionToCloud(item.data);
+            } else if (item.type === 'product') {
+              if (item.data?._deleted) {
+                await deleteProductFromCloud(item.data.id);
+              } else {
+                await saveProductToCloud(item.data);
+              }
+            } else if (item.type === 'customer') {
+              if (item.data?._deleted) {
+                await deleteCustomerFromCloud(item.data.id);
+              } else {
+                await saveCustomerToCloud(item.data);
+              }
+            } else if (item.type === 'supplier') {
+              if (item.data?._deleted) {
+                await deleteSupplierFromCloud(item.data.id);
+              } else {
+                await saveSupplierToCloud(item.data);
+              }
+            } else if (item.type === 'expense') {
+              await saveExpenseToCloud(item.data);
+            } else if (item.type === 'restock') {
+              await saveRestockRecordToCloud(item.data);
+            } else if (item.type === 'user') {
+              await saveUserToCloud(item.data);
+            }
+            removePendingSyncItem(item.id);
+            syncedCount += 1;
+          } catch (err) {
+            if (isQuotaExceededError(err)) {
+              setIsCloudQuotaExceeded(true);
+              setCloudSyncStatus('quota_exceeded');
+              return {
+                syncedCount,
+                remainingCount: getPendingSyncCount(),
+                errorMessage: 'Cloud Firestore daily free quota limit reached.',
+              };
+            }
+            hadError = true;
             lastErrorMessage = err instanceof Error ? err.message : String(err);
+            console.warn(`[Sync Queue] Offline action ${item.id} waiting for stable connection:`, err);
           }
-          console.warn('[Sync] Could not batch push local sales to cloud:', err);
         }
-      }
 
-      // 3. Preserve Local Sales State
-      const existingLocalSales = safeGetJSON<Transaction[]>('retail_pos_transactions', transactions);
-      setTransactions(existingLocalSales);
-      safeSetJSON('retail_pos_transactions', existingLocalSales);
+        // 2. Bidirectional Sync Guarantee: Batch-push recent local sales
+        const localSales = safeGetJSON<Transaction[]>('retail_pos_transactions', transactionsRef.current);
+        if (localSales && localSales.length > 0) {
+          try {
+            await batchSaveTransactionsToCloud(localSales.slice(0, 100));
+          } catch (err) {
+            if (isQuotaExceededError(err)) {
+              setIsCloudQuotaExceeded(true);
+              setCloudSyncStatus('quota_exceeded');
+              return {
+                syncedCount,
+                remainingCount: getPendingSyncCount(),
+                errorMessage: 'Cloud Firestore daily free quota limit reached.',
+              };
+            }
+            hadError = true;
+            if (!lastErrorMessage) {
+              lastErrorMessage = err instanceof Error ? err.message : String(err);
+            }
+            console.warn('[Sync] Could not batch push local sales to cloud:', err);
+          }
+        }
 
-      const remainingCount = getPendingSyncCount();
-      if (hadError || remainingCount > 0) {
-        setCloudSyncStatus(typeof navigator !== 'undefined' && !navigator.onLine ? 'offline' : 'error');
+        // 3. Preserve Local Sales State without unnecessary re-renders
+        const existingLocalSales = safeGetJSON<Transaction[]>('retail_pos_transactions', transactionsRef.current);
+        if (haveTransactionListsChanged(transactionsRef.current, existingLocalSales)) {
+          setTransactions(existingLocalSales);
+        }
+
+        const remainingCount = getPendingSyncCount();
+        if (hadError || remainingCount > 0) {
+          setCloudSyncStatus(typeof navigator !== 'undefined' && !navigator.onLine ? 'offline' : 'error');
+          addSyncHistoryEntry({
+            operation: 'queue_flush',
+            status: syncedCount > 0 ? 'partial' : 'failed',
+            syncedCount,
+            failedCount: Math.max(remainingCount, 1),
+            summary:
+              syncedCount > 0
+                ? `Synced ${syncedCount} queued record(s); ${remainingCount} remaining`
+                : `Failed to sync ${remainingCount} queued record(s)`,
+            errorDetails: lastErrorMessage || 'Could not reach Cloud Firestore.',
+          });
+        } else {
+          setLastSyncedTime(new Date().toLocaleTimeString());
+          setCloudSyncStatus('synced');
+          if (syncedCount > 0 || initialQueue.length > 0) {
+            addSyncHistoryEntry({
+              operation: 'queue_flush',
+              status: 'success',
+              syncedCount,
+              failedCount: 0,
+              summary:
+                syncedCount > 0
+                  ? `Uploaded ${syncedCount} queued offline record${syncedCount === 1 ? '' : 's'} to Cloud Firestore`
+                  : 'Verified local sales & offline queue in sync with Cloud Firestore',
+            });
+          }
+        }
+
+        return {
+          syncedCount,
+          remainingCount,
+          errorMessage: lastErrorMessage,
+        };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (isQuotaExceededError(err)) {
+          setIsCloudQuotaExceeded(true);
+          setCloudSyncStatus('quota_exceeded');
+        } else if (typeof navigator !== 'undefined' && !navigator.onLine) {
+          setCloudSyncStatus('offline');
+        } else {
+          setCloudSyncStatus('error');
+        }
         addSyncHistoryEntry({
           operation: 'queue_flush',
           status: syncedCount > 0 ? 'partial' : 'failed',
           syncedCount,
-          failedCount: Math.max(remainingCount, 1),
-          summary:
-            syncedCount > 0
-              ? `Synced ${syncedCount} queued record(s); ${remainingCount} remaining`
-              : `Failed to sync ${remainingCount} queued record(s)`,
-          errorDetails: lastErrorMessage || 'Could not reach Cloud Firestore.',
+          failedCount: Math.max(getPendingSyncCount(), 1),
+          summary: 'Cloud queue sync encountered an unexpected error',
+          errorDetails: msg,
         });
-      } else {
-        setLastSyncedTime(new Date().toLocaleTimeString());
-        setCloudSyncStatus('synced');
-        if (syncedCount > 0 || initialQueue.length > 0) {
-          addSyncHistoryEntry({
-            operation: 'queue_flush',
-            status: 'success',
-            syncedCount,
-            failedCount: 0,
-            summary:
-              syncedCount > 0
-                ? `Uploaded ${syncedCount} queued offline record${syncedCount === 1 ? '' : 's'} to Cloud Firestore`
-                : 'Verified local sales & offline queue in sync with Cloud Firestore',
-          });
-        }
+        console.warn('[Sync Queue] Unexpected sync failure:', err);
+        return {
+          syncedCount,
+          remainingCount: getPendingSyncCount(),
+          errorMessage: msg,
+        };
       }
+    };
 
-      return {
-        syncedCount,
-        remainingCount,
-        errorMessage: lastErrorMessage,
-      };
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      if (isQuotaExceededError(err)) {
-        setIsCloudQuotaExceeded(true);
-        setCloudSyncStatus('quota_exceeded');
-      } else if (typeof navigator !== 'undefined' && !navigator.onLine) {
-        setCloudSyncStatus('offline');
-      } else {
-        setCloudSyncStatus('error');
-      }
-      addSyncHistoryEntry({
-        operation: 'queue_flush',
-        status: syncedCount > 0 ? 'partial' : 'failed',
-        syncedCount,
-        failedCount: Math.max(getPendingSyncCount(), 1),
-        summary: 'Cloud queue sync encountered an unexpected error',
-        errorDetails: msg,
-      });
-      console.warn('[Sync Queue] Unexpected sync failure:', err);
-      return {
-        syncedCount,
-        remainingCount: getPendingSyncCount(),
-        errorMessage: msg,
-      };
-    }
-  };
+    const promise = runSync().finally(() => {
+      syncInFlightPromiseRef.current = null;
+    });
+    syncInFlightPromiseRef.current = promise;
+    return promise;
+  }, []);
+
+  const syncPendingQueueToCloudRef = useRef(syncPendingQueueToCloud);
+  syncPendingQueueToCloudRef.current = syncPendingQueueToCloud;
 
   // Proactively attempt flushing any queued offline records shortly after app launch & Google auth readiness when Aggressive Auto-Sync is enabled
   useEffect(() => {
     if (!isCloudAuthReady || !getAggressiveAutoSync() || !getIsOnline() || getPendingSyncCount() === 0) return;
     const timer = setTimeout(() => {
-      syncPendingQueueToCloud().catch(() => {});
+      syncPendingQueueToCloudRef.current().catch(() => {});
     }, 1500);
     return () => clearTimeout(timer);
   }, [isCloudAuthReady, firebaseUser?.uid]);
@@ -3220,6 +3341,16 @@ export default function App() {
   // State to track if user dismissed the top emergency recovery banner
   const [dismissedRecoveryBanner, setDismissedRecoveryBanner] = useState(false);
 
+  const largestRecoverableBackup = useMemo(() => {
+    if (dismissedRecoveryBanner || products.length >= 50) return null;
+    try {
+      const backups = findRecoverableBackups();
+      return backups.find((b) => b.productsCount > products.length && b.productsCount > 50) || null;
+    } catch {
+      return null;
+    }
+  }, [dismissedRecoveryBanner, products.length]);
+
   // Emergency Catalog Rollback Handler: restores products and associated collections from local snapshots
   // Emergency Catalog Rollback Handler: restores products and associated collections from local snapshots
   const handleRestoreEmergencyBackup = async (sourceKey?: string): Promise<boolean> => {
@@ -3325,7 +3456,7 @@ export default function App() {
   useEffect(() => {
     const handleReconnected = () => {
       if (getAggressiveAutoSync() && isAuthorizedCloudUser(auth.currentUser)) {
-        syncPendingQueueToCloud();
+        syncPendingQueueToCloudRef.current().catch(() => {});
       }
     };
 
@@ -3567,7 +3698,7 @@ export default function App() {
     }
   };
 
-  // Automated Daily Gmail Backup Background Schedule Checker
+  // Automated Daily Gmail Backup Background Schedule Checker (reads refs so timer never tears down on every sale/edit)
   useEffect(() => {
     let isCancelled = false;
 
@@ -3596,18 +3727,21 @@ export default function App() {
           }
 
           console.log('[Daily Email Backup] Scheduled closing hour reached, generating and dispatching daily store backup via Gmail...');
-          const currentStore = stores.find((s) => s.id === activeStoreId)?.name || storeProfile?.storeName || 'Rofani POS';
+          const currentStore =
+            storesRef.current.find((s) => s.id === activeStoreIdRef.current)?.name ||
+            storeProfileRef.current?.storeName ||
+            'Rofani POS';
 
           const result = await buildAndDispatchStoreBackup({
             accessToken: token,
             recipientEmail: settings.recipientEmail || 'NivaJuma@gmail.com',
-            products,
-            transactions,
-            customers,
-            suppliers,
-            expenses,
-            cashTransactions,
-            allUsers,
+            products: productsRef.current,
+            transactions: transactionsRef.current,
+            customers: customersRef.current,
+            suppliers: suppliersRef.current,
+            expenses: expensesRef.current,
+            cashTransactions: cashTransactionsRef.current,
+            allUsers: allUsersRef.current,
             storeName: currentStore,
           });
 
@@ -3641,7 +3775,7 @@ export default function App() {
       isCancelled = true;
       window.clearInterval(intervalId);
     };
-  }, [products, transactions, customers, suppliers, expenses, cashTransactions, allUsers, stores, activeStoreId]);
+  }, []);
 
   // Low stock counter
   const lowStockProducts = products.filter((p) => p.stockQuantity <= p.minStockAlert);
@@ -4357,7 +4491,21 @@ export default function App() {
       };
     });
 
+    let removedProductIds: string[] = [];
+
     if (replaceExisting) {
+      const keptIds = new Set(stampedImports.map((p) => p.id));
+      removedProductIds = (productsRef.current || [])
+        .map((p) => p.id)
+        .filter((id) => id && !keptIds.has(id));
+      if (removedProductIds.length > 0) {
+        markProductsDeletedLocally(removedProductIds);
+        removedProductIds.forEach((pid) => {
+          clearPendingSyncItemsForRecord('product', pid);
+          deleteProductImageFromIndexedDB(pid);
+        });
+      }
+      productsRef.current = stampedImports;
       setProducts(stampedImports);
     } else {
       setProducts((prev) => {
@@ -4367,12 +4515,14 @@ export default function App() {
         const newUnique = stampedImports.filter(
           (p) => !existingBarcodes.has(p.barcode.toLowerCase()) && !existingSkus.has(p.sku.toLowerCase())
         );
-        return [...newUnique, ...prev];
+        const nextList = [...newUnique, ...prev];
+        productsRef.current = nextList;
+        return nextList;
       });
     }
 
-    // Sync imported products to Firestore cloud catalog (with offline queue fallback)
-    if (!getIsOnline()) {
+    // Sync imported products (and any removed IDs on replaceExisting) to Firestore cloud catalog
+    if (!canAutoSyncCloud()) {
       stampedImports.forEach((p) =>
         addPendingSyncItem({
           type: 'product',
@@ -4380,8 +4530,15 @@ export default function App() {
           data: p,
         })
       );
+      removedProductIds.forEach((pid) =>
+        addPendingSyncItem({
+          type: 'product',
+          description: `Delete Replaced/Duplicate Product: ${pid}`,
+          data: { id: pid, _deleted: true },
+        })
+      );
     } else {
-      bulkUploadProductsToCloud(stampedImports).catch(() => {
+      bulkUploadProductsToCloud(stampedImports, undefined, activeCloudStoreId || undefined).catch(() => {
         stampedImports.forEach((p) =>
           addPendingSyncItem({
             type: 'product',
@@ -4390,7 +4547,89 @@ export default function App() {
           })
         );
       });
+      if (removedProductIds.length > 0) {
+        batchDeleteProductsFromCloud(removedProductIds, activeCloudStoreId || undefined).catch(() => {
+          removedProductIds.forEach((pid) =>
+            addPendingSyncItem({
+              type: 'product',
+              description: `Delete Replaced/Duplicate Product: ${pid}`,
+              data: { id: pid, _deleted: true },
+            })
+          );
+        });
+      }
     }
+  };
+
+  const handleBatchUpdateProducts = async (updatedProducts: Product[], summaryLabel?: string) => {
+    if (!updatedProducts || updatedProducts.length === 0) return;
+    const nowIso = new Date().toISOString();
+    const deletedCats: string[] = safeGetJSON('retail_pos_deleted_categories', []);
+    const assignedCats = new Set(
+      updatedProducts.map((p) => (p.category || '').trim().toLowerCase()).filter(Boolean)
+    );
+    if (deletedCats.some((dc) => assignedCats.has(dc))) {
+      safeSetJSON(
+        'retail_pos_deleted_categories',
+        deletedCats.filter((dc) => !assignedCats.has(dc))
+      );
+    }
+
+    const stampedUpdates = updatedProducts.map((p) => {
+      unmarkProductDeletedLocally(p.id);
+      return {
+        ...p,
+        updatedAt: nowIso,
+      };
+    });
+
+    const updatedMap = new Map(stampedUpdates.map((p) => [p.id, p]));
+    setProducts((prev) => prev.map((p) => updatedMap.get(p.id) || p));
+
+    if (!canAutoSyncCloud()) {
+      stampedUpdates.forEach((p) =>
+        addPendingSyncItem({
+          type: 'product',
+          description: `Bulk Edit: ${p.name}`,
+          data: p,
+        })
+      );
+    } else {
+      try {
+        await batchSaveProductsToCloud(stampedUpdates);
+      } catch {
+        stampedUpdates.forEach((p) =>
+          addPendingSyncItem({
+            type: 'product',
+            description: `Bulk Edit: ${p.name}`,
+            data: p,
+          })
+        );
+      }
+    }
+
+    const qualifyingRoles = getQualifyingRolesForAction(currentUser, 'MODIFY_INVENTORY');
+    const userRoles = getUserRoles(currentUser);
+    const authorizingRole = qualifyingRoles[0] || userRoles[0] || 'Admin';
+
+    const log = buildSensitiveActionLog({
+      actionType: 'MODIFY_INVENTORY',
+      actionTitle: `Bulk Edit: ${stampedUpdates.length} Products Updated`,
+      user: currentUser,
+      authorizingRole,
+      details: {
+        summary: summaryLabel
+          ? `Batch updated ${stampedUpdates.length} product(s): ${summaryLabel}`
+          : `Batch updated ${stampedUpdates.length} product(s)`,
+        metadata: {
+          updatedCount: stampedUpdates.length,
+          productIds: stampedUpdates.slice(0, 50).map((p) => p.id),
+          summary: summaryLabel || '',
+        },
+      },
+      severity: 'high',
+    });
+    handleRecordAuditLog(log);
   };
 
   const handleDeleteProduct = (productId: string) => {
@@ -4400,8 +4639,13 @@ export default function App() {
 
     const performDelete = (authorizingRole: Role, reason?: string) => {
       markProductDeletedLocally(productId);
+      clearPendingSyncItemsForRecord('product', productId);
       deleteProductImageFromIndexedDB(productId);
-      setProducts((prev) => prev.filter((p) => p.id !== productId));
+      setProducts((prev) => {
+        const nextList = prev.filter((p) => p.id !== productId);
+        productsRef.current = nextList;
+        return nextList;
+      });
 
       if (!canAutoSyncCloud()) {
         addPendingSyncItem({
@@ -4410,7 +4654,7 @@ export default function App() {
           data: { id: productId, _deleted: true },
         });
       } else {
-        deleteProductFromCloud(productId).catch(() => {
+        deleteProductFromCloud(productId, activeCloudStoreId || undefined).catch(() => {
           addPendingSyncItem({
             type: 'product',
             description: `Delete Product: ${existing?.name || productId}`,
@@ -4461,6 +4705,226 @@ export default function App() {
       const singleRole = qualifyingRoles[0] || userRoles[0] || 'Staff';
       performDelete(singleRole);
     }
+  };
+
+  const handleBatchDeleteProducts = async (productIds: string[], summaryLabel?: string): Promise<void> => {
+    const uniqueIds = Array.from(new Set((productIds || []).map((id) => String(id || '').trim()).filter(Boolean)));
+    if (uniqueIds.length === 0) return;
+
+    const idSet = new Set(uniqueIds);
+    const removedItems = (productsRef.current || []).filter((p) => idSet.has(p.id));
+    const qualifyingRoles = getQualifyingRolesForAction(currentUser, 'DELETE_PRODUCT');
+    const userRoles = getUserRoles(currentUser);
+
+    const executeBatchDelete = async (authorizingRole: Role, reason?: string) => {
+      markProductsDeletedLocally(uniqueIds);
+      uniqueIds.forEach((pid) => {
+        clearPendingSyncItemsForRecord('product', pid);
+        deleteProductImageFromIndexedDB(pid);
+      });
+
+      setProducts((prev) => {
+        const nextList = prev.filter((p) => !idSet.has(p.id));
+        productsRef.current = nextList;
+        return nextList;
+      });
+
+      if (!canAutoSyncCloud()) {
+        uniqueIds.forEach((pid) => {
+          const itemName = removedItems.find((p) => p.id === pid)?.name || pid;
+          addPendingSyncItem({
+            type: 'product',
+            description: `Delete Product: ${itemName}`,
+            data: { id: pid, _deleted: true },
+          });
+        });
+      } else {
+        try {
+          await batchDeleteProductsFromCloud(uniqueIds, activeCloudStoreId || undefined);
+        } catch {
+          uniqueIds.forEach((pid) => {
+            const itemName = removedItems.find((p) => p.id === pid)?.name || pid;
+            addPendingSyncItem({
+              type: 'product',
+              description: `Delete Product: ${itemName}`,
+              data: { id: pid, _deleted: true },
+            });
+          });
+        }
+      }
+
+      const log = buildSensitiveActionLog({
+        actionType: 'DELETE_PRODUCT',
+        actionTitle: summaryLabel || `Batch Deleted ${uniqueIds.length} Product(s)`,
+        user: currentUser,
+        authorizingRole,
+        details: {
+          summary: summaryLabel || `Deleted ${uniqueIds.length} product(s) from store catalog`,
+          metadata: {
+            deletedCount: uniqueIds.length,
+            deletedIds: uniqueIds.slice(0, 50),
+            names: removedItems.slice(0, 20).map((p) => p.name),
+          },
+        },
+        reason,
+        severity: 'critical',
+      });
+      handleRecordAuditLog(log);
+    };
+
+    if (qualifyingRoles.length > 1 || userRoles.length > 1) {
+      return new Promise<void>((resolve) => {
+        setRoleAuthRequest({
+          actionType: 'DELETE_PRODUCT',
+          actionTitle: summaryLabel || `Delete ${uniqueIds.length} Selected Product(s)`,
+          targetName: `${uniqueIds.length} catalog item(s)`,
+          qualifyingRoles: qualifyingRoles.length > 0 ? qualifyingRoles : userRoles,
+          user: currentUser,
+          diffSummary: removedItems.slice(0, 6).map((p) => `${p.name} (SKU: ${p.sku || 'N/A'}, Stock: ${p.stockQuantity})`),
+          onConfirm: async (selectedRole, reason) => {
+            setRoleAuthRequest(null);
+            await executeBatchDelete(selectedRole, reason);
+            resolve();
+          },
+          onCancel: () => {
+            setRoleAuthRequest(null);
+            resolve();
+          },
+        });
+      });
+    }
+
+    const singleRole = qualifyingRoles[0] || userRoles[0] || 'Staff';
+    await executeBatchDelete(singleRole);
+  };
+
+  const handleMergeAndDeleteProducts = async (
+    updatedPrimaries: Product[],
+    removedProductIds: string[],
+    summaryLabel?: string
+  ): Promise<void> => {
+    const uniqueRemovedIds = Array.from(
+      new Set((removedProductIds || []).map((id) => String(id || '').trim()).filter(Boolean))
+    );
+    const removedSet = new Set(uniqueRemovedIds);
+    const nowIso = new Date().toISOString();
+
+    const stampedPrimaries = (updatedPrimaries || [])
+      .filter((p) => p && p.id && !removedSet.has(p.id))
+      .map((p) => {
+        unmarkProductDeletedLocally(p.id);
+        if (p.imageUrl && p.imageUrl.trim() !== '') {
+          saveProductImageToIndexedDB(p.id, p.imageUrl);
+        }
+        return {
+          ...p,
+          updatedAt: nowIso,
+        };
+      });
+
+    const primaryMap = new Map(stampedPrimaries.map((p) => [p.id, p]));
+
+    if (uniqueRemovedIds.length > 0) {
+      markProductsDeletedLocally(uniqueRemovedIds);
+      uniqueRemovedIds.forEach((pid) => {
+        clearPendingSyncItemsForRecord('product', pid);
+        deleteProductImageFromIndexedDB(pid);
+      });
+    }
+
+    setProducts((prev) => {
+      const nextList = prev
+        .filter((p) => !removedSet.has(p.id))
+        .map((p) => primaryMap.get(p.id) || p);
+      productsRef.current = nextList;
+      return nextList;
+    });
+
+    if (!canAutoSyncCloud()) {
+      stampedPrimaries.forEach((p) => {
+        addPendingSyncItem({
+          type: 'product',
+          description: `Merged Primary Product: ${p.name}`,
+          data: p,
+        });
+      });
+      uniqueRemovedIds.forEach((pid) => {
+        addPendingSyncItem({
+          type: 'product',
+          description: `Delete Duplicate Product: ${pid}`,
+          data: { id: pid, _deleted: true },
+        });
+      });
+    } else {
+      if (stampedPrimaries.length > 0) {
+        try {
+          await batchSaveProductsToCloud(stampedPrimaries, undefined, activeCloudStoreId || undefined);
+        } catch {
+          stampedPrimaries.forEach((p) => {
+            addPendingSyncItem({
+              type: 'product',
+              description: `Merged Primary Product: ${p.name}`,
+              data: p,
+            });
+          });
+        }
+      }
+      if (uniqueRemovedIds.length > 0) {
+        try {
+          await batchDeleteProductsFromCloud(uniqueRemovedIds, activeCloudStoreId || undefined);
+        } catch {
+          uniqueRemovedIds.forEach((pid) => {
+            addPendingSyncItem({
+              type: 'product',
+              description: `Delete Duplicate Product: ${pid}`,
+              data: { id: pid, _deleted: true },
+            });
+          });
+        }
+      }
+    }
+
+    const qualifyingRoles = getQualifyingRolesForAction(currentUser, 'MODIFY_INVENTORY');
+    const userRoles = getUserRoles(currentUser);
+    const authorizingRole = qualifyingRoles[0] || userRoles[0] || 'Admin';
+
+    const log = buildSensitiveActionLog({
+      actionType: 'MODIFY_INVENTORY',
+      actionTitle: summaryLabel || `Merged & Deleted ${uniqueRemovedIds.length} Duplicate Item(s)`,
+      user: currentUser,
+      authorizingRole,
+      details: {
+        summary:
+          summaryLabel ||
+          `Merged ${stampedPrimaries.length} primary product(s) and permanently removed ${uniqueRemovedIds.length} duplicate entry/entries.`,
+        metadata: {
+          updatedPrimaryCount: stampedPrimaries.length,
+          removedCount: uniqueRemovedIds.length,
+          removedIds: uniqueRemovedIds.slice(0, 50),
+        },
+      },
+      severity: 'high',
+    });
+    handleRecordAuditLog(log);
+  };
+
+  const handleDeduplicateCatalog = async () => {
+    const result = deduplicateProducts(productsRef.current);
+    if (result.removedProductsCount <= 0) {
+      return result;
+    }
+
+    const removedIds = result.groups.flatMap((g) => g.duplicateItems.map((d) => d.id));
+    const primaryIds = new Set(result.groups.map((g) => g.primaryItem.id));
+    const updatedPrimaries = result.cleanedProducts.filter((p) => primaryIds.has(p.id));
+
+    await handleMergeAndDeleteProducts(
+      updatedPrimaries,
+      removedIds,
+      `Auto-Deleted ${result.removedProductsCount} Duplicate Item(s) & Merged +${result.mergedStockUnitsTotal} Stock`
+    );
+
+    return result;
   };
 
   const handleAddRestockRecord = (
@@ -5539,7 +6003,10 @@ export default function App() {
           transactions={transactions}
           onSaveProduct={handleSaveProduct}
           onDeleteProduct={handleDeleteProduct}
+          onBatchDeleteProducts={handleBatchDeleteProducts}
           onBatchImportProducts={handleBatchImportProducts}
+          onBatchUpdateProducts={handleBatchUpdateProducts}
+          onMergeAndDeleteProducts={handleMergeAndDeleteProducts}
           onAddSupplier={handleSaveSupplier}
           initialShowLowStockOnly={inventoryLowStockOnly}
           onViewProductHistory={(prod) => {
@@ -5696,6 +6163,8 @@ export default function App() {
           commissionPayouts={commissionPayouts}
           storeName={stores.find((s) => s.id === activeStoreId)?.name || storeProfile?.storeName || 'Rofani POS'}
           onAddExpense={handleAddExpense}
+          onSell={handleMobileMakeSaleBarClick}
+          inPhoneFrame={deviceFormat === 'phone'}
         />
       )}
 
@@ -5752,6 +6221,7 @@ export default function App() {
           onUpdateUser={handleUpdateUser}
           onDeleteUser={handleDeleteUser}
           onImportData={handleImportData}
+          onDeduplicateProducts={handleDeduplicateCatalog}
           onResetSampleData={handleResetData}
           onClearTransactions={handleClearTransactions}
           onClearExpenses={handleClearExpenses}
@@ -5866,8 +6336,12 @@ export default function App() {
     );
   }
 
+  // Never log out an active cached session just because the 3s Firebase Auth hydration timer fired early.
+  // Only show MerchantAuthScreen when Firebase Auth has genuinely settled as signed-out (or for unauthenticated cold starts).
+  const isWaitingForCachedAuthHydration = !hasAuthSettledFromFirebase && hasCachedVerifiedSession;
   if (
     isFirebaseAuthReady &&
+    !isWaitingForCachedAuthHydration &&
     !isAuthorizedCloudUser(firebaseUser) &&
     !allowOfflineOwnerMode
   ) {
@@ -6041,7 +6515,9 @@ export default function App() {
             />
           }
         >
-          {renderActiveTabContent()}
+          <ErrorBoundary resetKey={activeTab} fallbackTitle="Workspace View Recovered">
+            {renderActiveTabContent()}
+          </ErrorBoundary>
         </PhoneDeviceFrame>
 
         {/* Modals in Phone Format Mode */}
@@ -7018,10 +7494,8 @@ export default function App() {
         )}
 
         {/* Emergency Catalog Recovery Alert Banner: Appears automatically if current catalog has < 50 items and a larger local backup exists (e.g. on Vercel) */}
-        {!dismissedRecoveryBanner && (() => {
-          const backups = findRecoverableBackups();
-          const largest = backups.find((b) => b.productsCount > products.length && b.productsCount > 50);
-          if (!largest) return null;
+        {largestRecoverableBackup && (() => {
+          const largest = largestRecoverableBackup;
 
           return (
             <div className="bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 text-slate-950 px-4 py-3 text-xs font-bold flex items-center justify-between shadow-md z-30 shrink-0 border-b border-amber-600">
@@ -7161,8 +7635,18 @@ export default function App() {
             </div>
 
             <div className="flex items-center gap-1.5 shrink-0">
-              {/* Inline Network & Cloud Sync on wider tablets (768px-1023px) where ample space exists */}
+              {/* Inline Sell, Network & Cloud Sync on wider tablets (768px-1023px) where ample space exists */}
               <div className="hidden md:flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={handleMobileMakeSaleBarClick}
+                  className="bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white font-semibold text-xs px-2.5 py-1.5 rounded-full flex items-center gap-1 shrink-0 shadow-sm transition cursor-pointer whitespace-nowrap"
+                  title="Open POS Register / New Sale"
+                  aria-label="Sell — Open POS Register"
+                >
+                  <ShoppingBag className="w-3.5 h-3.5 shrink-0" />
+                  <span>Sell</span>
+                </button>
                 <NetworkStatusBadge onClick={() => setShowCloudSyncModal(true)} />
 
                 <button
@@ -7253,14 +7737,26 @@ export default function App() {
             </div>
           </div>
 
-          {/* Secondary Strip on Phones (<768px): Dedicated row for Network Status & Cloud Live Sync so top-left Menu is never covered */}
+          {/* Secondary Strip on Phones (<768px): Dedicated row for Network Status, Sell & Cloud Live Sync */}
           <div className="md:hidden px-3 py-1.5 bg-slate-950/75 border-t border-slate-800/80 flex items-center justify-between gap-2">
             <NetworkStatusBadge onClick={() => setShowCloudSyncModal(true)} />
 
-            <button
-              type="button"
-              onClick={() => setShowCloudSyncModal(true)}
-              title="Cloud Sync & Multi-Phone Share"
+            <div className="flex items-center gap-1.5 shrink-0">
+              <button
+                type="button"
+                onClick={handleMobileMakeSaleBarClick}
+                className="bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white font-semibold text-xs px-2.5 py-1 rounded-full flex items-center gap-1 shrink-0 shadow-sm transition cursor-pointer whitespace-nowrap"
+                title="Open POS Register / New Sale"
+                aria-label="Sell — Open POS Register"
+              >
+                <ShoppingBag className="w-3.5 h-3.5 shrink-0" />
+                <span>Sell</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setShowCloudSyncModal(true)}
+                title="Cloud Sync & Multi-Phone Share"
               className={`px-2.5 py-1 rounded-xl border transition flex items-center gap-1.5 text-[11px] font-bold shadow-sm cursor-pointer shrink-0 ${
                 cloudSyncStatus === 'quota_exceeded'
                   ? 'bg-amber-950/90 text-amber-200 border-amber-700'
@@ -7290,7 +7786,8 @@ export default function App() {
                     : 'bg-emerald-400'
                 }`}
               />
-            </button>
+              </button>
+            </div>
           </div>
         </div>
         )}
@@ -7602,7 +8099,9 @@ export default function App() {
               : 'bg-slate-900 text-slate-100 lg:bg-slate-50 lg:text-slate-900'
           }`}
         >
-          {renderActiveTabContent()}
+          <ErrorBoundary resetKey={activeTab} fallbackTitle="Workspace View Recovered">
+            {renderActiveTabContent()}
+          </ErrorBoundary>
         </div>
 
         {/* Floating 9-Dot Shortcuts & Calculator Suite Trigger */}

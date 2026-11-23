@@ -266,6 +266,59 @@ export async function deleteProductFromCloud(productId: string, storeId?: string
   }
 }
 
+export async function batchDeleteProductsFromCloud(
+  productIds: string[],
+  storeId?: string
+): Promise<number> {
+  const uniqueIds = Array.from(new Set((productIds || []).map((id) => String(id || '').trim()).filter(Boolean)));
+  if (uniqueIds.length === 0) return 0;
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    throw new Error('Device is offline. Product deletions queued locally.');
+  }
+
+  const sid = resolveCloudStoreId(storeId);
+  const scopedColPath = getScopedCollectionPath('products', sid);
+  const CHUNK_SIZE = 100;
+  let deletedCount = 0;
+
+  for (let i = 0; i < uniqueIds.length; i += CHUNK_SIZE) {
+    const chunk = uniqueIds.slice(i, i + CHUNK_SIZE);
+    try {
+      const batch = writeBatch(db);
+      chunk.forEach((pid) => {
+        const docRef = getScopedDocRef('products', pid, sid);
+        batch.delete(docRef);
+      });
+      await withFirestoreTimeout(
+        batch.commit(),
+        `deleting ${chunk.length} products`,
+        DEFAULT_FIRESTORE_BATCH_SDK_TIMEOUT_MS
+      );
+      deletedCount += chunk.length;
+    } catch (batchErr) {
+      if (isNonRetryableCloudError(batchErr)) {
+        // On transport stall, deleteProductFromCloud uses REST fallback; otherwise propagate non-retryable auth/quota error
+        if (!isQuotaExceededError(batchErr) && isTransportStallError(batchErr)) {
+          for (const pid of chunk) {
+            await deleteProductFromCloud(pid, sid);
+            deletedCount += 1;
+          }
+          continue;
+        }
+        handleFirestoreError(batchErr, OperationType.DELETE, `${scopedColPath}/batch-delete`);
+        throw batchErr;
+      }
+
+      for (const pid of chunk) {
+        await deleteProductFromCloud(pid, sid);
+        deletedCount += 1;
+      }
+    }
+  }
+
+  return deletedCount;
+}
+
 function decodeFirestoreRestValue(val: any): any {
   if (!val || typeof val !== 'object') return undefined;
   if ('nullValue' in val) return null;

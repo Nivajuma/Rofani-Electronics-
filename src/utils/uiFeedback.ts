@@ -47,12 +47,12 @@ export function subscribeToSoundPref(callback: (enabled: boolean) => void): () =
   return () => window.removeEventListener(SOUND_CHANGED_EVENT, handler);
 }
 
-function getAudioContext(): AudioContext | null {
+export function getSharedAudioContext(): AudioContext | null {
   if (typeof window === 'undefined') return null;
   const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
   if (!AudioCtx) return null;
 
-  if (!sharedAudioCtx) {
+  if (!sharedAudioCtx || sharedAudioCtx.state === 'closed') {
     try {
       sharedAudioCtx = new AudioCtx();
     } catch {
@@ -64,6 +64,10 @@ function getAudioContext(): AudioContext | null {
     sharedAudioCtx.resume().catch(() => {});
   }
   return sharedAudioCtx;
+}
+
+function getAudioContext(): AudioContext | null {
+  return getSharedAudioContext();
 }
 
 function playTone(

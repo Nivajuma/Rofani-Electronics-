@@ -79,6 +79,7 @@ import { hasWorkerPermission } from '../../utils/permissions';
 import { isContactPickerSupported, pickFromDevicePhonebook, parseContactFile } from '../../utils/phoneContacts';
 import { useNetworkStatus } from '../../utils/offlineSync';
 import { safeGetJSON, safeSetJSON, safeRemove } from '../../utils/safeStorage';
+import { getSharedAudioContext } from '../../utils/uiFeedback';
 import { refreshFirestoreConnection } from '../../lib/firebase';
 import { POSProductListRow, POSProductGridCard } from './POSProductItem';
 import {
@@ -594,12 +595,8 @@ export const POSView: React.FC<POSViewProps> = ({
   // Subtle audio cue whenever an item is selected or added during sales
   const playItemSelectAudioCue = React.useCallback(() => {
     try {
-      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-      if (AudioCtx) {
-        const ctx = new AudioCtx();
-        if (ctx.state === 'suspended') {
-          ctx.resume();
-        }
+      const ctx = getSharedAudioContext();
+      if (ctx) {
         const osc = ctx.createOscillator();
         const gain = ctx.createGain();
 

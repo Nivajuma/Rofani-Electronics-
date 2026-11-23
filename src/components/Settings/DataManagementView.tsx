@@ -103,6 +103,7 @@ interface DataManagementViewProps {
   accountEmail?: string;
   onOpenStoreManager?: () => void;
   onImportData: (data: any, options?: { mode?: 'merge' | 'replace' }) => void;
+  onDeduplicateProducts?: () => Promise<{ removedProductsCount: number; mergedStockUnitsTotal: number } | void> | { removedProductsCount: number; mergedStockUnitsTotal: number } | void;
   onResetSampleData: () => void;
   onClearTransactions: () => void;
   onClearExpenses: () => void;
@@ -147,6 +148,7 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
   onUpdateUser,
   onDeleteUser,
   onImportData,
+  onDeduplicateProducts,
   onResetSampleData,
   onClearTransactions,
   onClearExpenses,
@@ -2067,16 +2069,28 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
               <button
                 type="button"
-                onClick={() => {
-                  const result = deduplicateProducts(products);
-                  if (result.removedProductsCount > 0) {
-                    onImportData({ products: result.cleanedProducts });
-                    triggerNotify(`✨ Auto-deleted ${result.removedProductsCount} repeated items & merged ${result.mergedStockUnitsTotal} stock units into unique catalog items!`);
-                  } else {
+                onClick={async () => {
+                  const preview = deduplicateProducts(products);
+                  if (preview.removedProductsCount <= 0) {
                     triggerNotify('✨ No repeated or duplicate items found in catalog!');
+                    return;
+                  }
+                  if (onDeduplicateProducts) {
+                    const res = await onDeduplicateProducts();
+                    const hasCounts = res !== undefined && typeof res === 'object' && res !== null;
+                    const removed = hasCounts ? res.removedProductsCount : preview.removedProductsCount;
+                    const mergedStock = hasCounts ? res.mergedStockUnitsTotal : preview.mergedStockUnitsTotal;
+                    if (removed > 0) {
+                      triggerNotify(`✨ Auto-deleted ${removed} repeated items & merged ${mergedStock} stock units into unique catalog items!`);
+                    } else {
+                      triggerNotify('✨ No repeated or duplicate items found in catalog!');
+                    }
+                  } else {
+                    onImportData({ products: preview.cleanedProducts }, { mode: 'replace' });
+                    triggerNotify(`✨ Auto-deleted ${preview.removedProductsCount} repeated items & merged ${preview.mergedStockUnitsTotal} stock units into unique catalog items!`);
                   }
                 }}
-                className="bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-900 p-3.5 rounded-xl transition text-left space-y-1"
+                className="bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-900 p-3.5 rounded-xl transition text-left space-y-1 cursor-pointer"
               >
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-1.5 font-bold text-xs text-indigo-800">

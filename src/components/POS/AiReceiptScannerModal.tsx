@@ -31,6 +31,7 @@ import {
   parseAiHttpResponse,
   RATE_LIMIT_SCANNER_MESSAGE,
 } from '../../utils/aiErrorHandling';
+import { getSharedAudioContext } from '../../utils/uiFeedback';
 
 export interface ScannedNewItem {
   id: string;
@@ -103,6 +104,7 @@ export const AiReceiptScannerModal: React.FC<AiReceiptScannerModalProps> = ({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const scanInFlightRef = useRef(false);
   const lastScanTapRef = useRef(0);
+  const isMountedRef = useRef(true);
 
   useEffect(() => {
     if (cooldownSeconds <= 0) return;
@@ -132,9 +134,8 @@ export const AiReceiptScannerModal: React.FC<AiReceiptScannerModalProps> = ({
   // Audio register confirmation chime & haptic feedback
   const triggerAudioFeedback = () => {
     try {
-      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-      if (AudioCtx) {
-        const ctx = new AudioCtx();
+      const ctx = getSharedAudioContext();
+      if (ctx) {
         const osc = ctx.createOscillator();
         const gain = ctx.createGain();
         osc.type = 'triangle';
@@ -186,6 +187,11 @@ export const AiReceiptScannerModal: React.FC<AiReceiptScannerModalProps> = ({
         }
       }
 
+      if (!isMountedRef.current) {
+        stream.getTracks().forEach((t) => t.stop());
+        return;
+      }
+
       streamRef.current = stream;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
@@ -193,9 +199,12 @@ export const AiReceiptScannerModal: React.FC<AiReceiptScannerModalProps> = ({
           videoRef.current?.play().catch(() => {});
         };
         await videoRef.current.play().catch(() => {});
-        setCameraActive(true);
+        if (isMountedRef.current) {
+          setCameraActive(true);
+        }
       }
     } catch (err: any) {
+      if (!isMountedRef.current) return;
       console.warn('Camera stream error:', err);
       setCameraActive(false);
       let msg = 'Could not access phone camera for AI scan. Please pick from photo gallery.';
@@ -225,8 +234,10 @@ export const AiReceiptScannerModal: React.FC<AiReceiptScannerModalProps> = ({
   };
 
   useEffect(() => {
+    isMountedRef.current = true;
     startCamera();
     return () => {
+      isMountedRef.current = false;
       stopCamera();
     };
   }, [facingMode]);

@@ -42,7 +42,8 @@ import {
   RotateCcw,
   ExternalLink,
   Info,
-  QrCode
+  QrCode,
+  Lightbulb
 } from 'lucide-react';
 import { TabKey } from '../../utils/permissions';
 import { User, StoreSubscriptionProfile } from '../../types';
@@ -79,6 +80,7 @@ export interface AppMenuViewProps {
   onOpenSuperAdmin?: () => void;
   onOpenAboutUs?: () => void;
   onOpenShopQrShare?: () => void;
+  onOpenSuggestFeature?: () => void;
   onSignOutCloud?: () => Promise<void> | void;
   cloudUserEmail?: string | null;
 }
@@ -112,6 +114,7 @@ export const AppMenuView: React.FC<AppMenuViewProps> = ({
   onOpenSuperAdmin,
   onOpenAboutUs,
   onOpenShopQrShare,
+  onOpenSuggestFeature,
   onSignOutCloud,
   cloudUserEmail = null
 }) => {
@@ -1040,12 +1043,48 @@ export const AppMenuView: React.FC<AppMenuViewProps> = ({
                   </span>
                   <ChevronRight className="w-4 h-4 text-slate-500" />
                 </button>
+                {onOpenSuggestFeature && (
+                  <button
+                    type="button"
+                    id="btn-help-suggest-feature"
+                    onClick={onOpenSuggestFeature}
+                    className="w-full min-h-[44px] py-2.5 flex items-center justify-between text-sky-300 hover:text-sky-200 transition cursor-pointer"
+                  >
+                    <span className="font-semibold flex items-center gap-2.5">
+                      <Lightbulb className="w-3.5 h-3.5 text-amber-400" />
+                      Suggest a Special Feature
+                    </span>
+                    <ChevronRight className="w-4 h-4 text-slate-500" />
+                  </button>
+                )}
                 <div className="py-3 pr-1">
                   <CustomerCareSupportCard compact title="Quick Support Desk" />
                 </div>
               </div>
             )}
           </div>
+
+          {onOpenSuggestFeature && (
+            <button
+              type="button"
+              id="btn-menu-suggest-feature"
+              onClick={onOpenSuggestFeature}
+              className="w-full min-h-[52px] px-4 py-3 flex items-center justify-between hover:bg-slate-800/70 transition text-left cursor-pointer"
+            >
+              <div className="flex items-center gap-3.5 min-w-0">
+                <Lightbulb className="w-4 h-4 text-amber-400 shrink-0" strokeWidth={1.75} />
+                <span className="text-[13px] font-semibold text-white truncate">
+                  Suggest a Feature
+                </span>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <span className="px-2 py-0.5 rounded-md bg-sky-500/15 border border-sky-500/30 text-[10px] font-bold text-sky-300">
+                  Custom Idea
+                </span>
+                <ChevronRight className="w-4 h-4 text-slate-400 shrink-0" />
+              </div>
+            </button>
+          )}
 
           <button
             type="button"

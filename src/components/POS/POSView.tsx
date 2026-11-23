@@ -68,6 +68,7 @@ import {
 } from '../../types';
 import { BarcodeScannerModal } from './BarcodeScannerModal';
 import { AiReceiptScannerModal } from './AiReceiptScannerModal';
+import { isLegacyRofaniStoreBrand } from '../../lib/cloudSync';
 import { ReceiptModal } from './ReceiptModal';
 import { MpesaPromptModal } from './MpesaPromptModal';
 import { SmsDeliveryLogsModal } from './SmsDeliveryLogsModal';
@@ -210,11 +211,10 @@ export const POSView: React.FC<POSViewProps> = ({
 
   const customSettingsShopName = safeGetJSON<string>('rofani_settings_shop_name', '');
   const resolvedStoreName = (() => {
-    const legacy = ['rofani electronics', 'rofani electronics & boutique', 'rofani electronics and boutique'];
-    if (customSettingsShopName && !legacy.includes(customSettingsShopName.trim().toLowerCase()) && customSettingsShopName.trim().toLowerCase() !== 'rofani pos') {
+    if (customSettingsShopName && !isLegacyRofaniStoreBrand(customSettingsShopName)) {
       return customSettingsShopName.trim();
     }
-    if (storeName && !legacy.includes(storeName.trim().toLowerCase())) {
+    if (storeName && !isLegacyRofaniStoreBrand(storeName)) {
       return storeName.trim();
     }
     return 'Rofani POS';

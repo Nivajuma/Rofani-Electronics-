@@ -15,6 +15,7 @@ import { User } from '../types';
 import { TabKey } from '../utils/permissions';
 import { OfflineSyncBanner } from './Network/OfflineSyncBanner';
 import { SyncRetryResult } from '../utils/offlineSync';
+import { isLegacyRofaniStoreBrand } from '../lib/cloudSync';
 
 interface PhoneDeviceFrameProps {
   children: React.ReactNode;
@@ -96,13 +97,7 @@ export const PhoneDeviceFrame: React.FC<PhoneDeviceFrameProps> = ({
       : 'bg-emerald-400';
 
   const normalizedCustomStore =
-    storeName &&
-    ![
-      'rofani pos',
-      'rofani electronics',
-      'rofani electronics & boutique',
-      'rofani electronics and boutique',
-    ].includes(storeName.trim().toLowerCase())
+    storeName && !isLegacyRofaniStoreBrand(storeName)
       ? storeName.trim()
       : '';
 

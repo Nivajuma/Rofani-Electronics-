@@ -21,7 +21,7 @@ import {
   OWNER_CLOUD_EMAIL,
   isOwnerCloudUser,
 } from './firebase';
-import { getActiveTenantStoreId } from '../utils/tenantScope';
+import { getActiveTenantStoreId, resolveTenantStorageKey } from '../utils/tenantScope';
 import { TRANSACTION_SETTINGS_DEFAULT } from '../utils/transactionSettings';
 import {
   Product,
@@ -1661,6 +1661,20 @@ export async function ensureReferralCodeForStore(
   return profile.referralCode ? profile : { ...profile, referralCode: chosenCode };
 }
 
+export function isLegacyRofaniStoreBrand(name?: string | null): boolean {
+  const norm = (name || '').trim().toLowerCase();
+  return (
+    !norm ||
+    norm === 'rofani pos' ||
+    norm === 'rofani electronic' ||
+    norm === 'rofani electronics' ||
+    norm === 'rofani electronic & boutique' ||
+    norm === 'rofani electronic and boutique' ||
+    norm === 'rofani electronics & boutique' ||
+    norm === 'rofani electronics and boutique'
+  );
+}
+
 export async function ensureOwnerPrimaryStoreProfile(user: {
   uid: string;
   email?: string | null;
@@ -1694,13 +1708,17 @@ export async function ensureOwnerPrimaryStoreProfile(user: {
 
   // Fallback: inherit existing primary profile from legacy stores/rofani-pos if present
   const legacyProfile = await fetchStoreProfile(OWNER_PRIMARY_STORE_ID).catch(() => null);
+  const resolvedLegacyName =
+    legacyProfile?.storeName && !isLegacyRofaniStoreBrand(legacyProfile.storeName)
+      ? legacyProfile.storeName
+      : 'Rofani POS';
 
   const profile: StoreSubscriptionProfile = {
     ...(legacyProfile || {}),
     id: targetStoreId,
     ownerUid: user.uid,
     ownerEmail: (user.email || 'nivajuma@gmail.com').toLowerCase(),
-    storeName: legacyProfile?.storeName || 'Rofani POS',
+    storeName: resolvedLegacyName,
     phone: legacyProfile?.phone || '0700000000',
     kraPin: legacyProfile?.kraPin || '',
     mpesaShortcode: legacyProfile?.mpesaShortcode || '1833804',
@@ -2022,7 +2040,12 @@ export function subscribeToReferralRewards(
 
 export async function updateStoreProfileDetails(
   storeId: string,
-  updates: Partial<Pick<StoreSubscriptionProfile, 'storeName' | 'phone' | 'kraPin' | 'mpesaShortcode' | 'mpesaShortcodeType'>>
+  updates: Partial<
+    Pick<
+      StoreSubscriptionProfile,
+      'storeName' | 'phone' | 'kraPin' | 'mpesaShortcode' | 'mpesaShortcodeType' | 'skipLegacySeed'
+    >
+  >
 ): Promise<void> {
   const path = `stores/${storeId}`;
   try {
@@ -2233,16 +2256,33 @@ export async function migrateLegacyRootCollectionsToOwnerStoreIfNeeded(
 
   const migrationFlagKey = `rofani_pos_migrated_uid_${userId}`;
   try {
-    if (typeof window !== 'undefined' && window.localStorage?.getItem(migrationFlagKey) === '1') {
-      return false;
+    if (typeof window !== 'undefined') {
+      if (window.localStorage?.getItem(migrationFlagKey) === '1') {
+        return false;
+      }
+      const blankModeRaw =
+        window.localStorage?.getItem('rofani_pos_blank_mode') ||
+        window.localStorage?.getItem(resolveTenantStorageKey('rofani_pos_blank_mode', userId));
+      if (blankModeRaw === 'true' || blankModeRaw === '1') {
+        window.localStorage?.setItem(migrationFlagKey, '1');
+        return false;
+      }
     }
   } catch {}
 
   try {
-    const [scopedProducts, scopedSales] = await Promise.all([
+    const [existingProfile, scopedProducts, scopedSales] = await Promise.all([
+      fetchStoreProfile(userId).catch(() => null),
       fetchProductsFromCloud(userId).catch(() => []),
       fetchTransactionsFromCloud(userId).catch(() => []),
     ]);
+
+    if (existingProfile?.skipLegacySeed) {
+      try {
+        localStorage.setItem(migrationFlagKey, '1');
+      } catch {}
+      return false;
+    }
 
     if (scopedProducts.length > 0 || scopedSales.length > 0) {
       try {

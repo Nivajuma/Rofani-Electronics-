@@ -51,7 +51,8 @@ import {
   Award,
   LogOut,
   Gift,
-  Info
+  Info,
+  Lightbulb
 } from 'lucide-react';
 import {
   Product,
@@ -142,6 +143,7 @@ import { MerchantAuthScreen } from './components/Auth/MerchantAuthScreen';
 import { StoreOnboardingModal } from './components/Auth/StoreOnboardingModal';
 import { SubscriptionPlansModal } from './components/Subscription/SubscriptionPlansModal';
 import { SuperAdminSubscribersModal } from './components/Admin/SuperAdminSubscribersModal';
+import { SuggestFeatureModal } from './components/Common/SuggestFeatureModal';
 import { getBackupSettings, saveBackupSettings, getGmailAccessToken, buildAndDispatchStoreBackup } from './lib/gmailService';
 import { formatKSh } from './utils/currency';
 import {
@@ -220,6 +222,7 @@ import {
   subscribeToShopProtectionSettings,
   deleteTransactionFromCloud,
   updateStoreProfileDetails,
+  isLegacyRofaniStoreBrand,
 } from './lib/cloudSync';
 import { loadMpesaConfig, saveMpesaConfig } from './utils/mpesa';
 import {
@@ -740,6 +743,7 @@ export default function App() {
   const [isCheckingStoreProfile, setIsCheckingStoreProfile] = useState<boolean>(false);
   const [showPlansModal, setShowPlansModal] = useState<boolean>(false);
   const [showSuperAdminModal, setShowSuperAdminModal] = useState<boolean>(false);
+  const [showSuggestFeatureModal, setShowSuggestFeatureModal] = useState<boolean>(false);
 
   const PENDING_REFERRAL_STORAGE_KEY = 'rofani_pending_referral_code';
   const [pendingReferralCode, setPendingReferralCode] = useState<string>(() => {
@@ -849,8 +853,12 @@ export default function App() {
       return isOwnerScope ? ownerFallback : [];
     };
 
+    const isBlankMode =
+      safeGetJSON<boolean>('rofani_pos_blank_mode', false) ||
+      Boolean(profileOverride?.skipLegacySeed);
+
     const nextProducts = mergeProductListsByTimestamp(
-      loadArr<Product>('retail_pos_products', INITIAL_PRODUCTS),
+      loadArr<Product>('retail_pos_products', isBlankMode ? [] : INITIAL_PRODUCTS),
       [],
       getDeletedProductIds(),
       getPendingProductMap()
@@ -1019,14 +1027,20 @@ export default function App() {
       setStoreProfile(prof);
       if (prof) {
         safeSetJSON('rofani_pos_store_profile', prof);
+        if (prof.skipLegacySeed) {
+          safeSetJSON('rofani_pos_blank_mode', true);
+        }
       }
-      if (prof && !isOwnerCloudUser(firebaseUser)) {
+      if (prof) {
+        const cleanProfileStoreName = isLegacyRofaniStoreBrand(prof.storeName)
+          ? 'Rofani POS'
+          : prof.storeName;
         setStores((prev) => {
           if (!prev || prev.length === 0) {
             return [
               {
                 id: 'store-main',
-                name: prof.storeName,
+                name: cleanProfileStoreName,
                 code: 'MAIN-01',
                 city: 'Nairobi',
                 address: 'Main Branch',
@@ -1036,16 +1050,27 @@ export default function App() {
               },
             ];
           }
-          const updated = prev.map((s, idx) =>
+          if (isOwnerCloudUser(firebaseUser) && !isLegacyRofaniStoreBrand(prof.storeName) && prof.storeName !== prev[0]?.name) {
+            return prev.map((s, idx) =>
+              idx === 0 || s.id === 'store-main'
+                ? { ...s, name: cleanProfileStoreName }
+                : s
+            );
+          }
+          if (isOwnerCloudUser(firebaseUser)) {
+            return prev.map((s) =>
+              isLegacyRofaniStoreBrand(s.name) ? { ...s, name: 'Rofani POS' } : s
+            );
+          }
+          return prev.map((s, idx) =>
             idx === 0 || s.id === 'store-main'
               ? {
                   ...s,
-                  name: prof.storeName || s.name,
+                  name: cleanProfileStoreName || s.name,
                   phone: prof.phone || s.phone,
                 }
               : s
           );
-          return updated;
         });
       }
     };
@@ -1257,13 +1282,15 @@ export default function App() {
       const deletedIds = getDeletedProductIds();
       const pendingMap = getPendingProductMap();
       const isOwnerScope = getActiveTenantStoreId() === OWNER_PRIMARY_STORE_ID;
-      const fallback = isOwnerScope ? INITIAL_PRODUCTS : [];
+      const isBlankMode = safeGetJSON<boolean>('rofani_pos_blank_mode', false);
+      const fallback = isOwnerScope && !isBlankMode ? INITIAL_PRODUCTS : [];
       const saved = localStorage.getItem(resolveTenantStorageKey('retail_pos_products'));
       const parsed = saved ? JSON.parse(saved) : fallback;
       const baseList = Array.isArray(parsed) ? parsed : fallback;
       return mergeProductListsByTimestamp(baseList, [], deletedIds, pendingMap);
     } catch {
-      return getActiveTenantStoreId() === OWNER_PRIMARY_STORE_ID ? INITIAL_PRODUCTS : [];
+      const isBlankMode = safeGetJSON<boolean>('rofani_pos_blank_mode', false);
+      return getActiveTenantStoreId() === OWNER_PRIMARY_STORE_ID && !isBlankMode ? INITIAL_PRODUCTS : [];
     }
   });
 
@@ -1939,9 +1966,7 @@ export default function App() {
       if (
         lower.includes('flagship') ||
         s.name === 'Main Store' ||
-        lower === 'rofani electronics' ||
-        lower === 'rofani electronics & boutique' ||
-        lower === 'rofani electronics and boutique'
+        isLegacyRofaniStoreBrand(s.name)
       ) {
         return { ...s, name: 'Rofani POS' };
       }
@@ -5360,8 +5385,38 @@ export default function App() {
     setStores((prev) => [...prev, newStore]);
   };
 
+  const handleUpdateStoreName = (nextName: string) => {
+    const trimmed = (nextName || '').trim();
+    const normalizedName = !trimmed || isLegacyRofaniStoreBrand(trimmed) ? 'Rofani POS' : trimmed;
+    safeSetJSON('retail_pos_store_name', normalizedName);
+    safeSetJSON('rofani_settings_shop_name', normalizedName);
+    setStores((prev) =>
+      prev.map((s, idx) =>
+        s.id === activeStoreId || s.id === 'store-main' || (idx === 0 && s.isMainBranch)
+          ? { ...s, name: normalizedName }
+          : s
+      )
+    );
+    setStoreProfile((prev) => (prev ? { ...prev, storeName: normalizedName } : prev));
+    const targetCloudStoreId = activeCloudStoreId || getActiveTenantStoreId();
+    if (targetCloudStoreId && targetCloudStoreId !== '__unauthenticated__' && isAuthorizedCloudUser(firebaseUser)) {
+      updateStoreProfileDetails(targetCloudStoreId, { storeName: normalizedName }).catch(() => {});
+    }
+  };
+
   const handleUpdateStore = (updatedStore: StoreLocation) => {
-    setStores((prev) => prev.map((s) => (s.id === updatedStore.id ? updatedStore : s)));
+    const cleanName = isLegacyRofaniStoreBrand(updatedStore.name) ? 'Rofani POS' : updatedStore.name.trim();
+    const normalizedStore = { ...updatedStore, name: cleanName };
+    setStores((prev) => prev.map((s) => (s.id === normalizedStore.id ? normalizedStore : s)));
+    if (normalizedStore.id === 'store-main' || normalizedStore.isMainBranch || normalizedStore.id === activeStoreId) {
+      safeSetJSON('retail_pos_store_name', cleanName);
+      safeSetJSON('rofani_settings_shop_name', cleanName);
+      setStoreProfile((prev) => (prev ? { ...prev, storeName: cleanName } : prev));
+      const targetCloudStoreId = activeCloudStoreId || getActiveTenantStoreId();
+      if (targetCloudStoreId && targetCloudStoreId !== '__unauthenticated__' && isAuthorizedCloudUser(firebaseUser)) {
+        updateStoreProfileDetails(targetCloudStoreId, { storeName: cleanName }).catch(() => {});
+      }
+    }
   };
 
   const handleDeleteStore = (storeId: string) => {
@@ -5546,9 +5601,134 @@ export default function App() {
     );
   };
 
+  const handleSwitchToBlankRofaniPos = async (options?: {
+    alsoClearSalesAndExpenses?: boolean;
+  }) => {
+    const scope = getActiveTenantStoreId();
+    const targetCloudStoreId = activeCloudStoreId || (firebaseUser?.uid ? firebaseUser.uid : '');
+
+    // 1. Persist blank-mode guards so Rofani Electronics sample/legacy catalog never re-seeds
+    safeSetJSON('rofani_pos_blank_mode', true);
+    if (firebaseUser?.uid) {
+      try {
+        localStorage.setItem(`rofani_pos_migrated_uid_${firebaseUser.uid}`, '1');
+      } catch {}
+    }
+
+    // 2. Collect all local & cloud product IDs to permanently purge inventory
+    const localIds = (productsRef.current || []).map((p) => p.id).filter(Boolean);
+    let cloudIds: string[] = [];
+    if (targetCloudStoreId && targetCloudStoreId !== '__unauthenticated__' && isAuthorizedCloudUser(firebaseUser)) {
+      try {
+        const remoteProds = await fetchProductsFromCloud(targetCloudStoreId);
+        cloudIds = remoteProds.map((p) => p.id).filter(Boolean);
+      } catch {}
+    }
+    const allProductIds = Array.from(new Set([...localIds, ...cloudIds]));
+
+    if (allProductIds.length > 0) {
+      markProductsDeletedLocally(allProductIds);
+      allProductIds.forEach((pid) => {
+        clearPendingSyncItemsForRecord('product', pid);
+        deleteProductImageFromIndexedDB(pid);
+      });
+    }
+
+    // 3. Clear local & IndexedDB product catalog immediately
+    productsRef.current = [];
+    setProducts([]);
+    safeSetJSON('retail_pos_products', []);
+    saveToIDB(resolveTenantStorageKey('retail_pos_products', scope), []).catch(() => {});
+
+    // 4. Delete cloud products if signed in and online
+    if (allProductIds.length > 0 && targetCloudStoreId && targetCloudStoreId !== '__unauthenticated__' && isAuthorizedCloudUser(firebaseUser)) {
+      if (canAutoSyncCloud()) {
+        try {
+          await batchDeleteProductsFromCloud(allProductIds, targetCloudStoreId);
+        } catch {
+          allProductIds.forEach((pid) => {
+            addPendingSyncItem({
+              type: 'product',
+              description: `Clear Inventory Item: ${pid}`,
+              data: { id: pid, _deleted: true },
+            });
+          });
+        }
+      } else {
+        allProductIds.forEach((pid) => {
+          addPendingSyncItem({
+            type: 'product',
+            description: `Clear Inventory Item: ${pid}`,
+            data: { id: pid, _deleted: true },
+          });
+        });
+      }
+    }
+
+    // 5. Clear custom shop name everywhere so header & receipts show pure Rofani POS
+    const cleanMainStore: StoreLocation = {
+      id: 'store-main',
+      name: 'Rofani POS',
+      code: 'MAIN-01',
+      city: 'Nairobi',
+      address: 'Main Branch',
+      phone: storeProfile?.phone || '',
+      isMainBranch: true,
+      active: true,
+    };
+    setStores([cleanMainStore]);
+    setActiveStoreId('store-main');
+    safeSetJSON('retail_pos_stores', [cleanMainStore]);
+    safeSetJSON('retail_pos_active_store_id', 'store-main');
+    safeSetJSON('retail_pos_store_name', 'Rofani POS');
+    safeSetJSON('rofani_settings_shop_name', 'Rofani POS');
+
+    setStoreProfile((prev) =>
+      prev ? { ...prev, storeName: 'Rofani POS', skipLegacySeed: true } : prev
+    );
+    if (targetCloudStoreId && targetCloudStoreId !== '__unauthenticated__' && isAuthorizedCloudUser(firebaseUser)) {
+      await updateStoreProfileDetails(targetCloudStoreId, {
+        storeName: 'Rofani POS',
+        skipLegacySeed: true,
+      }).catch(() => {});
+    }
+
+    // 6. Optional full register wipe (sales & expenses)
+    if (options?.alsoClearSalesAndExpenses) {
+      transactionsRef.current = [];
+      setTransactions([]);
+      expensesRef.current = [];
+      setExpenses([]);
+      setCashTransactions([]);
+      setRestockRecords([]);
+      setPurchaseOrdersState([]);
+      setOnlineOrders([]);
+      setStockTransfers([]);
+    }
+
+    const log = buildSensitiveActionLog({
+      actionType: 'DELETE_PRODUCT',
+      actionTitle: 'Switched to Clean Rofani POS (No Shop Name & 0 Inventory)',
+      user: currentUser,
+      authorizingRole: currentUser.role || 'Admin',
+      details: {
+        summary: `Cleared ${allProductIds.length} inventory item(s) and reset store branding to clean Rofani POS${
+          options?.alsoClearSalesAndExpenses ? ' (also cleared sales & expense logs)' : ''
+        }.`,
+      },
+      severity: 'critical',
+    });
+    handleRecordAuditLog(log);
+  };
+
   const handleResetData = () => {
     const scope = getActiveTenantStoreId();
     const isOwnerScope = scope === OWNER_PRIMARY_STORE_ID;
+    safeSetJSON('rofani_pos_blank_mode', false);
+    const targetCloudStoreId = activeCloudStoreId || (firebaseUser?.uid ? firebaseUser.uid : '');
+    if (targetCloudStoreId && targetCloudStoreId !== '__unauthenticated__' && isAuthorizedCloudUser(firebaseUser)) {
+      updateStoreProfileDetails(targetCloudStoreId, { skipLegacySeed: false }).catch(() => {});
+    }
     try {
       if (isOwnerScope) {
         const ownerKeys = [
@@ -6163,7 +6343,6 @@ export default function App() {
           commissionPayouts={commissionPayouts}
           storeName={stores.find((s) => s.id === activeStoreId)?.name || storeProfile?.storeName || 'Rofani POS'}
           onAddExpense={handleAddExpense}
-          onSell={handleMobileMakeSaleBarClick}
           inPhoneFrame={deviceFormat === 'phone'}
         />
       )}
@@ -6267,6 +6446,8 @@ export default function App() {
               await updateStoreProfileDetails(targetCloudStoreId, { kraPin: cleanPin });
             }
           }}
+          onUpdateStoreName={handleUpdateStoreName}
+          onSwitchToBlankPos={handleSwitchToBlankRofaniPos}
           onOpenShopQrShare={() => setShowShopQrModal(true)}
           onPreview9PmSummary={() => setShow9PmSummaryModal(true)}
         />
@@ -6295,6 +6476,7 @@ export default function App() {
           onOpenSuperAdmin={() => setShowSuperAdminModal(true)}
           onOpenAboutUs={() => setActiveTab('about')}
           onOpenShopQrShare={() => setShowShopQrModal(true)}
+          onOpenSuggestFeature={() => setShowSuggestFeatureModal(true)}
           onSignOutCloud={async () => {
             setAllowOfflineOwnerMode(false);
             await signOutFromCloud();
@@ -6308,6 +6490,7 @@ export default function App() {
           onBack={() => setActiveTab(deviceFormat === 'phone' ? 'menu' : 'pos')}
           onOpenPlansPricing={() => setShowPlansModal(true)}
           onOpenAiAssistant={() => setShowAiAssistantModal(true)}
+          onOpenSuggestFeature={() => setShowSuggestFeatureModal(true)}
           inPhoneFrame={deviceFormat === 'phone'}
         />
       )}
@@ -6572,6 +6755,15 @@ export default function App() {
             onClose={() => setShowSuperAdminModal(false)}
           />
         )}
+
+        <SuggestFeatureModal
+          isOpen={showSuggestFeatureModal}
+          onClose={() => setShowSuggestFeatureModal(false)}
+          storeName={stores.find((s) => s.id === activeStoreId)?.name || storeProfile?.storeName || 'Rofani POS'}
+          defaultPhone={storeProfile?.phone || currentUser?.phone || ''}
+          defaultContactName={currentUser?.name || ''}
+          isCloudSignedIn={isAuthorizedCloudUser(firebaseUser)}
+        />
 
         <ConflictResolutionModal
           isOpen={isConflictModalOpen && syncConflicts.length > 0}
@@ -6845,7 +7037,7 @@ export default function App() {
                 <span className="text-[10px] text-slate-400 font-mono block truncate">
                   {(() => {
                     const activeName = stores.find((s) => s.id === activeStoreId)?.name || storeProfile?.storeName || '';
-                    return activeName && !['rofani pos', 'rofani electronics', 'rofani electronics & boutique', 'rofani electronics and boutique'].includes(activeName.trim().toLowerCase())
+                    return activeName && !isLegacyRofaniStoreBrand(activeName)
                       ? activeName
                       : 'RETAIL & WHOLESALE';
                   })()}
@@ -7292,6 +7484,28 @@ export default function App() {
             </div>
           </button>
 
+          {/* Suggest a Special Feature */}
+          <button
+            type="button"
+            id="btn-sidebar-suggest-feature"
+            onClick={() => {
+              setShowSuggestFeatureModal(true);
+              setIsMobileMenuOpen(false);
+            }}
+            title="Suggest a Special Feature or Custom Integration"
+            className={`w-full flex items-center ${isSidebarCollapsed ? 'justify-center px-2' : 'justify-between px-3'} py-2.5 rounded-lg transition hover:bg-slate-800 text-amber-200 border border-amber-500/25 bg-amber-500/5 cursor-pointer`}
+          >
+            <div className="flex items-center gap-3">
+              <Lightbulb className="w-4 h-4 shrink-0 text-amber-400" />
+              {!isSidebarCollapsed && <span>Suggest a Feature</span>}
+            </div>
+            {!isSidebarCollapsed && (
+              <span className="text-[9px] bg-sky-500/15 text-sky-300 border border-sky-500/30 px-1.5 py-0.5 rounded-full font-bold uppercase">
+                Ideas
+              </span>
+            )}
+          </button>
+
           {/* Owner-Only Super Admin Subscribers Panel */}
           {isOwnerAccount && (
             <button
@@ -7625,7 +7839,7 @@ export default function App() {
                   <span className="text-[9px] text-slate-400 font-mono block truncate">
                     {(() => {
                       const activeName = stores.find((s) => s.id === activeStoreId)?.name || storeProfile?.storeName || '';
-                      return activeName && !['rofani pos', 'rofani electronics', 'rofani electronics & boutique', 'rofani electronics and boutique'].includes(activeName.trim().toLowerCase())
+                      return activeName && !isLegacyRofaniStoreBrand(activeName)
                         ? activeName
                         : 'Retail & Wholesale POS';
                     })()}
@@ -8328,6 +8542,16 @@ export default function App() {
           onClose={() => setShowSuperAdminModal(false)}
         />
       )}
+
+      {/* Client Special Feature Request Modal */}
+      <SuggestFeatureModal
+        isOpen={showSuggestFeatureModal}
+        onClose={() => setShowSuggestFeatureModal(false)}
+        storeName={stores.find((s) => s.id === activeStoreId)?.name || storeProfile?.storeName || 'Rofani POS'}
+        defaultPhone={storeProfile?.phone || currentUser?.phone || ''}
+        defaultContactName={currentUser?.name || ''}
+        isCloudSignedIn={isAuthorizedCloudUser(firebaseUser)}
+      />
 
       {/* Conflict Resolution Assistant Modal */}
       <ConflictResolutionModal

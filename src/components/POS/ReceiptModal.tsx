@@ -30,7 +30,10 @@ const isLegacyStoreBrand = (val?: string): boolean => {
   if (!val || !val.trim()) return true;
   const norm = val.trim().toLowerCase();
   return (
+    norm === 'rofani electronic' ||
     norm === 'rofani electronics' ||
+    norm === 'rofani electronic & boutique' ||
+    norm === 'rofani electronic and boutique' ||
     norm === 'rofani electronics & boutique' ||
     norm === 'rofani electronics and boutique'
   );

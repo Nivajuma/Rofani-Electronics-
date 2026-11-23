@@ -16,6 +16,7 @@ import {
   ShoppingBag,
   Sparkles,
   Users,
+  Lightbulb,
 } from 'lucide-react';
 import {
   SUPPORT_EMAIL,
@@ -32,6 +33,7 @@ export interface AboutUsViewProps {
   onBack: () => void;
   onOpenPlansPricing?: () => void;
   onOpenAiAssistant?: () => void;
+  onOpenSuggestFeature?: () => void;
   inPhoneFrame?: boolean;
 }
 
@@ -131,6 +133,7 @@ export const AboutUsView: React.FC<AboutUsViewProps> = ({
   onBack,
   onOpenPlansPricing,
   onOpenAiAssistant,
+  onOpenSuggestFeature,
   inPhoneFrame = false,
 }) => {
   const rootRef = useRef<HTMLDivElement>(null);
@@ -269,6 +272,16 @@ export const AboutUsView: React.FC<AboutUsViewProps> = ({
               >
                 <Sparkles className="w-3.5 h-3.5 text-orange-400" />
                 <span>Ask Smart AI Assistant</span>
+              </button>
+            )}
+            {onOpenSuggestFeature && (
+              <button
+                type="button"
+                onClick={onOpenSuggestFeature}
+                className="px-4 py-2 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-amber-300 text-xs font-bold flex items-center gap-1.5 whitespace-nowrap shrink-0 transition cursor-pointer"
+              >
+                <Lightbulb className="w-3.5 h-3.5 text-amber-400" />
+                <span>Suggest a Feature</span>
               </button>
             )}
           </div>

@@ -26,7 +26,6 @@ import {
   Landmark,
   Layers,
   ShoppingCart,
-  ShoppingBag,
   Lock,
   Trash2
 } from 'lucide-react';
@@ -56,7 +55,6 @@ interface ReportsViewProps {
   commissionPayouts?: StaffCommissionPayout[];
   storeName?: string;
   onAddExpense?: (expense: Expense) => void;
-  onSell?: () => void;
   inPhoneFrame?: boolean;
 }
 
@@ -86,7 +84,6 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   commissionPayouts = [],
   storeName,
   onAddExpense,
-  onSell,
   inPhoneFrame = false,
 }) => {
   const [txSettings] = useTransactionSettings(activeStoreId);
@@ -664,37 +661,8 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
         </div>
       )}
 
-      {/* Main Content: Mobile Quick Sell CTA, Daily Overview & Grouped Cards */}
-      <div className={`max-w-4xl mx-auto ${inPhoneFrame ? 'px-3 pt-3 pb-4 space-y-4' : 'px-4 pt-3 sm:pt-6 pb-6 space-y-6'} mb-12`}>
-        {onSell && (
-          <div className={inPhoneFrame ? 'block pt-0.5' : 'lg:hidden pt-0.5'}>
-            <button
-              type="button"
-              id="btn-mobile-dashboard-sell"
-              onClick={onSell}
-              className="w-full min-h-[48px] px-4 py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-500 active:scale-[0.99] text-white font-bold text-sm shadow-lg shadow-emerald-950/50 border border-emerald-400/30 flex items-center justify-between gap-3 transition cursor-pointer"
-            >
-              <span className="flex items-center gap-3 min-w-0">
-                <span className="w-9 h-9 rounded-xl bg-white/15 flex items-center justify-center shrink-0">
-                  <ShoppingBag className="w-5 h-5 text-white" />
-                </span>
-                <span className="text-left min-w-0">
-                  <span className="block font-extrabold text-sm leading-tight truncate">
-                    Sell
-                  </span>
-                  <span className="block text-[11px] font-medium text-emerald-100/90 leading-tight truncate">
-                    Open POS register &amp; ring up a sale
-                  </span>
-                </span>
-              </span>
-              <span className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-slate-950/25 text-xs font-bold whitespace-nowrap shrink-0">
-                <span>New Sale</span>
-                <ChevronRight className="w-4 h-4" />
-              </span>
-            </button>
-          </div>
-        )}
-
+      {/* Main Content: Daily Overview & Grouped Cards */}
+      <div className={`max-w-4xl mx-auto ${inPhoneFrame ? 'px-3 mt-3 pb-4 space-y-4' : 'px-4 mt-3 sm:mt-6 pb-6 space-y-6'} mb-12`}>
         <DailyOverviewCard
           transactions={transactions}
           products={products}

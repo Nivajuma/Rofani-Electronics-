@@ -28,6 +28,75 @@ service cloud.firestore {
       return id is string && id.size() > 0 && id.size() <= 128;
     }
 
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidFeatureRequest(data) {
+      return data.keys().hasAll([
+          'id',
+          'ownerUid',
+          'ownerEmail',
+          'storeId',
+          'storeName',
+          'subject',
+          'category',
+          'priority',
+          'description',
+          'status',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id',
+          'ownerUid',
+          'ownerEmail',
+          'storeId',
+          'storeName',
+          'subject',
+          'category',
+          'priority',
+          'description',
+          'contactPhone',
+          'contactName',
+          'status',
+          'adminNotes',
+          'createdAt',
+          'updatedAt'
+        ])
+        && isValidId(data.id)
+        && isValidId(data.ownerUid)
+        && data.ownerEmail is string && data.ownerEmail.size() > 0 && data.ownerEmail.size() <= 200
+        && isValidId(data.storeId)
+        && data.storeName is string && data.storeName.size() >= 1 && data.storeName.size() <= 200
+        && data.subject is string && data.subject.size() >= 3 && data.subject.size() <= 140
+        && data.category in [
+          'POS & Checkout',
+          'M-Pesa & Payments',
+          'Inventory & Stock',
+          'Reports & Tax',
+          'Multi-Shop & Staff',
+          'Custom Integration',
+          'Other'
+        ]
+        && data.priority in ['Nice to Have', 'Important for My Shop', 'Urgent Custom Build']
+        && data.description is string && data.description.size() >= 10 && data.description.size() <= 1500
+        && (!('contactPhone' in data) || (data.contactPhone is string && data.contactPhone.size() <= 64))
+        && (!('contactName' in data) || (data.contactName is string && data.contactName.size() <= 120))
+        && data.status in ['Pending', 'Planned', 'In Progress', 'Completed', 'Declined']
+        && (!('adminNotes' in data) || (data.adminNotes is string && data.adminNotes.size() <= 1000))
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
     // Legacy root collections: readable/writable strictly by Super Admin for one-time migration into stores/{uid}
     match /products/{productId} {
       allow get, create, update, delete: if isSuperAdmin() && isValidDocId(productId);
@@ -72,6 +141,60 @@ service cloud.firestore {
     match /store_settings/{settingId} {
       allow get, create, update, delete: if isSuperAdmin() && isValidDocId(settingId);
       allow list: if isSuperAdmin();
+    }
+
+    // Client Special Feature Requests: strict tenant ownership + Super Admin triage
+    match /feature_requests/{requestId} {
+      allow get: if isSignedIn()
+        && isValidId(requestId)
+        && (existing().ownerUid == request.auth.uid || isSuperAdmin());
+      allow list: if isSuperAdmin()
+        || (isSignedIn() && existing().ownerUid == request.auth.uid);
+      allow create: if isSignedIn()
+        && isValidId(requestId)
+        && isValidFeatureRequest(incoming())
+        && incoming().id == requestId
+        && incoming().ownerUid == request.auth.uid
+        && request.auth.token.email != null
+        && incoming().ownerEmail.lower() == request.auth.token.email.lower()
+        && (incoming().storeId == request.auth.uid || (isSuperAdmin() && incoming().storeId == 'rofani-pos'))
+        && incoming().status == 'Pending'
+        && !('adminNotes' in incoming())
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && (isSuperAdmin() || exists(/databases/$(database)/documents/stores/$(incoming().storeId)));
+      allow update: if isSignedIn()
+        && isValidId(requestId)
+        && isValidFeatureRequest(incoming())
+        && incoming().id == existing().id
+        && incoming().ownerUid == existing().ownerUid
+        && incoming().ownerEmail == existing().ownerEmail
+        && incoming().storeId == existing().storeId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          (isSuperAdmin() && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'adminNotes', 'updatedAt']))
+          || (
+            existing().ownerUid == request.auth.uid
+            && existing().status == 'Pending'
+            && incoming().status == 'Pending'
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'subject',
+              'category',
+              'priority',
+              'description',
+              'contactPhone',
+              'contactName',
+              'storeName',
+              'updatedAt'
+            ])
+          )
+        );
+      allow delete: if isValidId(requestId)
+        && (
+          isSuperAdmin()
+          || (isSignedIn() && existing().ownerUid == request.auth.uid && existing().status == 'Pending')
+        );
     }
 
     // Non-PII referral code lookup index (get-only for signed-in merchants, list only for Super Admin)

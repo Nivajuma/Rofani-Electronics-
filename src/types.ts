@@ -720,6 +720,7 @@ export interface StoreSubscriptionProfile {
   lastReferralRewardStoreName?: string;
   taxMode?: 'none' | 'tot' | 'vat';
   transactionWiseTax?: boolean;
+  skipLegacySeed?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -756,5 +757,45 @@ export interface SubscriptionPaymentRecord {
   paidAt: string;
   expiresAtAfter: string;
   recordedByEmail?: string;
+}
+
+export type FeatureRequestCategory =
+  | 'POS & Checkout'
+  | 'M-Pesa & Payments'
+  | 'Inventory & Stock'
+  | 'Reports & Tax'
+  | 'Multi-Shop & Staff'
+  | 'Custom Integration'
+  | 'Other';
+
+export type FeatureRequestPriority =
+  | 'Nice to Have'
+  | 'Important for My Shop'
+  | 'Urgent Custom Build';
+
+export type FeatureRequestStatus =
+  | 'Pending'
+  | 'Planned'
+  | 'In Progress'
+  | 'Completed'
+  | 'Declined';
+
+export interface FeatureRequest {
+  id: string;
+  ownerUid: string;
+  ownerEmail: string;
+  storeId: string;
+  storeName: string;
+  subject: string;
+  category: FeatureRequestCategory;
+  priority: FeatureRequestPriority;
+  description: string;
+  contactPhone?: string;
+  contactName?: string;
+  status: FeatureRequestStatus;
+  adminNotes?: string;
+  createdAt: string;
+  updatedAt: string;
+  pendingCloudSync?: boolean;
 }
 

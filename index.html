@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" style="background-color: #0f172a; color: #f1f5f9;">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
@@ -14,10 +14,42 @@
     <meta property="og:title" content="Rofani POS" />
     <meta property="og:description" content="Rofani POS — Multi-store point of sale, inventory tracking, M-Pesa STK push, worker sales commission, expenses, and KRA tax reports." />
   </head>
-  <body>
-    <div id="root"></div>
+  <body style="background-color: #0f172a; color: #f1f5f9; margin: 0;">
+    <div id="root">
+      <div id="app-boot-splash" style="min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#0f172a;color:#cbd5e1;font-family:system-ui,-apple-system,sans-serif;padding:24px;text-align:center;">
+        <div style="font-size:16px;font-weight:700;color:#ffffff;margin-bottom:6px;">Loading Rofani POS...</div>
+        <div id="app-boot-status" style="font-size:12px;color:#94a3b8;">Preparing workspace</div>
+        <button id="app-boot-retry" type="button" onclick="window.__rofaniHardReload && window.__rofaniHardReload()" style="display:none;margin-top:16px;padding:10px 18px;border-radius:10px;border:1px solid #38bdf8;background:#0284c7;color:#ffffff;font-weight:700;font-size:12px;cursor:pointer;">Reload Preview</button>
+      </div>
+    </div>
     <script>
       (function() {
+        window.__rofaniHardReload = function() {
+          try {
+            if ('serviceWorker' in navigator) {
+              navigator.serviceWorker.getRegistrations().then(function(regs) {
+                for (var i = 0; i < regs.length; i++) regs[i].unregister();
+              }).catch(function() {});
+            }
+            if ('caches' in window) {
+              caches.keys().then(function(names) {
+                for (var j = 0; j < names.length; j++) caches.delete(names[j]);
+              }).catch(function() {});
+            }
+          } catch (e) {}
+          setTimeout(function() { window.location.reload(); }, 120);
+        };
+
+        setTimeout(function() {
+          var splash = document.getElementById('app-boot-splash');
+          if (splash) {
+            var st = document.getElementById('app-boot-status');
+            var btn = document.getElementById('app-boot-retry');
+            if (st) st.textContent = 'Taking longer than expected to load preview.';
+            if (btn) btn.style.display = 'inline-block';
+          }
+        }, 9000);
+
         try {
           if (window.localStorage) {
             // Pre-emptively purge legacy firestore client synchronization keys
@@ -74,9 +106,24 @@
     <script>
       if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {
-          navigator.serviceWorker.register('/sw.js').catch((err) => {
-            console.log('SW registration skipped or failed:', err);
-          });
+          var host = window.location.hostname || '';
+          var isDevPreview = host === 'localhost' || host === '127.0.0.1' || host.indexOf('ais-dev-') === 0;
+          if (isDevPreview) {
+            navigator.serviceWorker.getRegistrations().then((regs) => {
+              regs.forEach((reg) => reg.unregister());
+            }).catch(() => {});
+            if ('caches' in window) {
+              caches.keys().then((names) => {
+                names.forEach((name) => {
+                  if (name.indexOf('rofani-pos-offline') === 0) caches.delete(name);
+                });
+              }).catch(() => {});
+            }
+          } else {
+            navigator.serviceWorker.register('/sw.js').catch((err) => {
+              console.log('SW registration skipped or failed:', err);
+            });
+          }
         });
       }
     </script>

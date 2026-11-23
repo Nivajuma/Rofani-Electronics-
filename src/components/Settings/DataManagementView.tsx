@@ -68,6 +68,7 @@ import {
   bulkUploadUsersToCloud,
   fetchProductsFromCloud,
   fetchTransactionsFromCloud,
+  isLegacyRofaniStoreBrand,
 } from '../../lib/cloudSync';
 import {
   LastBackupMeta,
@@ -131,6 +132,8 @@ interface DataManagementViewProps {
   onCloudSyncError?: () => void;
   storeKraPin?: string;
   onUpdateStoreKraPin?: (kraPin: string) => Promise<void> | void;
+  onUpdateStoreName?: (storeName: string) => void;
+  onSwitchToBlankPos?: (options?: { alsoClearSalesAndExpenses?: boolean }) => Promise<void> | void;
   onOpenShopQrShare?: () => void;
   onPreview9PmSummary?: () => void;
 }
@@ -181,6 +184,8 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
   onCloudSyncError,
   storeKraPin,
   onUpdateStoreKraPin,
+  onUpdateStoreName,
+  onSwitchToBlankPos,
   onOpenShopQrShare,
   onPreview9PmSummary,
 }) => {
@@ -470,9 +475,16 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
   const [showMasterPin, setShowMasterPin] = useState(false);
 
   // Business settings state stored in local state for header/receipt customization
-  const [storeName, setStoreName] = useState(() =>
-    safeGetJSON<string>('retail_pos_store_name', 'Rofani POS', (val) => typeof val === 'string' && val.trim().length > 0)
-  );
+  const [storeName, setStoreName] = useState(() => {
+    const saved = safeGetJSON<string>('retail_pos_store_name', 'Rofani POS', (val) => typeof val === 'string');
+    return isLegacyRofaniStoreBrand(saved) ? 'Rofani POS' : saved;
+  });
+  useEffect(() => {
+    if (activeStoreName) {
+      const normalized = isLegacyRofaniStoreBrand(activeStoreName) ? 'Rofani POS' : activeStoreName.trim();
+      setStoreName(normalized);
+    }
+  }, [activeStoreName]);
   useEffect(() => {
     safeSetJSON('retail_pos_store_name', storeName);
   }, [storeName]);
@@ -514,7 +526,9 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
   const [isSavedSettings, setIsSavedSettings] = useState(false);
 
   // Confirm dialogs state
-  const [confirmModal, setConfirmModal] = useState<'reset' | 'clear_tx' | 'clear_exp' | null>(null);
+  const [confirmModal, setConfirmModal] = useState<'reset' | 'clear_tx' | 'clear_exp' | 'blank_pos' | null>(null);
+  const [blankPosClearSales, setBlankPosClearSales] = useState(false);
+  const [isSwitchingBlankPos, setIsSwitchingBlankPos] = useState(false);
 
   // Full Data Snapshot Modal state
   const [showSnapshotModal, setShowSnapshotModal] = useState(false);
@@ -776,6 +790,16 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
 
   const handleSaveStoreSettings = (e: React.FormEvent) => {
     e.preventDefault();
+    const trimmedStoreName = storeName.trim();
+    const cleanStoreName =
+      !trimmedStoreName || isLegacyRofaniStoreBrand(trimmedStoreName)
+        ? 'Rofani POS'
+        : trimmedStoreName;
+    setStoreName(cleanStoreName);
+    safeSetJSON('retail_pos_store_name', cleanStoreName);
+    safeSetJSON('rofani_settings_shop_name', cleanStoreName);
+    onUpdateStoreName?.(cleanStoreName);
+
     const cleanPin = kraPin.trim().toUpperCase();
     if (cleanPin) {
       setKraPin(cleanPin);
@@ -1706,8 +1730,8 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
                 type="text"
                 value={storeName}
                 onChange={(e) => setStoreName(e.target.value)}
+                placeholder="Rofani POS (leave blank for no custom shop name)"
                 className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-900 font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500"
-                required
               />
             </div>
 
@@ -2066,7 +2090,26 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
               </span>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-3">
+              {onSwitchToBlankPos && (
+                <button
+                  type="button"
+                  id="btn-switch-clean-rofani-pos"
+                  onClick={() => {
+                    setBlankPosClearSales(false);
+                    setConfirmModal('blank_pos');
+                  }}
+                  className="bg-sky-50 hover:bg-sky-100 border border-sky-200 text-sky-950 p-3.5 rounded-xl transition text-left space-y-1 cursor-pointer"
+                >
+                  <div className="flex items-center gap-1.5 font-bold text-xs text-sky-800">
+                    <Sparkles className="w-4 h-4 text-sky-600" /> Clean Rofani POS
+                  </div>
+                  <div className="text-[10px] text-sky-700">
+                    Remove shop name &amp; clear all {products.length} inventory items
+                  </div>
+                </button>
+              )}
+
               <button
                 type="button"
                 onClick={async () => {
@@ -2106,6 +2149,7 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
               </button>
 
               <button
+                type="button"
                 onClick={() => setConfirmModal('reset')}
                 className="bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-900 p-3.5 rounded-xl transition text-left space-y-1"
               >
@@ -2116,6 +2160,7 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
               </button>
 
               <button
+                type="button"
                 onClick={() => setConfirmModal('clear_tx')}
                 className="bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-900 p-3.5 rounded-xl transition text-left space-y-1"
               >
@@ -2126,6 +2171,7 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
               </button>
 
               <button
+                type="button"
                 onClick={() => setConfirmModal('clear_exp')}
                 className="bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-900 p-3.5 rounded-xl transition text-left space-y-1"
               >
@@ -2144,37 +2190,86 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
         <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-md w-full shadow-2xl text-slate-100 space-y-4">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-rose-500/20 text-rose-400 rounded-xl flex items-center justify-center border border-rose-500/30">
-                <AlertTriangle className="w-5 h-5" />
+              <div className={`w-10 h-10 rounded-xl flex items-center justify-center border ${
+                confirmModal === 'blank_pos'
+                  ? 'bg-sky-500/20 text-sky-400 border-sky-500/30'
+                  : 'bg-rose-500/20 text-rose-400 border-rose-500/30'
+              }`}>
+                {confirmModal === 'blank_pos' ? (
+                  <Sparkles className="w-5 h-5" />
+                ) : (
+                  <AlertTriangle className="w-5 h-5" />
+                )}
               </div>
               <div>
                 <h3 className="font-bold text-base text-white">
+                  {confirmModal === 'blank_pos' && 'Switch to Clean Rofani POS?'}
                   {confirmModal === 'reset' && 'Reset to Default Sample Database?'}
                   {confirmModal === 'clear_tx' && 'Purge All Sales Receipts?'}
                   {confirmModal === 'clear_exp' && 'Purge All Expense Records?'}
                 </h3>
-                <p className="text-xs text-slate-400">This action cannot be undone without a backup file.</p>
+                <p className="text-xs text-slate-400">
+                  {confirmModal === 'blank_pos'
+                    ? 'Start fresh with no custom shop name and 0 inventory items.'
+                    : 'This action cannot be undone without a backup file.'}
+                </p>
               </div>
             </div>
 
-            <p className="text-xs text-slate-300 leading-relaxed bg-slate-950 p-3 rounded-xl border border-slate-800">
+            <div className="text-xs text-slate-300 leading-relaxed bg-slate-950 p-3 rounded-xl border border-slate-800 space-y-2.5">
+              {confirmModal === 'blank_pos' && (
+                <>
+                  <p>
+                    This will remove the custom shop name (reverting headers &amp; receipts to plain{' '}
+                    <strong className="text-white">Rofani POS</strong>) and permanently delete all{' '}
+                    <strong className="text-sky-300">{products.length} inventory item(s)</strong> from this device and Cloud Sync so you can start cleanly from 0 items.
+                  </p>
+                  <label className="flex items-center gap-2 pt-1 cursor-pointer select-none text-slate-200 font-medium">
+                    <input
+                      type="checkbox"
+                      checked={blankPosClearSales}
+                      onChange={(e) => setBlankPosClearSales(e.target.checked)}
+                      className="rounded border-slate-600 bg-slate-800 text-sky-500 focus:ring-sky-500"
+                    />
+                    <span>
+                      Also clear sales receipts ({transactions.length}) &amp; expenses ({expenses.length})
+                    </span>
+                  </label>
+                </>
+              )}
               {confirmModal === 'reset' &&
                 'This will replace your current store inventory, transactions, customers, and expenses with the default Rofani POS retail & wholesale sample dataset.'}
               {confirmModal === 'clear_tx' &&
                 `Are you sure you want to delete all ${transactions.length} sales transactions? Your inventory product stock counts will remain intact.`}
               {confirmModal === 'clear_exp' &&
                 `Are you sure you want to clear all ${expenses.length} recorded operating expenses?`}
-            </p>
+            </div>
 
             <div className="flex items-center justify-end gap-3 pt-2">
               <button
+                type="button"
+                disabled={isSwitchingBlankPos}
                 onClick={() => setConfirmModal(null)}
-                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold transition"
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold transition disabled:opacity-50"
               >
                 Cancel
               </button>
               <button
-                onClick={() => {
+                type="button"
+                disabled={isSwitchingBlankPos}
+                onClick={async () => {
+                  if (confirmModal === 'blank_pos' && onSwitchToBlankPos) {
+                    setIsSwitchingBlankPos(true);
+                    try {
+                      await onSwitchToBlankPos({ alsoClearSalesAndExpenses: blankPosClearSales });
+                      setStoreName('Rofani POS');
+                      triggerNotify('✅ Switched to Clean Rofani POS (no shop name & 0 inventory)!');
+                      setConfirmModal(null);
+                    } finally {
+                      setIsSwitchingBlankPos(false);
+                    }
+                    return;
+                  }
                   if (confirmModal === 'reset') {
                     onResetSampleData();
                     triggerNotify('Sample database restored successfully!');
@@ -2187,9 +2282,17 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
                   }
                   setConfirmModal(null);
                 }}
-                className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold shadow-md shadow-rose-600/30 transition"
+                className={`px-4 py-2 text-white rounded-xl text-xs font-bold shadow-md transition disabled:opacity-60 ${
+                  confirmModal === 'blank_pos'
+                    ? 'bg-sky-600 hover:bg-sky-500 shadow-sky-600/30'
+                    : 'bg-rose-600 hover:bg-rose-500 shadow-rose-600/30'
+                }`}
               >
-                Yes, Proceed
+                {isSwitchingBlankPos
+                  ? 'Switching...'
+                  : confirmModal === 'blank_pos'
+                  ? 'Yes, Switch to Clean Rofani POS'
+                  : 'Yes, Proceed'}
               </button>
             </div>
           </div>

@@ -32,6 +32,7 @@
         "lastReferralRewardStoreName": { "type": "string", "maxLength": 200 },
         "taxMode": { "type": "string", "enum": ["none", "tot", "vat"] },
         "transactionWiseTax": { "type": "boolean" },
+        "skipLegacySeed": { "type": "boolean" },
         "createdAt": { "type": "string", "maxLength": 64 },
         "updatedAt": { "type": "string", "maxLength": 64 }
       },
@@ -209,6 +210,59 @@
       "properties": {
         "updatedAt": { "type": "string", "maxLength": 64 }
       }
+    },
+    "FeatureRequest": {
+      "title": "FeatureRequest",
+      "description": "Client-submitted special feature request or custom build proposal",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerUid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerEmail": { "type": "string", "maxLength": 200 },
+        "storeId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "storeName": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "subject": { "type": "string", "minLength": 3, "maxLength": 140 },
+        "category": {
+          "type": "string",
+          "enum": [
+            "POS & Checkout",
+            "M-Pesa & Payments",
+            "Inventory & Stock",
+            "Reports & Tax",
+            "Multi-Shop & Staff",
+            "Custom Integration",
+            "Other"
+          ]
+        },
+        "priority": {
+          "type": "string",
+          "enum": ["Nice to Have", "Important for My Shop", "Urgent Custom Build"]
+        },
+        "description": { "type": "string", "minLength": 10, "maxLength": 1500 },
+        "contactPhone": { "type": "string", "maxLength": 64 },
+        "contactName": { "type": "string", "maxLength": 120 },
+        "status": {
+          "type": "string",
+          "enum": ["Pending", "Planned", "In Progress", "Completed", "Declined"]
+        },
+        "adminNotes": { "type": "string", "maxLength": 1000 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "id",
+        "ownerUid",
+        "ownerEmail",
+        "storeId",
+        "storeName",
+        "subject",
+        "category",
+        "priority",
+        "description",
+        "status",
+        "createdAt",
+        "updatedAt"
+      ]
     }
   },
   "firestore": {
@@ -303,6 +357,10 @@
     "/store_settings/{settingId}": {
       "schema": { "$ref": "#/entities/StoreSetting" },
       "description": "Legacy owner root store settings collection"
+    },
+    "/feature_requests/{requestId}": {
+      "schema": { "$ref": "#/entities/FeatureRequest" },
+      "description": "Client special feature requests and custom build suggestions"
     }
   }
 }

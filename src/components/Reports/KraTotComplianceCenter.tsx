@@ -247,7 +247,14 @@ export const KraTotComplianceCenter: React.FC<KraTotComplianceCenterProps> = ({
   // Export Official PDF Return
   const handleExportPdf = (monthItem: (typeof monthlyData)[0]) => {
     const customShop = safeGetJSON<string>('rofani_settings_shop_name', '');
-    const legacyNames = ['rofani electronics', 'rofani electronics & boutique', 'rofani electronics and boutique'];
+    const legacyNames = [
+      'rofani electronic',
+      'rofani electronics',
+      'rofani electronic & boutique',
+      'rofani electronic and boutique',
+      'rofani electronics & boutique',
+      'rofani electronics and boutique',
+    ];
     const resolvedStore =
       customShop && !legacyNames.includes(customShop.trim().toLowerCase())
         ? customShop.trim()

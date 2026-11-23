@@ -29,7 +29,7 @@ import {
 } from 'lucide-react';
 import { Product, Customer, Supplier, Transaction, Expense, AttendanceRecord, User, StoreLocation, Role, WorkerPermissions } from '../../types';
 import { safeGetJSON, safeSetJSON } from '../../utils/safeStorage';
-import { saveUserToCloud, deleteUserFromCloud } from '../../lib/cloudSync';
+import { saveUserToCloud, deleteUserFromCloud, isLegacyRofaniStoreBrand } from '../../lib/cloudSync';
 import { getLastBackupMeta, formatLastBackupTimestamp, LastBackupMeta } from '../../utils/storeBackup';
 import { ItemSettingsView } from './ItemSettingsView';
 import { GeneralSettingsView } from './GeneralSettingsView';
@@ -548,8 +548,7 @@ export const SettingsDashboardView: React.FC<SettingsDashboardViewProps> = ({
   // Persistent settings states
   const [shopName, setShopName] = useState(() => {
     const saved = safeGetJSON<string>('rofani_settings_shop_name', 'Rofani POS');
-    const lower = (saved || '').trim().toLowerCase();
-    if (!lower || lower === 'rofani electronics' || lower === 'rofani electronics & boutique' || lower === 'rofani electronics and boutique') {
+    if (isLegacyRofaniStoreBrand(saved)) {
       return 'Rofani POS';
     }
     return saved;

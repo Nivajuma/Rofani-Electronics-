@@ -156,13 +156,13 @@ export function subscribeToProducts(
   return onSnapshot(
     colRef,
     (snapshot) => {
+      const loaded: Product[] = [];
       if (!snapshot.empty) {
-        const loaded: Product[] = [];
         snapshot.forEach((d) => {
           loaded.push({ id: d.id, ...d.data() } as Product);
         });
-        onUpdate(loaded);
       }
+      onUpdate(loaded);
     },
     (error) => {
       handleFirestoreError(error, OperationType.LIST, path);
@@ -353,16 +353,23 @@ async function fetchCollectionViaRest<T extends { id: string }>(
   const dbId = firebaseConfig.firestoreDatabaseId || '(default)';
   const endpointDbId = dbId === '(default)' ? '(default)' : encodeURIComponent(dbId);
   const headers: Record<string, string> = {};
-  try {
-    if (auth.currentUser) {
-      const token = await auth.currentUser.getIdToken();
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
-      }
-    }
-  } catch {
-    // Proceed without auth header when unavailable
+  if (!auth.currentUser) {
+    throw new Error('Firebase Auth session not active for Cloud REST read.');
   }
+  let token = '';
+  try {
+    token = await auth.currentUser.getIdToken();
+  } catch {
+    try {
+      token = await auth.currentUser.getIdToken(true);
+    } catch {
+      token = '';
+    }
+  }
+  if (!token) {
+    throw new Error('Firebase Auth ID token unavailable for Cloud REST read.');
+  }
+  headers['Authorization'] = `Bearer ${token}`;
 
   const loaded: T[] = [];
   let pageToken: string | undefined = undefined;
@@ -573,16 +580,23 @@ async function commitChunkViaRest<T extends { id: string }>(
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
   };
-  try {
-    if (auth.currentUser) {
-      const token = await auth.currentUser.getIdToken();
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
-      }
-    }
-  } catch {
-    // Proceed without auth header
+  if (!auth.currentUser) {
+    throw new Error('Firebase Auth session not active for Cloud REST write.');
   }
+  let token = '';
+  try {
+    token = await auth.currentUser.getIdToken();
+  } catch {
+    try {
+      token = await auth.currentUser.getIdToken(true);
+    } catch {
+      token = '';
+    }
+  }
+  if (!token) {
+    throw new Error('Firebase Auth ID token unavailable for Cloud REST write.');
+  }
+  headers['Authorization'] = `Bearer ${token}`;
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), DEFAULT_FIRESTORE_WRITE_TIMEOUT_MS);
@@ -881,14 +895,14 @@ export function subscribeToTransactions(
   return onSnapshot(
     colRef,
     (snapshot) => {
+      const loaded: Transaction[] = [];
       if (!snapshot.empty) {
-        const loaded: Transaction[] = [];
         snapshot.forEach((d) => {
           loaded.push({ id: d.id, ...d.data() } as Transaction);
         });
         loaded.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-        onUpdate(loaded);
       }
+      onUpdate(loaded);
     },
     (error) => {
       handleFirestoreError(error, OperationType.LIST, path);
@@ -2043,7 +2057,18 @@ export async function updateStoreProfileDetails(
   updates: Partial<
     Pick<
       StoreSubscriptionProfile,
-      'storeName' | 'phone' | 'kraPin' | 'mpesaShortcode' | 'mpesaShortcodeType' | 'skipLegacySeed'
+      | 'storeName'
+      | 'phone'
+      | 'kraPin'
+      | 'mpesaShortcode'
+      | 'mpesaShortcodeType'
+      | 'skipLegacySeed'
+      | 'preferredLabelSizeId'
+      | 'businessCard'
+      | 'backupEmail'
+      | 'backupEmailConfirmed'
+      | 'emailAutoBackupEnabled'
+      | 'dismissedBackupBannerDate'
     >
   >
 ): Promise<void> {

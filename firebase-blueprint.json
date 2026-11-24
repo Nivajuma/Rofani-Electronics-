@@ -33,6 +33,12 @@
         "taxMode": { "type": "string", "enum": ["none", "tot", "vat"] },
         "transactionWiseTax": { "type": "boolean" },
         "skipLegacySeed": { "type": "boolean" },
+        "preferredLabelSizeId": { "type": "string", "maxLength": 64 },
+        "businessCard": { "type": "object", "description": "Per-store digital business card profile (owner info, photo/logo, shop name, contact, referral URL)" },
+        "backupEmail": { "type": "string", "maxLength": 200 },
+        "backupEmailConfirmed": { "type": "boolean" },
+        "emailAutoBackupEnabled": { "type": "boolean" },
+        "dismissedBackupBannerDate": { "type": "string", "maxLength": 32 },
         "createdAt": { "type": "string", "maxLength": 64 },
         "updatedAt": { "type": "string", "maxLength": 64 }
       },

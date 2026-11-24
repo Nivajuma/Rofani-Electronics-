@@ -190,34 +190,66 @@ export async function signOutFromCloud(): Promise<void> {
   await signOut(auth);
 }
 
-// Connection test helper: verifies live Firestore connectivity against the server within 3s
+// Connection test helper: verifies live Firestore connectivity against the server within 4s
+// with HTTPS REST fallback when WebChannel is slow or blocked in iframe/mobile proxies.
 export async function testFirestoreConnection(): Promise<boolean> {
+  if (
+    !firebaseConfig?.projectId ||
+    !firebaseConfig?.apiKey ||
+    !firebaseConfig?.firestoreDatabaseId
+  ) {
+    console.error('Please check your Firebase configuration.');
+    return false;
+  }
+
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    return false;
+  }
+
   if (!auth.currentUser || !auth.currentUser.emailVerified) {
     return false;
   }
+
   const storeId = getStoreIdForUser(auth.currentUser) || auth.currentUser.uid;
   try {
     const fetchDoc = getDocFromServer(doc(db, 'stores', storeId));
     const timeout = new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error('Connection check timeout')), 3000)
+      setTimeout(() => reject(new Error('Connection check timeout')), 4000)
     );
     await Promise.race([fetchDoc, timeout]);
     return true;
   } catch (error) {
-    if (error instanceof Error) {
-      if (error.message.includes('the client is offline')) {
-        console.error('Please check your Firebase configuration.');
+    // Fallback to direct Firestore HTTPS REST read so proxy/WebChannel delays never emit false config errors
+    try {
+      const idToken = await auth.currentUser.getIdToken();
+      if (idToken) {
+        const dbId = encodeURIComponent(firebaseConfig.firestoreDatabaseId);
+        const endpoint = `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(
+          firebaseConfig.projectId
+        )}/databases/${dbId}/documents/stores/${encodeURIComponent(storeId)}?key=${encodeURIComponent(
+          firebaseConfig.apiKey
+        )}`;
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 5000);
+        try {
+          const res = await fetch(endpoint, {
+            method: 'GET',
+            headers: { Authorization: `Bearer ${idToken}` },
+            signal: controller.signal,
+          });
+          if (res.ok || res.status === 404) {
+            return true;
+          }
+        } finally {
+          clearTimeout(timer);
+        }
       }
-      if (
-        error.message.includes('the client is offline') ||
-        error.message.includes('Quota') ||
-        error.message.includes('quota') ||
-        error.message.includes('timeout') ||
-        error.message.includes('Could not reach') ||
-        error.message.includes('unavailable')
-      ) {
-        return false;
-      }
+    } catch {
+      // Transient offline / sandbox network restriction; handled silently below
+    }
+
+    if (error instanceof Error && error.message.includes('the client is offline')) {
+      console.warn('[Firestore] Client offline or WebChannel unavailable; continuing in offline-safe mode.');
     }
     return false;
   }

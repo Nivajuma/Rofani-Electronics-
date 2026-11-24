@@ -26,6 +26,7 @@ import { safeGetJSON, safeSetJSON } from '../../utils/safeStorage';
 import { getIsOnline, useAggressiveAutoSync, useNetworkStatus } from '../../utils/offlineSync';
 import { playButtonSound } from '../../utils/uiFeedback';
 import { getLastBackupMeta, formatLastBackupTimestamp, formatBackupMethodLabel, LastBackupMeta } from '../../utils/storeBackup';
+import { getBackupSettings } from '../../lib/gmailService';
 
 interface GeneralSettingsViewProps {
   onBack: () => void;
@@ -829,21 +830,39 @@ export const GeneralSettingsView: React.FC<GeneralSettingsViewProps> = ({
                       </button>
                     )}
                   </div>
-                  <span
-                    className={`inline-flex items-center gap-1.5 text-[10px] font-mono px-2.5 py-1 rounded-full border ${
-                      lastBackupMeta
-                        ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30'
-                        : 'bg-slate-800 text-slate-400 border-slate-700'
-                    }`}
-                  >
-                    <Clock className="w-3 h-3" />
-                    <span>
-                      Last Backup:{' '}
-                      {lastBackupMeta
-                        ? `${formatLastBackupTimestamp(lastBackupMeta.timestamp)} (${formatBackupMethodLabel(lastBackupMeta.method)})`
-                        : 'Never'}
+                  <div className="flex flex-wrap items-center gap-2">
+                    {(() => {
+                      const cfg = getBackupSettings();
+                      if (!cfg.enabled || !cfg.recipientEmail) return null;
+                      const todayIso = new Date().toISOString().slice(0, 10);
+                      const statusLabel =
+                        cfg.lastSentDate === todayIso
+                          ? `Auto-Backup Sent (${cfg.recipientEmail})`
+                          : cfg.lastQueuedDate === todayIso
+                          ? `Auto-Backup Queued (${cfg.recipientEmail})`
+                          : `Auto-Backup ON (${cfg.recipientEmail})`;
+                      return (
+                        <span className="inline-flex items-center gap-1.5 text-[10px] font-mono px-2.5 py-1 rounded-full border bg-sky-500/10 text-sky-300 border-sky-500/30">
+                          ● {statusLabel}
+                        </span>
+                      );
+                    })()}
+                    <span
+                      className={`inline-flex items-center gap-1.5 text-[10px] font-mono px-2.5 py-1 rounded-full border ${
+                        lastBackupMeta
+                          ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30'
+                          : 'bg-slate-800 text-slate-400 border-slate-700'
+                      }`}
+                    >
+                      <Clock className="w-3 h-3" />
+                      <span>
+                        Last Backup:{' '}
+                        {lastBackupMeta
+                          ? `${formatLastBackupTimestamp(lastBackupMeta.timestamp)} (${formatBackupMethodLabel(lastBackupMeta.method)})`
+                          : 'Never'}
+                      </span>
                     </span>
-                  </span>
+                  </div>
                 </div>
               )}
             </div>

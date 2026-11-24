@@ -43,7 +43,8 @@ import {
   ExternalLink,
   Info,
   QrCode,
-  Lightbulb
+  Lightbulb,
+  CreditCard
 } from 'lucide-react';
 import { TabKey } from '../../utils/permissions';
 import { User, StoreSubscriptionProfile } from '../../types';
@@ -80,6 +81,7 @@ export interface AppMenuViewProps {
   onOpenSuperAdmin?: () => void;
   onOpenAboutUs?: () => void;
   onOpenShopQrShare?: () => void;
+  onOpenDigitalBusinessCard?: () => void;
   onOpenSuggestFeature?: () => void;
   onSignOutCloud?: () => Promise<void> | void;
   cloudUserEmail?: string | null;
@@ -114,6 +116,7 @@ export const AppMenuView: React.FC<AppMenuViewProps> = ({
   onOpenSuperAdmin,
   onOpenAboutUs,
   onOpenShopQrShare,
+  onOpenDigitalBusinessCard,
   onOpenSuggestFeature,
   onSignOutCloud,
   cloudUserEmail = null
@@ -836,6 +839,28 @@ export const AppMenuView: React.FC<AppMenuViewProps> = ({
             </button>
           )}
 
+          {onOpenDigitalBusinessCard && (
+            <button
+              type="button"
+              id="btn-menu-digital-business-card"
+              onClick={onOpenDigitalBusinessCard}
+              className="w-full min-h-[52px] px-4 py-3 flex items-center justify-between hover:bg-slate-800/70 transition text-left cursor-pointer"
+            >
+              <div className="flex items-center gap-3.5 min-w-0">
+                <CreditCard className="w-4 h-4 text-emerald-400 shrink-0" strokeWidth={1.75} />
+                <span className="text-[13px] font-semibold text-white truncate">
+                  Digital Business Card
+                </span>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <span className="px-2 py-0.5 rounded-md bg-emerald-500/15 border border-emerald-500/30 text-[10px] font-bold text-emerald-300">
+                  QR + Card
+                </span>
+                <ChevronRight className="w-4 h-4 text-slate-400 shrink-0" />
+              </div>
+            </button>
+          )}
+
           {isOwnerAccount && onOpenSuperAdmin && (
             <button
               type="button"
@@ -940,6 +965,19 @@ export const AppMenuView: React.FC<AppMenuViewProps> = ({
                   </span>
                   <ChevronRight className="w-4 h-4 text-slate-500" />
                 </button>
+                {onOpenDigitalBusinessCard && (
+                  <button
+                    type="button"
+                    onClick={onOpenDigitalBusinessCard}
+                    className="w-full min-h-[44px] py-2.5 flex items-center justify-between text-emerald-300 hover:text-emerald-200 transition cursor-pointer"
+                  >
+                    <span className="font-semibold flex items-center gap-2">
+                      <CreditCard className="w-3.5 h-3.5 text-emerald-400" />
+                      Digital Business Card (QR)
+                    </span>
+                    <ChevronRight className="w-4 h-4 text-slate-500" />
+                  </button>
+                )}
               </div>
             )}
           </div>
@@ -1284,6 +1322,35 @@ export const AppMenuView: React.FC<AppMenuViewProps> = ({
                         Invite fellow shop owners: they get <strong className="text-emerald-300">22 Days Free</strong> and you automatically get <strong className="text-amber-300">+30 Days Free (+1 Month)</strong>!
                       </p>
                     </div>
+                  )}
+
+                  {onOpenDigitalBusinessCard && (
+                    <button
+                      type="button"
+                      id="btn-share-modal-business-card"
+                      onClick={() => {
+                        setActiveModal(null);
+                        onOpenDigitalBusinessCard();
+                      }}
+                      className="w-full bg-slate-900 hover:bg-slate-800/90 border border-sky-500/40 rounded-2xl p-3 flex items-center justify-between gap-3 text-left transition cursor-pointer"
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <div className="w-9 h-9 rounded-xl bg-sky-500/15 border border-sky-500/30 flex items-center justify-center shrink-0">
+                          <CreditCard className="w-4 h-4 text-sky-400" />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="text-xs font-extrabold text-white truncate">
+                            Digital Business Card Creator
+                          </div>
+                          <div className="text-[11px] text-slate-400 truncate">
+                            Custom photo, contacts, scannable QR &amp; shareable card
+                          </div>
+                        </div>
+                      </div>
+                      <span className="px-2.5 py-1 rounded-lg bg-sky-600 text-white text-[10px] font-bold shrink-0">
+                        Open
+                      </span>
+                    </button>
                   )}
 
                   {/* Share on Social Media Hub */}

@@ -2607,7 +2607,12 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                   barcode: p.sku || p.barcode,
                   count: 1
                 }));
-                printBatchBarcodes(batchData, `Inventory QR Codes Catalog (${filteredProducts.length} items)`, true);
+                printBatchBarcodes(
+                  batchData,
+                  `Inventory QR Codes Catalog (${filteredProducts.length} items)`,
+                  true,
+                  safeGetJSON<string>('retail_pos_print_format_id', 'a4_40')
+                );
               }}
               className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold px-3.5 py-2 rounded-xl text-xs transition flex items-center gap-1.5 shadow-lg cursor-pointer"
               title="Print 1 QR code label for every item in current inventory view"
@@ -6681,7 +6686,8 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                           printBatchBarcodes(
                             [{ name: editingProduct.name || 'New Product', price: editingProduct.sellingPrice || 0, barcode: code, count: 1 }],
                             `${editingProduct.name || 'Product'} Barcode Label`,
-                            true
+                            true,
+                            safeGetJSON<string>('retail_pos_print_format_id', 'a4_40')
                           );
                         }}
                         className="bg-sky-600 hover:bg-sky-500 text-white font-bold px-3 py-1.5 rounded-xl text-xs flex items-center gap-1.5 transition shadow-sm cursor-pointer"
@@ -6698,7 +6704,12 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                             barcode: p.sku || p.barcode,
                             count: 1
                           }));
-                          printBatchBarcodes(batchData, `Inventory Bulk Barcode Labels (${products.length} Items)`, true);
+                          printBatchBarcodes(
+                            batchData,
+                            `Inventory Bulk Barcode Labels (${products.length} Items)`,
+                            true,
+                            safeGetJSON<string>('retail_pos_print_format_id', 'a4_40')
+                          );
                         }}
                         className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold px-3 py-1.5 rounded-xl text-xs flex items-center gap-1.5 transition shadow-sm cursor-pointer"
                         title="Download bulk PDF sheets for all recent inventory products"

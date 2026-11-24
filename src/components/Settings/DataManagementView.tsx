@@ -46,6 +46,7 @@ import { Product, Customer, Supplier, Transaction, Expense, AttendanceRecord, Us
 import { detectDuplicateProducts, deduplicateProducts } from '../../utils/deduplicate';
 import { DataSnapshotModal } from './DataSnapshotModal';
 import { DailyEmailBackupModal } from './DailyEmailBackupModal';
+import { getBackupSettings, saveBackupSettings } from '../../lib/gmailService';
 import { CameraPermissionsCard } from './CameraPermissionsCard';
 import { SettingsDashboardView } from './SettingsDashboardView';
 import { safeGetJSON, safeSetJSON, getLocalStorageUsageStats } from '../../utils/safeStorage';
@@ -136,6 +137,9 @@ interface DataManagementViewProps {
   onSwitchToBlankPos?: (options?: { alsoClearSalesAndExpenses?: boolean }) => Promise<void> | void;
   onOpenShopQrShare?: () => void;
   onPreview9PmSummary?: () => void;
+  confirmedBackupEmail?: string;
+  backupEmailConfirmed?: boolean;
+  onConfirmBackupEmail?: (email: string, autoBackupEnabled?: boolean) => Promise<void> | void;
 }
 
 export const DataManagementView: React.FC<DataManagementViewProps> = ({
@@ -188,6 +192,9 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
   onSwitchToBlankPos,
   onOpenShopQrShare,
   onPreview9PmSummary,
+  confirmedBackupEmail = '',
+  backupEmailConfirmed = false,
+  onConfirmBackupEmail,
 }) => {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -208,9 +215,17 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
   const [lastBackupMeta, setLastBackupMeta] = useState<LastBackupMeta | null>(() => getLastBackupMeta());
   const [showShareEmailModal, setShowShareEmailModal] = useState(false);
   const [backupEmailInput, setBackupEmailInput] = useState<string>(() => {
-    const saved = safeGetJSON<string>('rofani_pos_backup_email', '');
-    return saved || accountEmail || '';
+    const saved = safeGetJSON<string>('rofani_pos_backup_email', '', (v) => typeof v === 'string');
+    const gmailCfg = getBackupSettings();
+    const raw =
+      (typeof confirmedBackupEmail === 'string' && confirmedBackupEmail) ||
+      saved ||
+      (typeof gmailCfg.recipientEmail === 'string' && gmailCfg.recipientEmail) ||
+      (typeof accountEmail === 'string' && accountEmail) ||
+      '';
+    return String(raw).trim();
   });
+  const [isEditingShareEmail, setIsEditingShareEmail] = useState(false);
   const [isSharingBackup, setIsSharingBackup] = useState(false);
   const [shareFeedback, setShareFeedback] = useState<{ type: 'success' | 'info' | 'error'; message: string } | null>(null);
   const [pendingRestorePreview, setPendingRestorePreview] = useState<ParsedBackupPreview | null>(null);
@@ -220,19 +235,50 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
   const [restorePinError, setRestorePinError] = useState<string | null>(null);
   const [isRestoringBackup, setIsRestoringBackup] = useState(false);
 
-  useEffect(() => {
-    if (accountEmail && !backupEmailInput.trim()) {
-      setBackupEmailInput(accountEmail);
-    }
-  }, [accountEmail]);
+  const [backupSettingsState, setBackupSettingsState] = useState(() => getBackupSettings());
+  const savedGmailSettings = backupSettingsState;
+  const savedLocalEmail = safeGetJSON<string>('rofani_pos_backup_email', '', (v) => typeof v === 'string');
+  const savedCfgRecipient =
+    typeof savedGmailSettings.recipientEmail === 'string'
+      ? savedGmailSettings.recipientEmail.trim()
+      : '';
+  const knownConfirmedEmail = String(
+    (backupEmailConfirmed && typeof confirmedBackupEmail === 'string' ? confirmedBackupEmail : '') ||
+      (typeof confirmedBackupEmail === 'string' && confirmedBackupEmail ? confirmedBackupEmail : '') ||
+      savedLocalEmail ||
+      (savedGmailSettings.recipientEmailConfirmed ||
+      (savedGmailSettings.enabled && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(savedCfgRecipient))
+        ? savedCfgRecipient
+        : '') ||
+      (typeof accountEmail === 'string' ? accountEmail : '') ||
+      ''
+  ).trim();
 
   useEffect(() => {
+    const preferred = String(
+      (typeof confirmedBackupEmail === 'string' && confirmedBackupEmail) ||
+        knownConfirmedEmail ||
+        (typeof accountEmail === 'string' ? accountEmail : '') ||
+        ''
+    ).trim();
+    if (preferred && !backupEmailInput.trim()) {
+      setBackupEmailInput(preferred);
+    }
+  }, [accountEmail, confirmedBackupEmail]);
+
+  useEffect(() => {
+    const refreshBackupSettings = () => setBackupSettingsState(getBackupSettings());
+    window.addEventListener('rofani:backup-settings-updated', refreshBackupSettings);
     const onBackupRecorded = (e: Event) => {
       const detail = (e as CustomEvent<LastBackupMeta>).detail;
       setLastBackupMeta(detail || getLastBackupMeta());
+      refreshBackupSettings();
     };
     window.addEventListener('rofani:backup-recorded', onBackupRecorded);
-    return () => window.removeEventListener('rofani:backup-recorded', onBackupRecorded);
+    return () => {
+      window.removeEventListener('rofani:backup-recorded', onBackupRecorded);
+      window.removeEventListener('rofani:backup-settings-updated', refreshBackupSettings);
+    };
   }, []);
 
   const handleToggleAggressiveAutoSync = () => {
@@ -625,8 +671,13 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
       return;
     }
 
-    if (trimmedEmail) {
+    if (trimmedEmail && trimmedEmail.includes('@')) {
       safeSetJSON('rofani_pos_backup_email', trimmedEmail);
+      saveBackupSettings({ recipientEmail: trimmedEmail, recipientEmailConfirmed: true });
+      setIsEditingShareEmail(false);
+      if (onConfirmBackupEmail) {
+        Promise.resolve(onConfirmBackupEmail(trimmedEmail)).catch(() => {});
+      }
     }
 
     setIsSharingBackup(true);
@@ -1040,6 +1091,11 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
             data-feedback="backup"
             onClick={() => {
               setShareFeedback(null);
+              const preferred = (confirmedBackupEmail || knownConfirmedEmail || accountEmail || '').trim();
+              if (preferred) {
+                setBackupEmailInput(preferred);
+              }
+              setIsEditingShareEmail(false);
               setShowShareEmailModal(true);
             }}
             className="bg-sky-600 hover:bg-sky-500 active:scale-95 text-white p-4 rounded-xl border border-sky-400/50 shadow-lg shadow-sky-950/50 transition text-left space-y-1.5 cursor-pointer group"
@@ -1053,8 +1109,10 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
               </span>
             </div>
             <div className="font-extrabold text-sm text-white">Email Backup Copy</div>
-            <div className="text-[11px] text-sky-100/90">
-              Send backup file to Gmail, Yahoo, or WhatsApp in one tap
+            <div className="text-[11px] text-sky-100/90 truncate">
+              {knownConfirmedEmail
+                ? `Saved: ${knownConfirmedEmail}`
+                : 'Send backup file to Gmail, Yahoo, or WhatsApp in one tap'}
             </div>
           </button>
 
@@ -1913,35 +1971,77 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
             </p>
 
             {/* DAILY AUTOMATIC EMAIL BACKUP CARD */}
-            <div className="bg-gradient-to-r from-sky-950 via-slate-900 to-indigo-950 border-2 border-sky-500/60 rounded-2xl p-4.5 text-white shadow-lg flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-              <div className="flex items-start gap-3.5">
-                <div className="w-11 h-11 bg-sky-500/20 border border-sky-400/40 rounded-xl flex items-center justify-center text-sky-300 shrink-0 shadow-inner">
-                  <Mail className="w-5 h-5 text-sky-400" />
-                </div>
-                <div>
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <h4 className="font-extrabold text-sm text-white">Daily Automatic Email Backup</h4>
-                    <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-400/40 text-[10px] px-2 py-0.5 rounded-full font-mono font-bold flex items-center gap-1">
-                      ● {accountEmail || 'Scheduled Gmail Dispatch'}
-                    </span>
+            {(() => {
+              const todayIso = new Date().toISOString().slice(0, 10);
+              const activeTargetEmail =
+                knownConfirmedEmail ||
+                (typeof backupSettingsState.recipientEmail === 'string'
+                  ? backupSettingsState.recipientEmail.trim()
+                  : '') ||
+                accountEmail;
+              const hasTargetEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(activeTargetEmail || '');
+              const isAutoOn = backupSettingsState.enabled;
+              let subtleStatus = 'Configure a trusted email for automatic evening snapshots.';
+              if (isAutoOn && hasTargetEmail) {
+                if (backupSettingsState.lastSentDate === todayIso) {
+                  subtleStatus = `✓ Today's backup sent silently to ${activeTargetEmail}`;
+                } else if (backupSettingsState.lastQueuedDate === todayIso) {
+                  subtleStatus = `✓ Auto-backup armed • Today's snapshot queued quietly (${backupSettingsState.scheduledHour}:00)`;
+                } else if (backupSettingsState.lastSentDate) {
+                  subtleStatus = `✓ Auto-backup active (last sent ${backupSettingsState.lastSentDate}) • Runs quietly at ${backupSettingsState.scheduledHour}:00`;
+                } else {
+                  subtleStatus = `✓ Trusted email saved • Runs quietly in background at ${backupSettingsState.scheduledHour}:00`;
+                }
+              } else if (!isAutoOn) {
+                subtleStatus = 'Daily automatic email backup is paused. Open settings to re-enable.';
+              }
+              return (
+                <div className="bg-gradient-to-r from-sky-950 via-slate-900 to-indigo-950 border-2 border-sky-500/60 rounded-2xl p-4.5 text-white shadow-lg flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                  <div className="flex items-start gap-3.5">
+                    <div className="w-11 h-11 bg-sky-500/20 border border-sky-400/40 rounded-xl flex items-center justify-center text-sky-300 shrink-0 shadow-inner">
+                      <Mail className="w-5 h-5 text-sky-400" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h4 className="font-extrabold text-sm text-white">Daily Automatic Email Backup</h4>
+                        <span
+                          className={`text-[10px] px-2 py-0.5 rounded-full font-mono font-bold flex items-center gap-1 border ${
+                            isAutoOn && hasTargetEmail
+                              ? 'bg-emerald-500/20 text-emerald-300 border-emerald-400/40'
+                              : isAutoOn
+                              ? 'bg-amber-500/20 text-amber-300 border-amber-400/40'
+                              : 'bg-slate-800 text-slate-300 border-slate-700'
+                          }`}
+                        >
+                          {isAutoOn && hasTargetEmail
+                            ? `● Auto ON • ${activeTargetEmail}`
+                            : isAutoOn
+                            ? '○ Needs Backup Email'
+                            : '○ Auto Paused'}
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-300 mt-0.5">
+                        Automated daily database snapshot with complete JSON database, products CSV, and financial summary.
+                      </p>
+                      <p className="text-[11px] text-emerald-300/90 font-medium mt-1">
+                        {subtleStatus}
+                      </p>
+                    </div>
                   </div>
-                  <p className="text-xs text-slate-300 mt-0.5">
-                    Automated daily database snapshot emailed every evening with complete JSON database, products CSV, and financial summary.
-                  </p>
-                </div>
-              </div>
 
-              <button
-                type="button"
-                id="btn-open-email-backup-modal"
-                data-feedback="backup"
-                onClick={() => setShowEmailBackupModal(true)}
-                className="px-4 py-2.5 bg-gradient-to-r from-sky-500 to-indigo-600 hover:from-sky-400 hover:to-indigo-500 text-white font-extrabold rounded-xl text-xs flex items-center gap-2 shadow-lg shadow-sky-600/30 ring-2 ring-sky-400/40 transition shrink-0 active:scale-95 cursor-pointer"
-              >
-                <Mail className="w-4 h-4" />
-                <span>Configure Schedule</span>
-              </button>
-            </div>
+                  <button
+                    type="button"
+                    id="btn-open-email-backup-modal"
+                    data-feedback="backup"
+                    onClick={() => setShowEmailBackupModal(true)}
+                    className="px-4 py-2.5 bg-gradient-to-r from-sky-500 to-indigo-600 hover:from-sky-400 hover:to-indigo-500 text-white font-extrabold rounded-xl text-xs flex items-center gap-2 shadow-lg shadow-sky-600/30 ring-2 ring-sky-400/40 transition shrink-0 active:scale-95 cursor-pointer"
+                  >
+                    <Mail className="w-4 h-4" />
+                    <span>Backup Settings</span>
+                  </button>
+                </div>
+              );
+            })()}
 
             {/* FULL ENCRYPTED DATA SNAPSHOT CARD */}
             <div className="bg-gradient-to-r from-slate-950 via-indigo-950 to-slate-950 border border-indigo-500/50 rounded-2xl p-4.5 text-white shadow-md flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
@@ -2327,6 +2427,10 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
         expenses={expenses}
         allUsers={allUsers}
         storeName={resolvedStoreName}
+        accountEmail={accountEmail}
+        confirmedBackupEmail={confirmedBackupEmail}
+        backupEmailConfirmed={backupEmailConfirmed}
+        onConfirmBackupEmail={onConfirmBackupEmail}
       />
 
       {/* ONE-TAP EMAIL & SHARE BACKUP MODAL */}
@@ -2382,18 +2486,70 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
               )}
 
               <div className="space-y-1.5">
-                <label className="block text-xs font-bold text-slate-300">
-                  Destination Email Address
-                </label>
-                <input
-                  type="email"
-                  value={backupEmailInput}
-                  onChange={(e) => setBackupEmailInput(e.target.value)}
-                  placeholder="Enter your email (e.g. shopowner@gmail.com)"
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-white font-mono focus:outline-none focus:ring-2 focus:ring-sky-500"
-                />
+                <div className="flex items-center justify-between gap-2">
+                  <label className="block text-xs font-bold text-slate-300">
+                    Destination Email Address
+                  </label>
+                  {knownConfirmedEmail && backupEmailInput.trim().toLowerCase() === knownConfirmedEmail.toLowerCase() && !isEditingShareEmail && (
+                    <span className="text-[11px] font-semibold text-emerald-400 inline-flex items-center gap-1">
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      Confirmed &amp; Remembered
+                    </span>
+                  )}
+                </div>
+
+                {knownConfirmedEmail && backupEmailInput.trim().toLowerCase() === knownConfirmedEmail.toLowerCase() && !isEditingShareEmail ? (
+                  <div className="flex items-center justify-between gap-2 bg-slate-950 border border-emerald-500/35 rounded-xl px-3.5 py-2.5">
+                    <span className="text-xs text-white font-mono font-semibold truncate">
+                      {backupEmailInput.trim()}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setIsEditingShareEmail(true)}
+                      className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-sky-300 text-[11px] font-bold rounded-lg border border-slate-700 transition shrink-0 cursor-pointer"
+                    >
+                      Change
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex gap-2">
+                    <input
+                      type="email"
+                      value={backupEmailInput}
+                      onChange={(e) => setBackupEmailInput(e.target.value)}
+                      placeholder="Enter your email (e.g. shopowner@gmail.com)"
+                      className="flex-1 bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-white font-mono focus:outline-none focus:ring-2 focus:ring-sky-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const clean = backupEmailInput.trim();
+                        if (!clean || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clean)) {
+                          setShareFeedback({
+                            type: 'error',
+                            message: 'Please enter a valid email address.',
+                          });
+                          return;
+                        }
+                        safeSetJSON('rofani_pos_backup_email', clean);
+                        saveBackupSettings({ recipientEmail: clean, recipientEmailConfirmed: true });
+                        setIsEditingShareEmail(false);
+                        setShareFeedback({
+                          type: 'success',
+                          message: `Backup email confirmed & remembered (${clean}).`,
+                        });
+                        if (onConfirmBackupEmail) {
+                          Promise.resolve(onConfirmBackupEmail(clean)).catch(() => {});
+                        }
+                      }}
+                      className="px-3 py-2 bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold rounded-xl transition cursor-pointer whitespace-nowrap"
+                    >
+                      Save &amp; Confirm
+                    </button>
+                  </div>
+                )}
                 <p className="text-[11px] text-slate-400">
-                  Defaults to your registered account email. On mobile, tap Share to send the attached `.json` file directly to Gmail, Yahoo, or WhatsApp.
+                  Saved per store so you never have to re-confirm it on future backups.
                 </p>
               </div>
 

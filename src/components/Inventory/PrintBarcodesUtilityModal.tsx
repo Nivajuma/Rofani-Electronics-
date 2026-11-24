@@ -35,13 +35,17 @@ import {
   ZoomIn,
   ZoomOut,
   FileText,
-  Smartphone
+  Smartphone,
+  Download,
+  Share2
 } from 'lucide-react';
 import { BarcodeScanLog, Product } from '../../types';
 import {
   printBatchBarcodes,
   generateBarcodeDataUrl,
   LABEL_SHEET_PRESETS,
+  PRIMARY_LABEL_SIZE_PRESETS,
+  buildBatchBarcodeLabelsPdfBlob,
   LabelSheetPreset
 } from '../../utils/barcode';
 import { safeGetJSON, safeSetJSON } from '../../utils/safeStorage';
@@ -52,6 +56,8 @@ export interface PrintBarcodesUtilityModalProps {
   scanLogs: BarcodeScanLog[];
   products: Product[];
   storeName?: string;
+  preferredFormatId?: string;
+  onSelectFormatId?: (formatId: string) => void;
 }
 
 interface PrintableItem {
@@ -74,6 +80,8 @@ export const PrintBarcodesUtilityModal: React.FC<PrintBarcodesUtilityModalProps>
   scanLogs,
   products,
   storeName = 'ROFANI Retail',
+  preferredFormatId,
+  onSelectFormatId,
 }) => {
   const [activeSource, setActiveSource] = useState<'scan_history' | 'catalog'>(() => {
     return safeGetJSON<'scan_history' | 'catalog'>(
@@ -133,12 +141,39 @@ export const PrintBarcodesUtilityModal: React.FC<PrintBarcodesUtilityModalProps>
     safeSetJSON('retail_pos_print_custom_prices', customLabelPrices);
   }, [customLabelPrices]);
 
-  const [selectedFormatId, setSelectedFormatId] = useState<string>(() =>
-    safeGetJSON<string>('retail_pos_print_format_id', 'a4_64', (val) => typeof val === 'string')
-  );
+  const [selectedFormatId, setSelectedFormatId] = useState<string>(() => {
+    if (preferredFormatId && LABEL_SHEET_PRESETS.some((p) => p.id === preferredFormatId)) {
+      return preferredFormatId;
+    }
+    return safeGetJSON<string>('retail_pos_print_format_id', 'a4_40', (val) => typeof val === 'string');
+  });
+
+  useEffect(() => {
+    if (
+      preferredFormatId &&
+      LABEL_SHEET_PRESETS.some((p) => p.id === preferredFormatId) &&
+      preferredFormatId !== selectedFormatId
+    ) {
+      setSelectedFormatId(preferredFormatId);
+    }
+  }, [preferredFormatId]);
+
   useEffect(() => {
     safeSetJSON('retail_pos_print_format_id', selectedFormatId);
   }, [selectedFormatId]);
+
+  const handleSelectLabelFormat = (formatId: string) => {
+    setSelectedFormatId(formatId);
+    safeSetJSON('retail_pos_print_format_id', formatId);
+    setSheetPageIndex(0);
+    if (onSelectFormatId) {
+      onSelectFormatId(formatId);
+    }
+  };
+
+  const [showOtherPresets, setShowOtherPresets] = useState(false);
+  const [isExportingPdf, setIsExportingPdf] = useState(false);
+  const [labelFeedback, setLabelFeedback] = useState<string | null>(null);
 
   const [labelFontSize, setLabelFontSize] = useState<'small' | 'medium' | 'large'>(() =>
     safeGetJSON<'small' | 'medium' | 'large'>('retail_pos_print_font_size', 'medium', (val) =>
@@ -522,14 +557,21 @@ export const PrintBarcodesUtilityModal: React.FC<PrintBarcodesUtilityModalProps>
     setPreviewItemId(list[nextIndex].barcode);
   };
 
-  // Perform Batch Print with selected format and styling
-  const handleExecuteBatchPrint = () => {
-    if (selectedItemsList.length === 0) {
-      alert('Please select at least one item to print barcode labels.');
-      return;
+  useEffect(() => {
+    if (sheetPageIndex >= maxSheetPages) {
+      setSheetPageIndex(Math.max(0, maxSheetPages - 1));
     }
+  }, [maxSheetPages, sheetPageIndex]);
 
-    const batchData = selectedItemsList.map((item) => {
+  const showLabelNotice = (msg: string) => {
+    setLabelFeedback(msg);
+    setTimeout(() => {
+      setLabelFeedback((curr) => (curr === msg ? null : curr));
+    }, 4000);
+  };
+
+  const buildSelectedBatchData = () => {
+    return selectedItemsList.map((item) => {
       const customPrice = customLabelPrices[item.barcode];
       const effectivePrice =
         customPrice !== null && customPrice !== undefined
@@ -542,7 +584,16 @@ export const PrintBarcodesUtilityModal: React.FC<PrintBarcodesUtilityModalProps>
         count: Math.max(1, parseInt(String(labelCounts[item.barcode] || 1), 10) || 1),
       };
     });
+  };
 
+  // Perform Batch Print with selected format and styling
+  const handleExecuteBatchPrint = () => {
+    if (selectedItemsList.length === 0) {
+      showLabelNotice('Select at least one product before printing labels.');
+      return;
+    }
+
+    const batchData = buildSelectedBatchData();
     const finalTitle = sheetTitle.trim() || `${storeName} Barcode Labels`;
     printBatchBarcodes(
       batchData,
@@ -551,6 +602,157 @@ export const PrintBarcodesUtilityModal: React.FC<PrintBarcodesUtilityModalProps>
       selectedFormatId,
       labelFontSize,
       showStoreNameOnLabel ? storeName : undefined
+    );
+  };
+
+  const handleExportLabelsPdf = async (mode: 'download' | 'share') => {
+    if (selectedItemsList.length === 0) {
+      showLabelNotice('Select at least one product to generate an A4 label sheet.');
+      return;
+    }
+    try {
+      setIsExportingPdf(true);
+      const batchData = buildSelectedBatchData();
+      const finalTitle = sheetTitle.trim() || `${storeName} Barcode Labels`;
+      const { blob, filename, pageCount, totalLabels } = await buildBatchBarcodeLabelsPdfBlob({
+        items: batchData,
+        title: finalTitle,
+        includePrice,
+        formatId: selectedFormatId,
+        fontSize: labelFontSize,
+        storeName: showStoreNameOnLabel ? storeName : undefined,
+      });
+
+      if (mode === 'share' && typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
+        const pdfFile = new File([blob], filename, { type: 'application/pdf' });
+        const canShareFiles =
+          typeof (navigator as any).canShare === 'function' &&
+          (navigator as any).canShare({ files: [pdfFile] });
+        if (canShareFiles) {
+          await navigator.share({
+            title: `${storeName} — ${activePreset.sizeTierLabel || activePreset.shortName} Labels`,
+            text: `${totalLabels} barcode labels arranged on ${pageCount} A4 page(s).`,
+            files: [pdfFile],
+          });
+          showLabelNotice(`Shared ${totalLabels} labels (${pageCount} page${pageCount > 1 ? 's' : ''})!`);
+          return;
+        }
+      }
+
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+      showLabelNotice(
+        mode === 'share'
+          ? `Saved ${filename} (${pageCount} A4 page${pageCount > 1 ? 's' : ''}) — ready to send or print!`
+          : `Downloaded ${filename} (${totalLabels} labels across ${pageCount} page${pageCount > 1 ? 's' : ''})`
+      );
+    } catch (err: any) {
+      if (err?.name !== 'AbortError') {
+        showLabelNotice(err?.message || 'Could not build label PDF. Try Print Sheet Now instead.');
+      }
+    } finally {
+      setIsExportingPdf(false);
+    }
+  };
+
+  const renderLabelSizeSelector = (compactMode: boolean = false) => {
+    const secondaryPresets = LABEL_SHEET_PRESETS.filter(
+      (p) => !PRIMARY_LABEL_SIZE_PRESETS.some((primary) => primary.id === p.id)
+    );
+    const isSecondaryActive = secondaryPresets.some((p) => p.id === selectedFormatId);
+
+    return (
+      <div className="space-y-2">
+        <div className="flex items-center justify-between gap-2 text-[11px] text-slate-300 flex-wrap">
+          <span className="font-bold flex items-center gap-1.5 text-slate-200">
+            <Ruler className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+            <span>Select Label Size</span>
+            <span className="text-slate-500 font-normal hidden sm:inline">· Saved per store</span>
+          </span>
+          <button
+            type="button"
+            onClick={() => setShowOtherPresets((prev) => !prev)}
+            className="text-[11px] font-semibold text-sky-400 hover:text-sky-300 flex items-center gap-1 cursor-pointer"
+          >
+            <span>{showOtherPresets || isSecondaryActive ? 'Hide Extra Formats' : 'More A4 / Thermal Formats'}</span>
+            {showOtherPresets || isSecondaryActive ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+          </button>
+        </div>
+
+        <div className="grid grid-cols-3 gap-2">
+          {PRIMARY_LABEL_SIZE_PRESETS.map((preset) => {
+            const isSelected = preset.id === selectedFormatId;
+            return (
+              <button
+                key={preset.id}
+                type="button"
+                id={`btn-label-size-${preset.id}`}
+                onClick={() => handleSelectLabelFormat(preset.id)}
+                className={`text-left rounded-xl border transition-all cursor-pointer ${
+                  compactMode ? 'p-2 sm:p-2.5' : 'p-2.5 sm:p-3'
+                } ${
+                  isSelected
+                    ? 'border-sky-500 bg-sky-950/40 ring-1 ring-sky-500/40 text-white shadow-sm'
+                    : 'border-slate-700/80 bg-slate-800/80 hover:border-slate-600 text-slate-200'
+                }`}
+              >
+                <div className="flex items-center justify-between gap-1.5">
+                  <span className="text-xs sm:text-[13px] font-bold text-white truncate">
+                    {preset.sizeTierLabel || preset.shortName}
+                  </span>
+                  <span
+                    className={`w-4 h-4 rounded-full flex items-center justify-center shrink-0 border ${
+                      isSelected
+                        ? 'bg-sky-500 border-sky-400 text-slate-950'
+                        : 'border-slate-600 bg-slate-900 text-transparent'
+                    }`}
+                  >
+                    <Check className="w-2.5 h-2.5 stroke-[3]" />
+                  </span>
+                </div>
+                <div className="mt-1 flex items-center justify-between gap-1 text-[10px] sm:text-[11px] font-mono">
+                  <span className={isSelected ? 'text-sky-300 font-bold' : 'text-slate-400 font-semibold'}>
+                    {preset.tagsPerPageLabel || `${preset.labelsPerSheet} tags / page`}
+                  </span>
+                  <span className="hidden sm:inline text-slate-500">
+                    {preset.columns}×{preset.rows}
+                  </span>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+
+        {(showOtherPresets || isSecondaryActive) && (
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 pt-0.5 scrollbar-none">
+            {secondaryPresets.map((preset) => {
+              const isSelected = preset.id === selectedFormatId;
+              return (
+                <button
+                  key={preset.id}
+                  type="button"
+                  onClick={() => handleSelectLabelFormat(preset.id)}
+                  className={`px-2.5 py-1.5 rounded-lg border text-[11px] font-bold transition flex items-center gap-1.5 shrink-0 cursor-pointer ${
+                    isSelected
+                      ? 'border-sky-500 bg-sky-950/40 text-sky-200'
+                      : 'border-slate-700/80 bg-slate-900 text-slate-300 hover:bg-slate-800 hover:text-white'
+                  }`}
+                  title={preset.description}
+                >
+                  <span>{preset.shortName}</span>
+                  {isSelected && <Check className="w-3 h-3 text-sky-400" />}
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
     );
   };
 
@@ -903,6 +1105,24 @@ export const PrintBarcodesUtilityModal: React.FC<PrintBarcodesUtilityModalProps>
                 </div>
               </div>
             )}
+
+            {/* Label Size Card Selector on Product Selection Tab */}
+            <div className="pt-1 border-t border-slate-800/80">
+              {renderLabelSizeSelector(true)}
+            </div>
+
+            {labelFeedback && (
+              <div className="bg-emerald-950/80 border border-emerald-500/40 text-emerald-200 rounded-xl px-3 py-2 text-xs font-semibold flex items-center justify-between gap-2">
+                <span>{labelFeedback}</span>
+                <button
+                  type="button"
+                  onClick={() => setLabelFeedback(null)}
+                  className="text-emerald-300 hover:text-white cursor-pointer"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
           </div>
         )}
 
@@ -928,7 +1148,27 @@ export const PrintBarcodesUtilityModal: React.FC<PrintBarcodesUtilityModalProps>
                 </span>
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  type="button"
+                  onClick={() => handleExportLabelsPdf('download')}
+                  disabled={selectedItemsList.length === 0 || isExportingPdf}
+                  className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-100 border border-slate-700 font-bold text-xs rounded-xl transition flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Download className="w-3.5 h-3.5 text-sky-400" />
+                  <span>{isExportingPdf ? 'Building PDF...' : 'A4 PDF'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleExportLabelsPdf('share')}
+                  disabled={selectedItemsList.length === 0 || isExportingPdf}
+                  className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold text-xs rounded-xl transition flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Share2 className="w-3.5 h-3.5" />
+                  <span>Share PDF</span>
+                </button>
+
                 <button
                   type="button"
                   onClick={handleExecuteBatchPrint}
@@ -941,45 +1181,23 @@ export const PrintBarcodesUtilityModal: React.FC<PrintBarcodesUtilityModalProps>
               </div>
             </div>
 
+            {labelFeedback && (
+              <div className="bg-emerald-950/80 border border-emerald-500/40 text-emerald-200 rounded-xl px-3 py-2 text-xs font-semibold flex items-center justify-between gap-2">
+                <span>{labelFeedback}</span>
+                <button
+                  type="button"
+                  onClick={() => setLabelFeedback(null)}
+                  className="text-emerald-300 hover:text-white cursor-pointer"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
+
           {showLivePreview && (
             <div className="space-y-3 animate-in fade-in duration-200">
-              {/* Paper Format Selector Bar */}
-              <div className="space-y-1.5">
-                <div className="flex items-center justify-between text-[11px] text-slate-400">
-                  <span className="font-bold flex items-center gap-1">
-                    <LayoutGrid className="w-3.5 h-3.5 text-sky-400" />
-                    Select Adhesive Paper Size / Sheet Format:
-                  </span>
-                  <span className="text-slate-400 text-[10px] hidden sm:inline">
-                    {activePreset.description}
-                  </span>
-                </div>
-
-                <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none text-xs">
-                  {LABEL_SHEET_PRESETS.map((preset) => {
-                    const isSelected = preset.id === selectedFormatId;
-                    return (
-                      <button
-                        key={preset.id}
-                        type="button"
-                        onClick={() => setSelectedFormatId(preset.id)}
-                        className={`px-3 py-1.5 rounded-xl border text-xs font-bold transition flex items-center gap-1.5 shrink-0 cursor-pointer ${
-                          isSelected
-                            ? 'bg-sky-600 text-white border-sky-400 shadow-md shadow-sky-600/25 ring-1 ring-sky-400'
-                            : 'bg-slate-900/80 text-slate-300 border-slate-700/80 hover:bg-slate-800 hover:text-white'
-                        }`}
-                        title={preset.description}
-                      >
-                        {preset.id === 'a4_64' && (
-                          <span className="text-amber-300 text-[10px]">⭐</span>
-                        )}
-                        <span>{preset.shortName}</span>
-                        {isSelected && <Check className="w-3 h-3 text-white" />}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
+              {/* Select Label Size Cards (Small 2x1" 40/pg, Medium 3x2" 10/pg, Large 4x2.5" 8/pg) */}
+              {renderLabelSizeSelector(false)}
 
               {/* Preview View Mode Switcher & Mobile HP Quick Guide Toggle */}
               <div className="flex items-center justify-between gap-2 flex-wrap pt-1 border-t border-slate-800/80">
@@ -1183,7 +1401,14 @@ export const PrintBarcodesUtilityModal: React.FC<PrintBarcodesUtilityModalProps>
                                 }
                               }}
                               style={{
-                                minHeight: activePreset.heightMm <= 18 ? '46px' : '60px',
+                                minHeight:
+                                  activePreset.heightMm <= 18
+                                    ? '46px'
+                                    : activePreset.heightMm <= 28
+                                    ? '58px'
+                                    : activePreset.heightMm <= 52
+                                    ? '92px'
+                                    : '112px',
                                 boxSizing: 'border-box',
                               }}
                               className={`p-1 rounded-[3px] border flex flex-col justify-between items-center text-center transition overflow-hidden ${
@@ -1231,7 +1456,14 @@ export const PrintBarcodesUtilityModal: React.FC<PrintBarcodesUtilityModalProps>
                                         alt={item.barcode}
                                         style={{
                                           height: '100%',
-                                          maxHeight: activePreset.heightMm <= 18 ? '22px' : activePreset.heightMm <= 26 ? '32px' : '42px',
+                                          maxHeight:
+                                            activePreset.heightMm <= 18
+                                              ? '22px'
+                                              : activePreset.heightMm <= 28
+                                              ? '32px'
+                                              : activePreset.heightMm <= 52
+                                              ? '48px'
+                                              : '60px',
                                           maxWidth: '98%',
                                           width: '100%',
                                           objectFit: 'contain',
@@ -1259,7 +1491,9 @@ export const PrintBarcodesUtilityModal: React.FC<PrintBarcodesUtilityModalProps>
                       {/* Sheet Footer Notes */}
                       <div className="border-t border-slate-200 mt-2 pt-1 flex items-center justify-between text-[8px] text-slate-400 font-mono">
                         <span>Format: Scale 100% (Actual Size)</span>
-                        <span>4 Columns × 16 Rows = 64 Labels</span>
+                        <span>
+                          {activePreset.columns} Columns × {activePreset.rows} Rows = {activePreset.labelsPerSheet} Labels
+                        </span>
                       </div>
                     </div>
                   </div>
@@ -2209,6 +2443,28 @@ export const PrintBarcodesUtilityModal: React.FC<PrintBarcodesUtilityModalProps>
                 <ChevronLeft className="w-4 h-4" />
                 <span className="hidden xs:inline">Back to Products</span>
                 <span className="xs:hidden">Back</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleExportLabelsPdf('download')}
+                disabled={selectedItemsList.length === 0 || isExportingPdf}
+                className="px-2.5 sm:px-3.5 py-2 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-100 border border-slate-700 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+                title="Download arranged A4 label sheet as PDF"
+              >
+                <Download className="w-3.5 h-3.5 text-sky-400" />
+                <span className="hidden sm:inline">PDF</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleExportLabelsPdf('share')}
+                disabled={selectedItemsList.length === 0 || isExportingPdf}
+                className="px-2.5 sm:px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+                title="Share arranged A4 label sheet PDF"
+              >
+                <Share2 className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Share</span>
               </button>
 
               <button

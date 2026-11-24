@@ -81,7 +81,8 @@ import {
   SensitiveActionLog,
   SensitiveActionType,
   PurchaseOrder,
-  StoreSubscriptionProfile
+  StoreSubscriptionProfile,
+  DigitalBusinessCard
 } from './types';
 import {
   INITIAL_USERS,
@@ -144,7 +145,19 @@ import { StoreOnboardingModal } from './components/Auth/StoreOnboardingModal';
 import { SubscriptionPlansModal } from './components/Subscription/SubscriptionPlansModal';
 import { SuperAdminSubscribersModal } from './components/Admin/SuperAdminSubscribersModal';
 import { SuggestFeatureModal } from './components/Common/SuggestFeatureModal';
-import { getBackupSettings, saveBackupSettings, getGmailAccessToken, buildAndDispatchStoreBackup } from './lib/gmailService';
+import {
+  DigitalBusinessCardModal,
+  BUSINESS_CARD_STORAGE_KEY,
+} from './components/Common/DigitalBusinessCardModal';
+import {
+  getBackupSettings,
+  saveBackupSettings,
+  getGmailAccessToken,
+  buildAndDispatchStoreBackup,
+  dismissBackupBannerForDate,
+  isBackupBannerDismissedForDate,
+  BackupSettings,
+} from './lib/gmailService';
 import { formatKSh } from './utils/currency';
 import {
   TabKey,
@@ -279,6 +292,7 @@ import {
   mergeRecordsWithConflictDetection,
 } from './utils/syncConflicts';
 import { findRecoverableBackups, protectLargestBackup, getBackupDataByKey } from './utils/backupRecovery';
+import { recordLastBackupMeta } from './utils/storeBackup';
 import { isSoundEnabled, setSoundEnabled, subscribeToSoundPref, playButtonSound, playLowStockAlertSound } from './utils/uiFeedback';
 import { saveToIDB, getFromIDB } from './utils/idbStorage';
 import { deduplicateProducts } from './utils/deduplicate';
@@ -684,6 +698,7 @@ export default function App() {
   }, [isTerminalLocked]);
 
   const [showShopQrModal, setShowShopQrModal] = useState(false);
+  const [showBusinessCardModal, setShowBusinessCardModal] = useState(false);
   const [show9PmSummaryModal, setShow9PmSummaryModal] = useState(false);
   const [activityAlertBanner, setActivityAlertBanner] = useState<{
     id: string;
@@ -1029,6 +1044,51 @@ export default function App() {
         safeSetJSON('rofani_pos_store_profile', prof);
         if (prof.skipLegacySeed) {
           safeSetJSON('rofani_pos_blank_mode', true);
+        }
+        if (prof.preferredLabelSizeId) {
+          safeSetJSON('retail_pos_print_format_id', prof.preferredLabelSizeId);
+        }
+        if (prof.businessCard) {
+          safeSetJSON(BUSINESS_CARD_STORAGE_KEY, prof.businessCard);
+        }
+        if (
+          prof.backupEmail ||
+          typeof prof.emailAutoBackupEnabled === 'boolean' ||
+          prof.dismissedBackupBannerDate
+        ) {
+          const cleanProfEmail = (prof.backupEmail || '').trim();
+          if (cleanProfEmail) {
+            safeSetJSON('rofani_pos_backup_email', cleanProfEmail);
+          }
+          if (prof.dismissedBackupBannerDate) {
+            safeSetJSON('rofani_pos_dismissed_backup_banner_date', prof.dismissedBackupBannerDate);
+          }
+          const currentLocalBackupCfg = getBackupSettings();
+          const resolvedEmail = cleanProfEmail || (currentLocalBackupCfg.recipientEmail || '').trim();
+          const autoEnabled =
+            typeof prof.emailAutoBackupEnabled === 'boolean'
+              ? prof.emailAutoBackupEnabled
+              : currentLocalBackupCfg.enabled;
+          saveBackupSettings({
+            ...(resolvedEmail ? { recipientEmail: resolvedEmail } : {}),
+            ...(cleanProfEmail
+              ? { recipientEmailConfirmed: prof.backupEmailConfirmed !== false }
+              : autoEnabled && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(resolvedEmail)
+              ? { recipientEmailConfirmed: true }
+              : {}),
+            enabled: autoEnabled,
+            ...(prof.dismissedBackupBannerDate
+              ? { dismissedBackupBannerDate: prof.dismissedBackupBannerDate }
+              : {}),
+          });
+
+          const todayIso = new Date().toISOString().split('T')[0];
+          if (
+            prof.dismissedBackupBannerDate === todayIso ||
+            (Boolean(resolvedEmail) && autoEnabled)
+          ) {
+            setBackupBanner((prev) => (prev?.type === 'info' ? null : prev));
+          }
         }
       }
       if (prof) {
@@ -2367,24 +2427,26 @@ export default function App() {
         (incomingRemoteSales) => {
           receivedSnapshot = true;
           if (cancelled) return;
-          const currentLocal = transactionsRef.current.length > 0
-            ? transactionsRef.current
-            : safeGetJSON<Transaction[]>('retail_pos_transactions', []);
-          const { merged, conflicts } = mergeRecordsWithConflictDetection<Transaction>({
-            recordType: 'transaction',
-            localRecords: currentLocal,
-            incomingRecords: incomingRemoteSales,
-            pendingMap: getPendingRecordMap<Transaction>('sale'),
-            resolvedFingerprints: resolvedConflictFingerprintsRef.current,
-            sourceLabel: 'Cloud Firestore Live Sales Sync',
-          });
-          merged.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-          if (haveTransactionListsChanged(transactionsRef.current, merged)) {
-            transactionsRef.current = merged;
-            setTransactions(merged);
-          }
-          if (conflicts.length > 0) {
-            enqueueSyncConflicts(conflicts, true);
+          if (incomingRemoteSales && incomingRemoteSales.length > 0) {
+            const currentLocal = transactionsRef.current.length > 0
+              ? transactionsRef.current
+              : safeGetJSON<Transaction[]>('retail_pos_transactions', []);
+            const { merged, conflicts } = mergeRecordsWithConflictDetection<Transaction>({
+              recordType: 'transaction',
+              localRecords: currentLocal,
+              incomingRecords: incomingRemoteSales,
+              pendingMap: getPendingRecordMap<Transaction>('sale'),
+              resolvedFingerprints: resolvedConflictFingerprintsRef.current,
+              sourceLabel: 'Cloud Firestore Live Sales Sync',
+            });
+            merged.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+            if (haveTransactionListsChanged(transactionsRef.current, merged)) {
+              transactionsRef.current = merged;
+              setTransactions(merged);
+            }
+            if (conflicts.length > 0) {
+              enqueueSyncConflicts(conflicts, true);
+            }
           }
         },
         (err) => {
@@ -2459,12 +2521,12 @@ export default function App() {
               productsRef.current = merged;
               setProducts(merged);
             }
-            setCloudSyncStatus('synced');
-            setLastSyncedTime(new Date().toLocaleTimeString());
             if (conflicts.length > 0) {
               enqueueSyncConflicts(conflicts, true);
             }
           }
+          setCloudSyncStatus('synced');
+          setLastSyncedTime(new Date().toLocaleTimeString());
         },
         (err) => {
           if (isQuotaExceededError(err)) {
@@ -3726,70 +3788,162 @@ export default function App() {
   // Automated Daily Gmail Backup Background Schedule Checker (reads refs so timer never tears down on every sale/edit)
   useEffect(() => {
     let isCancelled = false;
+    let isCheckRunning = false;
 
     const performDailyBackupCheck = async () => {
+      if (isCheckRunning || isCancelled) return;
+      isCheckRunning = true;
       try {
         const settings = getBackupSettings();
-        if (!settings.enabled) return;
+        const storeEmail = (storeProfileRef.current?.backupEmail || '').trim();
+        const effectiveAutoEnabled =
+          typeof storeProfileRef.current?.emailAutoBackupEnabled === 'boolean'
+            ? storeProfileRef.current.emailAutoBackupEnabled
+            : settings.enabled;
+        if (!effectiveAutoEnabled) return;
 
         const now = new Date();
         const todayStr = now.toISOString().split('T')[0];
         const currentHour = now.getHours();
 
-        // Check if scheduled hour has arrived and today's backup has not been performed, OR if yesterday's was missed
+        const localDismissedDate = safeGetJSON<string>(
+          'rofani_pos_dismissed_backup_banner_date',
+          '',
+          (v) => typeof v === 'string'
+        );
+        const isDismissedToday =
+          isBackupBannerDismissedForDate(todayStr) ||
+          storeProfileRef.current?.dismissedBackupBannerDate === todayStr ||
+          localDismissedDate === todayStr;
+
+        const localSavedEmail = safeGetJSON<string>(
+          'rofani_pos_backup_email',
+          '',
+          (v) => typeof v === 'string'
+        ).trim();
+        const configuredEmail =
+          storeEmail ||
+          localSavedEmail ||
+          (settings.recipientEmail || '').trim();
+        const hasConfiguredEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(configuredEmail);
+
+        // Ensure configured backup email with Auto Backup ON stays confirmed/trusted automatically
+        if (hasConfiguredEmail && !settings.recipientEmailConfirmed) {
+          safeSetJSON('rofani_pos_backup_email', configuredEmail);
+          saveBackupSettings({
+            recipientEmail: configuredEmail,
+            recipientEmailConfirmed: true,
+          });
+        }
+
+        // Check if scheduled hour has arrived and today's backup has not been delivered yet
         const isPastScheduledHour = currentHour >= settings.scheduledHour;
         const isMissedPreviousDay = settings.lastSentDate ? settings.lastSentDate < todayStr : true;
         const isDue = (isPastScheduledHour || isMissedPreviousDay) && settings.lastSentDate !== todayStr;
 
-        if (isDue) {
-          const token = getGmailAccessToken();
-          if (!token) {
-            setBackupBanner((prev) => (prev ? prev : {
-              message: `Daily store database backup for ${todayStr} is pending for ${settings.recipientEmail || 'NivaJuma@gmail.com'}.`,
-              type: 'info',
-            }));
-            return;
+        if (!isDue) return;
+
+        // Only prompt gently if NO backup email is set yet (and user hasn't dismissed today's banner)
+        if (!hasConfiguredEmail) {
+          if (!isDismissedToday && storeProfileRef.current) {
+            setBackupBanner((prev) =>
+              prev
+                ? prev
+                : {
+                    message: 'Set a backup email address in Backup Settings to enable daily automatic snapshots.',
+                    type: 'info',
+                  }
+            );
           }
+          return;
+        }
 
-          console.log('[Daily Email Backup] Scheduled closing hour reached, generating and dispatching daily store backup via Gmail...');
-          const currentStore =
-            storesRef.current.find((s) => s.id === activeStoreIdRef.current)?.name ||
-            storeProfileRef.current?.storeName ||
-            'Rofani POS';
+        const currentStore =
+          storesRef.current.find((s) => s.id === activeStoreIdRef.current)?.name ||
+          storeProfileRef.current?.storeName ||
+          'Rofani POS';
 
-          const result = await buildAndDispatchStoreBackup({
-            accessToken: token,
-            recipientEmail: settings.recipientEmail || 'NivaJuma@gmail.com',
-            products: productsRef.current,
-            transactions: transactionsRef.current,
-            customers: customersRef.current,
-            suppliers: suppliersRef.current,
-            expenses: expensesRef.current,
-            cashTransactions: cashTransactionsRef.current,
-            allUsers: allUsersRef.current,
+        const queueLocalSnapshotSilently = () => {
+          if (settings.lastQueuedDate !== todayStr) {
+            protectLargestBackup(
+              productsRef.current,
+              transactionsRef.current,
+              customersRef.current,
+              suppliersRef.current,
+              expensesRef.current,
+              allUsersRef.current
+            );
+          }
+          saveBackupSettings({
+            recipientEmail: configuredEmail,
+            recipientEmailConfirmed: true,
+            lastQueuedDate: todayStr,
+            lastQueuedTimestamp: now.toISOString(),
+            lastSentMessage: `Auto-backup snapshot queued silently for ${configuredEmail} (${todayStr})`,
+          });
+        };
+
+        const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
+        const token = getGmailAccessToken();
+
+        // Skip network Gmail call if offline, missing session token, or already attempted & queued today
+        if (
+          isOffline ||
+          !token ||
+          (settings.lastAutoAttemptDate === todayStr && settings.lastQueuedDate === todayStr)
+        ) {
+          if (settings.lastQueuedDate !== todayStr) {
+            queueLocalSnapshotSilently();
+          }
+          return;
+        }
+
+        console.log('[Daily Email Backup] Scheduled hour reached, dispatching daily store backup silently...');
+        const result = await buildAndDispatchStoreBackup({
+          accessToken: token,
+          recipientEmail: configuredEmail,
+          products: productsRef.current,
+          transactions: transactionsRef.current,
+          customers: customersRef.current,
+          suppliers: suppliersRef.current,
+          expenses: expensesRef.current,
+          cashTransactions: cashTransactionsRef.current,
+          allUsers: allUsersRef.current,
+          storeName: currentStore,
+        });
+
+        if (isCancelled) return;
+
+        if (result.success) {
+          const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          recordLastBackupMeta({
+            timestamp: now.toISOString(),
+            method: 'gmail_api',
+            fileName: `Rofani_Store_Backup_${todayStr}.json`,
+            recipientEmail: configuredEmail,
+            productsCount: productsRef.current.length,
+            categoriesCount: 0,
+            salesCount: transactionsRef.current.length,
+            customersCount: customersRef.current.length,
             storeName: currentStore,
           });
-
-          if (isCancelled) return;
-
-          if (result.success) {
-            const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          if (!isDismissedToday) {
             setBackupBanner({
-              message: `Daily automated backup email sent successfully to ${settings.recipientEmail || 'NivaJuma@gmail.com'} at ${timeStr}.`,
+              message: `Daily automated backup email sent silently to ${configuredEmail} at ${timeStr}.`,
               type: 'success',
             });
-          } else {
-            const isUnauthorized = result.error?.includes('unauthorized-domain');
-            setBackupBanner({
-              message: isUnauthorized
-                ? `Vercel domain authorization required in Firebase: Add 'vercel.app' to Authorized domains.`
-                : `Automated daily backup failed: ${result.error || 'Check Gmail permissions'}`,
-              type: 'error',
-            });
+            window.setTimeout(() => {
+              setBackupBanner((curr) => (curr?.type === 'success' ? null : curr));
+            }, 6000);
           }
+        } else {
+          // Silently fall back to queued local snapshot without retrying every 60s
+          queueLocalSnapshotSilently();
         }
       } catch (err: any) {
-        console.warn('[Daily Email Backup Background Error]:', err);
+        console.warn('[Daily Email Backup Background Notice]:', err?.message || err);
+      } finally {
+        isCheckRunning = false;
       }
     };
 
@@ -5404,6 +5558,87 @@ export default function App() {
     }
   };
 
+  const handleSaveBusinessCard = async (nextCard: DigitalBusinessCard) => {
+    safeSetJSON(BUSINESS_CARD_STORAGE_KEY, nextCard);
+    setStoreProfile((prev) => {
+      const updated = prev ? { ...prev, businessCard: nextCard } : prev;
+      if (updated) {
+        safeSetJSON('rofani_pos_store_profile', updated);
+      }
+      return updated;
+    });
+    const targetCloudStoreId = activeCloudStoreId || getActiveTenantStoreId();
+    if (targetCloudStoreId && targetCloudStoreId !== '__unauthenticated__' && isAuthorizedCloudUser(firebaseUser)) {
+      await updateStoreProfileDetails(targetCloudStoreId, { businessCard: nextCard });
+    }
+  };
+
+  const handleSelectPreferredLabelSize = (formatId: string) => {
+    if (!formatId) return;
+    safeSetJSON('retail_pos_print_format_id', formatId);
+    setStoreProfile((prev) => {
+      const updated = prev ? { ...prev, preferredLabelSizeId: formatId } : prev;
+      if (updated) {
+        safeSetJSON('rofani_pos_store_profile', updated);
+      }
+      return updated;
+    });
+    const targetCloudStoreId = activeCloudStoreId || getActiveTenantStoreId();
+    if (targetCloudStoreId && targetCloudStoreId !== '__unauthenticated__' && isAuthorizedCloudUser(firebaseUser)) {
+      updateStoreProfileDetails(targetCloudStoreId, { preferredLabelSizeId: formatId }).catch(() => {});
+    }
+  };
+
+  const handleConfirmBackupEmail = async (nextEmail: string, autoBackupEnabled?: boolean) => {
+    const cleanEmail = (nextEmail || '').trim();
+    const hasValidEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail);
+    if (!hasValidEmail && typeof autoBackupEnabled !== 'boolean') return;
+
+    if (hasValidEmail) {
+      safeSetJSON('rofani_pos_backup_email', cleanEmail);
+    }
+    saveBackupSettings({
+      ...(hasValidEmail ? { recipientEmail: cleanEmail, recipientEmailConfirmed: true } : {}),
+      ...(typeof autoBackupEnabled === 'boolean' ? { enabled: autoBackupEnabled } : {}),
+    });
+    setBackupBanner((prev) => (prev?.type === 'info' ? null : prev));
+
+    const profilePatch: Partial<StoreSubscriptionProfile> = {
+      ...(hasValidEmail ? { backupEmail: cleanEmail, backupEmailConfirmed: true } : {}),
+      ...(typeof autoBackupEnabled === 'boolean' ? { emailAutoBackupEnabled: autoBackupEnabled } : {}),
+    };
+
+    setStoreProfile((prev) => {
+      const updated = prev ? { ...prev, ...profilePatch } : prev;
+      if (updated) {
+        safeSetJSON('rofani_pos_store_profile', updated);
+      }
+      return updated;
+    });
+    const targetCloudStoreId = activeCloudStoreId || getActiveTenantStoreId();
+    if (targetCloudStoreId && targetCloudStoreId !== '__unauthenticated__' && isAuthorizedCloudUser(firebaseUser)) {
+      await updateStoreProfileDetails(targetCloudStoreId, profilePatch);
+    }
+  };
+
+  const handleDismissBackupBanner = () => {
+    const dateStr = new Date().toISOString().split('T')[0];
+    setBackupBanner(null);
+    safeSetJSON('rofani_pos_dismissed_backup_banner_date', dateStr);
+    dismissBackupBannerForDate(dateStr);
+    setStoreProfile((prev) => {
+      const updated = prev ? { ...prev, dismissedBackupBannerDate: dateStr } : prev;
+      if (updated) {
+        safeSetJSON('rofani_pos_store_profile', updated);
+      }
+      return updated;
+    });
+    const targetCloudStoreId = activeCloudStoreId || getActiveTenantStoreId();
+    if (targetCloudStoreId && targetCloudStoreId !== '__unauthenticated__' && isAuthorizedCloudUser(firebaseUser)) {
+      updateStoreProfileDetails(targetCloudStoreId, { dismissedBackupBannerDate: dateStr }).catch(() => {});
+    }
+  };
+
   const handleUpdateStore = (updatedStore: StoreLocation) => {
     const cleanName = isLegacyRofaniStoreBrand(updatedStore.name) ? 'Rofani POS' : updatedStore.name.trim();
     const normalizedStore = { ...updatedStore, name: cleanName };
@@ -6450,6 +6685,9 @@ export default function App() {
           onSwitchToBlankPos={handleSwitchToBlankRofaniPos}
           onOpenShopQrShare={() => setShowShopQrModal(true)}
           onPreview9PmSummary={() => setShow9PmSummaryModal(true)}
+          confirmedBackupEmail={storeProfile?.backupEmail || ''}
+          backupEmailConfirmed={Boolean(storeProfile?.backupEmailConfirmed)}
+          onConfirmBackupEmail={handleConfirmBackupEmail}
         />
       )}
 
@@ -6476,6 +6714,7 @@ export default function App() {
           onOpenSuperAdmin={() => setShowSuperAdminModal(true)}
           onOpenAboutUs={() => setActiveTab('about')}
           onOpenShopQrShare={() => setShowShopQrModal(true)}
+          onOpenDigitalBusinessCard={() => setShowBusinessCardModal(true)}
           onOpenSuggestFeature={() => setShowSuggestFeatureModal(true)}
           onSignOutCloud={async () => {
             setAllowOfflineOwnerMode(false);
@@ -6820,6 +7059,10 @@ export default function App() {
           cashTransactions={cashTransactions}
           allUsers={allUsers}
           storeName={stores.find((s) => s.id === activeStoreId)?.name || storeProfile?.storeName || 'Rofani POS'}
+          accountEmail={firebaseUser?.email || storeProfile?.ownerEmail || cachedCloudSession?.email || ''}
+          confirmedBackupEmail={storeProfile?.backupEmail || ''}
+          backupEmailConfirmed={Boolean(storeProfile?.backupEmailConfirmed)}
+          onConfirmBackupEmail={handleConfirmBackupEmail}
           onNotification={(msg, type) => setBackupBanner({ message: msg, type })}
         />
 
@@ -6882,6 +7125,8 @@ export default function App() {
           scanLogs={scanLogs}
           products={products}
           storeName={stores.find((s) => s.id === activeStoreId)?.name || storeProfile?.storeName || 'Rofani POS'}
+          preferredFormatId={storeProfile?.preferredLabelSizeId}
+          onSelectFormatId={handleSelectPreferredLabelSize}
         />
 
         {/* AI Worker Assistant Modal (Phone Format Mode) */}
@@ -6945,6 +7190,16 @@ export default function App() {
           storeName={stores.find((s) => s.id === activeStoreId)?.name || storeProfile?.storeName || 'Rofani POS'}
           storeId={resolvedSettingsStoreId}
           referralCode={storeProfile?.referralCode}
+        />
+
+        <DigitalBusinessCardModal
+          isOpen={showBusinessCardModal}
+          onClose={() => setShowBusinessCardModal(false)}
+          storeName={stores.find((s) => s.id === activeStoreId)?.name || storeProfile?.storeName || 'Rofani POS'}
+          storeId={resolvedSettingsStoreId}
+          currentUser={currentUser}
+          storeProfile={storeProfile}
+          onSaveCard={handleSaveBusinessCard}
         />
 
         <DailyEndOfDaySummaryModal
@@ -7802,13 +8057,13 @@ export default function App() {
                 onClick={() => setShowDailyEmailBackupModal(true)}
                 className="underline font-bold text-white hover:text-sky-100 cursor-pointer ml-2"
               >
-                {backupBanner.type === 'info' ? 'Authorize & Send Backup Now' : 'View Backup Details'}
+                {backupBanner.type === 'info' ? 'Set Backup Email' : 'View Backup Details'}
               </button>
             </div>
             <button
-              onClick={() => setBackupBanner(null)}
+              onClick={handleDismissBackupBanner}
               className="p-1 hover:bg-black/20 rounded text-white cursor-pointer ml-2"
-              title="Dismiss"
+              title="Dismiss for today"
             >
               <X className="w-4 h-4" />
             </button>
@@ -8605,6 +8860,8 @@ export default function App() {
         scanLogs={scanLogs}
         products={products}
         storeName={stores.find((s) => s.id === activeStoreId)?.name || storeProfile?.storeName || 'Rofani POS'}
+        preferredFormatId={storeProfile?.preferredLabelSizeId}
+        onSelectFormatId={handleSelectPreferredLabelSize}
       />
 
       {/* Store Manager Dedicated Item Audit Mini-Page Terminal (Scanned via QR Code or Opened Directly) */}
@@ -8679,6 +8936,10 @@ export default function App() {
         cashTransactions={cashTransactions}
         allUsers={allUsers}
         storeName={stores.find((s) => s.id === activeStoreId)?.name || storeProfile?.storeName || 'Rofani POS'}
+        accountEmail={firebaseUser?.email || storeProfile?.ownerEmail || cachedCloudSession?.email || ''}
+        confirmedBackupEmail={storeProfile?.backupEmail || ''}
+        backupEmailConfirmed={Boolean(storeProfile?.backupEmailConfirmed)}
+        onConfirmBackupEmail={handleConfirmBackupEmail}
         onNotification={(msg, type) => setBackupBanner({ message: msg, type })}
       />
 
@@ -8773,6 +9034,16 @@ export default function App() {
         storeName={stores.find((s) => s.id === activeStoreId)?.name || storeProfile?.storeName || 'Rofani POS'}
         storeId={resolvedSettingsStoreId}
         referralCode={storeProfile?.referralCode}
+      />
+
+      <DigitalBusinessCardModal
+        isOpen={showBusinessCardModal}
+        onClose={() => setShowBusinessCardModal(false)}
+        storeName={stores.find((s) => s.id === activeStoreId)?.name || storeProfile?.storeName || 'Rofani POS'}
+        storeId={resolvedSettingsStoreId}
+        currentUser={currentUser}
+        storeProfile={storeProfile}
+        onSaveCard={handleSaveBusinessCard}
       />
 
       <DailyEndOfDaySummaryModal

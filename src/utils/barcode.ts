@@ -1,9 +1,12 @@
 import QRCode from 'qrcode';
+import { jsPDF } from 'jspdf';
 
 export interface LabelSheetPreset {
   id: string;
   name: string;
   shortName: string;
+  sizeTierLabel?: string;
+  tagsPerPageLabel?: string;
   category: 'a4_sheet' | 'thermal_roll';
   labelsPerSheet: number;
   widthMm: number;
@@ -16,6 +19,51 @@ export interface LabelSheetPreset {
 
 export const LABEL_SHEET_PRESETS: LabelSheetPreset[] = [
   {
+    id: 'a4_40',
+    name: 'Small (2x1") — 40 Tags / Page (A4)',
+    shortName: 'Small (2x1")',
+    sizeTierLabel: 'Small (2x1")',
+    tagsPerPageLabel: '40 tags / page',
+    category: 'a4_sheet',
+    labelsPerSheet: 40,
+    widthMm: 48.5,
+    heightMm: 25.4,
+    columns: 4,
+    rows: 10,
+    description: '4 cols × 10 rows (2×1 in). High-density A4 price & QR tags for everyday retail shelves.',
+    recommendedFor: 'Standard retail items, QR Code + KSh Price',
+  },
+  {
+    id: 'a4_10',
+    name: 'Medium (3x2") — 10 Tags / Page (A4)',
+    shortName: 'Medium (3x2")',
+    sizeTierLabel: 'Medium (3x2")',
+    tagsPerPageLabel: '10 tags / page',
+    category: 'a4_sheet',
+    labelsPerSheet: 10,
+    widthMm: 76.2,
+    heightMm: 50.8,
+    columns: 2,
+    rows: 5,
+    description: '2 cols × 5 rows (3×2 in). Bold medium shelf & box tags with large QR code and price.',
+    recommendedFor: 'Appliances, apparel boxes & medium shelf tags',
+  },
+  {
+    id: 'a4_8',
+    name: 'Large (4x2.5") — 8 Tags / Page (A4)',
+    shortName: 'Large (4x2.5")',
+    sizeTierLabel: 'Large (4x2.5")',
+    tagsPerPageLabel: '8 tags / page',
+    category: 'a4_sheet',
+    labelsPerSheet: 8,
+    widthMm: 99.1,
+    heightMm: 63.5,
+    columns: 2,
+    rows: 4,
+    description: '2 cols × 4 rows (4×2.5 in). Extra-large carton, pallet & showroom display price tags.',
+    recommendedFor: 'Large boxes, electronics & showroom displays',
+  },
+  {
     id: 'a4_64',
     name: 'A4 Sheet — 64 Labels (48.5 × 16.9 mm)',
     shortName: 'A4 64-Up (48.5×16.9mm)',
@@ -27,19 +75,6 @@ export const LABEL_SHEET_PRESETS: LabelSheetPreset[] = [
     rows: 16,
     description: '4 cols × 16 rows. Compact stickers for Item Name + QR Code sticker labels.',
     recommendedFor: 'Item Name + QR Code (No Price) on office/laser printers',
-  },
-  {
-    id: 'a4_40',
-    name: 'A4 Sheet — 40 Labels (48.5 × 25.4 mm)',
-    shortName: 'A4 40-Up (48.5×25.4mm)',
-    category: 'a4_sheet',
-    labelsPerSheet: 40,
-    widthMm: 48.5,
-    heightMm: 25.4,
-    columns: 4,
-    rows: 10,
-    description: '4 cols × 10 rows. Standard retail die-cut sheet. Ideal square aspect for QR codes + Price.',
-    recommendedFor: 'Easy alignment, QR Code + KSh Price for retail items',
   },
   {
     id: 'a4_65',
@@ -81,6 +116,10 @@ export const LABEL_SHEET_PRESETS: LabelSheetPreset[] = [
     recommendedFor: 'Thermal roll stickers with price and QR',
   },
 ];
+
+export const PRIMARY_LABEL_SIZE_PRESETS: LabelSheetPreset[] = LABEL_SHEET_PRESETS.filter((p) =>
+  ['a4_40', 'a4_10', 'a4_8'].includes(p.id)
+);
 
 /**
  * Generate a random 13-digit EAN-13 / SKU numeric code string
@@ -561,3 +600,203 @@ export const printBatchBarcodes = (
 };
 
 export const printBatchQrCodes = printBatchBarcodes;
+
+/**
+ * Generates an A4 gridded PDF Blob (or triggers direct download) arranging selected barcode/price tags
+ * according to the active Label Size preset (Small 40/page, Medium 10/page, Large 8/page, etc.).
+ */
+export async function buildBatchBarcodeLabelsPdfBlob(params: {
+  items: { name: string; price?: number; barcode: string; sku?: string; count?: number }[];
+  title?: string;
+  includePrice?: boolean;
+  formatId?: string;
+  fontSize?: 'small' | 'medium' | 'large';
+  storeName?: string;
+}): Promise<{ blob: Blob; filename: string; pageCount: number; totalLabels: number }> {
+  const {
+    items,
+    title = 'Rofani POS Barcode Labels',
+    includePrice = false,
+    formatId = 'a4_40',
+    fontSize = 'medium',
+    storeName,
+  } = params;
+
+  const preset = LABEL_SHEET_PRESETS.find((p) => p.id === formatId) || LABEL_SHEET_PRESETS[0];
+  const expanded: { name: string; price?: number; code: string }[] = [];
+  items.forEach((item) => {
+    const code = (item.barcode || item.sku || '').trim();
+    if (!code) return;
+    const copies = Math.max(1, item.count || 1);
+    for (let i = 0; i < copies; i++) {
+      expanded.push({ name: item.name, price: item.price, code });
+    }
+  });
+
+  if (expanded.length === 0) {
+    throw new Error('No valid barcode labels to export.');
+  }
+
+  // Generate crisp PNG QR data URLs per unique code (jsPDF natively embeds PNGs cleanly)
+  const qrCache = new Map<string, string>();
+  const uniqueCodes = Array.from(new Set(expanded.map((e) => e.code)));
+  await Promise.all(
+    uniqueCodes.map(async (code) => {
+      try {
+        const pngUrl = await QRCode.toDataURL(code, {
+          width: 240,
+          margin: 1,
+          errorCorrectionLevel: 'M',
+          color: { dark: '#000000', light: '#ffffff' },
+        });
+        qrCache.set(code, pngUrl);
+      } catch {
+        // Skip failed QR
+      }
+    })
+  );
+
+  const isThermal = preset.category === 'thermal_roll';
+  const pdf = new jsPDF({
+    orientation: isThermal && preset.widthMm > preset.heightMm ? 'landscape' : 'portrait',
+    unit: 'mm',
+    format: isThermal ? [preset.widthMm, preset.heightMm] : 'a4',
+    compress: true,
+  });
+
+  pdf.setProperties({
+    title,
+    subject: `${preset.name} Label Sheet`,
+    creator: 'Rofani POS',
+  });
+
+  const pageWidthMm = isThermal ? preset.widthMm : 210;
+  const pageHeightMm = isThermal ? preset.heightMm : 297;
+  const cols = Math.max(1, preset.columns);
+  const rows = Math.max(1, preset.rows);
+  const perPage = Math.max(1, cols * rows);
+  const gapX = isThermal ? 0 : cols <= 2 ? 4 : 2;
+  const gapY = isThermal ? 0 : rows <= 5 ? 4 : 2;
+
+  const totalGridW = cols * preset.widthMm + Math.max(0, cols - 1) * gapX;
+  const totalGridH = rows * preset.heightMm + Math.max(0, rows - 1) * gapY;
+  const startX = isThermal ? 0 : Math.max(4, (pageWidthMm - totalGridW) / 2);
+  const startY = isThermal ? 0 : Math.max(8, (pageHeightMm - totalGridH) / 2);
+
+  const pageCount = Math.ceil(expanded.length / perPage);
+
+  for (let pageIdx = 0; pageIdx < pageCount; pageIdx++) {
+    if (pageIdx > 0) pdf.addPage();
+
+    if (!isThermal) {
+      pdf.setFont('helvetica', 'bold');
+      pdf.setFontSize(7.5);
+      pdf.setTextColor(71, 85, 105);
+      pdf.text(
+        `${storeName ? `${storeName} · ` : ''}${preset.sizeTierLabel || preset.shortName} (${preset.labelsPerSheet} tags/page)`,
+        startX,
+        Math.max(4.5, startY - 2)
+      );
+      pdf.setFont('helvetica', 'normal');
+      pdf.text(`Page ${pageIdx + 1} / ${pageCount}`, pageWidthMm - startX, Math.max(4.5, startY - 2), {
+        align: 'right',
+      });
+    }
+
+    const slice = expanded.slice(pageIdx * perPage, (pageIdx + 1) * perPage);
+    slice.forEach((tag, idx) => {
+      const col = idx % cols;
+      const row = Math.floor(idx / cols);
+      const cellX = startX + col * (preset.widthMm + gapX);
+      const cellY = startY + row * (preset.heightMm + gapY);
+      const cellW = preset.widthMm;
+      const cellH = preset.heightMm;
+
+      // Subtle dashed/light guide box
+      pdf.setDrawColor(203, 213, 225);
+      pdf.setLineWidth(0.2);
+      pdf.rect(cellX, cellY, cellW, cellH);
+
+      const pad = isThermal ? 1.5 : cellH >= 45 ? 3 : 1.6;
+      const innerW = cellW - pad * 2;
+      let cursorY = cellY + pad + 2.2;
+
+      if (storeName) {
+        pdf.setFont('helvetica', 'bold');
+        pdf.setFontSize(cellH >= 45 ? 6.5 : 5);
+        pdf.setTextColor(100, 116, 139);
+        pdf.text(storeName.toUpperCase().slice(0, 28), cellX + cellW / 2, cursorY, {
+          align: 'center',
+          maxWidth: innerW,
+        });
+        cursorY += cellH >= 45 ? 3 : 2.2;
+      }
+
+      // Product Name
+      const baseNameSize =
+        cellH >= 55 ? 10.5 : cellH >= 45 ? 9 : cellH >= 24 ? 7.2 : 6;
+      const sizedName =
+        fontSize === 'small'
+          ? Math.max(5.5, baseNameSize - 1)
+          : fontSize === 'large'
+          ? baseNameSize + 1.2
+          : baseNameSize;
+      pdf.setFont('helvetica', 'bold');
+      pdf.setFontSize(sizedName);
+      pdf.setTextColor(15, 23, 42);
+      const nameLines = pdf.splitTextToSize(tag.name || 'Item', innerW).slice(0, 2);
+      pdf.text(nameLines, cellX + cellW / 2, cursorY, { align: 'center' });
+      cursorY += nameLines.length * (sizedName * 0.4) + (cellH >= 45 ? 1.6 : 0.8);
+
+      // Optional Price
+      if (includePrice && tag.price !== undefined) {
+        const priceSize = cellH >= 55 ? 12 : cellH >= 45 ? 10.5 : 8;
+        pdf.setFont('helvetica', 'bold');
+        pdf.setFontSize(priceSize);
+        pdf.setTextColor(2, 132, 199);
+        pdf.text(
+          `KSh ${Math.round(Number(tag.price || 0)).toLocaleString()}`,
+          cellX + cellW / 2,
+          cursorY + 1,
+          { align: 'center' }
+        );
+        cursorY += cellH >= 45 ? 4.8 : 3.2;
+      }
+
+      // Footer code caption reserve
+      const codeCaptionH = 3.2;
+      const availForQrH = Math.max(7, cellY + cellH - pad - codeCaptionH - cursorY);
+      const qrSize = Math.min(availForQrH, innerW * 0.65);
+      const qrUrl = qrCache.get(tag.code);
+      if (qrUrl) {
+        pdf.addImage(
+          qrUrl,
+          'PNG',
+          cellX + (cellW - qrSize) / 2,
+          cursorY,
+          qrSize,
+          qrSize,
+          undefined,
+          'FAST'
+        );
+      }
+
+      pdf.setFont('courier', 'bold');
+      pdf.setFontSize(cellH >= 45 ? 7 : 5.5);
+      pdf.setTextColor(71, 85, 105);
+      pdf.text(tag.code.slice(0, 24), cellX + cellW / 2, cellY + cellH - pad, {
+        align: 'center',
+        maxWidth: innerW,
+      });
+    });
+  }
+
+  const slug = (title || 'rofani-labels')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/(^-|-$)/g, '');
+  const filename = `${slug || 'rofani-labels'}-${preset.id}.pdf`;
+  const blob = pdf.output('blob');
+  return { blob, filename, pageCount, totalLabels: expanded.length };
+}
+

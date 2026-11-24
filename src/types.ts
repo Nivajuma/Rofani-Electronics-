@@ -692,6 +692,20 @@ export interface SensitiveActionLog {
 export type SubscriptionPlanType = 'trial' | 'monthly' | 'quarterly' | 'biannual' | 'annual';
 export type SubscriptionStatus = 'active' | 'expired';
 
+export interface DigitalBusinessCard {
+  ownerName: string;
+  roleTitle?: string;
+  tagline?: string;
+  photoDataUrl?: string;
+  shopName: string;
+  phone: string;
+  whatsapp?: string;
+  email: string;
+  referralLink: string;
+  accentColor?: 'sky' | 'emerald' | 'amber' | 'indigo';
+  updatedAt?: string;
+}
+
 export interface StoreSubscriptionProfile {
   id: string; // 'rofani-pos' for owner or Firebase Auth UID for merchants
   ownerUid: string;
@@ -721,6 +735,12 @@ export interface StoreSubscriptionProfile {
   taxMode?: 'none' | 'tot' | 'vat';
   transactionWiseTax?: boolean;
   skipLegacySeed?: boolean;
+  preferredLabelSizeId?: string;
+  businessCard?: DigitalBusinessCard;
+  backupEmail?: string;
+  backupEmailConfirmed?: boolean;
+  emailAutoBackupEnabled?: boolean;
+  dismissedBackupBannerDate?: string;
   createdAt: string;
   updatedAt: string;
 }

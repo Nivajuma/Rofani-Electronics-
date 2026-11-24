@@ -24,15 +24,28 @@ import { User } from 'firebase/auth';
 import {
   signInWithGoogleForGmail,
   getGmailAccessToken,
+  getGmailUserEmail,
+  clearGmailAccessToken,
   logoutGmail,
   getBackupSettings,
   saveBackupSettings,
   sendBackupEmailViaGmail,
+  sanitizeProductsForEmailBackup,
   BackupSettings
 } from '../../lib/gmailService';
+import { getFirebaseAuthConsoleUrl } from '../../lib/firebase';
 import { Product, Transaction, Customer, Supplier, Expense, CashTransaction, User as POSUser } from '../../types';
 import { playBackupSuccessSound } from '../../utils/uiFeedback';
-import { recordLastBackupMeta } from '../../utils/storeBackup';
+import {
+  recordLastBackupMeta,
+  buildCompleteStoreBackupPayload,
+  shareOrEmailStoreBackup,
+} from '../../utils/storeBackup';
+import { safeGetJSON, safeSetJSON } from '../../utils/safeStorage';
+import { ErrorBoundary } from '../ErrorBoundary';
+
+const asCleanString = (val: unknown): string => (typeof val === 'string' ? val.trim() : '');
+const isStringValue = (val: unknown): boolean => typeof val === 'string';
 
 interface DailyEmailBackupModalProps {
   isOpen: boolean;
@@ -45,6 +58,10 @@ interface DailyEmailBackupModalProps {
   allUsers?: POSUser[];
   cashTransactions?: CashTransaction[];
   storeName?: string;
+  accountEmail?: string;
+  confirmedBackupEmail?: string;
+  backupEmailConfirmed?: boolean;
+  onConfirmBackupEmail?: (email: string, autoBackupEnabled?: boolean) => Promise<void> | void;
   onNotification?: (msg: string, type: 'success' | 'error') => void;
 }
 
@@ -59,53 +76,118 @@ export const DailyEmailBackupModal: React.FC<DailyEmailBackupModalProps> = ({
   allUsers = [],
   cashTransactions = [],
   storeName = 'Rofani POS',
+  accountEmail = '',
+  confirmedBackupEmail = '',
+  backupEmailConfirmed = false,
+  onConfirmBackupEmail,
   onNotification,
 }) => {
   const [settings, setSettings] = useState<BackupSettings>(getBackupSettings);
-  const [recipientInput, setRecipientInput] = useState(settings.recipientEmail);
+  const [recipientInput, setRecipientInput] = useState<string>(() => {
+    const initial = getBackupSettings();
+    const localSaved = safeGetJSON<string>('rofani_pos_backup_email', '', isStringValue);
+    return (
+      asCleanString(confirmedBackupEmail) ||
+      asCleanString(localSaved) ||
+      asCleanString(initial.recipientEmail) ||
+      asCleanString(accountEmail)
+    );
+  });
+  const [isEditingRecipient, setIsEditingRecipient] = useState(false);
   const [googleUser, setGoogleUser] = useState<User | null>(null);
-  const [accessToken, setAccessToken] = useState<string | null>(getGmailAccessToken());
+  const [connectedGmailEmail, setConnectedGmailEmail] = useState<string | null>(() => getGmailUserEmail());
+  const [accessToken, setAccessToken] = useState<string | null>(() => getGmailAccessToken());
   const [isConnecting, setIsConnecting] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [sendNotice, setSendNotice] = useState<{ type: 'success' | 'error' | 'info'; message: string } | null>(null);
   const [unauthorizedDomainInfo, setUnauthorizedDomainInfo] = useState<{ hostname: string; consoleUrl: string } | null>(null);
+  const [showPopupFallbackActions, setShowPopupFallbackActions] = useState(false);
   const [copiedDomain, setCopiedDomain] = useState(false);
   const [showConfirmSendDialog, setShowConfirmSendDialog] = useState(false);
 
-  // Sync token on mount
+  // Sync token and store's saved/confirmed email whenever modal opens or profile updates
   useEffect(() => {
+    if (!isOpen) return;
     setAccessToken(getGmailAccessToken());
-  }, [isOpen]);
+    setConnectedGmailEmail(getGmailUserEmail());
+    setShowPopupFallbackActions(false);
+    const latest = getBackupSettings();
+    setSettings(latest);
+    const localSaved = safeGetJSON<string>('rofani_pos_backup_email', '', isStringValue);
+    const preferred =
+      (backupEmailConfirmed ? asCleanString(confirmedBackupEmail) : '') ||
+      asCleanString(confirmedBackupEmail) ||
+      asCleanString(localSaved) ||
+      asCleanString(latest.recipientEmail) ||
+      asCleanString(accountEmail);
+    if (preferred) {
+      setRecipientInput(preferred);
+    }
+    setIsEditingRecipient(false);
+  }, [isOpen, confirmedBackupEmail, backupEmailConfirmed, accountEmail]);
 
   if (!isOpen) return null;
 
-  const handleConnectGmail = async () => {
+  const trimmedRecipient = asCleanString(recipientInput);
+  const isValidRecipientEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedRecipient);
+  const localSavedConfirmed = safeGetJSON<string>('rofani_pos_backup_email', '', isStringValue);
+  const savedSettingsEmail = asCleanString(settings.recipientEmail);
+  const knownConfirmedEmail =
+    (backupEmailConfirmed ? asCleanString(confirmedBackupEmail) : '') ||
+    asCleanString(confirmedBackupEmail) ||
+    asCleanString(localSavedConfirmed) ||
+    (settings.recipientEmailConfirmed ||
+    (settings.enabled && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(savedSettingsEmail))
+      ? savedSettingsEmail
+      : '') ||
+    asCleanString(accountEmail);
+  const isCurrentRecipientConfirmed = Boolean(
+    isValidRecipientEmail &&
+      knownConfirmedEmail &&
+      trimmedRecipient.toLowerCase() === knownConfirmedEmail.toLowerCase()
+  );
+
+  const handleConnectGmail = async (forceSelectAccount = false) => {
     setIsConnecting(true);
     setSendNotice(null);
+    setShowPopupFallbackActions(false);
     try {
-      const { user, accessToken: token } = await signInWithGoogleForGmail();
+      const hintEmail =
+        trimmedRecipient || asCleanString(accountEmail) || asCleanString(settings.recipientEmail);
+      const { user, accessToken: token } = await signInWithGoogleForGmail({
+        loginHint: hintEmail || undefined,
+        forceSelectAccount,
+      });
       setGoogleUser(user);
+      setConnectedGmailEmail(user?.email || hintEmail || null);
       setAccessToken(token);
       setUnauthorizedDomainInfo(null);
       setSendNotice({
         type: 'success',
-        message: `Connected as ${user.email}! Gmail sending is now authorized.`,
+        message: `Connected as ${user?.email || hintEmail || 'Google Account'}! Gmail sending is now authorized.`,
       });
     } catch (err: any) {
       console.error('Failed to sign in with Google:', err);
-      if (err.isUnauthorizedDomain || err.code === 'auth/unauthorized-domain' || err.message?.includes('unauthorized-domain')) {
+      if (
+        err?.isUnauthorizedDomain ||
+        err?.code === 'auth/unauthorized-domain' ||
+        err?.message?.includes('unauthorized-domain')
+      ) {
         setUnauthorizedDomainInfo({
           hostname: typeof window !== 'undefined' ? window.location.hostname : 'vercel.app',
-          consoleUrl: 'https://console.firebase.google.com/project/gen-lang-client-0043475796/authentication/settings',
+          consoleUrl: err?.consoleUrl || getFirebaseAuthConsoleUrl(),
         });
         setSendNotice({
           type: 'error',
-          message: 'Firebase Error: unauthorized-domain. Add "vercel.app" to your Firebase project authorized domains (see quick guide below).',
+          message: 'Firebase Error: unauthorized-domain. Add your domain to Firebase Authorized domains (or use Email App / Share Backup below).',
         });
       } else {
+        if (err?.isPopupBlocked) {
+          setShowPopupFallbackActions(true);
+        }
         setSendNotice({
           type: 'error',
-          message: err.message || 'Google authentication was cancelled or could not be completed.',
+          message: err?.message || 'Google authentication was cancelled or could not be completed.',
         });
       }
     } finally {
@@ -114,8 +196,13 @@ export const DailyEmailBackupModal: React.FC<DailyEmailBackupModalProps> = ({
   };
 
   const handleDisconnect = async () => {
-    await logoutGmail();
+    try {
+      await logoutGmail();
+    } catch {
+      clearGmailAccessToken();
+    }
     setGoogleUser(null);
+    setConnectedGmailEmail(null);
     setAccessToken(null);
     setSendNotice({
       type: 'info',
@@ -124,17 +211,76 @@ export const DailyEmailBackupModal: React.FC<DailyEmailBackupModalProps> = ({
   };
 
   const handleSaveSettings = (updates: Partial<BackupSettings>) => {
-    const updated = saveBackupSettings(updates);
+    const activeEmail = trimmedRecipient || asCleanString(settings.recipientEmail);
+    const hasValidEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(activeEmail);
+    const nextEnabled =
+      typeof updates.enabled === 'boolean' ? updates.enabled : settings.enabled;
+    const updated = saveBackupSettings({
+      ...updates,
+      ...(nextEnabled && hasValidEmail
+        ? { recipientEmail: activeEmail, recipientEmailConfirmed: true }
+        : {}),
+    });
     setSettings(updated);
+    if (nextEnabled && hasValidEmail) {
+      safeSetJSON('rofani_pos_backup_email', activeEmail);
+    }
+    if (
+      onConfirmBackupEmail &&
+      (typeof updates.enabled === 'boolean' || (nextEnabled && hasValidEmail))
+    ) {
+      Promise.resolve(
+        onConfirmBackupEmail(hasValidEmail ? activeEmail : '', updated.enabled)
+      ).catch(() => {});
+    }
     setSendNotice({
       type: 'success',
-      message: 'Backup preferences updated successfully.',
+      message:
+        nextEnabled && hasValidEmail
+          ? `Email Auto Backup ON & trusted for ${activeEmail}.`
+          : 'Backup preferences updated successfully.',
     });
     setTimeout(() => setSendNotice(null), 3500);
   };
 
-  // Compile full database payload
+  const handleSaveAndConfirmRecipientEmail = async () => {
+    const cleanEmail = recipientInput.trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+      setSendNotice({
+        type: 'error',
+        message: 'Please enter a valid recipient email address (e.g. name@gmail.com).',
+      });
+      return;
+    }
+
+    safeSetJSON('rofani_pos_backup_email', cleanEmail);
+    const updated = saveBackupSettings({
+      recipientEmail: cleanEmail,
+      recipientEmailConfirmed: true,
+    });
+    setSettings(updated);
+    setRecipientInput(cleanEmail);
+    setIsEditingRecipient(false);
+    setSendNotice({
+      type: 'success',
+      message: `Backup email confirmed and remembered (${cleanEmail}). Future backups run automatically.`,
+    });
+    setTimeout(() => setSendNotice(null), 4000);
+
+    if (onConfirmBackupEmail) {
+      Promise.resolve(onConfirmBackupEmail(cleanEmail, updated.enabled)).catch(() => {});
+    }
+  };
+
+  // Compile lightweight email-safe database payload (strips oversized base64 product photos to prevent OOM crashes)
   const compileBackupPayload = () => {
+    const safeProducts = sanitizeProductsForEmailBackup(products);
+    const safeTransactions = Array.isArray(transactions) ? transactions.filter(Boolean) : [];
+    const safeCustomers = Array.isArray(customers) ? customers.filter(Boolean) : [];
+    const safeSuppliers = Array.isArray(suppliers) ? suppliers.filter(Boolean) : [];
+    const safeExpenses = Array.isArray(expenses) ? expenses.filter(Boolean) : [];
+    const safeCashTransactions = Array.isArray(cashTransactions) ? cashTransactions.filter(Boolean) : [];
+    const safeUsers = Array.isArray(allUsers) ? allUsers.filter(Boolean) : [];
     const timestamp = new Date().toISOString();
     return {
       storeName: storeName || 'Rofani POS',
@@ -142,35 +288,37 @@ export const DailyEmailBackupModal: React.FC<DailyEmailBackupModalProps> = ({
       systemVersion: '2.5.0',
       databaseId: 'ai-studio-retailstockmanag-35779e9e-08d0-4311-8158-8be055847014',
       summary: {
-        totalProducts: products.length,
-        totalTransactions: transactions.length,
-        totalCustomers: customers.length,
-        totalSuppliers: suppliers.length,
-        totalExpenses: expenses.length,
-        totalEmployees: allUsers.length,
-        totalInventoryValueKSh: products.reduce(
-          (sum, p) => sum + (p.sellingPrice || 0) * (p.stockQuantity || 0),
+        totalProducts: safeProducts.length,
+        totalTransactions: safeTransactions.length,
+        totalCustomers: safeCustomers.length,
+        totalSuppliers: safeSuppliers.length,
+        totalExpenses: safeExpenses.length,
+        totalCashTransactions: safeCashTransactions.length,
+        totalEmployees: safeUsers.length,
+        totalInventoryValueKSh: safeProducts.reduce(
+          (sum, p) => sum + (Number(p?.sellingPrice) || 0) * (Number(p?.stockQuantity) || 0),
           0
         ),
-        totalGrossSalesKSh: transactions.reduce(
-          (sum, t) => sum + (t.grandTotal || 0),
+        totalGrossSalesKSh: safeTransactions.reduce(
+          (sum, t) => sum + (Number(t?.grandTotal) || 0),
           0
         ),
       },
       collections: {
-        products,
-        transactions,
-        customers,
-        suppliers,
-        expenses,
-        employees: allUsers.map((u) => ({
-          id: u.id,
-          name: u.name,
-          email: u.email,
-          role: u.role,
-          phone: u.phone,
-          status: u.status,
-          commissionType: u.commissionType,
+        products: safeProducts,
+        transactions: safeTransactions,
+        customers: safeCustomers,
+        suppliers: safeSuppliers,
+        expenses: safeExpenses,
+        cashTransactions: safeCashTransactions,
+        employees: safeUsers.map((u) => ({
+          id: u?.id,
+          name: u?.name,
+          email: u?.email,
+          role: u?.role,
+          phone: u?.phone,
+          status: u?.status,
+          commissionType: u?.commissionType,
         })),
       },
     };
@@ -258,36 +406,96 @@ export const DailyEmailBackupModal: React.FC<DailyEmailBackupModalProps> = ({
     `;
   };
 
+  const handleFallbackEmailAppShare = async () => {
+    const targetRecipient =
+      trimmedRecipient || asCleanString(settings.recipientEmail) || asCleanString(confirmedBackupEmail);
+    try {
+      setIsSending(true);
+      const payload = buildCompleteStoreBackupPayload({
+        storeName: storeName || 'Rofani POS',
+        accountEmail: targetRecipient || accountEmail || '',
+        products: Array.isArray(products) ? products : [],
+        categories: [],
+        transactions: Array.isArray(transactions) ? transactions : [],
+        customers: Array.isArray(customers) ? customers : [],
+        suppliers: Array.isArray(suppliers) ? suppliers : [],
+        expenses: Array.isArray(expenses) ? expenses : [],
+        attendanceRecords: [],
+        allUsers: Array.isArray(allUsers) ? allUsers : [],
+      });
+      const res = await shareOrEmailStoreBackup({
+        payload,
+        recipientEmail: targetRecipient,
+        preferNativeShare: true,
+      });
+      if (res.outcome !== 'cancelled') {
+        playBackupSuccessSound();
+        setShowPopupFallbackActions(false);
+        setSendNotice({
+          type: 'success',
+          message:
+            res.outcome === 'web_share'
+              ? `✅ Backup file (${res.fileName}) shared via your device share sheet!`
+              : `✅ Backup saved to Downloads (${res.fileName}) and opened in your email app! Attach the file and tap Send.`,
+        });
+      }
+    } catch (err: any) {
+      setSendNotice({
+        type: 'error',
+        message: err?.message || 'Could not open device email/share sheet. Use Download .JSON Backup below.',
+      });
+    } finally {
+      setIsSending(false);
+    }
+  };
+
   // Perform email send
   const executeSendBackupEmail = async () => {
     setShowConfirmSendDialog(false);
-    let activeToken = accessToken;
+    setShowPopupFallbackActions(false);
+    const targetRecipient =
+      trimmedRecipient || asCleanString(settings.recipientEmail) || asCleanString(confirmedBackupEmail);
+    if (!targetRecipient || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(targetRecipient)) {
+      setSendNotice({
+        type: 'error',
+        message: 'Please provide a valid recipient email address.',
+      });
+      return;
+    }
+
+    let activeToken = accessToken || getGmailAccessToken();
 
     if (!activeToken) {
       try {
         setIsConnecting(true);
-        const { user, accessToken: token } = await signInWithGoogleForGmail();
+        const { user, accessToken: token } = await signInWithGoogleForGmail({
+          loginHint: targetRecipient || asCleanString(accountEmail) || undefined,
+        });
         setGoogleUser(user);
+        setConnectedGmailEmail(user?.email || targetRecipient);
         setAccessToken(token);
         activeToken = token;
       } catch (authErr: any) {
         if (
-          authErr.isUnauthorizedDomain ||
-          authErr.code === 'auth/unauthorized-domain' ||
-          authErr.message?.includes('unauthorized-domain')
+          authErr?.isUnauthorizedDomain ||
+          authErr?.code === 'auth/unauthorized-domain' ||
+          authErr?.message?.includes('unauthorized-domain')
         ) {
           setUnauthorizedDomainInfo({
             hostname: typeof window !== 'undefined' ? window.location.hostname : 'vercel.app',
-            consoleUrl: 'https://console.firebase.google.com/project/gen-lang-client-0043475796/authentication/settings',
+            consoleUrl: authErr?.consoleUrl || getFirebaseAuthConsoleUrl(),
           });
           setSendNotice({
             type: 'error',
-            message: 'Firebase Error: unauthorized-domain. Add "vercel.app" to your Firebase project authorized domains (see quick guide below).',
+            message: 'Firebase Error: unauthorized-domain. Add your domain to Firebase Authorized domains (or use Email App / Share Backup below).',
           });
         } else {
+          if (authErr?.isPopupBlocked) {
+            setShowPopupFallbackActions(true);
+          }
           setSendNotice({
             type: 'error',
-            message: 'Google authorization is required to send emails via Gmail: ' + (authErr.message || 'Cancelled'),
+            message: authErr?.message || 'Google authorization is required to send emails via Gmail.',
           });
         }
         return;
@@ -296,21 +504,14 @@ export const DailyEmailBackupModal: React.FC<DailyEmailBackupModalProps> = ({
       }
     }
 
-    const targetRecipient = recipientInput.trim() || settings.recipientEmail;
-    if (!targetRecipient || !targetRecipient.includes('@')) {
-      setSendNotice({
-        type: 'error',
-        message: 'Please provide a valid recipient email address.',
-      });
-      return;
-    }
-
     setIsSending(true);
     setSendNotice(null);
 
     try {
       const payload = compileBackupPayload();
-      const jsonString = JSON.stringify(payload, null, 2);
+      const compactJson = JSON.stringify(payload);
+      const jsonString =
+        compactJson.length > 2 * 1024 * 1024 ? compactJson : JSON.stringify(payload, null, 2);
       const dateStr = new Date().toISOString().slice(0, 10);
       const fileName = `Rofani_Store_Backup_${dateStr}.json`;
       const subject = `ROFANI POS Daily Backup • ${dateStr} (${payload.summary.totalProducts} Items)`;
@@ -326,6 +527,7 @@ export const DailyEmailBackupModal: React.FC<DailyEmailBackupModalProps> = ({
       });
 
       const fileSizeKB = Math.round(new Blob([jsonString]).size / 1024);
+      const existingHistory = Array.isArray(settings.history) ? settings.history : [];
 
       if (result.success) {
         const newHistoryEntry = {
@@ -336,18 +538,24 @@ export const DailyEmailBackupModal: React.FC<DailyEmailBackupModalProps> = ({
           transactionsCount: payload.summary.totalTransactions,
           fileSizeKB,
           status: 'success' as const,
-          message: `Delivered via Gmail (Message ID: ${result.messageId?.slice(0, 8) || 'verified'})`,
+          message: `Delivered via Gmail (Message ID: ${String(result.messageId || '').slice(0, 8) || 'verified'})`,
         };
 
         const updatedSettings = saveBackupSettings({
           recipientEmail: targetRecipient,
+          recipientEmailConfirmed: true,
           lastSentDate: dateStr,
           lastSentStatus: 'success',
           lastSentMessage: `Successfully emailed to ${targetRecipient}`,
-          history: [newHistoryEntry, ...settings.history.slice(0, 9)],
+          history: [newHistoryEntry, ...existingHistory.slice(0, 9)],
         });
 
+        safeSetJSON('rofani_pos_backup_email', targetRecipient);
         setSettings(updatedSettings);
+        setIsEditingRecipient(false);
+        if (onConfirmBackupEmail) {
+          Promise.resolve(onConfirmBackupEmail(targetRecipient)).catch(() => {});
+        }
         recordLastBackupMeta({
           timestamp: new Date().toISOString(),
           method: 'gmail_api',
@@ -356,7 +564,7 @@ export const DailyEmailBackupModal: React.FC<DailyEmailBackupModalProps> = ({
           productsCount: payload.summary.totalProducts,
           categoriesCount: 0,
           salesCount: payload.summary.totalTransactions,
-          customersCount: customers.length,
+          customersCount: Array.isArray(customers) ? customers.length : 0,
           storeName,
         });
         playBackupSuccessSound();
@@ -368,6 +576,10 @@ export const DailyEmailBackupModal: React.FC<DailyEmailBackupModalProps> = ({
           onNotification(`Daily backup email successfully sent to ${targetRecipient}!`, 'success');
         }
       } else {
+        if (result.isAuthExpired) {
+          setAccessToken(null);
+          clearGmailAccessToken();
+        }
         const newHistoryEntry = {
           id: `hist_${Date.now()}`,
           timestamp: new Date().toISOString(),
@@ -382,14 +594,21 @@ export const DailyEmailBackupModal: React.FC<DailyEmailBackupModalProps> = ({
         const updatedSettings = saveBackupSettings({
           lastSentStatus: 'failed',
           lastSentMessage: result.error || 'Send failed',
-          history: [newHistoryEntry, ...settings.history.slice(0, 9)],
+          history: [newHistoryEntry, ...existingHistory.slice(0, 9)],
         });
 
         setSettings(updatedSettings);
         setSendNotice({
           type: 'error',
-          message: `Failed to send backup: ${result.error}`,
+          message: result.isAuthExpired
+            ? 'Your Gmail authorization session expired. Tap "Send Backup Email Now" to refresh or use Email App / Share Sheet below.'
+            : result.isNetworkError
+            ? result.error || 'Could not reach Gmail servers right now. Use Email App / Share Sheet or Download .JSON Backup below.'
+            : `Failed to send backup: ${result.error}`,
         });
+        if (result.isAuthExpired || result.isNetworkError) {
+          setShowPopupFallbackActions(true);
+        }
         if (onNotification) {
           onNotification(`Failed to send backup email: ${result.error}`, 'error');
         }
@@ -398,7 +617,7 @@ export const DailyEmailBackupModal: React.FC<DailyEmailBackupModalProps> = ({
       console.error('Error sending backup email:', err);
       setSendNotice({
         type: 'error',
-        message: err.message || 'An error occurred while preparing or sending the backup.',
+        message: err?.message || 'An error occurred while preparing or sending the backup.',
       });
     } finally {
       setIsSending(false);
@@ -437,7 +656,10 @@ export const DailyEmailBackupModal: React.FC<DailyEmailBackupModalProps> = ({
     });
   };
 
+  const historyItems = Array.isArray(settings.history) ? settings.history : [];
+
   return (
+    <ErrorBoundary resetKey={isOpen ? 'open' : 'closed'} fallbackTitle="Email Backup Modal Recovered">
     <div className="fixed inset-0 z-[110] flex items-center justify-center p-3 sm:p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in duration-200">
       <div className="relative w-full max-w-2xl bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[92vh]">
         {/* Header */}
@@ -471,7 +693,7 @@ export const DailyEmailBackupModal: React.FC<DailyEmailBackupModalProps> = ({
           {/* Notification Banner */}
           {sendNotice && (
             <div
-              className={`p-3 rounded-xl border flex items-center gap-2.5 text-xs font-semibold ${
+              className={`p-3 rounded-xl border flex flex-col gap-2 text-xs font-semibold ${
                 sendNotice.type === 'success'
                   ? 'bg-emerald-950/60 border-emerald-800 text-emerald-300'
                   : sendNotice.type === 'error'
@@ -479,12 +701,35 @@ export const DailyEmailBackupModal: React.FC<DailyEmailBackupModalProps> = ({
                   : 'bg-sky-950/60 border-sky-800 text-sky-300'
               }`}
             >
-              {sendNotice.type === 'success' ? (
-                <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
-              ) : (
-                <AlertCircle className="w-4 h-4 shrink-0" />
+              <div className="flex items-center gap-2.5">
+                {sendNotice.type === 'success' ? (
+                  <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
+                ) : (
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                )}
+                <span className="flex-1">{sendNotice.message}</span>
+              </div>
+              {showPopupFallbackActions && (
+                <div className="flex flex-wrap items-center gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={handleFallbackEmailAppShare}
+                    disabled={isSending}
+                    className="px-3 py-1.5 bg-sky-600 hover:bg-sky-500 text-white rounded-lg text-[11px] font-bold flex items-center gap-1.5 cursor-pointer transition"
+                  >
+                    <Send className="w-3.5 h-3.5" />
+                    <span>Send via Email App / Share Sheet</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleDownloadBackupLocally}
+                    className="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-600 text-white rounded-lg text-[11px] font-bold flex items-center gap-1.5 cursor-pointer transition"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Download .JSON Backup</span>
+                  </button>
+                </div>
               )}
-              <span className="flex-1">{sendNotice.message}</span>
             </div>
           )}
 
@@ -589,9 +834,13 @@ export const DailyEmailBackupModal: React.FC<DailyEmailBackupModalProps> = ({
                 <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 font-bold flex items-center gap-1">
                   ● Connected to Gmail
                 </span>
+              ) : settings.enabled && isCurrentRecipientConfirmed ? (
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-sky-500/20 text-sky-300 border border-sky-500/30 font-bold flex items-center gap-1">
+                  ● Auto-Backup Active{settings.lastQueuedDate === new Date().toISOString().slice(0, 10) ? ' • Queued Today' : ''}
+                </span>
               ) : (
-                <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/30 font-bold">
-                  Connection Needed
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700 font-bold">
+                  Setup Email / Gmail
                 </span>
               )}
             </div>
@@ -603,18 +852,26 @@ export const DailyEmailBackupModal: React.FC<DailyEmailBackupModalProps> = ({
                     <span>{googleUser?.displayName || 'Google Account Authorized'}</span>
                   </div>
                   <div className="text-[11px] text-slate-400 font-mono">
-                    {googleUser?.email || settings.recipientEmail}
+                    {googleUser?.email || connectedGmailEmail || settings.recipientEmail}
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <button
                     type="button"
-                    onClick={handleConnectGmail}
+                    onClick={() => handleConnectGmail(false)}
                     disabled={isConnecting}
                     className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-lg border border-slate-700 transition flex items-center gap-1 cursor-pointer"
                   >
                     <RefreshCw className={`w-3 h-3 ${isConnecting ? 'animate-spin' : ''}`} />
                     <span>Refresh</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleConnectGmail(true)}
+                    disabled={isConnecting}
+                    className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-sky-300 text-xs font-semibold rounded-lg border border-slate-700 transition cursor-pointer"
+                  >
+                    Switch Account
                   </button>
                   <button
                     type="button"
@@ -629,11 +886,17 @@ export const DailyEmailBackupModal: React.FC<DailyEmailBackupModalProps> = ({
             ) : (
               <div className="p-4 bg-slate-900 rounded-xl border border-slate-800 space-y-3">
                 <p className="text-xs text-slate-300 leading-relaxed">
-                  Connect your Google account with permission to send daily store backup emails. The app accesses Gmail with your permission to deliver automated backup snapshots to your inbox.
+                  {settings.enabled && isCurrentRecipientConfirmed
+                    ? `Daily snapshots run silently in the background for ${trimmedRecipient}${
+                        settings.lastQueuedDate === new Date().toISOString().slice(0, 10)
+                          ? ` (today's snapshot queued safely).`
+                          : '.'
+                      } Connect Gmail anytime for direct background email delivery.`
+                    : 'Connect your Google account with permission to send daily store backup emails to your inbox.'}
                 </p>
                 <button
                   type="button"
-                  onClick={handleConnectGmail}
+                  onClick={() => handleConnectGmail(false)}
                   disabled={isConnecting}
                   className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-white hover:bg-slate-100 text-slate-900 rounded-xl text-xs font-extrabold shadow-md transition cursor-pointer active:scale-95 disabled:opacity-50"
                 >
@@ -655,7 +918,7 @@ export const DailyEmailBackupModal: React.FC<DailyEmailBackupModalProps> = ({
                       d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
                     />
                   </svg>
-                  <span>{isConnecting ? 'Authorizing Gmail...' : 'Connect Gmail to Enable Automated Backups'}</span>
+                  <span>{isConnecting ? 'Connecting Gmail...' : 'Connect Gmail for Direct Delivery'}</span>
                 </button>
               </div>
             )}
@@ -670,25 +933,66 @@ export const DailyEmailBackupModal: React.FC<DailyEmailBackupModalProps> = ({
 
             <div className="space-y-3">
               <div>
-                <label className="text-[11px] font-bold text-slate-400 block mb-1">
-                  Recipient Email Address
-                </label>
-                <div className="flex gap-2">
-                  <input
-                    type="email"
-                    value={recipientInput}
-                    onChange={(e) => setRecipientInput(e.target.value)}
-                    placeholder="e.g. NivaJuma@gmail.com"
-                    className="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-sky-500 font-mono"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => handleSaveSettings({ recipientEmail: recipientInput.trim() })}
-                    className="px-3 py-2 bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold rounded-xl transition cursor-pointer"
-                  >
-                    Save
-                  </button>
+                <div className="flex items-center justify-between gap-2 mb-1">
+                  <label className="text-[11px] font-bold text-slate-400">
+                    Recipient Email Address
+                  </label>
+                  {isCurrentRecipientConfirmed && !isEditingRecipient && (
+                    <span className="text-[11px] font-semibold text-emerald-400 inline-flex items-center gap-1">
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      Confirmed &amp; Remembered
+                    </span>
+                  )}
                 </div>
+
+                {isCurrentRecipientConfirmed && !isEditingRecipient ? (
+                  <div className="flex items-center justify-between gap-2 bg-slate-900 border border-emerald-500/35 rounded-xl px-3.5 py-2.5">
+                    <span className="text-xs text-white font-mono font-semibold truncate">
+                      {trimmedRecipient}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setIsEditingRecipient(true)}
+                      className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-sky-300 text-[11px] font-bold rounded-lg border border-slate-700 transition shrink-0 cursor-pointer"
+                    >
+                      Change Email
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-1.5">
+                    <div className="flex gap-2">
+                      <input
+                        type="email"
+                        value={recipientInput}
+                        onChange={(e) => setRecipientInput(e.target.value)}
+                        placeholder="e.g. NivaJuma@gmail.com"
+                        className="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-sky-500 font-mono"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleSaveAndConfirmRecipientEmail}
+                        className="px-3 py-2 bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold rounded-xl transition cursor-pointer whitespace-nowrap"
+                      >
+                        Save &amp; Confirm
+                      </button>
+                      {knownConfirmedEmail && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setRecipientInput(knownConfirmedEmail);
+                            setIsEditingRecipient(false);
+                          }}
+                          className="px-2.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-xl border border-slate-700 transition cursor-pointer"
+                        >
+                          Cancel
+                        </button>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-slate-400">
+                      Confirm once to remember this address for 1-tap backups without re-asking.
+                    </p>
+                  </div>
+                )}
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
@@ -784,13 +1088,13 @@ export const DailyEmailBackupModal: React.FC<DailyEmailBackupModalProps> = ({
               )}
             </div>
 
-            {settings.history.length === 0 ? (
+            {historyItems.length === 0 ? (
               <p className="text-xs text-slate-500 py-3 text-center italic">
                 No email backups delivered yet. Click "Send Backup Email Now" below to run your first backup!
               </p>
             ) : (
               <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
-                {settings.history.map((log) => (
+                {historyItems.map((log) => (
                   <div
                     key={log.id}
                     className="p-2 rounded-lg bg-slate-900 border border-slate-800/80 flex items-center justify-between text-xs"
@@ -857,12 +1161,18 @@ export const DailyEmailBackupModal: React.FC<DailyEmailBackupModalProps> = ({
             <button
               type="button"
               data-feedback="backup"
-              onClick={() => setShowConfirmSendDialog(true)}
+              onClick={() => {
+                if (isCurrentRecipientConfirmed) {
+                  executeSendBackupEmail();
+                } else {
+                  setShowConfirmSendDialog(true);
+                }
+              }}
               disabled={isSending || isConnecting}
               className="flex-1 sm:flex-initial px-5 py-2.5 bg-gradient-to-r from-sky-500 to-indigo-600 hover:from-sky-400 hover:to-indigo-500 disabled:opacity-50 text-white text-xs font-extrabold rounded-xl border border-sky-300/60 ring-2 ring-sky-400/35 shadow-lg shadow-sky-600/30 transition flex items-center justify-center gap-2 cursor-pointer active:scale-95"
             >
               <Send className={`w-3.5 h-3.5 ${isSending ? 'animate-pulse' : ''}`} />
-              <span>{isSending ? 'Sending Backup...' : accessToken ? 'Send Backup Email Now' : 'Authorize & Send Backup Now'}</span>
+              <span>{isSending ? 'Sending Backup...' : 'Send Backup Email Now'}</span>
             </button>
           </div>
         </div>
@@ -913,5 +1223,6 @@ export const DailyEmailBackupModal: React.FC<DailyEmailBackupModalProps> = ({
         )}
       </div>
     </div>
+    </ErrorBoundary>
   );
 };

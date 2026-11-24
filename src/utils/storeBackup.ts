@@ -423,7 +423,22 @@ export async function shareOrEmailStoreBackup(params: {
 }> {
   const { payload, recipientEmail, preferNativeShare = true } = params;
   const fileName = getStoreBackupFileName(payload.storeInfo.storeName, 'json', 'RofaniPOS_Backup');
-  const jsonString = JSON.stringify(payload, null, 2);
+  const emailSafePayload: CompleteStoreBackupPayload = {
+    ...payload,
+    data: {
+      ...payload.data,
+      products: (payload.data.products || []).map((p) => {
+        const img = typeof p?.imageUrl === 'string' ? p.imageUrl : '';
+        if (img.startsWith('data:') || img.length > 2000) {
+          return { ...p, imageUrl: '' };
+        }
+        return p;
+      }),
+    },
+  };
+  const compactJson = JSON.stringify(emailSafePayload);
+  const jsonString =
+    compactJson.length > 2 * 1024 * 1024 ? compactJson : JSON.stringify(emailSafePayload, null, 2);
   const dateReadable = new Date().toLocaleDateString('en-GB', {
     year: 'numeric',
     month: 'short',

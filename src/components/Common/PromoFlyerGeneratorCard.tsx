@@ -753,8 +753,10 @@ function drawHardwareShowcase(
   const originY = boxY + pad;
 
   // 1. LAPTOP RUNNING ROFANI POS DARK-MODE DASHBOARD
-  const laptopW = isVertical ? contentW * 0.72 : contentW * 0.85;
-  const laptopH = laptopW * 0.62;
+  const rawLaptopW = isVertical ? contentW * 0.72 : contentW * 0.85;
+  const maxLaptopH = contentH * (isVertical ? 0.56 : 0.72);
+  const laptopH = Math.min(rawLaptopW * 0.62, maxLaptopH);
+  const laptopW = Math.min(rawLaptopW, laptopH / 0.62);
   const laptopX = originX + (isVertical ? 14 : 4);
   const laptopY = originY + (isVertical ? 20 : 10);
 
@@ -842,14 +844,14 @@ function drawHardwareShowcase(
   fillRoundedRect(ctx, deckX + deckW * 0.36, deckY + 4, deckW * 0.28, 5, 3, '#64748b');
 
   // 2. THERMAL RECEIPT PRINTER (bottom-left)
-  const printerW = isVertical ? contentW * 0.38 : contentW * 0.44;
-  const printerH = isVertical ? 146 : 112;
+  const printerW = Math.min(isVertical ? contentW * 0.38 : contentW * 0.44, 240);
+  const printerH = Math.min(isVertical ? 146 : 112, contentH * 0.46);
   const printerX = originX + (isVertical ? 18 : 10);
   const printerY = originY + contentH - printerH - 6;
 
   const paperW = printerW * 0.66;
   const paperX = printerX + (printerW - paperW) / 2;
-  const paperH = isVertical ? 112 : 88;
+  const paperH = Math.min(isVertical ? 112 : 88, printerH * 0.82);
   const paperY = printerY - paperH + 20;
   fillRoundedRect(ctx, paperX, paperY, paperW, paperH, 6, '#f8fafc');
   ctx.fillStyle = '#0f172a';
@@ -885,8 +887,8 @@ function drawHardwareShowcase(
   ctx.fillText('80MM THERMAL', printerX + 16, printerY + printerH - 24);
 
   // 3. SMARTPHONE POS TERMINAL (right foreground)
-  const phoneW = isVertical ? contentW * 0.36 : contentW * 0.43;
-  const phoneH = isVertical ? contentH * 0.72 : contentH * 0.7;
+  const phoneH = isVertical ? contentH * 0.72 : contentH * 0.82;
+  const phoneW = Math.min(isVertical ? contentW * 0.36 : contentW * 0.43, phoneH * 0.54);
   const phoneX = originX + contentW - phoneW - (isVertical ? 14 : 6);
   const phoneY = originY + contentH - phoneH - 4;
 
@@ -2184,8 +2186,8 @@ export const PromoFlyerGeneratorCard: React.FC<PromoFlyerGeneratorCardProps> = (
       ctx.font = `900 ${isVertical ? 32 : 28}px ${FONT_STACK}`;
       ctx.fillText('ROFANI POS', margin + 60, headerY + 22);
 
-      // Minimal status pill right
-      const mpTxt = '●  M-PESA READY';
+      // Minimal status badge right
+      const mpTxt = '✓  M-PESA READY';
       ctx.font = `800 ${isVertical ? 18 : 15}px ${FONT_STACK}`;
       const mpW = ctx.measureText(mpTxt).width + 36;
       const mpX = W - margin - mpW;
@@ -2477,6 +2479,7 @@ export const PromoFlyerGeneratorCard: React.FC<PromoFlyerGeneratorCardProps> = (
         >
           <button
             type="button"
+            aria-pressed={template === 'standard_retail'}
             onClick={() => setTemplate('standard_retail')}
             className={`min-h-[38px] px-1.5 py-1.5 rounded-lg text-[10px] sm:text-[11px] font-bold inline-flex items-center justify-center gap-1 cursor-pointer transition ${
               template === 'standard_retail'
@@ -2489,6 +2492,7 @@ export const PromoFlyerGeneratorCard: React.FC<PromoFlyerGeneratorCardProps> = (
           </button>
           <button
             type="button"
+            aria-pressed={template === 'boutique_sale'}
             onClick={() => setTemplate('boutique_sale')}
             className={`min-h-[38px] px-1.5 py-1.5 rounded-lg text-[10px] sm:text-[11px] font-bold inline-flex items-center justify-center gap-1 cursor-pointer transition ${
               template === 'boutique_sale'
@@ -2501,6 +2505,7 @@ export const PromoFlyerGeneratorCard: React.FC<PromoFlyerGeneratorCardProps> = (
           </button>
           <button
             type="button"
+            aria-pressed={template === 'minimalist'}
             onClick={() => setTemplate('minimalist')}
             className={`min-h-[38px] px-1.5 py-1.5 rounded-lg text-[10px] sm:text-[11px] font-bold inline-flex items-center justify-center gap-1 cursor-pointer transition ${
               template === 'minimalist'

@@ -19,6 +19,7 @@ import {
   X,
   Download,
   FileText,
+  GitBranch,
 } from 'lucide-react';
 import { StoreSubscriptionProfile, SubscriptionPlanType } from '../../types';
 import {
@@ -493,6 +494,22 @@ export const SubscriptionPlansModal: React.FC<SubscriptionPlansModalProps> = ({
               Till <strong className="text-slate-200 font-mono">1833804</strong>
             </span>
           </div>
+
+          {storeProfile?.isMultiBranch && (
+            <div className="bg-sky-950/40 border border-sky-500/35 rounded-2xl px-4 py-3 mb-4 flex items-start gap-2.5 text-xs text-sky-100">
+              <GitBranch className="w-4 h-4 text-sky-400 shrink-0 mt-0.5" />
+              <div>
+                <div className="font-bold text-white">Unified Multi-Branch M-Pesa Billing</div>
+                <p className="text-[11px] text-sky-200/85 mt-0.5">
+                  All branches under{' '}
+                  <strong className="text-white">
+                    {storeProfile.businessGroupName || storeProfile.storeName}
+                  </strong>{' '}
+                  share this single M-Pesa subscription.
+                </p>
+              </div>
+            </div>
+          )}
 
           <div className="bg-slate-800/70 border border-slate-700/70 rounded-2xl px-4 py-3 mb-4 text-[11px] text-slate-300 flex flex-wrap items-center gap-x-4 gap-y-1.5">
             <span>• Fast POS Sales</span>

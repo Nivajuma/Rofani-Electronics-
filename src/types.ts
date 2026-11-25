@@ -110,6 +110,7 @@ export interface User {
   payCycle?: PayCycle; // 'Monthly' | 'Weekly' | 'Bi-Weekly' | 'Daily'
   basePayRate?: number; // Monthly salary, daily shift wage, or hourly rate in KSh
   fixedAllowance?: number; // Recurring transport/lunch/housing allowance in KSh
+  assignedBranchIds?: string[]; // Cloud storeIds across Multi-Branch Business Group
   updatedAt?: string;
 }
 
@@ -741,6 +742,15 @@ export interface StoreSubscriptionProfile {
   backupEmailConfirmed?: boolean;
   emailAutoBackupEnabled?: boolean;
   dismissedBackupBannerDate?: string;
+  isMultiBranch?: boolean;
+  businessGroupId?: string;
+  businessGroupName?: string;
+  parentStoreId?: string;
+  isBranchStore?: boolean;
+  branchCode?: string;
+  branchCity?: string;
+  branchAddress?: string;
+  branchManagerName?: string;
   createdAt: string;
   updatedAt: string;
 }

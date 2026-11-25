@@ -140,6 +140,15 @@ interface DataManagementViewProps {
   confirmedBackupEmail?: string;
   backupEmailConfirmed?: boolean;
   onConfirmBackupEmail?: (email: string, autoBackupEnabled?: boolean) => Promise<void> | void;
+  ownerDisplayName?: string;
+  ownerPhone?: string;
+  isMultiBranch?: boolean;
+  businessGroupName?: string;
+  branchCount?: number;
+  onOpenMultiBranch?: () => void;
+  biometricUnlockEnabled?: boolean;
+  onToggleBiometricUnlock?: (enabled: boolean) => Promise<void> | void;
+  onChangePasswordOrPin?: (params: { currentPin: string; newPin: string }) => Promise<void> | void;
 }
 
 export const DataManagementView: React.FC<DataManagementViewProps> = ({
@@ -195,6 +204,15 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
   confirmedBackupEmail = '',
   backupEmailConfirmed = false,
   onConfirmBackupEmail,
+  ownerDisplayName = '',
+  ownerPhone = '',
+  isMultiBranch = false,
+  businessGroupName = '',
+  branchCount = 1,
+  onOpenMultiBranch,
+  biometricUnlockEnabled = false,
+  onToggleBiometricUnlock,
+  onChangePasswordOrPin,
 }) => {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -944,6 +962,16 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
         onLockNow={onLockNow}
         onOpenAuditLogs={onOpenAuditLogs}
         onOpenCategoryManager={onOpenCategoryManager}
+        accountEmail={accountEmail}
+        ownerPhone={ownerPhone || storePhone}
+        ownerDisplayName={ownerDisplayName}
+        isMultiBranch={isMultiBranch}
+        businessGroupName={businessGroupName}
+        branchCount={branchCount}
+        onOpenMultiBranch={onOpenMultiBranch}
+        biometricUnlockEnabled={biometricUnlockEnabled}
+        onToggleBiometricUnlock={onToggleBiometricUnlock}
+        onChangePasswordOrPin={onChangePasswordOrPin}
       />
 
       <div id="data-management-section" className="p-4 sm:p-6 space-y-6 max-w-7xl mx-auto border-t border-slate-800 pt-8">

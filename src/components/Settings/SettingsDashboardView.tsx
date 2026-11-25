@@ -25,7 +25,17 @@ import {
   RefreshCw,
   Database,
   Clock,
-  QrCode
+  QrCode,
+  Eye,
+  EyeOff,
+  Fingerprint,
+  GitBranch,
+  Lock,
+  Phone,
+  Mail,
+  ArrowRightLeft,
+  ChevronDown,
+  AlertCircle
 } from 'lucide-react';
 import { Product, Customer, Supplier, Transaction, Expense, AttendanceRecord, User, StoreLocation, Role, WorkerPermissions } from '../../types';
 import { safeGetJSON, safeSetJSON } from '../../utils/safeStorage';
@@ -78,6 +88,16 @@ interface SettingsDashboardViewProps {
   onUpdateStoreKraPin?: (kraPin: string) => Promise<void> | void;
   onOpenShopQrShare?: () => void;
   onPreview9PmSummary?: () => void;
+  accountEmail?: string;
+  ownerPhone?: string;
+  ownerDisplayName?: string;
+  isMultiBranch?: boolean;
+  businessGroupName?: string;
+  branchCount?: number;
+  onOpenMultiBranch?: () => void;
+  biometricUnlockEnabled?: boolean;
+  onToggleBiometricUnlock?: (enabled: boolean) => Promise<void> | void;
+  onChangePasswordOrPin?: (params: { currentPin: string; newPin: string }) => Promise<void> | void;
 }
 
 type SettingCategoryKey =
@@ -323,11 +343,33 @@ export const SettingsDashboardView: React.FC<SettingsDashboardViewProps> = ({
   onUpdateStoreKraPin,
   onOpenShopQrShare,
   onPreview9PmSummary,
+  accountEmail = '',
+  ownerPhone = '',
+  ownerDisplayName = '',
+  isMultiBranch = false,
+  businessGroupName = '',
+  branchCount = 1,
+  onOpenMultiBranch,
+  biometricUnlockEnabled = false,
+  onToggleBiometricUnlock,
+  onChangePasswordOrPin,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [activeSubPanel, setActiveSubPanel] = useState<SettingCategoryKey | null>(null);
   const [successToast, setSuccessToast] = useState<string | null>(null);
   const [lastBackupMeta, setLastBackupMeta] = useState<LastBackupMeta | null>(() => getLastBackupMeta());
+
+  // Account & Security Card state
+  const [isPasswordFormOpen, setIsPasswordFormOpen] = useState(false);
+  const [currentPinInput, setCurrentPinInput] = useState('');
+  const [newPinInput, setNewPinInput] = useState('');
+  const [confirmPinInput, setConfirmPinInput] = useState('');
+  const [showCurrentPin, setShowCurrentPin] = useState(false);
+  const [showNewPin, setShowNewPin] = useState(false);
+  const [showConfirmPin, setShowConfirmPin] = useState(false);
+  const [passwordError, setPasswordError] = useState<string | null>(null);
+  const [isUpdatingPassword, setIsUpdatingPassword] = useState(false);
+  const [isUpdatingBiometric, setIsUpdatingBiometric] = useState(false);
 
   useEffect(() => {
     const onBackupRecorded = (e: Event) => {
@@ -794,6 +836,343 @@ export const SettingsDashboardView: React.FC<SettingsDashboardViewProps> = ({
         </div>
       )}
 
+      {/* Multi-Branch Business Group & Account / Security Overview */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        {/* Card 1: Multi-Branch ("Run more than one shop?") */}
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl flex flex-col justify-between gap-4">
+          <div className="space-y-3">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-11 h-11 rounded-xl bg-sky-500/15 border border-sky-500/30 text-sky-400 flex items-center justify-center shrink-0">
+                  <GitBranch className="w-5 h-5" />
+                </div>
+                <div className="min-w-0">
+                  <h3 className="font-bold text-sm text-white truncate">
+                    {isMultiBranch ? (businessGroupName || activeStoreName) : 'Run more than one shop?'}
+                  </h3>
+                  <p className="text-[11px] text-slate-400">
+                    {isMultiBranch
+                      ? `${branchCount} ${branchCount === 1 ? 'branch' : 'branches'} • Isolated stock & combined profit`
+                      : 'Multi-Branch Business Group'}
+                  </p>
+                </div>
+              </div>
+              {isMultiBranch && (
+                <span className="px-2 py-0.5 rounded-md bg-emerald-500/15 border border-emerald-500/30 text-[10px] font-bold text-emerald-300 shrink-0">
+                  Active
+                </span>
+              )}
+            </div>
+
+            <ul className="space-y-1.5 text-[11px] text-slate-300">
+              <li className="flex items-center gap-2">
+                <Check className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+                <span>Switch branches inside the app with isolated stock</span>
+              </li>
+              <li className="flex items-center gap-2">
+                <Check className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+                <span>Combined branch sales, wages, profit &amp; variance alerts</span>
+              </li>
+              <li className="flex items-center gap-2">
+                <Check className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+                <span>Unified M-Pesa billing &amp; cross-branch staff access</span>
+              </li>
+            </ul>
+          </div>
+
+          <button
+            type="button"
+            id="btn-settings-multi-branch"
+            onClick={() => {
+              if (onOpenMultiBranch) {
+                onOpenMultiBranch();
+              } else if (onOpenStoreManager) {
+                onOpenStoreManager();
+              }
+            }}
+            className="w-full py-2.5 px-4 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs flex items-center justify-center gap-2 transition cursor-pointer shadow-lg shadow-sky-600/20"
+          >
+            {isMultiBranch ? (
+              <>
+                <ArrowRightLeft className="w-4 h-4" />
+                <span>Switch Branch &amp; Group Report</span>
+              </>
+            ) : (
+              <>
+                <GitBranch className="w-4 h-4" />
+                <span>Upgrade to Multi-Branch</span>
+              </>
+            )}
+          </button>
+        </div>
+
+        {/* Card 2: Account Summary + Collapsible Change Password / Admin PIN */}
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl flex flex-col justify-between gap-4">
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-11 h-11 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 flex items-center justify-center shrink-0">
+                  <Building2 className="w-5 h-5" />
+                </div>
+                <div className="min-w-0">
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Account</div>
+                  <h3 className="font-bold text-sm text-white truncate">
+                    {activeStoreName}
+                  </h3>
+                  {ownerDisplayName && (
+                    <p className="text-[11px] text-slate-300 truncate">Owner: {ownerDisplayName}</p>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-slate-800/70 border border-slate-700/70 rounded-xl p-3 space-y-1.5 text-[11px]">
+              <div className="flex items-center gap-2 text-slate-300">
+                <Phone className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                <span className="truncate font-mono">{ownerPhone || storePhone || 'No phone saved'}</span>
+              </div>
+              <div className="flex items-center gap-2 text-slate-300">
+                <Mail className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                <span className="truncate">{accountEmail || 'Local / Offline Mode'}</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-2.5">
+            <button
+              type="button"
+              id="btn-toggle-change-password"
+              onClick={() => {
+                setIsPasswordFormOpen((prev) => !prev);
+                setPasswordError(null);
+              }}
+              className="w-full py-2.5 px-3.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-100 font-bold text-xs flex items-center justify-between transition cursor-pointer"
+            >
+              <span className="flex items-center gap-2">
+                <KeyRound className="w-4 h-4 text-amber-400" />
+                <span>Change Password / Admin PIN</span>
+              </span>
+              <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${isPasswordFormOpen ? 'rotate-180' : ''}`} />
+            </button>
+
+            {isPasswordFormOpen && (
+              <form
+                onSubmit={async (e) => {
+                  e.preventDefault();
+                  setPasswordError(null);
+                  const adminUser =
+                    localStaffUsers.find((u) => u.role === 'Admin' || (u.roles || []).includes('Admin')) ||
+                    localStaffUsers[0];
+                  const expectedCurrent = masterPin || adminUser?.pin || '1234';
+                  const trimmedCurrent = currentPinInput.trim();
+                  const trimmedNew = newPinInput.trim();
+                  const trimmedConfirm = confirmPinInput.trim();
+
+                  if (!trimmedCurrent) {
+                    setPasswordError('Enter your current Password or Admin PIN.');
+                    return;
+                  }
+                  if (trimmedCurrent !== expectedCurrent && trimmedCurrent !== adminUser?.pin) {
+                    setPasswordError('Current Password / Admin PIN does not match.');
+                    return;
+                  }
+                  if (trimmedNew.length < 4) {
+                    setPasswordError('New Password / PIN must be at least 4 characters.');
+                    return;
+                  }
+                  if (trimmedNew !== trimmedConfirm) {
+                    setPasswordError('New Password / PIN and confirmation do not match.');
+                    return;
+                  }
+
+                  setIsUpdatingPassword(true);
+                  try {
+                    if (onChangePasswordOrPin) {
+                      await onChangePasswordOrPin({ currentPin: trimmedCurrent, newPin: trimmedNew });
+                    } else {
+                      safeSetJSON('rofani_app_pin', trimmedNew);
+                      safeSetJSON('retail_pos_master_pin', trimmedNew);
+                      onUpdateMasterPin?.(trimmedNew);
+                    }
+                    setCurrentPinInput('');
+                    setNewPinInput('');
+                    setConfirmPinInput('');
+                    setIsPasswordFormOpen(false);
+                    triggerNotify('Password / Admin PIN updated successfully!');
+                  } catch (err: any) {
+                    setPasswordError(err?.message || 'Failed to update Password / Admin PIN.');
+                  } finally {
+                    setIsUpdatingPassword(false);
+                  }
+                }}
+                className="bg-slate-950/90 border border-slate-800 rounded-xl p-3 space-y-2.5 text-xs"
+              >
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                    Current Password/PIN
+                  </label>
+                  <div className="relative">
+                    <input
+                      type={showCurrentPin ? 'text' : 'password'}
+                      value={currentPinInput}
+                      onChange={(e) => setCurrentPinInput(e.target.value)}
+                      placeholder="Current PIN or password"
+                      className="w-full bg-slate-900 border border-slate-700 rounded-lg pl-3 pr-9 py-2 text-xs text-white focus:outline-none focus:ring-2 focus:ring-sky-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowCurrentPin((v) => !v)}
+                      aria-label={showCurrentPin ? 'Hide current password' : 'Show current password'}
+                      className="absolute right-2.5 top-2 text-slate-400 hover:text-slate-200 cursor-pointer"
+                    >
+                      {showCurrentPin ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                    New Password/PIN (min 4 characters)
+                  </label>
+                  <div className="relative">
+                    <input
+                      type={showNewPin ? 'text' : 'password'}
+                      value={newPinInput}
+                      onChange={(e) => setNewPinInput(e.target.value)}
+                      placeholder="Min 4 characters"
+                      className="w-full bg-slate-900 border border-slate-700 rounded-lg pl-3 pr-9 py-2 text-xs text-white focus:outline-none focus:ring-2 focus:ring-sky-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowNewPin((v) => !v)}
+                      aria-label={showNewPin ? 'Hide new password' : 'Show new password'}
+                      className="absolute right-2.5 top-2 text-slate-400 hover:text-slate-200 cursor-pointer"
+                    >
+                      {showNewPin ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                    Confirm New Password/PIN
+                  </label>
+                  <div className="relative">
+                    <input
+                      type={showConfirmPin ? 'text' : 'password'}
+                      value={confirmPinInput}
+                      onChange={(e) => setConfirmPinInput(e.target.value)}
+                      placeholder="Re-enter new password/PIN"
+                      className="w-full bg-slate-900 border border-slate-700 rounded-lg pl-3 pr-9 py-2 text-xs text-white focus:outline-none focus:ring-2 focus:ring-sky-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowConfirmPin((v) => !v)}
+                      aria-label={showConfirmPin ? 'Hide confirm password' : 'Show confirm password'}
+                      className="absolute right-2.5 top-2 text-slate-400 hover:text-slate-200 cursor-pointer"
+                    >
+                      {showConfirmPin ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+
+                {passwordError && (
+                  <div className="bg-rose-950/80 border border-rose-500/40 text-rose-200 text-[11px] px-2.5 py-2 rounded-lg flex items-center gap-1.5">
+                    <AlertCircle className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                    <span>{passwordError}</span>
+                  </div>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={isUpdatingPassword}
+                  className="w-full py-2 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-60 text-white font-bold text-xs transition cursor-pointer"
+                >
+                  {isUpdatingPassword ? 'Updating...' : 'Update Password'}
+                </button>
+              </form>
+            )}
+          </div>
+        </div>
+
+        {/* Card 3: Security (PIN + Biometric / Fingerprint Unlock) */}
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl flex flex-col justify-between gap-4">
+          <div className="space-y-3">
+            <div className="flex items-center gap-3">
+              <div className="w-11 h-11 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-400 flex items-center justify-center shrink-0">
+                <Fingerprint className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Security</div>
+                <h3 className="font-bold text-sm text-white">PIN &amp; Biometric Unlock</h3>
+              </div>
+            </div>
+
+            <div className="bg-slate-800/70 border border-slate-700/70 rounded-xl p-3 flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <div className="font-bold text-xs text-slate-100">
+                  PIN + Biometric / Fingerprint Unlock
+                </div>
+                <p className="text-[11px] text-slate-400 mt-0.5">
+                  Use device fingerprint/passkey with automatic 4-digit Admin PIN fallback
+                </p>
+              </div>
+              <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                <input
+                  type="checkbox"
+                  checked={Boolean(biometricUnlockEnabled)}
+                  disabled={isUpdatingBiometric}
+                  onChange={async (e) => {
+                    const nextVal = e.target.checked;
+                    setIsUpdatingBiometric(true);
+                    try {
+                      if (onToggleBiometricUnlock) {
+                        await onToggleBiometricUnlock(nextVal);
+                      } else {
+                        onToggleRequirePinOnStartup?.(nextVal || requirePinOnStartup);
+                      }
+                      triggerNotify(
+                        nextVal
+                          ? 'PIN + Biometric Fingerprint Unlock enabled!'
+                          : 'Biometric Fingerprint Unlock disabled (Admin PIN remains active).'
+                      );
+                    } finally {
+                      setIsUpdatingBiometric(false);
+                    }
+                  }}
+                  className="sr-only peer"
+                />
+                <div className="w-10 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-500"></div>
+              </label>
+            </div>
+
+            <div className="bg-slate-800/40 border border-slate-800 rounded-xl p-2.5 flex items-center justify-between text-[11px]">
+              <span className="text-slate-300">Require PIN on Startup</span>
+              <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                <input
+                  type="checkbox"
+                  checked={Boolean(requirePinOnStartup)}
+                  onChange={(e) => onToggleRequirePinOnStartup?.(e.target.checked)}
+                  className="sr-only peer"
+                />
+                <div className="w-9 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-sky-500"></div>
+              </label>
+            </div>
+          </div>
+
+          {onLockNow && (
+            <button
+              type="button"
+              onClick={onLockNow}
+              className="w-full py-2.5 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-100 font-bold text-xs flex items-center justify-center gap-2 transition cursor-pointer"
+            >
+              <Lock className="w-4 h-4 text-amber-400" />
+              <span>Lock Register Now</span>
+            </button>
+          )}
+        </div>
+      </div>
+
       {/* Settings Menu List */}
       <div className="bg-slate-900 border border-slate-800 rounded-2xl shadow-xl overflow-hidden divide-y divide-slate-800/80">
         {filteredItems.length === 0 ? (
@@ -888,6 +1267,10 @@ export const SettingsDashboardView: React.FC<SettingsDashboardViewProps> = ({
             onToggleRequirePinOnStartup={onToggleRequirePinOnStartup}
             masterPin={masterPin}
             onUpdateMasterPin={onUpdateMasterPin}
+            onOpenMultiBranch={onOpenMultiBranch}
+            isMultiBranch={isMultiBranch}
+            businessGroupName={businessGroupName}
+            branchCount={branchCount}
           />
         </div>
       )}

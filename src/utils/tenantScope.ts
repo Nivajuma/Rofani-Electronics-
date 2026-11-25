@@ -4,6 +4,7 @@
 
 export const OWNER_PRIMARY_STORE_ID = 'rofani-pos';
 export const ACTIVE_SCOPE_STORAGE_KEY = 'rofani_saas_active_store_scope';
+export const ACTIVE_BRANCH_CLOUD_STORE_KEY = 'rofani_saas_active_branch_cloud_store_id';
 export const VERIFIED_OWNER_CACHE_KEY = 'rofani_pos_verified_owner_email';
 
 const GLOBAL_UI_KEYS = new Set<string>([
@@ -15,6 +16,7 @@ const GLOBAL_UI_KEYS = new Set<string>([
   'retail_pos_sidebar_collapsed',
   'retail_pos_sound_effects',
   ACTIVE_SCOPE_STORAGE_KEY,
+  ACTIVE_BRANCH_CLOUD_STORE_KEY,
   VERIFIED_OWNER_CACHE_KEY,
 ]);
 
@@ -29,6 +31,18 @@ let _activeTenantStoreId: string = (() => {
   return OWNER_PRIMARY_STORE_ID;
 })();
 
+let _activeBranchCloudStoreId: string | null = (() => {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      const val = window.localStorage.getItem(ACTIVE_BRANCH_CLOUD_STORE_KEY);
+      return val && val.trim() ? val.trim() : null;
+    }
+  } catch {
+    // Ignore storage read failures
+  }
+  return null;
+})();
+
 export function getActiveTenantStoreId(): string {
   return _activeTenantStoreId || OWNER_PRIMARY_STORE_ID;
 }
@@ -39,6 +53,29 @@ export function setActiveTenantStoreId(storeId: string | null | undefined): stri
   try {
     if (typeof window !== 'undefined' && window.localStorage) {
       window.localStorage.setItem(ACTIVE_SCOPE_STORAGE_KEY, next);
+    }
+  } catch {
+    // Ignore storage write failures
+  }
+  return next;
+}
+
+export function getActiveBranchCloudStoreId(): string | null {
+  return _activeBranchCloudStoreId && _activeBranchCloudStoreId.trim()
+    ? _activeBranchCloudStoreId.trim()
+    : null;
+}
+
+export function setActiveBranchCloudStoreId(branchStoreId: string | null | undefined): string | null {
+  const next = branchStoreId && branchStoreId.trim() ? branchStoreId.trim() : null;
+  _activeBranchCloudStoreId = next;
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      if (next) {
+        window.localStorage.setItem(ACTIVE_BRANCH_CLOUD_STORE_KEY, next);
+      } else {
+        window.localStorage.removeItem(ACTIVE_BRANCH_CLOUD_STORE_KEY);
+      }
     }
   } catch {
     // Ignore storage write failures

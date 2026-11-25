@@ -44,7 +44,8 @@ import {
   Info,
   QrCode,
   Lightbulb,
-  CreditCard
+  CreditCard,
+  GitBranch
 } from 'lucide-react';
 import { TabKey } from '../../utils/permissions';
 import { User, StoreSubscriptionProfile } from '../../types';
@@ -85,6 +86,10 @@ export interface AppMenuViewProps {
   onOpenSuggestFeature?: () => void;
   onSignOutCloud?: () => Promise<void> | void;
   cloudUserEmail?: string | null;
+  onOpenMultiBranch?: () => void;
+  isMultiBranch?: boolean;
+  businessGroupName?: string;
+  branchCount?: number;
 }
 
 type InfoModalType =
@@ -119,7 +124,11 @@ export const AppMenuView: React.FC<AppMenuViewProps> = ({
   onOpenDigitalBusinessCard,
   onOpenSuggestFeature,
   onSignOutCloud,
-  cloudUserEmail = null
+  cloudUserEmail = null,
+  onOpenMultiBranch,
+  isMultiBranch = false,
+  businessGroupName,
+  branchCount = 1,
 }) => {
   const [accordions, setAccordions] = useState<Record<string, boolean>>({
     sale: false,
@@ -603,6 +612,37 @@ export const AppMenuView: React.FC<AppMenuViewProps> = ({
               <span className="text-[13px] font-semibold text-white">Sync & Share</span>
             </div>
             <ChevronRight className="w-4 h-4 text-slate-400 shrink-0" />
+          </button>
+
+          <button
+            type="button"
+            id="btn-menu-multi-branch"
+            onClick={() => {
+              if (onOpenMultiBranch) onOpenMultiBranch();
+              else if (onOpenStoreManager) onOpenStoreManager();
+              else onSelectTab('settings');
+            }}
+            className="w-full min-h-[56px] px-4 py-3 flex items-center justify-between bg-sky-950/20 hover:bg-sky-950/40 transition text-left cursor-pointer"
+          >
+            <div className="flex items-center gap-3.5 min-w-0 pr-2">
+              <GitBranch className="w-4 h-4 text-sky-400 shrink-0" strokeWidth={1.75} />
+              <div className="min-w-0">
+                <div className="text-[13px] font-semibold text-white truncate">
+                  {isMultiBranch ? (businessGroupName || 'Multi-Branch Group') : 'Run more than one shop?'}
+                </div>
+                <div className="text-[11px] text-slate-400 truncate">
+                  {isMultiBranch
+                    ? `${branchCount} ${branchCount === 1 ? 'branch' : 'branches'} • Switch & combined report`
+                    : 'Upgrade to Multi-Branch (keep current shop intact)'}
+                </div>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <span className="px-2 py-0.5 rounded-md bg-sky-500/15 border border-sky-500/30 text-[10px] font-bold text-sky-300">
+                {isMultiBranch ? `${branchCount} Branches` : 'Multi-Branch'}
+              </span>
+              <ChevronRight className="w-4 h-4 text-slate-400 shrink-0" />
+            </div>
           </button>
 
           <button

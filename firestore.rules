@@ -20,8 +20,14 @@ service cloud.firestore {
         );
     }
 
+    function isBranchStoreOwner(storeId) {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/stores/$(storeId))
+        && get(/databases/$(database)/documents/stores/$(storeId)).data.ownerUid == request.auth.uid;
+    }
+
     function isStoreOwnerOrAdmin(storeId) {
-      return isSignedIn() && (request.auth.uid == storeId || isSuperAdmin());
+      return isSignedIn() && (request.auth.uid == storeId || isSuperAdmin() || isBranchStoreOwner(storeId));
     }
 
     function isValidDocId(id) {
@@ -225,7 +231,23 @@ service cloud.firestore {
     match /stores/{storeId} {
       allow get: if isStoreOwnerOrAdmin(storeId) && isValidDocId(storeId);
       allow list: if isSuperAdmin() || (isSignedIn() && resource.data.ownerUid == request.auth.uid);
-      allow create, update: if isStoreOwnerOrAdmin(storeId) && isValidDocId(storeId);
+      allow create: if isSignedIn()
+        && isValidId(storeId)
+        && (
+          request.auth.uid == storeId
+          || isSuperAdmin()
+          || (
+            incoming().ownerUid == request.auth.uid
+            && incoming().parentStoreId == request.auth.uid
+            && incoming().isBranchStore == true
+            && incoming().storeName is string
+            && incoming().storeName.size() >= 1
+            && incoming().storeName.size() <= 200
+          )
+        );
+      allow update: if isStoreOwnerOrAdmin(storeId)
+        && isValidDocId(storeId)
+        && (isSuperAdmin() || incoming().ownerUid == existing().ownerUid);
       allow delete: if isSuperAdmin() && isValidDocId(storeId);
 
       match /referral_rewards/{claimId} {

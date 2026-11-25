@@ -8,6 +8,8 @@ import {
   getDocs,
   getDoc,
   runTransaction,
+  query,
+  where,
 } from 'firebase/firestore';
 import {
   db,
@@ -21,7 +23,7 @@ import {
   OWNER_CLOUD_EMAIL,
   isOwnerCloudUser,
 } from './firebase';
-import { getActiveTenantStoreId, resolveTenantStorageKey } from '../utils/tenantScope';
+import { getActiveTenantStoreId, getActiveBranchCloudStoreId, resolveTenantStorageKey } from '../utils/tenantScope';
 import { TRANSACTION_SETTINGS_DEFAULT } from '../utils/transactionSettings';
 import {
   Product,
@@ -48,6 +50,10 @@ const DEFAULT_FIRESTORE_READ_TIMEOUT_MS = 20000;
 export function resolveCloudStoreId(explicitStoreId?: string): string {
   if (explicitStoreId && explicitStoreId.trim()) {
     return explicitStoreId.trim();
+  }
+  const activeBranch = getActiveBranchCloudStoreId();
+  if (activeBranch) {
+    return activeBranch;
   }
   const authStoreId = getStoreIdForUser(auth.currentUser);
   if (authStoreId) {
@@ -1172,6 +1178,7 @@ export async function saveRestockRecordToCloud(rec: RestockRecord, storeId?: str
 
 export interface StoreSecurityConfig {
   requirePinOnStartup: boolean;
+  biometricUnlockEnabled?: boolean;
   masterPin: string;
   storeName?: string;
   recoveryEmail?: string;
@@ -2069,6 +2076,15 @@ export async function updateStoreProfileDetails(
       | 'backupEmailConfirmed'
       | 'emailAutoBackupEnabled'
       | 'dismissedBackupBannerDate'
+      | 'isMultiBranch'
+      | 'businessGroupId'
+      | 'businessGroupName'
+      | 'parentStoreId'
+      | 'isBranchStore'
+      | 'branchCode'
+      | 'branchCity'
+      | 'branchAddress'
+      | 'branchManagerName'
     >
   >
 ): Promise<void> {
@@ -2158,6 +2174,44 @@ export async function activateStoreSubscription(
     if (!updated) {
       throw new Error('Could not reload updated store subscription profile.');
     }
+
+    // Propagate unified M-Pesa subscription across all branches in the Multi-Branch Business Group
+    if (updated.ownerUid && updated.isMultiBranch) {
+      try {
+        const siblingsSnap = await withFirestoreTimeout(
+          getDocs(query(collection(db, 'stores'), where('ownerUid', '==', updated.ownerUid))),
+          'synchronizing unified multi-branch subscription',
+          4000
+        );
+        const batch = writeBatch(db);
+        let hasSiblings = false;
+        siblingsSnap.forEach((docSnap) => {
+          if (docSnap.id !== storeId) {
+            hasSiblings = true;
+            batch.set(
+              doc(db, 'stores', docSnap.id),
+              cleanForFirestore({
+                planType: updated.planType,
+                subscriptionStatus: updated.subscriptionStatus,
+                expiresAt: updated.expiresAt,
+                lastPaymentRef: updated.lastPaymentRef,
+                lastPaymentAmount: updated.lastPaymentAmount,
+                lastPaymentAt: updated.lastPaymentAt,
+                lastPaymentMethod: updated.lastPaymentMethod,
+                updatedAt: nowIso,
+              }),
+              { merge: true }
+            );
+          }
+        });
+        if (hasSiblings) {
+          await batch.commit().catch(() => {});
+        }
+      } catch {
+        // Non-fatal: primary store license is already updated
+      }
+    }
+
     return updated;
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
@@ -2441,4 +2495,619 @@ export async function migrateLegacyRootCollectionsToOwnerStoreIfNeeded(
 
 export async function migrateLegacyRootCollectionsToRofaniStoreIfNeeded(): Promise<boolean> {
   return migrateLegacyRootCollectionsToOwnerStoreIfNeeded(auth.currentUser?.uid);
+}
+
+// ---------------- MULTI-BRANCH BUSINESS GROUP & COMBINED ANALYTICS ----------------
+
+const MULTI_BRANCH_CACHE_PREFIX = 'rofani_multi_branch_group_';
+
+export function getCachedGroupBranches(primaryStoreId: string): StoreSubscriptionProfile[] {
+  if (typeof window === 'undefined' || !primaryStoreId) return [];
+  try {
+    const raw = window.localStorage.getItem(`${MULTI_BRANCH_CACHE_PREFIX}${primaryStoreId}`);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveCachedGroupBranches(primaryStoreId: string, branches: StoreSubscriptionProfile[]): void {
+  if (typeof window === 'undefined' || !primaryStoreId) return;
+  try {
+    window.localStorage.setItem(`${MULTI_BRANCH_CACHE_PREFIX}${primaryStoreId}`, JSON.stringify(branches));
+  } catch {}
+}
+
+export async function upgradeStoreToMultiBranchGroup(params: {
+  primaryStoreId: string;
+  businessGroupName: string;
+  currentProfile?: StoreSubscriptionProfile | null;
+  fallbackOwnerUid?: string;
+  fallbackOwnerEmail?: string;
+  fallbackStoreName?: string;
+  fallbackPhone?: string;
+}): Promise<StoreSubscriptionProfile> {
+  const cleanGroupName = params.businessGroupName.trim().slice(0, 200);
+  if (!cleanGroupName) {
+    throw new Error('Please enter the name of the whole business.');
+  }
+  const nowIso = new Date().toISOString();
+  const existing = params.currentProfile;
+  const ownerUid = existing?.ownerUid || params.fallbackOwnerUid || auth.currentUser?.uid || params.primaryStoreId;
+  const ownerEmail = (existing?.ownerEmail || params.fallbackOwnerEmail || auth.currentUser?.email || 'owner@rofanipos.app').toLowerCase();
+  const branchStoreName = existing?.storeName || params.fallbackStoreName || cleanGroupName;
+
+  const updatedProfile: StoreSubscriptionProfile = {
+    ...(existing || {
+      id: params.primaryStoreId,
+      ownerUid,
+      ownerEmail,
+      storeName: branchStoreName,
+      phone: params.fallbackPhone || '',
+      planType: 'trial',
+      subscriptionStatus: 'active',
+      expiresAt: new Date(Date.now() + 7 * 86400000).toISOString(),
+      createdAt: nowIso,
+    }),
+    id: params.primaryStoreId,
+    ownerUid,
+    ownerEmail,
+    storeName: branchStoreName,
+    isMultiBranch: true,
+    businessGroupId: params.primaryStoreId,
+    businessGroupName: cleanGroupName,
+    parentStoreId: params.primaryStoreId,
+    isBranchStore: false,
+    branchCode: existing?.branchCode || 'MAIN-01',
+    branchCity: existing?.branchCity || 'Main Branch',
+    updatedAt: nowIso,
+  };
+
+  if (auth.currentUser && auth.currentUser.emailVerified && typeof navigator !== 'undefined' && navigator.onLine) {
+    try {
+      await withFirestoreTimeout(
+        setDoc(
+          doc(db, 'stores', params.primaryStoreId),
+          cleanForFirestore({
+            isMultiBranch: true,
+            businessGroupId: params.primaryStoreId,
+            businessGroupName: cleanGroupName,
+            parentStoreId: params.primaryStoreId,
+            isBranchStore: false,
+            branchCode: updatedProfile.branchCode,
+            branchCity: updatedProfile.branchCity,
+            updatedAt: nowIso,
+          }),
+          { merge: true }
+        ),
+        'upgrading store to Multi-Branch Business Group',
+        6000
+      );
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `stores/${params.primaryStoreId}`);
+    }
+  }
+
+  const cached = getCachedGroupBranches(params.primaryStoreId);
+  const nextCache = [
+    updatedProfile,
+    ...cached
+      .filter((b) => b.id !== updatedProfile.id)
+      .map((b) => ({ ...b, isMultiBranch: true, businessGroupName: cleanGroupName })),
+  ];
+  saveCachedGroupBranches(params.primaryStoreId, nextCache);
+  return updatedProfile;
+}
+
+export async function createBranchStoreInGroup(params: {
+  primaryStoreId: string;
+  ownerUid: string;
+  ownerEmail: string;
+  businessGroupName: string;
+  branchName: string;
+  branchCode?: string;
+  branchCity?: string;
+  branchAddress?: string;
+  branchPhone?: string;
+  branchManagerName?: string;
+  parentProfile?: StoreSubscriptionProfile | null;
+  defaultStaff?: User[];
+}): Promise<StoreSubscriptionProfile> {
+  const cleanBranchName = params.branchName.trim().slice(0, 200);
+  if (!cleanBranchName) {
+    throw new Error('Branch name is required.');
+  }
+  const slug =
+    cleanBranchName
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '')
+      .slice(0, 10) || 'shop';
+  const branchStoreId = `${params.primaryStoreId}_br_${slug}_${Date.now().toString(36)}`.slice(0, 120);
+  const nowIso = new Date().toISOString();
+  const parent = params.parentProfile;
+  const cleanGroupName = params.businessGroupName.trim() || parent?.businessGroupName || parent?.storeName || 'Business Group';
+
+  const branchProfile: StoreSubscriptionProfile = {
+    id: branchStoreId,
+    ownerUid: params.ownerUid,
+    ownerEmail: params.ownerEmail.toLowerCase(),
+    storeName: cleanBranchName,
+    phone: (params.branchPhone || parent?.phone || '').trim(),
+    kraPin: parent?.kraPin || '',
+    mpesaShortcode: parent?.mpesaShortcode || '',
+    mpesaShortcodeType: parent?.mpesaShortcodeType || 'till',
+    planType: parent?.planType || 'trial',
+    subscriptionStatus: parent?.subscriptionStatus || 'active',
+    expiresAt: parent?.expiresAt || new Date(Date.now() + 7 * 86400000).toISOString(),
+    lastPaymentRef: parent?.lastPaymentRef,
+    lastPaymentMethod: parent?.lastPaymentMethod || 'free_trial',
+    taxMode: parent?.taxMode || 'none',
+    transactionWiseTax: parent?.transactionWiseTax ?? false,
+    skipLegacySeed: true,
+    isMultiBranch: true,
+    businessGroupId: params.primaryStoreId,
+    businessGroupName: cleanGroupName,
+    parentStoreId: params.primaryStoreId,
+    isBranchStore: true,
+    branchCode: (params.branchCode || `BR-${Math.floor(10 + Math.random() * 89)}`).trim().toUpperCase().slice(0, 32),
+    branchCity: (params.branchCity || 'Nairobi').trim().slice(0, 120),
+    branchAddress: (params.branchAddress || '').trim().slice(0, 200),
+    branchManagerName: (params.branchManagerName || '').trim().slice(0, 150),
+    createdAt: nowIso,
+    updatedAt: nowIso,
+  };
+
+  // Seed default users & branch flag in isolated branch localStorage immediately
+  try {
+    const seedUsers: User[] = (params.defaultStaff && params.defaultStaff.length > 0
+      ? params.defaultStaff
+      : [
+          {
+            id: 'usr-owner',
+            name: params.branchManagerName?.trim() || `${cleanBranchName} Admin`,
+            role: 'Admin' as const,
+            roles: ['Admin' as const],
+            email: params.ownerEmail.toLowerCase(),
+            pin: '1234',
+            phone: branchProfile.phone,
+            status: 'active' as const,
+            assignedBranchIds: [params.primaryStoreId, branchStoreId],
+            updatedAt: nowIso,
+          },
+        ]
+    ).map((u) => ({
+      ...u,
+      assignedBranchIds: Array.from(new Set([...(u.assignedBranchIds || [params.primaryStoreId]), branchStoreId])),
+      updatedAt: nowIso,
+    }));
+    window.localStorage.setItem(resolveTenantStorageKey('retail_pos_users', branchStoreId), JSON.stringify(seedUsers));
+    window.localStorage.setItem(resolveTenantStorageKey('rofani_pos_blank_mode', branchStoreId), 'true');
+  } catch {}
+
+  if (auth.currentUser && auth.currentUser.emailVerified && typeof navigator !== 'undefined' && navigator.onLine) {
+    try {
+      await withFirestoreTimeout(
+        setDoc(doc(db, 'stores', branchStoreId), cleanForFirestore(branchProfile), { merge: true }),
+        `creating branch ${cleanBranchName}`,
+        8000
+      );
+
+      const staffToSeed = params.defaultStaff && params.defaultStaff.length > 0
+        ? params.defaultStaff
+        : [
+            {
+              id: 'usr-owner',
+              name: params.branchManagerName?.trim() || `${cleanBranchName} Admin`,
+              role: 'Admin' as const,
+              roles: ['Admin' as const],
+              email: params.ownerEmail.toLowerCase(),
+              pin: '1234',
+              phone: branchProfile.phone,
+              status: 'active' as const,
+              assignedBranchIds: [params.primaryStoreId, branchStoreId],
+              updatedAt: nowIso,
+            },
+          ];
+
+      await Promise.all([
+        ...staffToSeed.map((u) =>
+          setDoc(
+            getScopedDocRef('users', u.id, branchStoreId),
+            cleanForFirestore({
+              ...u,
+              assignedBranchIds: Array.from(new Set([...(u.assignedBranchIds || [params.primaryStoreId]), branchStoreId])),
+              updatedAt: nowIso,
+            }),
+            { merge: true }
+          ).catch(() => {})
+        ),
+        setDoc(
+          getScopedDocRef('settings', 'transaction', branchStoreId),
+          cleanForFirestore({
+            ...TRANSACTION_SETTINGS_DEFAULT,
+            enableTransactionWiseTax: false,
+            activePrefixFirmId: branchStoreId,
+            updatedAt: nowIso,
+          }),
+          { merge: true }
+        ).catch(() => {}),
+      ]);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, `stores/${branchStoreId}`);
+      throw error;
+    }
+  }
+
+  const existingCache = getCachedGroupBranches(params.primaryStoreId);
+  const nextCache = [...existingCache.filter((b) => b.id !== branchStoreId), branchProfile];
+  saveCachedGroupBranches(params.primaryStoreId, nextCache);
+  return branchProfile;
+}
+
+export async function fetchBusinessGroupBranches(
+  ownerUid: string | null | undefined,
+  primaryStoreId: string,
+  fallbackPrimaryProfile?: StoreSubscriptionProfile | null
+): Promise<StoreSubscriptionProfile[]> {
+  const cached = getCachedGroupBranches(primaryStoreId);
+  const map = new Map<string, StoreSubscriptionProfile>();
+
+  if (fallbackPrimaryProfile) {
+    map.set(fallbackPrimaryProfile.id || primaryStoreId, {
+      ...fallbackPrimaryProfile,
+      id: fallbackPrimaryProfile.id || primaryStoreId,
+    });
+  }
+  cached.forEach((b) => {
+    if (b?.id) map.set(b.id, b);
+  });
+
+  if (ownerUid && auth.currentUser && auth.currentUser.emailVerified && typeof navigator !== 'undefined' && navigator.onLine) {
+    try {
+      const snap = await withFirestoreTimeout(
+        getDocs(query(collection(db, 'stores'), where('ownerUid', '==', ownerUid))),
+        'fetching business group branches',
+        5000
+      );
+      snap.forEach((docSnap) => {
+        const data = { id: docSnap.id, ...docSnap.data() } as StoreSubscriptionProfile;
+        if (
+          docSnap.id === primaryStoreId ||
+          data.parentStoreId === primaryStoreId ||
+          data.businessGroupId === primaryStoreId ||
+          data.isBranchStore
+        ) {
+          map.set(docSnap.id, data);
+        }
+      });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.LIST, 'stores');
+    }
+  }
+
+  const list = Array.from(map.values());
+  list.sort((a, b) => {
+    if (a.id === primaryStoreId || !a.isBranchStore) return -1;
+    if (b.id === primaryStoreId || !b.isBranchStore) return 1;
+    return new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime();
+  });
+
+  if (list.length > 0) {
+    saveCachedGroupBranches(primaryStoreId, list);
+  }
+  return list;
+}
+
+export interface BranchAnalyticsSummary {
+  storeId: string;
+  branchName: string;
+  branchCode: string;
+  branchCity: string;
+  isMainBranch: boolean;
+  salesTotal: number;
+  transactionsCount: number;
+  cogsTotal: number;
+  grossProfit: number;
+  expensesTotal: number;
+  wagesTotal: number;
+  netProfit: number;
+  stockValue: number;
+  productCount: number;
+  lowStockCount: number;
+  outOfStockCount: number;
+  stockVarianceCount: number;
+  staffCount: number;
+  isOutlier: boolean;
+  anomalySeverity: 'normal' | 'warning' | 'alert';
+  anomalyReasons: string[];
+}
+
+export interface MultiBranchCombinedReport {
+  branches: BranchAnalyticsSummary[];
+  totals: {
+    salesTotal: number;
+    expensesTotal: number;
+    wagesTotal: number;
+    netProfit: number;
+    stockValue: number;
+    transactionsCount: number;
+    outlierCount: number;
+  };
+  generatedAt: string;
+}
+
+function readLocalTenantArray<T>(key: string, storeId: string): T[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = window.localStorage.getItem(resolveTenantStorageKey(key, storeId));
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function fetchMultiBranchCombinedAnalytics(
+  branches: StoreSubscriptionProfile[],
+  activeBranchStoreId: string,
+  activeLiveData?: {
+    products: Product[];
+    transactions: Transaction[];
+    expenses: Expense[];
+    users: User[];
+    salaryPayouts?: any[];
+    commissionPayouts?: any[];
+  }
+): Promise<MultiBranchCombinedReport> {
+  const canQueryCloud = Boolean(
+    auth.currentUser &&
+      auth.currentUser.emailVerified &&
+      typeof navigator !== 'undefined' &&
+      navigator.onLine
+  );
+
+  const rawSummaries: BranchAnalyticsSummary[] = await Promise.all(
+    branches.map(async (branch, idx) => {
+      const sid = branch.id;
+      const isActive = sid === activeBranchStoreId;
+
+      let prods: Product[] = isActive && activeLiveData ? activeLiveData.products : readLocalTenantArray<Product>('retail_pos_products', sid);
+      let sales: Transaction[] = isActive && activeLiveData ? activeLiveData.transactions : readLocalTenantArray<Transaction>('retail_pos_transactions', sid);
+      let exps: Expense[] = isActive && activeLiveData ? activeLiveData.expenses : readLocalTenantArray<Expense>('retail_pos_expenses', sid);
+      let usersList: User[] = isActive && activeLiveData ? activeLiveData.users : readLocalTenantArray<User>('retail_pos_users', sid);
+      const salaryPayouts = isActive && activeLiveData?.salaryPayouts
+        ? activeLiveData.salaryPayouts
+        : readLocalTenantArray<any>('retail_pos_salary_payouts', sid);
+      const commissionPayouts = isActive && activeLiveData?.commissionPayouts
+        ? activeLiveData.commissionPayouts
+        : readLocalTenantArray<any>('retail_pos_commission_payouts', sid);
+
+      if (!isActive && canQueryCloud) {
+        const [cloudProds, cloudSales, cloudExps, cloudUsers] = await Promise.all([
+          fetchProductsFromCloud(sid).catch(() => []),
+          fetchTransactionsFromCloud(sid).catch(() => []),
+          fetchExpensesFromCloud(sid).catch(() => []),
+          fetchUsersFromCloud(sid).catch(() => []),
+        ]);
+        if (cloudProds.length > 0) prods = cloudProds;
+        if (cloudSales.length > 0) sales = cloudSales;
+        if (cloudExps.length > 0) exps = cloudExps;
+        if (cloudUsers.length > 0) usersList = cloudUsers;
+      }
+
+      let salesTotal = 0;
+      let cogsTotal = 0;
+      let commissionAccrued = 0;
+      sales.forEach((tx) => {
+        const amt = Number(tx.grandTotal || 0);
+        salesTotal += amt;
+        (tx.items || []).forEach((item) => {
+          const unitCost = Number(item.product?.costPrice ?? item.product?.buyingPrice ?? 0);
+          cogsTotal += unitCost * Number(item.quantity || 0);
+        });
+        if (tx.cashierCommissionAmount) {
+          commissionAccrued += Number(tx.cashierCommissionAmount || 0);
+        }
+      });
+
+      const expensesTotal = exps.reduce((sum, e) => sum + Number(e.amount || 0), 0);
+      const paidSalaries = salaryPayouts.reduce((sum, p) => sum + Number(p.netPaid || p.amount || 0), 0);
+      const paidCommissions = commissionPayouts.reduce((sum, c) => sum + Number(c.amount || 0), 0);
+      const accruedBasePay = usersList.reduce((sum, u) => sum + Number(u.basePayRate || 0) + Number(u.fixedAllowance || 0), 0);
+      const wagesTotal = paidSalaries > 0 || paidCommissions > 0
+        ? paidSalaries + paidCommissions
+        : commissionAccrued + (sales.length > 0 ? accruedBasePay : 0);
+
+      const grossProfit = salesTotal - cogsTotal;
+      const netProfit = grossProfit - expensesTotal - wagesTotal;
+
+      let stockValue = 0;
+      let lowStockCount = 0;
+      let outOfStockCount = 0;
+      let stockVarianceCount = 0;
+      prods.forEach((p) => {
+        const qty = Number(p.stockQuantity ?? p.stock ?? 0);
+        const cost = Number(p.costPrice ?? p.buyingPrice ?? 0);
+        const minAlert = Number(p.minStockAlert ?? 5);
+        stockValue += Math.max(0, qty) * cost;
+        if (qty <= 0) {
+          outOfStockCount += 1;
+          stockVarianceCount += 1;
+        } else if (qty <= minAlert) {
+          lowStockCount += 1;
+        }
+        if (qty < 0 || (p.sellingPrice > 0 && cost > p.sellingPrice)) {
+          stockVarianceCount += 1;
+        }
+      });
+
+      return {
+        storeId: sid,
+        branchName: branch.storeName || `Branch ${idx + 1}`,
+        branchCode: branch.branchCode || (idx === 0 ? 'MAIN-01' : `BR-0${idx + 1}`),
+        branchCity: branch.branchCity || 'Main Location',
+        isMainBranch: !branch.isBranchStore || idx === 0,
+        salesTotal,
+        transactionsCount: sales.length,
+        cogsTotal,
+        grossProfit,
+        expensesTotal,
+        wagesTotal,
+        netProfit,
+        stockValue,
+        productCount: prods.length,
+        lowStockCount,
+        outOfStockCount,
+        stockVarianceCount,
+        staffCount: usersList.length,
+        isOutlier: false,
+        anomalySeverity: 'normal',
+        anomalyReasons: [],
+      };
+    })
+  );
+
+  // Detect branches whose performance or stock variance is out of line with the rest
+  const activeBranchesWithSales = rawSummaries.filter((b) => b.salesTotal > 0);
+  const avgSales =
+    activeBranchesWithSales.length > 0
+      ? activeBranchesWithSales.reduce((s, b) => s + b.salesTotal, 0) / activeBranchesWithSales.length
+      : 0;
+  const avgVarianceRate =
+    rawSummaries.length > 0
+      ? rawSummaries.reduce(
+          (s, b) => s + (b.productCount > 0 ? b.stockVarianceCount / b.productCount : 0),
+          0
+        ) / rawSummaries.length
+      : 0;
+
+  const analyzed = rawSummaries.map((b) => {
+    const reasons: string[] = [];
+    let severity: 'normal' | 'warning' | 'alert' = 'normal';
+
+    if (rawSummaries.length > 1 && avgSales > 0) {
+      if (b.salesTotal === 0) {
+        reasons.push('No recorded sales yet compared to active peer branches');
+        severity = 'warning';
+      } else if (b.salesTotal < avgSales * 0.55) {
+        const pctBelow = Math.round(((avgSales - b.salesTotal) / avgSales) * 100);
+        reasons.push(`Sales ${pctBelow}% below group average`);
+        severity = 'alert';
+      }
+    }
+
+    if (b.netProfit < 0) {
+      reasons.push(`Operating at a net loss (-KSh ${Math.abs(Math.round(b.netProfit)).toLocaleString()})`);
+      severity = 'alert';
+    } else if (b.salesTotal > 0 && b.expensesTotal + b.wagesTotal > b.salesTotal * 0.65) {
+      reasons.push('Expenses & wages exceed 65% of branch revenue');
+      if (severity === 'normal') severity = 'warning';
+    }
+
+    const varianceRate = b.productCount > 0 ? b.stockVarianceCount / b.productCount : 0;
+    if (b.stockVarianceCount > 0 && (varianceRate > Math.max(0.2, avgVarianceRate * 1.6) || b.outOfStockCount >= 5)) {
+      reasons.push(
+        `${b.stockVarianceCount} stock variance / out-of-stock item${b.stockVarianceCount === 1 ? '' : 's'} needing review`
+      );
+      if (severity === 'normal') severity = 'warning';
+    }
+
+    return {
+      ...b,
+      isOutlier: reasons.length > 0,
+      anomalySeverity: severity,
+      anomalyReasons: reasons,
+    };
+  });
+
+  const totals = analyzed.reduce(
+    (acc, b) => ({
+      salesTotal: acc.salesTotal + b.salesTotal,
+      expensesTotal: acc.expensesTotal + b.expensesTotal,
+      wagesTotal: acc.wagesTotal + b.wagesTotal,
+      netProfit: acc.netProfit + b.netProfit,
+      stockValue: acc.stockValue + b.stockValue,
+      transactionsCount: acc.transactionsCount + b.transactionsCount,
+      outlierCount: acc.outlierCount + (b.isOutlier ? 1 : 0),
+    }),
+    {
+      salesTotal: 0,
+      expensesTotal: 0,
+      wagesTotal: 0,
+      netProfit: 0,
+      stockValue: 0,
+      transactionsCount: 0,
+      outlierCount: 0,
+    }
+  );
+
+  return {
+    branches: analyzed,
+    totals,
+    generatedAt: new Date().toISOString(),
+  };
+}
+
+export async function syncCrossBranchStaffAssignment(params: {
+  user: User;
+  targetBranchIds: string[];
+  allBranchIds: string[];
+}): Promise<User> {
+  const uniqueTargetIds = Array.from(new Set(params.targetBranchIds.filter(Boolean)));
+  const updatedUser: User = {
+    ...params.user,
+    assignedBranchIds: uniqueTargetIds,
+    updatedAt: new Date().toISOString(),
+  };
+
+  const canCloud = Boolean(
+    auth.currentUser &&
+      auth.currentUser.emailVerified &&
+      typeof navigator !== 'undefined' &&
+      navigator.onLine
+  );
+
+  // Sync worker record into every assigned branch's isolated users storage & cloud subcollection
+  await Promise.all(
+    uniqueTargetIds.map(async (branchId) => {
+      try {
+        const key = resolveTenantStorageKey('retail_pos_users', branchId);
+        const raw = window.localStorage.getItem(key);
+        const existing: User[] = raw ? JSON.parse(raw) : [];
+        const exists = Array.isArray(existing) && existing.some((u) => u.id === updatedUser.id);
+        const nextList = exists
+          ? existing.map((u) => (u.id === updatedUser.id ? updatedUser : u))
+          : [...(Array.isArray(existing) ? existing : []), updatedUser];
+        window.localStorage.setItem(key, JSON.stringify(nextList));
+      } catch {}
+
+      if (canCloud) {
+        await saveUserToCloud(updatedUser, branchId).catch(() => {});
+      }
+    })
+  );
+
+  // Update assignedBranchIds on unassigned branches cleanly if worker already existed there
+  const unassignedIds = params.allBranchIds.filter((id) => !uniqueTargetIds.includes(id));
+  await Promise.all(
+    unassignedIds.map(async (branchId) => {
+      try {
+        const key = resolveTenantStorageKey('retail_pos_users', branchId);
+        const raw = window.localStorage.getItem(key);
+        const existing: User[] = raw ? JSON.parse(raw) : [];
+        if (Array.isArray(existing) && existing.some((u) => u.id === updatedUser.id)) {
+          const nextList = existing.filter((u) => u.id !== updatedUser.id);
+          window.localStorage.setItem(key, JSON.stringify(nextList));
+          if (canCloud && updatedUser.role !== 'Admin') {
+            await deleteUserFromCloud(updatedUser.id, branchId).catch(() => {});
+          }
+        }
+      } catch {}
+    })
+  );
+
+  return updatedUser;
 }

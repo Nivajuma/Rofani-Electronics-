@@ -124,6 +124,7 @@ import { InstallPwaModal } from './components/InstallPwaModal';
 import { PhoneDeviceFrame } from './components/PhoneDeviceFrame';
 import { ItemHistoryModal } from './components/Inventory/ItemHistoryModal';
 import { StoreManagerModal } from './components/Store/StoreManagerModal';
+import { MultiBranchUpgradeModal } from './components/Store/MultiBranchUpgradeModal';
 import { OnlineStorefrontView } from './components/OnlineStore/OnlineStorefrontView';
 import { OnlineOrdersManagerView } from './components/OnlineStore/OnlineOrdersManagerView';
 import { CustomersSuppliersView } from './components/Contacts/CustomersSuppliersView';
@@ -236,7 +237,14 @@ import {
   deleteTransactionFromCloud,
   updateStoreProfileDetails,
   isLegacyRofaniStoreBrand,
+  upgradeStoreToMultiBranchGroup,
+  createBranchStoreInGroup,
+  fetchBusinessGroupBranches,
+  getCachedGroupBranches,
+  saveCachedGroupBranches,
+  syncCrossBranchStaffAssignment,
 } from './lib/cloudSync';
+import { registerNativeBiometricCredential } from './utils/biometricAuth';
 import { loadMpesaConfig, saveMpesaConfig } from './utils/mpesa';
 import {
   saveTransactionSettingsLocal,
@@ -265,6 +273,8 @@ import {
   VERIFIED_OWNER_CACHE_KEY,
   setActiveTenantStoreId,
   getActiveTenantStoreId,
+  getActiveBranchCloudStoreId,
+  setActiveBranchCloudStoreId,
   resolveTenantStorageKey,
 } from './utils/tenantScope';
 import { safeGetJSON, safeSetJSON, checkAndRunRollingSalesArchive } from './utils/safeStorage';
@@ -673,9 +683,12 @@ export default function App() {
     };
   });
 
-  // Security Configuration (PIN Protection before sharing with anyone)
+  // Security Configuration (PIN / Password / Biometric Protection)
   const [requirePinOnStartup, setRequirePinOnStartup] = useState<boolean>(() =>
     safeGetJSON('retail_pos_require_pin_startup', true)
+  );
+  const [biometricUnlockEnabled, setBiometricUnlockEnabled] = useState<boolean>(() =>
+    safeGetJSON('retail_pos_biometric_unlock', false, (v) => typeof v === 'boolean')
   );
   const [masterPin, setMasterPin] = useState<string>(() =>
     safeGetJSON('retail_pos_master_pin', '1234')
@@ -759,6 +772,14 @@ export default function App() {
   const [showPlansModal, setShowPlansModal] = useState<boolean>(false);
   const [showSuperAdminModal, setShowSuperAdminModal] = useState<boolean>(false);
   const [showSuggestFeatureModal, setShowSuggestFeatureModal] = useState<boolean>(false);
+  const [activeBranchStoreId, setActiveBranchStoreIdState] = useState<string | null>(() =>
+    getActiveBranchCloudStoreId()
+  );
+  const [groupBranches, setGroupBranches] = useState<StoreSubscriptionProfile[]>(() => {
+    const cachedSess = safeGetJSON<{ uid?: string } | null>('rofani_pos_cached_cloud_session', null);
+    return cachedSess?.uid ? getCachedGroupBranches(cachedSess.uid) : [];
+  });
+  const [showMultiBranchModal, setShowMultiBranchModal] = useState<boolean>(false);
 
   const PENDING_REFERRAL_STORAGE_KEY = 'rofani_pending_referral_code';
   const [pendingReferralCode, setPendingReferralCode] = useState<string>(() => {
@@ -833,7 +854,16 @@ export default function App() {
     isOwnerCloudUser(firebaseUser) ||
     (!hasAuthSettledFromFirebase && Boolean(cachedCloudSession?.isOwner)) ||
     (allowOfflineOwnerMode && typeof window !== 'undefined' && localStorage.getItem(VERIFIED_OWNER_CACHE_KEY) === '1');
-  const activeCloudStoreId = getStoreIdForUser(firebaseUser) || cachedCloudSession?.uid || null;
+  const primaryCloudStoreId = getStoreIdForUser(firebaseUser) || cachedCloudSession?.uid || null;
+  const activeCloudStoreId = primaryCloudStoreId;
+  const effectiveCloudStoreId = activeBranchStoreId || primaryCloudStoreId;
+  const activeBranchProfile = useMemo(() => {
+    if (effectiveCloudStoreId && groupBranches.length > 0) {
+      const matched = groupBranches.find((b) => b.id === effectiveCloudStoreId);
+      if (matched) return matched;
+    }
+    return storeProfile;
+  }, [groupBranches, effectiveCloudStoreId, storeProfile]);
   const isCloudAuthReady = isFirebaseAuthReady && isAuthorizedCloudUser(firebaseUser);
   const canAutoSyncCloud = () => getIsOnline() && isAuthorizedCloudUser(auth.currentUser);
   const prevTenantScopeRef = useRef<string>(getActiveTenantStoreId());
@@ -998,9 +1028,22 @@ export default function App() {
       firebaseUser && isAuthorizedCloudUser(firebaseUser) ? getStoreIdForUser(firebaseUser) : null;
 
     if (firebaseUser && isAuthorizedCloudUser(firebaseUser)) {
-      nextLocalScope = isOwnerCloudUser(firebaseUser)
-        ? OWNER_PRIMARY_STORE_ID
-        : (nextCloudStoreId || firebaseUser.uid);
+      const validBranchScope =
+        activeBranchStoreId &&
+        nextCloudStoreId &&
+        (activeBranchStoreId === nextCloudStoreId ||
+          activeBranchStoreId.startsWith(`${nextCloudStoreId}_br_`))
+          ? activeBranchStoreId
+          : null;
+      if (activeBranchStoreId && !validBranchScope) {
+        setActiveBranchCloudStoreId(null);
+        setActiveBranchStoreIdState(null);
+      }
+      nextLocalScope =
+        validBranchScope ||
+        (isOwnerCloudUser(firebaseUser)
+          ? OWNER_PRIMARY_STORE_ID
+          : (nextCloudStoreId || firebaseUser.uid));
       if (isOwnerCloudUser(firebaseUser)) {
         try {
           localStorage.setItem(VERIFIED_OWNER_CACHE_KEY, '1');
@@ -1008,18 +1051,31 @@ export default function App() {
       }
     } else if (!hasAuthSettledFromFirebase && cachedCloudSession?.uid) {
       // Firebase Auth is still hydrating on a slow mobile/cold start — preserve cached session scope
-      nextLocalScope = cachedCloudSession.isOwner ? OWNER_PRIMARY_STORE_ID : cachedCloudSession.uid;
+      const validCachedBranch =
+        activeBranchStoreId &&
+        (activeBranchStoreId === cachedCloudSession.uid ||
+          activeBranchStoreId.startsWith(`${cachedCloudSession.uid}_br_`))
+          ? activeBranchStoreId
+          : null;
+      nextLocalScope =
+        validCachedBranch ||
+        (cachedCloudSession.isOwner ? OWNER_PRIMARY_STORE_ID : cachedCloudSession.uid);
     } else if (
       allowOfflineOwnerMode &&
       typeof window !== 'undefined' &&
       localStorage.getItem(VERIFIED_OWNER_CACHE_KEY) === '1'
     ) {
-      nextLocalScope = OWNER_PRIMARY_STORE_ID;
+      nextLocalScope = activeBranchStoreId || OWNER_PRIMARY_STORE_ID;
     }
 
     if (prevTenantScopeRef.current !== nextLocalScope) {
       prevTenantScopeRef.current = nextLocalScope;
-      reloadAppStateForTenantScope(nextLocalScope, nextLocalScope === OWNER_PRIMARY_STORE_ID);
+      const branchMatch = groupBranches.find((b) => b.id === nextLocalScope) || null;
+      reloadAppStateForTenantScope(
+        nextLocalScope,
+        nextLocalScope === OWNER_PRIMARY_STORE_ID,
+        branchMatch
+      );
     } else {
       setActiveTenantStoreId(nextLocalScope);
     }
@@ -1266,6 +1322,75 @@ export default function App() {
       if (unsubscribeRewards) unsubscribeRewards();
     };
   }, [isFirebaseAuthReady, hasAuthSettledFromFirebase, firebaseUser?.uid, allowOfflineOwnerMode]);
+
+  // Hydrate Store Security (PIN / Password / Biometric Unlock) from Firestore
+  useEffect(() => {
+    const activeUid = effectiveCloudStoreId || firebaseUser?.uid;
+    if (!isCloudAuthReady || !activeUid) return;
+    let unsubscribe: (() => void) | undefined;
+    try {
+      unsubscribe = subscribeToStoreSecurity(
+        (cfg) => {
+          if (!cfg) return;
+          if (typeof cfg.requirePinOnStartup === 'boolean') {
+            setRequirePinOnStartup(cfg.requirePinOnStartup);
+            safeSetJSON('retail_pos_require_pin_startup', cfg.requirePinOnStartup);
+          }
+          if (typeof cfg.biometricUnlockEnabled === 'boolean') {
+            setBiometricUnlockEnabled(cfg.biometricUnlockEnabled);
+            safeSetJSON('retail_pos_biometric_unlock', cfg.biometricUnlockEnabled);
+          }
+          if (cfg.masterPin && cfg.masterPin.trim().length >= 4) {
+            setMasterPin(cfg.masterPin.trim());
+            safeSetJSON('retail_pos_master_pin', cfg.masterPin.trim());
+            safeSetJSON('rofani_app_pin', cfg.masterPin.trim());
+          }
+        },
+        (err) => console.warn('Store security subscription notice:', err),
+        activeUid
+      );
+    } catch (err) {
+      console.warn('Could not subscribe to store security:', err);
+    }
+    return () => {
+      if (unsubscribe) unsubscribe();
+    };
+  }, [isCloudAuthReady, firebaseUser?.uid, effectiveCloudStoreId]);
+
+  // Hydrate Multi-Branch Business Group branches whenever primary store or multi-branch status updates
+  useEffect(() => {
+    const primaryId = primaryCloudStoreId || firebaseUser?.uid;
+    if (!primaryId) return;
+    let cancelled = false;
+
+    const cached = getCachedGroupBranches(primaryId);
+    if (cached.length > 0) {
+      setGroupBranches(cached);
+    } else if (storeProfile) {
+      setGroupBranches([storeProfile]);
+    }
+
+    if (isCloudAuthReady && (storeProfile?.isMultiBranch || cached.length > 1)) {
+      fetchBusinessGroupBranches(firebaseUser?.uid || primaryId, primaryId, storeProfile)
+        .then((branches) => {
+          if (!cancelled && branches.length > 0) {
+            setGroupBranches(branches);
+          }
+        })
+        .catch(() => {});
+    }
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    isCloudAuthReady,
+    firebaseUser?.uid,
+    primaryCloudStoreId,
+    storeProfile?.id,
+    storeProfile?.isMultiBranch,
+    storeProfile?.businessGroupName,
+  ]);
 
   const [cloudSyncStatus, setCloudSyncStatus] = useState<'synced' | 'syncing' | 'offline' | 'error' | 'quota_exceeded'>('offline');
   // Strict 3-second maximum cap on any active cloud sync indicator
@@ -2043,6 +2168,12 @@ export default function App() {
     }
   });
 
+  const displayedStoreName =
+    (activeBranchStoreId && activeBranchProfile?.storeName) ||
+    stores.find((s) => s.id === activeStoreId)?.name ||
+    storeProfile?.storeName ||
+    'Rofani POS';
+
   const [offers, setOffers] = useState<OfferDeal[]>(() =>
     safeGetJSON('retail_pos_offers', getActiveTenantStoreId() === OWNER_PRIMARY_STORE_ID ? INITIAL_OFFERS : [])
   );
@@ -2415,7 +2546,7 @@ export default function App() {
 
   // Real-time synchronization subscription for transactions with conflict detection
   useEffect(() => {
-    const activeUid = firebaseUser?.uid;
+    const activeUid = effectiveCloudStoreId || firebaseUser?.uid;
     if (!isCloudAuthReady || !activeUid) return;
     let cancelled = false;
     let receivedSnapshot = false;
@@ -2489,11 +2620,11 @@ export default function App() {
       if (fallbackTimer) clearTimeout(fallbackTimer);
       if (unsubscribe) unsubscribe();
     };
-  }, [isCloudAuthReady, firebaseUser?.uid]);
+  }, [isCloudAuthReady, firebaseUser?.uid, effectiveCloudStoreId]);
 
   // Real-time synchronization subscription for products with ID-based local preservation & exact-ms conflict detection
   useEffect(() => {
-    const activeUid = firebaseUser?.uid;
+    const activeUid = effectiveCloudStoreId || firebaseUser?.uid;
     if (!isCloudAuthReady || !activeUid) return;
     let cancelled = false;
     let receivedSnapshot = false;
@@ -2574,7 +2705,7 @@ export default function App() {
       if (fallbackTimer) clearTimeout(fallbackTimer);
       if (unsubscribe) unsubscribe();
     };
-  }, [isCloudAuthReady, firebaseUser?.uid]);
+  }, [isCloudAuthReady, firebaseUser?.uid, effectiveCloudStoreId]);
 
   // Real-time synchronization subscription for M-PESA & Daraja store configuration
   useEffect(() => {
@@ -2611,7 +2742,7 @@ export default function App() {
 
   // Real-time synchronization subscription for per-store Transaction Settings & Shop Protection Controls
   useEffect(() => {
-    const activeUid = activeCloudStoreId || firebaseUser?.uid;
+    const activeUid = effectiveCloudStoreId || firebaseUser?.uid;
     if (!isCloudAuthReady || !activeUid) return;
     let isCancelled = false;
     let unsubscribeTx: (() => void) | undefined;
@@ -2645,9 +2776,9 @@ export default function App() {
       if (unsubscribeTx) unsubscribeTx();
       if (unsubscribeControls) unsubscribeControls();
     };
-  }, [isCloudAuthReady, firebaseUser?.uid, activeCloudStoreId]);
+  }, [isCloudAuthReady, firebaseUser?.uid, effectiveCloudStoreId]);
 
-  const resolvedSettingsStoreId = activeCloudStoreId || getActiveTenantStoreId();
+  const resolvedSettingsStoreId = effectiveCloudStoreId || getActiveTenantStoreId();
   const [shopControls] = useShopProtectionSettings(resolvedSettingsStoreId);
 
   const pushActivityAlert = (
@@ -2723,7 +2854,7 @@ export default function App() {
 
   // Real-time synchronization subscription for users & staff accounts
   useEffect(() => {
-    const activeUid = firebaseUser?.uid;
+    const activeUid = effectiveCloudStoreId || firebaseUser?.uid;
     if (!isCloudAuthReady || !activeUid) return;
     let unsubscribe: (() => void) | undefined;
     try {
@@ -2756,7 +2887,7 @@ export default function App() {
     return () => {
       if (unsubscribe) unsubscribe();
     };
-  }, [isCloudAuthReady, firebaseUser?.uid]);
+  }, [isCloudAuthReady, firebaseUser?.uid, effectiveCloudStoreId]);
 
   const syncInFlightPromiseRef = useRef<Promise<SyncRetryResult> | null>(null);
 
@@ -3714,14 +3845,20 @@ export default function App() {
   const handleUpdateMasterPin = async (newPin: string) => {
     setMasterPin(newPin);
     safeSetJSON('retail_pos_master_pin', newPin);
+    safeSetJSON('rofani_app_pin', newPin);
     if (!canAutoSyncCloud()) return;
     try {
-      await saveStoreSecurityToCloud({
+      const payload: StoreSecurityConfig = {
         requirePinOnStartup,
+        biometricUnlockEnabled,
         masterPin: newPin,
         recoveryEmail: ownerRecoveryEmail,
         emergencyKey: emergencyRecoveryKey,
-      });
+      };
+      await saveStoreSecurityToCloud(payload, effectiveCloudStoreId || undefined);
+      if (primaryCloudStoreId && primaryCloudStoreId !== effectiveCloudStoreId) {
+        await saveStoreSecurityToCloud(payload, primaryCloudStoreId).catch(() => {});
+      }
     } catch (err) {
       console.warn('Could not sync master PIN to cloud:', err);
     }
@@ -3761,7 +3898,7 @@ export default function App() {
       }
       if (canAutoSyncCloud()) {
         try {
-          await saveUserToCloud(updatedUser);
+          await saveUserToCloud(updatedUser, effectiveCloudStoreId || undefined);
         } catch (err) {
           console.warn('Could not sync reset admin PIN to cloud:', err);
         }
@@ -3776,12 +3913,99 @@ export default function App() {
     safeSetJSON('retail_pos_require_pin_startup', require);
     if (!canAutoSyncCloud()) return;
     try {
-      await saveStoreSecurityToCloud({
+      const payload: StoreSecurityConfig = {
         requirePinOnStartup: require,
+        biometricUnlockEnabled,
         masterPin,
-      });
+        recoveryEmail: ownerRecoveryEmail,
+        emergencyKey: emergencyRecoveryKey,
+      };
+      await saveStoreSecurityToCloud(payload, effectiveCloudStoreId || undefined);
+      if (primaryCloudStoreId && primaryCloudStoreId !== effectiveCloudStoreId) {
+        await saveStoreSecurityToCloud(payload, primaryCloudStoreId).catch(() => {});
+      }
     } catch (err) {
       console.warn('Could not sync security settings to cloud:', err);
+    }
+  };
+
+  const handleChangePasswordOrPin = async ({
+    currentPin,
+    newPin,
+  }: {
+    currentPin: string;
+    newPin: string;
+  }) => {
+    const cleanCurrent = (currentPin || '').trim();
+    const cleanNew = (newPin || '').trim();
+    const adminUser =
+      allUsers.find((u) => hasRole(u, 'Admin')) || allUsers[0];
+    const validMaster = (masterPin || '1234').trim();
+    const validAdminPin = (adminUser?.pin || '').trim();
+
+    if (!cleanCurrent || (cleanCurrent !== validMaster && cleanCurrent !== validAdminPin)) {
+      throw new Error('Current Password / Admin PIN does not match.');
+    }
+    if (cleanNew.length < 4) {
+      throw new Error('New Password / PIN must be at least 4 characters.');
+    }
+
+    setMasterPin(cleanNew);
+    safeSetJSON('retail_pos_master_pin', cleanNew);
+    safeSetJSON('rofani_app_pin', cleanNew);
+
+    if (adminUser) {
+      const updatedAdmin: User = {
+        ...adminUser,
+        pin: cleanNew,
+        updatedAt: new Date().toISOString(),
+      };
+      setAllUsers((prev) => prev.map((u) => (u.id === adminUser.id ? updatedAdmin : u)));
+      if (currentUser.id === adminUser.id) {
+        setCurrentUser(updatedAdmin);
+        safeSetJSON('retail_pos_active_user', updatedAdmin);
+      }
+      if (canAutoSyncCloud()) {
+        await saveUserToCloud(updatedAdmin, effectiveCloudStoreId || undefined).catch(() => {});
+      }
+    }
+
+    if (canAutoSyncCloud()) {
+      const payload: StoreSecurityConfig = {
+        requirePinOnStartup,
+        biometricUnlockEnabled,
+        masterPin: cleanNew,
+        recoveryEmail: ownerRecoveryEmail,
+        emergencyKey: emergencyRecoveryKey,
+      };
+      await saveStoreSecurityToCloud(payload, effectiveCloudStoreId || undefined).catch(() => {});
+      if (primaryCloudStoreId && primaryCloudStoreId !== effectiveCloudStoreId) {
+        await saveStoreSecurityToCloud(payload, primaryCloudStoreId).catch(() => {});
+      }
+    }
+  };
+
+  const handleToggleBiometricUnlock = async (enabled: boolean) => {
+    setBiometricUnlockEnabled(enabled);
+    safeSetJSON('retail_pos_biometric_unlock', enabled);
+    if (enabled && currentUser) {
+      await registerNativeBiometricCredential(currentUser).catch(() => null);
+    }
+    if (!canAutoSyncCloud()) return;
+    try {
+      const payload: StoreSecurityConfig = {
+        requirePinOnStartup,
+        biometricUnlockEnabled: enabled,
+        masterPin,
+        recoveryEmail: ownerRecoveryEmail,
+        emergencyKey: emergencyRecoveryKey,
+      };
+      await saveStoreSecurityToCloud(payload, effectiveCloudStoreId || undefined);
+      if (primaryCloudStoreId && primaryCloudStoreId !== effectiveCloudStoreId) {
+        await saveStoreSecurityToCloud(payload, primaryCloudStoreId).catch(() => {});
+      }
+    } catch (err) {
+      console.warn('Could not sync biometric unlock setting:', err);
     }
   };
 
@@ -4717,7 +4941,7 @@ export default function App() {
         })
       );
     } else {
-      bulkUploadProductsToCloud(stampedImports, undefined, activeCloudStoreId || undefined).catch(() => {
+      bulkUploadProductsToCloud(stampedImports, undefined, effectiveCloudStoreId || undefined).catch(() => {
         stampedImports.forEach((p) =>
           addPendingSyncItem({
             type: 'product',
@@ -4727,7 +4951,7 @@ export default function App() {
         );
       });
       if (removedProductIds.length > 0) {
-        batchDeleteProductsFromCloud(removedProductIds, activeCloudStoreId || undefined).catch(() => {
+        batchDeleteProductsFromCloud(removedProductIds, effectiveCloudStoreId || undefined).catch(() => {
           removedProductIds.forEach((pid) =>
             addPendingSyncItem({
               type: 'product',
@@ -4833,7 +5057,7 @@ export default function App() {
           data: { id: productId, _deleted: true },
         });
       } else {
-        deleteProductFromCloud(productId, activeCloudStoreId || undefined).catch(() => {
+        deleteProductFromCloud(productId, effectiveCloudStoreId || undefined).catch(() => {
           addPendingSyncItem({
             type: 'product',
             description: `Delete Product: ${existing?.name || productId}`,
@@ -4919,7 +5143,7 @@ export default function App() {
         });
       } else {
         try {
-          await batchDeleteProductsFromCloud(uniqueIds, activeCloudStoreId || undefined);
+          await batchDeleteProductsFromCloud(uniqueIds, effectiveCloudStoreId || undefined);
         } catch {
           uniqueIds.forEach((pid) => {
             const itemName = removedItems.find((p) => p.id === pid)?.name || pid;
@@ -5037,7 +5261,7 @@ export default function App() {
     } else {
       if (stampedPrimaries.length > 0) {
         try {
-          await batchSaveProductsToCloud(stampedPrimaries, undefined, activeCloudStoreId || undefined);
+          await batchSaveProductsToCloud(stampedPrimaries, undefined, effectiveCloudStoreId || undefined);
         } catch {
           stampedPrimaries.forEach((p) => {
             addPendingSyncItem({
@@ -5050,7 +5274,7 @@ export default function App() {
       }
       if (uniqueRemovedIds.length > 0) {
         try {
-          await batchDeleteProductsFromCloud(uniqueRemovedIds, activeCloudStoreId || undefined);
+          await batchDeleteProductsFromCloud(uniqueRemovedIds, effectiveCloudStoreId || undefined);
         } catch {
           uniqueRemovedIds.forEach((pid) => {
             addPendingSyncItem({
@@ -5530,13 +5754,113 @@ export default function App() {
     );
   };
 
-  // Multi-Store & Online Orders Handlers
+  // Multi-Store & Multi-Branch Business Group Handlers
   const handleAddStore = (newStoreData: Omit<StoreLocation, 'id'>) => {
     const newStore: StoreLocation = {
       ...newStoreData,
       id: `store-${Date.now()}`
     };
     setStores((prev) => [...prev, newStore]);
+  };
+
+  const handleUpgradeToMultiBranch = async (businessGroupName: string) => {
+    const primaryId = primaryCloudStoreId || firebaseUser?.uid || OWNER_PRIMARY_STORE_ID;
+    const updated = await upgradeStoreToMultiBranchGroup({
+      primaryStoreId: primaryId,
+      businessGroupName,
+      currentProfile: storeProfile,
+      fallbackOwnerUid: firebaseUser?.uid || primaryId,
+      fallbackOwnerEmail: firebaseUser?.email || storeProfile?.ownerEmail || 'owner@rofanipos.app',
+      fallbackStoreName: displayedStoreName,
+      fallbackPhone: storeProfile?.phone || currentUser?.phone || '',
+    });
+    setStoreProfile(updated);
+    safeSetJSON('rofani_pos_store_profile', updated);
+    setGroupBranches((prev) => {
+      const next = [
+        updated,
+        ...prev
+          .filter((b) => b.id !== updated.id)
+          .map((b) => ({ ...b, isMultiBranch: true, businessGroupName: updated.businessGroupName })),
+      ];
+      saveCachedGroupBranches(primaryId, next);
+      return next;
+    });
+  };
+
+  const handleCreateBranchInGroup = async (branchInput: {
+    branchName: string;
+    branchCode?: string;
+    branchCity?: string;
+    branchAddress?: string;
+    branchPhone?: string;
+    branchManagerName?: string;
+  }) => {
+    const primaryId = primaryCloudStoreId || firebaseUser?.uid || OWNER_PRIMARY_STORE_ID;
+    const ownerUid = firebaseUser?.uid || storeProfile?.ownerUid || primaryId;
+    const ownerEmail = (firebaseUser?.email || storeProfile?.ownerEmail || 'owner@rofanipos.app').toLowerCase();
+    const adminStaff = allUsers.filter((u) => hasRole(u, 'Admin'));
+    const createdBranch = await createBranchStoreInGroup({
+      primaryStoreId: primaryId,
+      ownerUid,
+      ownerEmail,
+      businessGroupName: storeProfile?.businessGroupName || displayedStoreName,
+      branchName: branchInput.branchName,
+      branchCode: branchInput.branchCode,
+      branchCity: branchInput.branchCity,
+      branchAddress: branchInput.branchAddress,
+      branchPhone: branchInput.branchPhone,
+      branchManagerName: branchInput.branchManagerName,
+      parentProfile: storeProfile,
+      defaultStaff: adminStaff.length > 0 ? adminStaff : undefined,
+    });
+    setGroupBranches((prev) => {
+      const base = prev.length > 0 ? prev : storeProfile ? [storeProfile] : [];
+      const next = [...base.filter((b) => b.id !== createdBranch.id), createdBranch];
+      saveCachedGroupBranches(primaryId, next);
+      return next;
+    });
+  };
+
+  const handleSwitchBranchStore = (targetStoreId: string) => {
+    const primaryId = primaryCloudStoreId || firebaseUser?.uid || OWNER_PRIMARY_STORE_ID;
+    const isMainBranch = targetStoreId === primaryId;
+    const targetBranch = groupBranches.find((b) => b.id === targetStoreId) || storeProfile;
+    const nextScope = isMainBranch
+      ? isOwnerAccount
+        ? OWNER_PRIMARY_STORE_ID
+        : primaryId
+      : targetStoreId;
+
+    setActiveBranchCloudStoreId(isMainBranch ? null : targetStoreId);
+    setActiveBranchStoreIdState(isMainBranch ? null : targetStoreId);
+    prevTenantScopeRef.current = nextScope;
+    reloadAppStateForTenantScope(nextScope, nextScope === OWNER_PRIMARY_STORE_ID, targetBranch);
+    if (targetBranch?.storeName) {
+      setStores((prev) =>
+        prev.map((s, idx) =>
+          idx === 0 || s.id === 'store-main' ? { ...s, name: targetBranch.storeName } : s
+        )
+      );
+    }
+    setShowMultiBranchModal(false);
+  };
+
+  const handleSyncCrossBranchStaff = async (user: User, targetBranchIds: string[]) => {
+    const allBranchIds =
+      groupBranches.length > 0
+        ? groupBranches.map((b) => b.id)
+        : [primaryCloudStoreId || firebaseUser?.uid || OWNER_PRIMARY_STORE_ID];
+    const updatedUser = await syncCrossBranchStaffAssignment({
+      user,
+      targetBranchIds,
+      allBranchIds,
+    });
+    setAllUsers((prev) => prev.map((u) => (u.id === updatedUser.id ? updatedUser : u)));
+    if (currentUser.id === updatedUser.id) {
+      setCurrentUser(updatedUser);
+      safeSetJSON('retail_pos_active_user', updatedUser);
+    }
   };
 
   const handleUpdateStoreName = (nextName: string) => {
@@ -5551,8 +5875,13 @@ export default function App() {
           : s
       )
     );
-    setStoreProfile((prev) => (prev ? { ...prev, storeName: normalizedName } : prev));
-    const targetCloudStoreId = activeCloudStoreId || getActiveTenantStoreId();
+    const targetCloudStoreId = effectiveCloudStoreId || getActiveTenantStoreId();
+    if (!activeBranchStoreId || activeBranchStoreId === primaryCloudStoreId) {
+      setStoreProfile((prev) => (prev ? { ...prev, storeName: normalizedName } : prev));
+    }
+    setGroupBranches((prev) =>
+      prev.map((b) => (b.id === targetCloudStoreId ? { ...b, storeName: normalizedName } : b))
+    );
     if (targetCloudStoreId && targetCloudStoreId !== '__unauthenticated__' && isAuthorizedCloudUser(firebaseUser)) {
       updateStoreProfileDetails(targetCloudStoreId, { storeName: normalizedName }).catch(() => {});
     }
@@ -5567,7 +5896,7 @@ export default function App() {
       }
       return updated;
     });
-    const targetCloudStoreId = activeCloudStoreId || getActiveTenantStoreId();
+    const targetCloudStoreId = effectiveCloudStoreId || getActiveTenantStoreId();
     if (targetCloudStoreId && targetCloudStoreId !== '__unauthenticated__' && isAuthorizedCloudUser(firebaseUser)) {
       await updateStoreProfileDetails(targetCloudStoreId, { businessCard: nextCard });
     }
@@ -5583,7 +5912,7 @@ export default function App() {
       }
       return updated;
     });
-    const targetCloudStoreId = activeCloudStoreId || getActiveTenantStoreId();
+    const targetCloudStoreId = effectiveCloudStoreId || getActiveTenantStoreId();
     if (targetCloudStoreId && targetCloudStoreId !== '__unauthenticated__' && isAuthorizedCloudUser(firebaseUser)) {
       updateStoreProfileDetails(targetCloudStoreId, { preferredLabelSizeId: formatId }).catch(() => {});
     }
@@ -6243,8 +6572,8 @@ export default function App() {
         `Receipt ${targetTx?.receiptNumber || txId}${targetTx ? ` (KSh ${(targetTx.grandTotal || 0).toLocaleString()})` : ''} was deleted by ${currentUser.name}.`
       );
     }
-    if (isCloudAuthReady && firebaseUser?.uid) {
-      deleteTransactionFromCloud(txId, activeCloudStoreId || firebaseUser.uid).catch((err) =>
+    if (isCloudAuthReady && (effectiveCloudStoreId || firebaseUser?.uid)) {
+      deleteTransactionFromCloud(txId, effectiveCloudStoreId || firebaseUser!.uid).catch((err) =>
         console.warn('Cloud delete transaction notice:', err)
       );
     }
@@ -6398,8 +6727,8 @@ export default function App() {
           externalManualBarcodeRequest={externalManualBarcodeRequest}
           externalQuickDiscountRequest={externalQuickDiscountRequest}
           externalClearDiscountTrigger={externalClearDiscountTrigger}
-          storeName={stores.find((s) => s.id === activeStoreId)?.name || storeProfile?.storeName || 'Rofani POS'}
-          activeStoreId={activeCloudStoreId || getActiveTenantStoreId()}
+          storeName={displayedStoreName}
+          activeStoreId={effectiveCloudStoreId || getActiveTenantStoreId()}
           storeKraPin={storeProfile?.kraPin}
           requirePinOnStartup={requirePinOnStartup}
           expenses={expenses}
@@ -6450,7 +6779,7 @@ export default function App() {
             } catch {}
           }}
           onOpenCategoryManager={() => setShowCategoryManagerModal(true)}
-          activeStoreId={activeCloudStoreId || getActiveTenantStoreId()}
+          activeStoreId={effectiveCloudStoreId || getActiveTenantStoreId()}
         />
       )}
 
@@ -6526,7 +6855,7 @@ export default function App() {
           onBatchUpdateExpenses={setExpenses}
           onOpenAuditLogs={() => setActiveTab('auditlogs')}
           allUsers={allUsers}
-          activeStoreId={activeCloudStoreId || getActiveTenantStoreId()}
+          activeStoreId={effectiveCloudStoreId || getActiveTenantStoreId()}
         />
       )}
 
@@ -6556,8 +6885,8 @@ export default function App() {
           onUpdateUserSalarySettings={handleUpdateUserSalarySettings}
           expenses={expenses}
           onAddExpense={handleAddExpense}
-          storeName={stores.find((s) => s.id === activeStoreId)?.name || storeProfile?.storeName || 'Rofani POS'}
-          activeStoreId={activeCloudStoreId || getActiveTenantStoreId()}
+          storeName={displayedStoreName}
+          activeStoreId={effectiveCloudStoreId || getActiveTenantStoreId()}
         />
       )}
 
@@ -6571,12 +6900,12 @@ export default function App() {
           auditLogs={auditLogs}
           onUpdateTransaction={handleUpdateTransaction}
           onDeleteTransaction={handleDeleteTransaction}
-          activeStoreId={activeCloudStoreId || getActiveTenantStoreId()}
+          activeStoreId={effectiveCloudStoreId || getActiveTenantStoreId()}
           masterPin={masterPin}
           allUsers={allUsers}
           salaryPayouts={salaryPayouts}
           commissionPayouts={commissionPayouts}
-          storeName={stores.find((s) => s.id === activeStoreId)?.name || storeProfile?.storeName || 'Rofani POS'}
+          storeName={displayedStoreName}
           onAddExpense={handleAddExpense}
           inPhoneFrame={deviceFormat === 'phone'}
         />
@@ -6658,9 +6987,18 @@ export default function App() {
           onLockNow={() => setIsTerminalLocked(true)}
           onOpenAuditLogs={() => setActiveTab('auditlogs')}
           stores={stores}
-          activeStoreId={activeCloudStoreId || getActiveTenantStoreId()}
-          activeStoreName={stores.find((s) => s.id === activeStoreId)?.name || storeProfile?.storeName || 'Rofani POS'}
+          activeStoreId={effectiveCloudStoreId || getActiveTenantStoreId()}
+          activeStoreName={displayedStoreName}
           accountEmail={firebaseUser?.email || storeProfile?.ownerEmail || cachedCloudSession?.email || ''}
+          ownerDisplayName={currentUser?.name || firebaseUser?.displayName || ''}
+          ownerPhone={activeBranchProfile?.phone || storeProfile?.phone || currentUser?.phone || ''}
+          isMultiBranch={Boolean(storeProfile?.isMultiBranch || groupBranches.length > 1)}
+          businessGroupName={storeProfile?.businessGroupName || ''}
+          branchCount={Math.max(1, groupBranches.length)}
+          onOpenMultiBranch={() => setShowMultiBranchModal(true)}
+          biometricUnlockEnabled={biometricUnlockEnabled}
+          onToggleBiometricUnlock={handleToggleBiometricUnlock}
+          onChangePasswordOrPin={handleChangePasswordOrPin}
           onOpenStoreManager={() => setShowStoreManagerModal(true)}
           onOpenCategoryManager={() => setShowCategoryManagerModal(true)}
           lastSyncedTime={lastSyncedTime}
@@ -6676,7 +7014,7 @@ export default function App() {
             const cleanPin = nextKraPin.trim().toUpperCase();
             if (!cleanPin) return;
             setStoreProfile((prev) => (prev ? { ...prev, kraPin: cleanPin } : prev));
-            const targetCloudStoreId = activeCloudStoreId || getActiveTenantStoreId();
+            const targetCloudStoreId = primaryCloudStoreId || getActiveTenantStoreId();
             if (targetCloudStoreId && isAuthorizedCloudUser(firebaseUser)) {
               await updateStoreProfileDetails(targetCloudStoreId, { kraPin: cleanPin });
             }
@@ -6696,6 +7034,10 @@ export default function App() {
           onSelectTab={(tab) => setActiveTab(tab as any)}
           onOpenCloudSync={() => setShowCloudSyncModal(true)}
           onOpenStoreManager={() => setShowStoreManagerModal(true)}
+          onOpenMultiBranch={() => setShowMultiBranchModal(true)}
+          isMultiBranch={Boolean(storeProfile?.isMultiBranch || groupBranches.length > 1)}
+          businessGroupName={storeProfile?.businessGroupName || ''}
+          branchCount={Math.max(1, groupBranches.length)}
           onOpenInstallModal={() => setShowInstallModal(true)}
           onOpenEmailBackup={() => setShowDailyEmailBackupModal(true)}
           onOpenStockAlerts={() => setShowStockAlertModal(true)}
@@ -6704,7 +7046,7 @@ export default function App() {
           onTriggerSync={syncPendingQueueToCloud}
           onSwitchToComputer={() => setDeviceFormat('computer')}
           lowStockCount={lowStockCount}
-          storeName={stores.find((s) => s.id === activeStoreId)?.name || storeProfile?.storeName || 'Rofani POS'}
+          storeName={displayedStoreName}
           currentUser={currentUser}
           cloudSyncStatus={cloudSyncStatus}
           inPhoneFrame={deviceFormat === 'phone'}
@@ -6718,6 +7060,9 @@ export default function App() {
           onOpenSuggestFeature={() => setShowSuggestFeatureModal(true)}
           onSignOutCloud={async () => {
             setAllowOfflineOwnerMode(false);
+            setActiveBranchCloudStoreId(null);
+            setActiveBranchStoreIdState(null);
+            setGroupBranches([]);
             await signOutFromCloud();
           }}
           cloudUserEmail={firebaseUser?.email}
@@ -6898,7 +7243,7 @@ export default function App() {
           onChangeModel={(model) => setPhoneModel(model)}
           onSwitchToComputer={() => setDeviceFormat('computer')}
           currentUser={currentUser}
-          storeName={stores.find((s) => s.id === activeStoreId)?.name || storeProfile?.storeName || 'Rofani POS'}
+          storeName={displayedStoreName}
           todaySales={todaySales}
           lowStockCount={lowStockCount}
           onLockTerminal={() => setIsTerminalLocked(true)}
@@ -6920,7 +7265,7 @@ export default function App() {
               onNavigateTab={(tab) => setActiveTab(tab)}
               onOpenAiAssistant={() => setShowAiAssistantModal(true)}
               onOpenStoreManager={() => setShowStoreManagerModal(true)}
-              activeStoreName={stores.find((s) => s.id === activeStoreId)?.name || storeProfile?.storeName || 'Rofani POS'}
+              activeStoreName={displayedStoreName}
               stores={stores}
               activeStoreId={activeStoreId}
               onSelectActiveStore={(id) => setActiveStoreId(id)}
@@ -6973,8 +7318,8 @@ export default function App() {
           recoveryEmail={ownerRecoveryEmail}
           emergencyKey={emergencyRecoveryKey}
           firebaseUser={firebaseUser}
-          activeStoreId={activeCloudStoreId || OWNER_PRIMARY_STORE_ID}
-          activeStoreName={stores.find((s) => s.id === activeStoreId)?.name || storeProfile?.storeName}
+          activeStoreId={effectiveCloudStoreId || OWNER_PRIMARY_STORE_ID}
+          activeStoreName={displayedStoreName}
         />
 
         <SubscriptionPlansModal
@@ -7025,7 +7370,8 @@ export default function App() {
           }}
           isMandatory={requirePinOnStartup}
           masterPin={masterPin}
-          storeName={stores.find((s) => s.id === activeStoreId)?.name || 'ROFANI POS'}
+          biometricUnlockEnabled={biometricUnlockEnabled}
+          storeName={displayedStoreName}
           recoveryEmail={ownerRecoveryEmail}
           emergencyKey={emergencyRecoveryKey}
           onResetAdminPin={handleResetAdminPin}
@@ -7195,11 +7541,32 @@ export default function App() {
         <DigitalBusinessCardModal
           isOpen={showBusinessCardModal}
           onClose={() => setShowBusinessCardModal(false)}
-          storeName={stores.find((s) => s.id === activeStoreId)?.name || storeProfile?.storeName || 'Rofani POS'}
+          storeName={displayedStoreName}
           storeId={resolvedSettingsStoreId}
           currentUser={currentUser}
           storeProfile={storeProfile}
           onSaveCard={handleSaveBusinessCard}
+        />
+
+        <MultiBranchUpgradeModal
+          isOpen={showMultiBranchModal}
+          onClose={() => setShowMultiBranchModal(false)}
+          primaryStoreId={primaryCloudStoreId || firebaseUser?.uid || OWNER_PRIMARY_STORE_ID}
+          activeBranchStoreId={effectiveCloudStoreId || OWNER_PRIMARY_STORE_ID}
+          primaryProfile={storeProfile}
+          groupBranches={groupBranches}
+          activeStoreName={displayedStoreName}
+          allUsers={allUsers}
+          products={products}
+          transactions={transactions}
+          expenses={expenses}
+          salaryPayouts={salaryPayouts}
+          commissionPayouts={commissionPayouts}
+          onUpgradeToMultiBranch={handleUpgradeToMultiBranch}
+          onCreateBranch={handleCreateBranchInGroup}
+          onSwitchBranch={handleSwitchBranchStore}
+          onSyncCrossBranchStaff={handleSyncCrossBranchStaff}
+          onOpenPlansPricing={() => setShowPlansModal(true)}
         />
 
         <DailyEndOfDaySummaryModal
@@ -7809,6 +8176,9 @@ export default function App() {
               type="button"
               onClick={async () => {
                 setAllowOfflineOwnerMode(false);
+                setActiveBranchCloudStoreId(null);
+                setActiveBranchStoreIdState(null);
+                setGroupBranches([]);
                 await signOutFromCloud();
               }}
               title="Sign Out of Cloud Account"
@@ -8444,7 +8814,7 @@ export default function App() {
             >
               <Building2 className="w-4 h-4 text-indigo-600 shrink-0" />
               <span className="hidden xl:inline max-w-[120px] truncate">
-                {stores.find((s) => s.id === activeStoreId)?.name || storeProfile?.storeName || 'Rofani POS'}
+                {displayedStoreName}
               </span>
             </button>
 
@@ -8583,7 +8953,7 @@ export default function App() {
             onNavigateTab={(tab) => setActiveTab(tab)}
             onOpenAiAssistant={() => setShowAiAssistantModal(true)}
             onOpenStoreManager={() => setShowStoreManagerModal(true)}
-            activeStoreName={stores.find((s) => s.id === activeStoreId)?.name || storeProfile?.storeName || 'Rofani POS'}
+            activeStoreName={displayedStoreName}
             stores={stores}
             activeStoreId={activeStoreId}
             onSelectActiveStore={(id) => setActiveStoreId(id)}
@@ -8719,7 +9089,8 @@ export default function App() {
         }}
         isMandatory={requirePinOnStartup}
         masterPin={masterPin}
-        storeName={stores.find((s) => s.id === activeStoreId)?.name || 'ROFANI POS'}
+        biometricUnlockEnabled={biometricUnlockEnabled}
+        storeName={displayedStoreName}
         recoveryEmail={ownerRecoveryEmail}
         emergencyKey={emergencyRecoveryKey}
         onResetAdminPin={handleResetAdminPin}
@@ -8774,8 +9145,8 @@ export default function App() {
         recoveryEmail={ownerRecoveryEmail}
         emergencyKey={emergencyRecoveryKey}
         firebaseUser={firebaseUser}
-        activeStoreId={activeCloudStoreId || OWNER_PRIMARY_STORE_ID}
-        activeStoreName={stores.find((s) => s.id === activeStoreId)?.name || storeProfile?.storeName}
+        activeStoreId={effectiveCloudStoreId || OWNER_PRIMARY_STORE_ID}
+        activeStoreName={displayedStoreName}
       />
 
       {/* Subscription Plans & M-Pesa Payment Modal */}
@@ -9039,11 +9410,32 @@ export default function App() {
       <DigitalBusinessCardModal
         isOpen={showBusinessCardModal}
         onClose={() => setShowBusinessCardModal(false)}
-        storeName={stores.find((s) => s.id === activeStoreId)?.name || storeProfile?.storeName || 'Rofani POS'}
+        storeName={displayedStoreName}
         storeId={resolvedSettingsStoreId}
         currentUser={currentUser}
         storeProfile={storeProfile}
         onSaveCard={handleSaveBusinessCard}
+      />
+
+      <MultiBranchUpgradeModal
+        isOpen={showMultiBranchModal}
+        onClose={() => setShowMultiBranchModal(false)}
+        primaryStoreId={primaryCloudStoreId || firebaseUser?.uid || OWNER_PRIMARY_STORE_ID}
+        activeBranchStoreId={effectiveCloudStoreId || OWNER_PRIMARY_STORE_ID}
+        primaryProfile={storeProfile}
+        groupBranches={groupBranches}
+        activeStoreName={displayedStoreName}
+        allUsers={allUsers}
+        products={products}
+        transactions={transactions}
+        expenses={expenses}
+        salaryPayouts={salaryPayouts}
+        commissionPayouts={commissionPayouts}
+        onUpgradeToMultiBranch={handleUpgradeToMultiBranch}
+        onCreateBranch={handleCreateBranchInGroup}
+        onSwitchBranch={handleSwitchBranchStore}
+        onSyncCrossBranchStaff={handleSyncCrossBranchStaff}
+        onOpenPlansPricing={() => setShowPlansModal(true)}
       />
 
       <DailyEndOfDaySummaryModal

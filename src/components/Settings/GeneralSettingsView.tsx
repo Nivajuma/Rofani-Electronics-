@@ -20,7 +20,8 @@ import {
   Mail,
   Sliders,
   Cloud,
-  Clock
+  Clock,
+  GitBranch
 } from 'lucide-react';
 import { safeGetJSON, safeSetJSON } from '../../utils/safeStorage';
 import { getIsOnline, useAggressiveAutoSync, useNetworkStatus } from '../../utils/offlineSync';
@@ -42,6 +43,10 @@ interface GeneralSettingsViewProps {
   onToggleRequirePinOnStartup?: (require: boolean) => void;
   masterPin?: string;
   onUpdateMasterPin?: (newPin: string) => void;
+  onOpenMultiBranch?: () => void;
+  isMultiBranch?: boolean;
+  businessGroupName?: string;
+  branchCount?: number;
 }
 
 export interface GeneralSettingsState {
@@ -112,6 +117,10 @@ export const GeneralSettingsView: React.FC<GeneralSettingsViewProps> = ({
   onToggleRequirePinOnStartup,
   masterPin,
   onUpdateMasterPin,
+  onOpenMultiBranch,
+  isMultiBranch = false,
+  businessGroupName,
+  branchCount = 1,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [successToast, setSuccessToast] = useState<string | null>(null);
@@ -597,28 +606,63 @@ export const GeneralSettingsView: React.FC<GeneralSettingsViewProps> = ({
               <Building2 className="w-4 h-4 text-indigo-400" />
               <span>Section 3: Multifirm & Companies</span>
             </div>
-            <button
-              type="button"
-              onClick={() => {
-                if (onOpenStoreManager) {
-                  onOpenStoreManager();
-                } else {
-                  triggerToast('⚠️ Store Manager is unavailable in this view.');
-                }
-              }}
-              className="w-full p-4 flex items-center justify-between hover:bg-slate-800/60 transition text-left cursor-pointer"
-            >
-              <div className="space-y-0.5 pr-4">
-                <div className="font-bold text-slate-100 flex items-center gap-1.5">
-                  <span>Multifirm Settings</span>
-                  <span title="Manage multiple store branches and distinct company ledgers"><Info className="w-3.5 h-3.5 text-slate-400" /></span>
+            <div className="divide-y divide-slate-800">
+              {onOpenMultiBranch && (
+                <button
+                  type="button"
+                  onClick={onOpenMultiBranch}
+                  className="w-full p-4 flex items-center justify-between hover:bg-slate-800/60 transition text-left cursor-pointer"
+                >
+                  <div className="flex items-start gap-3 pr-4">
+                    <div className="w-9 h-9 rounded-xl bg-sky-500/15 border border-sky-500/30 text-sky-400 flex items-center justify-center shrink-0">
+                      <GitBranch className="w-4 h-4" />
+                    </div>
+                    <div className="space-y-0.5">
+                      <div className="font-bold text-slate-100 flex items-center gap-2 flex-wrap">
+                        <span>{isMultiBranch ? (businessGroupName || 'Multi-Branch Business Group') : 'Run more than one shop?'}</span>
+                        {isMultiBranch && (
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+                            {branchCount} {branchCount === 1 ? 'Branch' : 'Branches'}
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-[11px] text-slate-400">
+                        {isMultiBranch
+                          ? 'Switch branches, view combined profit reports & assign staff across shops'
+                          : 'Upgrade to Multi-Branch Business Group while keeping your current shop untouched'}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="w-8 h-8 rounded-lg bg-slate-800 text-slate-400 flex items-center justify-center shrink-0">
+                    <ChevronRight className="w-4 h-4" />
+                  </div>
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => {
+                  if (onOpenStoreManager) {
+                    onOpenStoreManager();
+                  } else if (onOpenMultiBranch) {
+                    onOpenMultiBranch();
+                  } else {
+                    triggerToast('⚠️ Store Manager is unavailable in this view.');
+                  }
+                }}
+                className="w-full p-4 flex items-center justify-between hover:bg-slate-800/60 transition text-left cursor-pointer"
+              >
+                <div className="space-y-0.5 pr-4">
+                  <div className="font-bold text-slate-100 flex items-center gap-1.5">
+                    <span>Multifirm Settings</span>
+                    <span title="Manage multiple store branches and distinct company ledgers"><Info className="w-3.5 h-3.5 text-slate-400" /></span>
+                  </div>
+                  <div className="text-[11px] text-slate-400">Configure multi-branch or multi-company accounts</div>
                 </div>
-                <div className="text-[11px] text-slate-400">Configure multi-branch or multi-company accounts</div>
-              </div>
-              <div className="w-8 h-8 rounded-lg bg-slate-800 text-slate-400 flex items-center justify-center shrink-0">
-                <ChevronRight className="w-4 h-4" />
-              </div>
-            </button>
+                <div className="w-8 h-8 rounded-lg bg-slate-800 text-slate-400 flex items-center justify-center shrink-0">
+                  <ChevronRight className="w-4 h-4" />
+                </div>
+              </button>
+            </div>
           </div>
         )}
 

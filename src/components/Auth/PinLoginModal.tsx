@@ -49,6 +49,7 @@ interface PinLoginModalProps {
   emergencyKey?: string;
   onResetAdminPin?: (newPin: string, targetUserId: string) => Promise<void> | void;
   onResetMasterPin?: (newMasterPin: string) => Promise<void> | void;
+  biometricUnlockEnabled?: boolean;
 }
 
 export const PinLoginModal: React.FC<PinLoginModalProps> = ({
@@ -65,6 +66,7 @@ export const PinLoginModal: React.FC<PinLoginModalProps> = ({
   emergencyKey = 'ROFANI-RESET-2026',
   onResetAdminPin,
   onResetMasterPin,
+  biometricUnlockEnabled = true,
 }) => {
   // Always require the employee to select their own account on mandatory startup/terminal lock
   const [selectedUser, setSelectedUser] = useState<User | null>(
@@ -75,6 +77,7 @@ export const PinLoginModal: React.FC<PinLoginModalProps> = ({
   const [showPinText, setShowPinText] = useState<boolean>(false);
   const [loginMode, setLoginMode] = useState<'staff' | 'master'>('staff');
   const [showBiometricModal, setShowBiometricModal] = useState<boolean>(false);
+  const [useKeyboardInput, setUseKeyboardInput] = useState<boolean>(false);
 
   // Worker search and filter state for selecting workers easily
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -139,8 +142,13 @@ export const PinLoginModal: React.FC<PinLoginModalProps> = ({
       setRecoveryError('');
       setRecoverySuccessNotice('');
       setShowBiometricModal(false);
+      setUseKeyboardInput(false);
     }
   }, [isOpen, isMandatory, currentUser, initialTargetUser]);
+
+  const requiresTextPassword =
+    /[^0-9]/.test(masterPin || '') || /[^0-9]/.test(selectedUser?.pin || '');
+  const showPasswordTextField = useKeyboardInput || requiresTextPassword;
 
   const handleBiometricSuccess = (user: User) => {
     setShowBiometricModal(false);
@@ -169,17 +177,13 @@ export const PinLoginModal: React.FC<PinLoginModalProps> = ({
       return;
     }
 
-    if (pinInput.length < 8) {
+    if (pinInput.length < 32) {
       const nextPin = pinInput + num;
       setPinInput(nextPin);
       setErrorMsg('');
 
       if (loginMode === 'master') {
-        if (
-          nextPin.length === masterPin.length ||
-          nextPin === masterPin ||
-          nextPin === '1234'
-        ) {
+        if (nextPin.length === masterPin.length || nextPin === masterPin) {
           verifyMasterPin(nextPin);
         }
       } else {
@@ -187,8 +191,7 @@ export const PinLoginModal: React.FC<PinLoginModalProps> = ({
         const isMatch =
           nextPin === targetPin ||
           nextPin === masterPin ||
-          nextPin === '1234' ||
-          (hasRole(selectedUser, 'Admin') && (nextPin === '1234' || nextPin === masterPin));
+          (hasRole(selectedUser, 'Admin') && nextPin === masterPin);
 
         if (isMatch || (targetPin && nextPin.length === targetPin.length)) {
           verifyPin(nextPin, selectedUser);
@@ -208,7 +211,7 @@ export const PinLoginModal: React.FC<PinLoginModalProps> = ({
   };
 
   const verifyMasterPin = (pinToTest: string) => {
-    if (pinToTest === masterPin || pinToTest === '1234') {
+    if (pinToTest === masterPin) {
       setErrorMsg('');
       setPinInput('');
       let adminUser =
@@ -228,7 +231,7 @@ export const PinLoginModal: React.FC<PinLoginModalProps> = ({
       }
       onLoginSuccess(adminUser);
     } else {
-      setErrorMsg('Incorrect Store Master PIN. Please try again or tap "Forgot PIN?"');
+      setErrorMsg('Incorrect Store Master PIN / Password. Please try again or tap "Forgot PIN?"');
       setPinInput('');
     }
   };
@@ -242,8 +245,7 @@ export const PinLoginModal: React.FC<PinLoginModalProps> = ({
     const isMatch =
       pinToTest === userToTest.pin ||
       pinToTest === masterPin ||
-      pinToTest === '1234' ||
-      (hasRole(userToTest, 'Admin') && (pinToTest === '1234' || pinToTest === masterPin));
+      (hasRole(userToTest, 'Admin') && pinToTest === masterPin);
 
     if (isMatch) {
       setErrorMsg('');
@@ -260,7 +262,7 @@ export const PinLoginModal: React.FC<PinLoginModalProps> = ({
       }
       onLoginSuccess(finalUser);
     } else {
-      setErrorMsg('Incorrect PIN code. Please try again.');
+      setErrorMsg('Incorrect PIN / Password. Please try again.');
       setPinInput('');
     }
   };
@@ -1057,7 +1059,7 @@ export const PinLoginModal: React.FC<PinLoginModalProps> = ({
                     </p>
                   </div>
 
-                  {/* PIN Bullet Dots Display or Placeholder */}
+                  {/* PIN Bullet Dots Display / Password Input or Placeholder */}
                   {!selectedUser && loginMode === 'staff' ? (
                     <div className="py-4 px-4 bg-slate-950/80 border border-dashed border-slate-800 rounded-2xl text-center space-y-2">
                       <div className="text-sky-400 font-semibold text-xs flex items-center justify-center gap-1.5 mb-1">
@@ -1065,16 +1067,18 @@ export const PinLoginModal: React.FC<PinLoginModalProps> = ({
                         <span>Choose Your Account First</span>
                       </div>
                       <p className="text-[11px] text-slate-400">
-                        Select your name from the staff directory, or tap below to authenticate with your fingerprint scanner.
+                        Select your name from the staff directory{biometricUnlockEnabled ? ', or tap below to authenticate with your fingerprint scanner.' : '.'}
                       </p>
-                      <button
-                        type="button"
-                        onClick={() => setShowBiometricModal(true)}
-                        className="w-full py-2 px-3 bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/35 text-emerald-300 font-bold rounded-xl text-xs flex items-center justify-center gap-2 transition cursor-pointer"
-                      >
-                        <Fingerprint className="w-4 h-4 text-emerald-400" />
-                        <span>Biometric Fingerprint Log In</span>
-                      </button>
+                      {biometricUnlockEnabled && (
+                        <button
+                          type="button"
+                          onClick={() => setShowBiometricModal(true)}
+                          className="w-full py-2 px-3 bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/35 text-emerald-300 font-bold rounded-xl text-xs flex items-center justify-center gap-2 transition cursor-pointer"
+                        >
+                          <Fingerprint className="w-4 h-4 text-emerald-400" />
+                          <span>Biometric Fingerprint Log In</span>
+                        </button>
+                      )}
                       <button
                         type="button"
                         onClick={() => setActiveMobileTab('workers')}
@@ -1085,7 +1089,7 @@ export const PinLoginModal: React.FC<PinLoginModalProps> = ({
                     </div>
                   ) : (
                     <div className="py-1">
-                      {selectedUser && (
+                      {selectedUser && biometricUnlockEnabled && (
                         <div className="mb-2">
                           <button
                             type="button"
@@ -1097,42 +1101,96 @@ export const PinLoginModal: React.FC<PinLoginModalProps> = ({
                           </button>
                         </div>
                       )}
-                      <div className="flex justify-center items-center gap-2">
-                        {Array.from({
-                          length: Math.max(
-                            4,
-                            loginMode === 'master'
-                              ? masterPin.length
-                              : (selectedUser?.pin?.length || 4)
-                          ),
-                        }).map((_, idx) => {
-                          const isFilled = pinInput.length > idx;
-                          return (
-                            <div
-                              key={idx}
-                              className={`w-10 h-11 sm:w-11 sm:h-12 rounded-xl sm:rounded-2xl border-2 flex items-center justify-center text-lg font-mono font-bold transition-all duration-200 ${
-                                isFilled
-                                  ? loginMode === 'master'
-                                    ? 'border-purple-500 bg-purple-950/60 text-purple-300 shadow-lg shadow-purple-500/20 scale-105'
-                                    : 'border-sky-500 bg-sky-950/60 text-sky-300 shadow-lg shadow-sky-500/20 scale-105'
-                                  : 'border-slate-800 bg-slate-950 text-slate-600'
-                              }`}
-                            >
-                              {isFilled ? (showPinText ? pinInput[idx] : '●') : ''}
-                            </div>
-                          );
-                        })}
-                      </div>
 
-                      {/* Toggle Show PIN Text */}
-                      <button
-                        type="button"
-                        onClick={() => setShowPinText(!showPinText)}
-                        className="mt-2 inline-flex items-center gap-1.5 text-[11px] text-slate-400 hover:text-slate-200 transition cursor-pointer"
-                      >
-                        {showPinText ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                        <span>{showPinText ? 'Hide Digits' : 'Show Digits'}</span>
-                      </button>
+                      {showPasswordTextField ? (
+                        <div className="max-w-[280px] mx-auto space-y-2">
+                          <div className="relative">
+                            <input
+                              type={showPinText ? 'text' : 'password'}
+                              value={pinInput}
+                              onChange={(e) => {
+                                setPinInput(e.target.value);
+                                setErrorMsg('');
+                              }}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter' && pinInput) {
+                                  e.preventDefault();
+                                  if (loginMode === 'master') verifyMasterPin(pinInput);
+                                  else if (selectedUser) verifyPin(pinInput, selectedUser);
+                                }
+                              }}
+                              placeholder="Enter Password or PIN"
+                              className="w-full bg-slate-950 border-2 border-sky-500/70 rounded-xl pl-3.5 pr-10 py-3 text-sm font-mono font-bold text-white focus:outline-none focus:ring-2 focus:ring-sky-500"
+                              autoFocus
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setShowPinText(!showPinText)}
+                              aria-label={showPinText ? 'Hide password' : 'Show password'}
+                              className="absolute right-3 top-3 text-slate-400 hover:text-slate-200 cursor-pointer"
+                            >
+                              {showPinText ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex justify-center items-center gap-2">
+                          {Array.from({
+                            length: Math.max(
+                              4,
+                              Math.min(
+                                8,
+                                loginMode === 'master'
+                                  ? masterPin.length
+                                  : (selectedUser?.pin?.length || 4)
+                              )
+                            ),
+                          }).map((_, idx) => {
+                            const isFilled = pinInput.length > idx;
+                            return (
+                              <div
+                                key={idx}
+                                className={`w-10 h-11 sm:w-11 sm:h-12 rounded-xl sm:rounded-2xl border-2 flex items-center justify-center text-lg font-mono font-bold transition-all duration-200 ${
+                                  isFilled
+                                    ? loginMode === 'master'
+                                      ? 'border-purple-500 bg-purple-950/60 text-purple-300 shadow-lg shadow-purple-500/20 scale-105'
+                                      : 'border-sky-500 bg-sky-950/60 text-sky-300 shadow-lg shadow-sky-500/20 scale-105'
+                                    : 'border-slate-800 bg-slate-950 text-slate-600'
+                                }`}
+                              >
+                                {isFilled ? (showPinText ? pinInput[idx] : '●') : ''}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+
+                      {/* Toggle Show PIN Text & Keyboard Password Input */}
+                      <div className="mt-2 flex items-center justify-center gap-3 flex-wrap">
+                        {!showPasswordTextField && (
+                          <button
+                            type="button"
+                            onClick={() => setShowPinText(!showPinText)}
+                            className="inline-flex items-center gap-1.5 text-[11px] text-slate-400 hover:text-slate-200 transition cursor-pointer"
+                          >
+                            {showPinText ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                            <span>{showPinText ? 'Hide Digits' : 'Show Digits'}</span>
+                          </button>
+                        )}
+                        {!requiresTextPassword && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setUseKeyboardInput((v) => !v);
+                              setErrorMsg('');
+                            }}
+                            className="inline-flex items-center gap-1 text-[11px] text-sky-400 hover:text-sky-300 transition cursor-pointer"
+                          >
+                            <KeyRound className="w-3 h-3" />
+                            <span>{useKeyboardInput ? 'Use Numeric Keypad' : 'Type Password'}</span>
+                          </button>
+                        )}
+                      </div>
                     </div>
                   )}
 
@@ -1144,43 +1202,45 @@ export const PinLoginModal: React.FC<PinLoginModalProps> = ({
                     </div>
                   )}
 
-                  {/* NUMERIC KEYPAD GRID (ALL NUMERIC NUMBERS 1,2,3,4,5,6,7,8,9,0 + CLEAR + DELETE) */}
-                  <div className="grid grid-cols-3 gap-2 sm:gap-2.5 max-w-[260px] sm:max-w-[280px] mx-auto pt-0.5">
-                    {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((digit) => (
+                  {/* NUMERIC KEYPAD GRID (hidden when typing alphanumeric password) */}
+                  {!showPasswordTextField && (
+                    <div className="grid grid-cols-3 gap-2 sm:gap-2.5 max-w-[260px] sm:max-w-[280px] mx-auto pt-0.5">
+                      {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((digit) => (
+                        <button
+                          key={digit}
+                          type="button"
+                          onClick={() => handleKeyPress(digit)}
+                          className="h-11 sm:h-12 md:h-12.5 bg-slate-800/80 hover:bg-slate-700 active:bg-sky-600 text-slate-100 font-mono font-bold text-lg sm:text-xl rounded-xl sm:rounded-2xl border border-slate-700/80 transition shadow-sm active:scale-95 flex items-center justify-center py-2 cursor-pointer select-none"
+                        >
+                          {digit}
+                        </button>
+                      ))}
+
                       <button
-                        key={digit}
                         type="button"
-                        onClick={() => handleKeyPress(digit)}
+                        onClick={handleClear}
+                        className="h-11 sm:h-12 md:h-12.5 bg-slate-950 hover:bg-slate-800 text-slate-400 hover:text-rose-400 font-bold text-xs rounded-xl sm:rounded-2xl border border-slate-800 transition active:scale-95 flex items-center justify-center py-2 cursor-pointer select-none"
+                      >
+                        CLEAR
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleKeyPress('0')}
                         className="h-11 sm:h-12 md:h-12.5 bg-slate-800/80 hover:bg-slate-700 active:bg-sky-600 text-slate-100 font-mono font-bold text-lg sm:text-xl rounded-xl sm:rounded-2xl border border-slate-700/80 transition shadow-sm active:scale-95 flex items-center justify-center py-2 cursor-pointer select-none"
                       >
-                        {digit}
+                        0
                       </button>
-                    ))}
 
-                    <button
-                      type="button"
-                      onClick={handleClear}
-                      className="h-11 sm:h-12 md:h-12.5 bg-slate-950 hover:bg-slate-800 text-slate-400 hover:text-rose-400 font-bold text-xs rounded-xl sm:rounded-2xl border border-slate-800 transition active:scale-95 flex items-center justify-center py-2 cursor-pointer select-none"
-                    >
-                      CLEAR
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => handleKeyPress('0')}
-                      className="h-11 sm:h-12 md:h-12.5 bg-slate-800/80 hover:bg-slate-700 active:bg-sky-600 text-slate-100 font-mono font-bold text-lg sm:text-xl rounded-xl sm:rounded-2xl border border-slate-700/80 transition shadow-sm active:scale-95 flex items-center justify-center py-2 cursor-pointer select-none"
-                    >
-                      0
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={handleBackspace}
-                      className="h-11 sm:h-12 md:h-12.5 bg-slate-950 hover:bg-slate-800 text-slate-400 hover:text-amber-400 font-bold text-xs rounded-xl sm:rounded-2xl border border-slate-800 transition active:scale-95 flex items-center justify-center py-2 cursor-pointer select-none"
-                    >
-                      <Delete className="w-5 h-5" />
-                    </button>
-                  </div>
+                      <button
+                        type="button"
+                        onClick={handleBackspace}
+                        className="h-11 sm:h-12 md:h-12.5 bg-slate-950 hover:bg-slate-800 text-slate-400 hover:text-amber-400 font-bold text-xs rounded-xl sm:rounded-2xl border border-slate-800 transition active:scale-95 flex items-center justify-center py-2 cursor-pointer select-none"
+                      >
+                        <Delete className="w-5 h-5" />
+                      </button>
+                    </div>
+                  )}
 
                   {/* Explicit Unlock Button */}
                   <div className="pt-1 max-w-[260px] sm:max-w-[280px] mx-auto w-full">
@@ -1207,18 +1267,22 @@ export const PinLoginModal: React.FC<PinLoginModalProps> = ({
                       <KeyRound className="w-3.5 h-3.5" />
                       <span>Unlock Terminal / Sign In</span>
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => setShowBiometricModal(true)}
-                      className="w-full mt-2 py-2 rounded-xl text-xs font-semibold text-emerald-300 hover:text-emerald-200 bg-emerald-950/40 hover:bg-emerald-900/40 border border-emerald-500/30 flex items-center justify-center gap-2 transition cursor-pointer shadow-sm active:scale-[0.98]"
-                    >
-                      <Fingerprint className="w-4 h-4 text-emerald-400" />
-                      <span>Use Biometric Fingerprint Recognition</span>
-                    </button>
+                    {biometricUnlockEnabled && (
+                      <button
+                        type="button"
+                        onClick={() => setShowBiometricModal(true)}
+                        className="w-full mt-2 py-2 rounded-xl text-xs font-semibold text-emerald-300 hover:text-emerald-200 bg-emerald-950/40 hover:bg-emerald-900/40 border border-emerald-500/30 flex items-center justify-center gap-2 transition cursor-pointer shadow-sm active:scale-[0.98]"
+                      >
+                        <Fingerprint className="w-4 h-4 text-emerald-400" />
+                        <span>Use Biometric Fingerprint Recognition</span>
+                      </button>
+                    )}
                   </div>
 
                   <p className="text-[10px] text-slate-500">
-                    Keyboard numpad & digits 0-9 also supported
+                    {showPasswordTextField
+                      ? 'Press Enter or tap Unlock Terminal to sign in'
+                      : 'Keyboard numpad & digits 0-9 also supported'}
                   </p>
                 </div>
 

@@ -39,6 +39,15 @@
         "backupEmailConfirmed": { "type": "boolean" },
         "emailAutoBackupEnabled": { "type": "boolean" },
         "dismissedBackupBannerDate": { "type": "string", "maxLength": 32 },
+        "isMultiBranch": { "type": "boolean" },
+        "businessGroupId": { "type": "string", "maxLength": 128 },
+        "businessGroupName": { "type": "string", "maxLength": 200 },
+        "parentStoreId": { "type": "string", "maxLength": 128 },
+        "isBranchStore": { "type": "boolean" },
+        "branchCode": { "type": "string", "maxLength": 32 },
+        "branchCity": { "type": "string", "maxLength": 120 },
+        "branchAddress": { "type": "string", "maxLength": 200 },
+        "branchManagerName": { "type": "string", "maxLength": 150 },
         "createdAt": { "type": "string", "maxLength": 64 },
         "updatedAt": { "type": "string", "maxLength": 64 }
       },
@@ -178,6 +187,7 @@
         "name": { "type": "string", "maxLength": 200 },
         "role": { "type": "string", "maxLength": 128 },
         "email": { "type": "string", "maxLength": 200 },
+        "assignedBranchIds": { "type": "array", "description": "Multi-branch storeIds assigned to this staff member" },
         "updatedAt": { "type": "string", "maxLength": 64 }
       },
       "required": ["id", "name"]

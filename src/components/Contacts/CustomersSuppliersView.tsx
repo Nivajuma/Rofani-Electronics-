@@ -36,15 +36,41 @@ import {
   Send,
   Check,
   Share2,
-  Clock
+  Clock,
+  Wallet,
+  RotateCcw,
+  MessageSquareWarning,
+  PackageCheck,
+  ShoppingBag,
 } from 'lucide-react';
-import { Customer, Supplier, Transaction, Product, User, PaymentMethod, CashTransaction } from '../../types';
-import { exportCustomerReportPDF, exportSupplierReportPDF } from '../../utils/pdfGenerator';
+import {
+  Customer,
+  Supplier,
+  Transaction,
+  Product,
+  User,
+  PaymentMethod,
+  CashTransaction,
+  CustomerDepositRecord,
+  CustomerComplaint,
+  CustomerReturnRecord,
+  CustomerReturnItem,
+  ReturnRefundMode,
+} from '../../types';
+import {
+  exportCustomerReportPDF,
+  exportCustomerReturnPDF,
+  exportSupplierReportPDF,
+  exportReceiptPDF,
+} from '../../utils/pdfGenerator';
 import { formatKSh } from '../../utils/currency';
 import { CustomerEditModal } from './CustomerEditModal';
 import { CustomerDebtPaymentModal } from './CustomerDebtPaymentModal';
 import { CustomerDetailsModal } from './CustomerDetailsModal';
 import { CustomerContactsListModal } from './CustomerContactsListModal';
+import { CustomerDepositModal } from './CustomerDepositModal';
+import { CustomerReturnModal } from './CustomerReturnModal';
+import { CustomerComplaintModal } from './CustomerComplaintModal';
 import { SupplierEditModal } from './SupplierEditModal';
 import { SupplierPaymentModal } from './SupplierPaymentModal';
 import { SupplierDetailsModal } from './SupplierDetailsModal';
@@ -64,6 +90,11 @@ interface CustomersSuppliersViewProps {
   products: Product[];
   currentUser: User;
   offers?: OfferDeal[];
+  customerDeposits?: CustomerDepositRecord[];
+  customerComplaints?: CustomerComplaint[];
+  customerReturns?: CustomerReturnRecord[];
+  storeName?: string;
+  storeKraPin?: string;
   onSaveCustomer: (customer: Customer) => void;
   onDeleteCustomer: (id: string) => void;
   onSaveSupplier: (supplier: Supplier) => void;
@@ -75,6 +106,27 @@ interface CustomersSuppliersViewProps {
     reference?: string,
     notes?: string
   ) => void;
+  onRecordCustomerDepositOrPayment?: (params: {
+    customerId: string;
+    mode: 'deposit' | 'partial_payment';
+    amount: number;
+    paymentMethod: PaymentMethod | 'store_credit';
+    linkedTransactionId?: string;
+    referenceNo?: string;
+    notes?: string;
+  }) => void;
+  onProcessCustomerReturn?: (params: {
+    customer: Customer;
+    transaction: Transaction;
+    items: CustomerReturnItem[];
+    refundMode: ReturnRefundMode;
+    cashRefundAmount: number;
+    cashRefundChannel?: 'cash' | 'mpesa';
+    cashRefundRef?: string;
+    reason: string;
+    notes?: string;
+  }) => CustomerReturnRecord | void;
+  onSaveCustomerComplaint?: (complaint: CustomerComplaint) => void;
   onRecordSupplierPayment: (
     supplierId: string,
     amount: number,
@@ -95,11 +147,19 @@ export const CustomersSuppliersView: React.FC<CustomersSuppliersViewProps> = ({
   products,
   currentUser,
   offers,
+  customerDeposits = [],
+  customerComplaints = [],
+  customerReturns = [],
+  storeName,
+  storeKraPin,
   onSaveCustomer,
   onDeleteCustomer,
   onSaveSupplier,
   onDeleteSupplier,
   onRecordCustomerDebtPayment,
+  onRecordCustomerDepositOrPayment,
+  onProcessCustomerReturn,
+  onSaveCustomerComplaint,
   onRecordSupplierPayment,
   onImportCustomers,
   onImportSuppliers,
@@ -270,15 +330,49 @@ export const CustomersSuppliersView: React.FC<CustomersSuppliersViewProps> = ({
   const [deleteNoticeMessage, setDeleteNoticeMessage] = useState<string | null>(null);
   const [toastNotice, setToastNotice] = useState<string | null>(null);
 
+  // Customer Sub-View & New Modal States (Sales/Partial Payments, Deposits, Returns & Restock, Complaints)
+  const [customerSubView, setCustomerSubView] = useState<
+    'directory' | 'sales_partial' | 'deposits' | 'returns' | 'complaints'
+  >('directory');
+  const [complaintStatusFilter, setComplaintStatusFilter] = useState<
+    'ALL' | 'Open' | 'In Review' | 'Escalated' | 'Resolved'
+  >('ALL');
+  const [salesStatusFilter, setSalesStatusFilter] = useState<'ALL' | 'Partial' | 'Unpaid' | 'Paid'>('ALL');
+
+  const [depositModalCustomer, setDepositModalCustomer] = useState<Customer | null>(null);
+  const [depositModalMode, setDepositModalMode] = useState<'deposit' | 'partial_payment'>('deposit');
+  const [depositModalTxId, setDepositModalTxId] = useState<string | undefined>(undefined);
+  const [isDepositModalOpen, setIsDepositModalOpen] = useState(false);
+
+  const [returnModalCustomer, setReturnModalCustomer] = useState<Customer | null>(null);
+  const [returnModalTxId, setReturnModalTxId] = useState<string | undefined>(undefined);
+  const [isReturnModalOpen, setIsReturnModalOpen] = useState(false);
+
+  const [complaintModalCustomer, setComplaintModalCustomer] = useState<Customer | null>(null);
+  const [editingComplaint, setEditingComplaint] = useState<CustomerComplaint | null>(null);
+  const [isComplaintModalOpen, setIsComplaintModalOpen] = useState(false);
+
   // 1. Calculate Customer Metrics
   const customerMetrics = useMemo(() => {
     const totalCount = customers.length;
     const debtors = customers.filter((c) => (c.currentBalanceDue || 0) > 0);
     const totalDebt = debtors.reduce((sum, c) => sum + (c.currentBalanceDue || 0), 0);
+    const totalDepositsHeld = customers.reduce((sum, c) => sum + (c.depositBalance || 0), 0);
     const totalLifetimeSales = customers.reduce((sum, c) => sum + (c.totalPurchases || 0), 0);
     const avgSpend = totalCount > 0 ? Math.round(totalLifetimeSales / totalCount) : 0;
-    return { totalCount, debtorsCount: debtors.length, totalDebt, totalLifetimeSales, avgSpend };
-  }, [customers]);
+    const openComplaintsCount = customerComplaints.filter((c) => c.status !== 'Resolved').length;
+    const totalRestockedUnits = customerReturns.reduce((s, r) => s + (r.restockedTotalUnits || 0), 0);
+    return {
+      totalCount,
+      debtorsCount: debtors.length,
+      totalDebt,
+      totalDepositsHeld,
+      totalLifetimeSales,
+      avgSpend,
+      openComplaintsCount,
+      totalRestockedUnits,
+    };
+  }, [customers, customerComplaints, customerReturns]);
 
   // 2. Calculate Supplier Metrics
   const supplierMetrics = useMemo(() => {
@@ -660,6 +754,7 @@ export const CustomersSuppliersView: React.FC<CustomersSuppliersViewProps> = ({
         <>
           {/* KPI Metrics Strip */}
           {activeTab === 'customers' ? (
+          <>
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl shadow-sm">
             <div className="flex items-center justify-between text-slate-400 text-xs font-semibold">
@@ -687,26 +782,80 @@ export const CustomersSuppliersView: React.FC<CustomersSuppliersViewProps> = ({
 
           <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl shadow-sm">
             <div className="flex items-center justify-between text-slate-400 text-xs font-semibold">
-              <span>Total Lifetime Purchases</span>
-              <DollarSign className="w-4 h-4 text-emerald-400" />
+              <span>Deposits &amp; Partial Credit</span>
+              <Wallet className="w-4 h-4 text-emerald-400" />
             </div>
             <div className="text-2xl font-black text-emerald-400 font-mono mt-1">
-              {formatKSh(customerMetrics.totalLifetimeSales, { showDecimals: true })}
+              {formatKSh(customerMetrics.totalDepositsHeld, { showDecimals: true })}
             </div>
-            <span className="text-[10px] text-slate-500 block mt-0.5">Gross customer sales</span>
+            <span className="text-[10px] text-slate-500 block mt-0.5">
+              {customerDeposits.length} deposit/partial ledger entries
+            </span>
           </div>
 
           <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl shadow-sm">
             <div className="flex items-center justify-between text-slate-400 text-xs font-semibold">
-              <span>Average Customer Spend</span>
-              <Sparkles className="w-4 h-4 text-amber-400" />
+              <span>Returns &amp; Complaints</span>
+              <RotateCcw className="w-4 h-4 text-amber-400" />
             </div>
-            <div className="text-2xl font-black text-slate-100 font-mono mt-1">
-              {formatKSh(customerMetrics.avgSpend)}
+            <div className="text-2xl font-black text-amber-300 font-mono mt-1">
+              {customerReturns.length}{' '}
+              <span className="text-xs font-bold text-slate-400">
+                / {customerMetrics.openComplaintsCount} open
+              </span>
             </div>
-            <span className="text-[10px] text-slate-500 block mt-0.5">Lifetime value per customer</span>
+            <span className="text-[10px] text-emerald-400 block mt-0.5">
+              +{customerMetrics.totalRestockedUnits} returned units added back to stock
+            </span>
           </div>
         </div>
+
+        {/* Customers Workspace Sub-Tabs */}
+        <div className="flex flex-wrap items-center gap-2 bg-slate-950 p-1.5 rounded-2xl border border-slate-800 text-xs">
+          {[
+            { id: 'directory', label: 'Customer Directory', count: customers.length, icon: Users },
+            {
+              id: 'sales_partial',
+              label: 'Sales & Partial Payments',
+              count: transactions.filter((t) => (t.balanceDue || 0) > 0).length,
+              icon: ShoppingBag,
+            },
+            { id: 'deposits', label: 'Deposits & Ledger', count: customerDeposits.length, icon: Wallet },
+            { id: 'returns', label: 'Goods Returns & Stock Restore', count: customerReturns.length, icon: RotateCcw },
+            {
+              id: 'complaints',
+              label: 'Complaints',
+              count: customerMetrics.openComplaintsCount,
+              icon: MessageSquareWarning,
+            },
+          ].map((sub) => {
+            const Icon = sub.icon;
+            const active = customerSubView === sub.id;
+            return (
+              <button
+                key={sub.id}
+                type="button"
+                onClick={() => setCustomerSubView(sub.id as any)}
+                className={`px-3.5 py-2 rounded-xl font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                  active
+                    ? 'bg-sky-600 text-white shadow'
+                    : 'text-slate-400 hover:text-white hover:bg-slate-900'
+                }`}
+              >
+                <Icon className="w-3.5 h-3.5" />
+                <span>{sub.label}</span>
+                <span
+                  className={`px-1.5 py-0.5 rounded-full text-[10px] font-mono ${
+                    active ? 'bg-slate-950/50 text-white' : 'bg-slate-800 text-slate-300'
+                  }`}
+                >
+                  {sub.count}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </>
       ) : (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl shadow-sm">
@@ -1150,6 +1299,436 @@ export const CustomersSuppliersView: React.FC<CustomersSuppliersViewProps> = ({
 
       {/* Main Data Table */}
       {activeTab === 'customers' ? (
+        customerSubView === 'sales_partial' ? (
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-xl p-4 space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h3 className="font-extrabold text-sm text-white flex items-center gap-2">
+                  <ShoppingBag className="w-4 h-4 text-sky-400" />
+                  <span>Customer Sales &amp; Partial Payments Tracker</span>
+                </h3>
+                <p className="text-xs text-slate-400">
+                  Track full, partial, and unpaid customer credit invoices and record installment payments or returns directly.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-1.5 text-xs">
+                {(['ALL', 'Partial', 'Unpaid', 'Paid'] as const).map((st) => (
+                  <button
+                    key={st}
+                    type="button"
+                    onClick={() => setSalesStatusFilter(st)}
+                    className={`px-3 py-1.5 rounded-xl font-bold cursor-pointer ${
+                      salesStatusFilter === st
+                        ? 'bg-sky-600 text-white'
+                        : 'bg-slate-950 text-slate-400 border border-slate-800'
+                    }`}
+                  >
+                    {st}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="overflow-x-auto rounded-2xl border border-slate-800">
+              <table className="w-full text-left text-xs text-slate-300 min-w-[780px]">
+                <thead className="bg-slate-950 text-[10px] uppercase text-slate-400 font-bold border-b border-slate-800">
+                  <tr>
+                    <th className="p-3">Receipt # &amp; Date</th>
+                    <th className="p-3">Customer</th>
+                    <th className="p-3 text-right">Total</th>
+                    <th className="p-3 text-right">Paid</th>
+                    <th className="p-3 text-right">Balance Due</th>
+                    <th className="p-3 text-center">Status</th>
+                    <th className="p-3 text-center">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/70">
+                  {transactions
+                    .filter((tx) => {
+                      if (salesStatusFilter !== 'ALL' && tx.paymentStatus !== salesStatusFilter) return false;
+                      if (!searchQuery.trim()) return true;
+                      const q = searchQuery.toLowerCase();
+                      return (
+                        tx.receiptNumber.toLowerCase().includes(q) ||
+                        (tx.customerName || '').toLowerCase().includes(q) ||
+                        (tx.customerPhone || '').toLowerCase().includes(q)
+                      );
+                    })
+                    .slice(0, 60)
+                    .map((tx) => {
+                      const matchedCust =
+                        customers.find((c) => c.id === tx.customerId) ||
+                        customers.find((c) => c.name.toLowerCase() === (tx.customerName || '').toLowerCase()) ||
+                        customers[0];
+                      return (
+                        <tr key={tx.id} className="hover:bg-slate-800/40">
+                          <td className="p-3 font-mono">
+                            <div className="font-bold text-sky-400">{tx.receiptNumber}</div>
+                            <div className="text-[10px] text-slate-500">{new Date(tx.date).toLocaleString()}</div>
+                          </td>
+                          <td className="p-3">
+                            <div className="font-bold text-white">{tx.customerName || 'Walk-in Customer'}</div>
+                            {tx.customerPhone && tx.customerPhone !== 'N/A' && (
+                              <div className="text-[10px] font-mono text-slate-400">{tx.customerPhone}</div>
+                            )}
+                          </td>
+                          <td className="p-3 text-right font-mono font-bold text-white">
+                            {formatKSh(tx.grandTotal, { showDecimals: true })}
+                          </td>
+                          <td className="p-3 text-right font-mono text-emerald-400">
+                            {formatKSh(tx.amountPaid, { showDecimals: true })}
+                          </td>
+                          <td className={`p-3 text-right font-mono font-extrabold ${tx.balanceDue > 0 ? 'text-rose-400' : 'text-slate-500'}`}>
+                            {formatKSh(tx.balanceDue, { showDecimals: true })}
+                          </td>
+                          <td className="p-3 text-center">
+                            <span
+                              className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                tx.paymentStatus === 'Paid'
+                                  ? 'bg-emerald-500/20 text-emerald-300'
+                                  : tx.paymentStatus === 'Partial'
+                                  ? 'bg-amber-500/20 text-amber-300'
+                                  : 'bg-rose-500/20 text-rose-300'
+                              }`}
+                            >
+                              {tx.paymentStatus}
+                            </span>
+                            {tx.returnStatus && tx.returnStatus !== 'None' && (
+                              <div className="text-[9px] text-amber-300 mt-0.5 font-bold">{tx.returnStatus}</div>
+                            )}
+                          </td>
+                          <td className="p-3 text-center">
+                            <div className="flex items-center justify-center gap-1.5">
+                              {tx.balanceDue > 0 && matchedCust && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setDepositModalCustomer(matchedCust);
+                                    setDepositModalMode('partial_payment');
+                                    setDepositModalTxId(tx.id);
+                                    setIsDepositModalOpen(true);
+                                  }}
+                                  className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-[10px] font-bold cursor-pointer"
+                                >
+                                  Partial Pay
+                                </button>
+                              )}
+                              {matchedCust && tx.returnStatus !== 'Full Return' && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setReturnModalCustomer(matchedCust);
+                                    setReturnModalTxId(tx.id);
+                                    setIsReturnModalOpen(true);
+                                  }}
+                                  className="px-2.5 py-1 bg-amber-600/20 hover:bg-amber-600 text-amber-300 hover:text-white border border-amber-500/40 rounded-lg text-[10px] font-bold cursor-pointer"
+                                >
+                                  Return
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => exportReceiptPDF(tx, { storeName, storeKraPin })}
+                                className="p-1.5 bg-slate-800 hover:bg-slate-700 text-sky-400 rounded-lg cursor-pointer"
+                                title="Download Receipt PDF"
+                              >
+                                <FileText className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ) : customerSubView === 'deposits' ? (
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-xl p-4 space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h3 className="font-extrabold text-sm text-white flex items-center gap-2">
+                  <Wallet className="w-4 h-4 text-emerald-400" />
+                  <span>Customer Deposits &amp; Partial Payments Ledger</span>
+                </h3>
+                <p className="text-xs text-slate-400">
+                  Track advance prepayments, partial invoice settlements, and store deposit credits applied at checkout.
+                </p>
+              </div>
+              {customers.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDepositModalCustomer(customers[0]);
+                    setDepositModalMode('deposit');
+                    setDepositModalTxId(undefined);
+                    setIsDepositModalOpen(true);
+                  }}
+                  className="px-3.5 py-2 bg-sky-600 hover:bg-sky-500 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Plus className="w-4 h-4" /> Record New Deposit / Partial Pay
+                </button>
+              )}
+            </div>
+
+            {customerDeposits.length === 0 ? (
+              <div className="p-12 text-center bg-slate-950/60 border border-slate-800 rounded-2xl text-slate-400 text-xs">
+                No customer deposits or partial invoice payments recorded yet.
+              </div>
+            ) : (
+              <div className="overflow-x-auto rounded-2xl border border-slate-800">
+                <table className="w-full text-left text-xs text-slate-300 min-w-[740px]">
+                  <thead className="bg-slate-950 text-[10px] uppercase text-slate-400 font-bold border-b border-slate-800">
+                    <tr>
+                      <th className="p-3">Ref # &amp; Date</th>
+                      <th className="p-3">Customer</th>
+                      <th className="p-3">Entry Type</th>
+                      <th className="p-3">Channel &amp; Ref</th>
+                      <th className="p-3">Linked Invoice / Notes</th>
+                      <th className="p-3 text-right">Amount</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/70">
+                    {customerDeposits.map((dep) => (
+                      <tr key={dep.id} className="hover:bg-slate-800/40">
+                        <td className="p-3 font-mono">
+                          <div className="font-bold text-sky-400">{dep.receiptRef}</div>
+                          <div className="text-[10px] text-slate-500">{new Date(dep.date).toLocaleString()}</div>
+                        </td>
+                        <td className="p-3 font-bold text-white">{dep.customerName}</td>
+                        <td className="p-3">
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-800 text-emerald-300 uppercase">
+                            {dep.type.replace(/_/g, ' ')}
+                          </span>
+                        </td>
+                        <td className="p-3 font-mono text-[11px]">
+                          {dep.paymentMethod.toUpperCase()} {dep.referenceNo ? `(${dep.referenceNo})` : ''}
+                        </td>
+                        <td className="p-3 text-[11px] text-slate-400">
+                          {dep.linkedReceiptNumber && (
+                            <span className="font-mono text-amber-300 mr-2">Inv: {dep.linkedReceiptNumber}</span>
+                          )}
+                          {dep.notes || `By ${dep.recordedBy}`}
+                        </td>
+                        <td className="p-3 text-right font-mono font-extrabold text-emerald-400">
+                          {formatKSh(dep.amount, { showDecimals: true })}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        ) : customerSubView === 'returns' ? (
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-xl p-4 space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h3 className="font-extrabold text-sm text-white flex items-center gap-2">
+                  <RotateCcw className="w-4 h-4 text-amber-400" />
+                  <span>Customer Goods Returns &amp; Stock Restoration Workflow</span>
+                </h3>
+                <p className="text-xs text-slate-400">
+                  Handle partial or full returns, cash/M-Pesa payouts or store credit, and verify exactly how resellable items return to inventory.
+                </p>
+              </div>
+              {customers.length > 0 && transactions.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setReturnModalCustomer(customers[0]);
+                    setReturnModalTxId(transactions[0]?.id);
+                    setIsReturnModalOpen(true);
+                  }}
+                  className="px-3.5 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                >
+                  <RotateCcw className="w-4 h-4" /> Process Goods Return
+                </button>
+              )}
+            </div>
+
+            <div className="p-3.5 rounded-2xl bg-emerald-950/30 border border-emerald-700/40 text-xs text-emerald-200 flex items-start gap-2.5">
+              <PackageCheck className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+              <div>
+                <strong>How Returned Items Go Back Into Stock:</strong> Each returned line item is inspected on the return screen. Items marked{' '}
+                <span className="text-emerald-300 font-bold">Resellable</span> automatically add their returned quantity back to{' '}
+                <code className="font-mono text-[11px]">stockQuantity</code> (logged in the Security &amp; Stock Audit Trail), while{' '}
+                <span className="text-rose-300 font-bold">Damaged / Defective</span> units are quarantined with <strong>0</strong> units added back to sellable inventory.
+              </div>
+            </div>
+
+            {customerReturns.length === 0 ? (
+              <div className="p-12 text-center bg-slate-950/60 border border-slate-800 rounded-2xl text-slate-400 text-xs">
+                No customer goods returns processed yet.
+              </div>
+            ) : (
+              <div className="space-y-2.5">
+                {customerReturns.map((ret) => (
+                  <div key={ret.id} className="p-4 bg-slate-950 border border-slate-800 rounded-2xl space-y-2 text-xs">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-mono font-bold text-amber-300">{ret.returnNumber}</span>
+                        <span className="px-2 py-0.5 rounded-full bg-slate-800 text-sky-300 font-mono text-[10px] font-bold">
+                          Credit Note: {ret.creditNoteNumber}
+                        </span>
+                        <span className="text-white font-bold">{ret.customerName}</span>
+                        <span className="text-slate-500 font-mono">Orig: {ret.originalReceiptNumber}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono font-extrabold text-amber-300">
+                          {formatKSh(ret.totalRefundAmount, { showDecimals: true })}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => exportCustomerReturnPDF(ret, { storeName, storeKraPin })}
+                          className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-sky-300 rounded-lg text-[10px] font-bold cursor-pointer"
+                        >
+                          Download PDF
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="text-[11px] text-slate-400 flex flex-wrap gap-3">
+                      <span>Date: {new Date(ret.date).toLocaleString()}</span>
+                      <span>Mode: <strong className="text-slate-200">{ret.refundMode.replace(/_/g, ' ').toUpperCase()}</strong></span>
+                      {ret.cashRefundAmount > 0 && <span>Cash/M-Pesa Out: <strong className="text-amber-300">{formatKSh(ret.cashRefundAmount)}</strong></span>}
+                      {ret.creditIssuedAmount > 0 && <span>Deposit Credit: <strong className="text-emerald-300">{formatKSh(ret.creditIssuedAmount)}</strong></span>}
+                      {ret.debtReducedAmount > 0 && <span>Debt Reduced: <strong className="text-sky-300">{formatKSh(ret.debtReducedAmount)}</strong></span>}
+                    </div>
+
+                    <div className="flex flex-wrap gap-2 pt-1">
+                      {ret.items.map((it) => (
+                        <span
+                          key={it.productId}
+                          className={`px-2.5 py-1 rounded-xl text-[11px] font-semibold border ${
+                            it.addedBackToStock
+                              ? 'bg-emerald-950/60 border-emerald-700/60 text-emerald-300'
+                              : 'bg-rose-950/60 border-rose-800/60 text-rose-300'
+                          }`}
+                        >
+                          {it.productName} x{it.quantityReturned}:{' '}
+                          {it.addedBackToStock
+                            ? `Restocked +${it.quantityReturned}${it.stockAfterReturn !== undefined ? ` (Stock -> ${it.stockAfterReturn})` : ''}`
+                            : 'Damaged Write-Off (0 Restocked)'}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        ) : customerSubView === 'complaints' ? (
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-xl p-4 space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h3 className="font-extrabold text-sm text-white flex items-center gap-2">
+                  <MessageSquareWarning className="w-4 h-4 text-rose-400" />
+                  <span>Customer Complaints &amp; Resolution Desk</span>
+                </h3>
+                <p className="text-xs text-slate-400">
+                  Track open issues, product defects, billing queries, and resolution notes per customer.
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                {(['ALL', 'Open', 'In Review', 'Escalated', 'Resolved'] as const).map((st) => (
+                  <button
+                    key={st}
+                    type="button"
+                    onClick={() => setComplaintStatusFilter(st)}
+                    className={`px-2.5 py-1.5 rounded-xl text-xs font-bold cursor-pointer ${
+                      complaintStatusFilter === st
+                        ? 'bg-rose-600 text-white'
+                        : 'bg-slate-950 text-slate-400 border border-slate-800'
+                    }`}
+                  >
+                    {st}
+                  </button>
+                ))}
+                {customers.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setComplaintModalCustomer(customers[0]);
+                      setEditingComplaint(null);
+                      setIsComplaintModalOpen(true);
+                    }}
+                    className="px-3.5 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Plus className="w-4 h-4" /> Log Complaint
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {customerComplaints.filter(
+              (c) => complaintStatusFilter === 'ALL' || c.status === complaintStatusFilter
+            ).length === 0 ? (
+              <div className="p-12 text-center bg-slate-950/60 border border-slate-800 rounded-2xl text-slate-400 text-xs">
+                No customer complaints match this filter.
+              </div>
+            ) : (
+              <div className="space-y-2.5">
+                {customerComplaints
+                  .filter((c) => complaintStatusFilter === 'ALL' || c.status === complaintStatusFilter)
+                  .map((cmp) => {
+                    const matchedCust = customers.find((cu) => cu.id === cmp.customerId) || customers[0];
+                    return (
+                      <div key={cmp.id} className="p-4 bg-slate-950 border border-slate-800 rounded-2xl space-y-2 text-xs">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="font-mono font-bold text-rose-400">{cmp.complaintNumber}</span>
+                            <span className="font-bold text-white">{cmp.subject}</span>
+                            <span className="px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 text-[10px]">
+                              {cmp.category}
+                            </span>
+                            <span className="px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-300 text-[10px] font-bold">
+                              {cmp.priority}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span
+                              className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
+                                cmp.status === 'Resolved'
+                                  ? 'bg-emerald-500/20 text-emerald-300'
+                                  : cmp.status === 'Escalated'
+                                  ? 'bg-rose-500/20 text-rose-300'
+                                  : 'bg-amber-500/20 text-amber-300'
+                              }`}
+                            >
+                              {cmp.status}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setComplaintModalCustomer(matchedCust);
+                                setEditingComplaint(cmp);
+                                setIsComplaintModalOpen(true);
+                              }}
+                              className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-sky-300 rounded-lg text-[10px] font-bold cursor-pointer"
+                            >
+                              Manage / Resolve
+                            </button>
+                          </div>
+                        </div>
+                        <div className="text-[11px] text-slate-400">
+                          Customer: <strong className="text-slate-200">{cmp.customerName}</strong>
+                          {cmp.linkedReceiptNumber && ` • Receipt: ${cmp.linkedReceiptNumber}`}
+                          {cmp.productName && ` • Product: ${cmp.productName}`}
+                        </div>
+                        <p className="text-slate-300">{cmp.description}</p>
+                        {cmp.resolutionNotes && (
+                          <div className="p-2.5 rounded-xl bg-emerald-950/40 border border-emerald-800/40 text-emerald-300 text-[11px]">
+                            Resolution: {cmp.resolutionNotes}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+              </div>
+            )}
+          </div>
+        ) : (
         <div>
           {filteredCustomers.length === 0 ? (
             <div className="p-16 text-center bg-slate-900 border border-slate-800 rounded-3xl">
@@ -1290,9 +1869,14 @@ export const CustomersSuppliersView: React.FC<CustomersSuppliersViewProps> = ({
                             </div>
                           </td>
 
-                          {/* Lifetime Purchases */}
+                          {/* Lifetime Purchases & Deposit Credit */}
                           <td className="p-4 text-right font-mono font-bold text-slate-100 text-sm">
-                            {formatKSh(c.totalPurchases || 0, { showDecimals: true })}
+                            <div>{formatKSh(c.totalPurchases || 0, { showDecimals: true })}</div>
+                            {(c.depositBalance || 0) > 0 && (
+                              <div className="text-[10px] text-emerald-400 font-bold">
+                                Deposit: {formatKSh(c.depositBalance || 0, { showDecimals: true })}
+                              </div>
+                            )}
                           </td>
 
                           {/* Balance Due */}
@@ -1322,25 +1906,49 @@ export const CustomersSuppliersView: React.FC<CustomersSuppliersViewProps> = ({
                           {/* Action Buttons */}
                           <td className="p-4 text-center">
                             <div className="flex items-center justify-center gap-1.5">
-                              {debt > 0 && (
-                                <button
-                                  onClick={() => {
-                                    setPayingCustomer(c);
-                                    setIsCustomerPayOpen(true);
-                                  }}
-                                  title="Record Debt Repayment"
-                                  className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-[11px] font-bold transition flex items-center gap-1 shadow-sm cursor-pointer"
-                                >
-                                  <DollarSign className="w-3.5 h-3.5" /> Pay
-                                </button>
-                              )}
+                              <button
+                                onClick={() => {
+                                  setDepositModalCustomer(c);
+                                  setDepositModalMode(debt > 0 ? 'partial_payment' : 'deposit');
+                                  setDepositModalTxId(undefined);
+                                  setIsDepositModalOpen(true);
+                                }}
+                                title={debt > 0 ? 'Partial Pay / Deposit' : 'Add Advance Deposit'}
+                                className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-[11px] font-bold transition flex items-center gap-1 shadow-sm cursor-pointer"
+                              >
+                                <Wallet className="w-3.5 h-3.5" /> {debt > 0 ? 'Pay' : 'Deposit'}
+                              </button>
+
+                              <button
+                                onClick={() => {
+                                  setReturnModalCustomer(c);
+                                  setReturnModalTxId(undefined);
+                                  setIsReturnModalOpen(true);
+                                }}
+                                title="Process Goods Return & Stock Restoration"
+                                className="p-1.5 bg-amber-950/70 hover:bg-amber-900 text-amber-300 border border-amber-700/60 rounded-xl transition cursor-pointer"
+                              >
+                                <RotateCcw className="w-4 h-4" />
+                              </button>
+
+                              <button
+                                onClick={() => {
+                                  setComplaintModalCustomer(c);
+                                  setEditingComplaint(null);
+                                  setIsComplaintModalOpen(true);
+                                }}
+                                title="Log Customer Complaint"
+                                className="p-1.5 bg-rose-950/60 hover:bg-rose-900 text-rose-300 border border-rose-800/60 rounded-xl transition cursor-pointer"
+                              >
+                                <MessageSquareWarning className="w-4 h-4" />
+                              </button>
 
                               <button
                                 onClick={() => {
                                   setViewingCustomer(c);
                                   setIsCustomerDetailsOpen(true);
                                 }}
-                                title="View Customer Profile & Invoices"
+                                title="View Customer Profile, Deposits, Returns & Complaints"
                                 className="p-1.5 bg-slate-800 hover:bg-slate-700 text-sky-400 rounded-xl transition cursor-pointer"
                               >
                                 <Eye className="w-4 h-4" />
@@ -1553,6 +2161,7 @@ export const CustomersSuppliersView: React.FC<CustomersSuppliersViewProps> = ({
             </div>
           )}
         </div>
+        )
       ) : (
         <div>
           {filteredSuppliers.length === 0 ? (
@@ -1765,6 +2374,9 @@ export const CustomersSuppliersView: React.FC<CustomersSuppliersViewProps> = ({
         }}
         customer={viewingCustomer}
         transactions={transactions}
+        deposits={customerDeposits}
+        returns={customerReturns}
+        complaints={customerComplaints}
         onOpenEdit={(c) => {
           setEditingCustomer(c);
           setIsCustomerEditOpen(true);
@@ -1773,12 +2385,82 @@ export const CustomersSuppliersView: React.FC<CustomersSuppliersViewProps> = ({
           setPayingCustomer(c);
           setIsCustomerPayOpen(true);
         }}
+        onOpenDeposit={(c, mode = 'deposit', txId) => {
+          setDepositModalCustomer(c);
+          setDepositModalMode(mode);
+          setDepositModalTxId(txId);
+          setIsDepositModalOpen(true);
+        }}
+        onOpenReturn={(c, txId) => {
+          setReturnModalCustomer(c);
+          setReturnModalTxId(txId);
+          setIsReturnModalOpen(true);
+        }}
+        onOpenComplaint={(c, existingCmp) => {
+          setComplaintModalCustomer(c);
+          setEditingComplaint(existingCmp || null);
+          setIsComplaintModalOpen(true);
+        }}
         onOpenContactsList={(c) => {
           setIsCustomerDetailsOpen(false);
           setSelectedCustomerForContactsList(c);
           setIsCustomerContactsListOpen(true);
         }}
       />
+
+      {onRecordCustomerDepositOrPayment && (
+        <CustomerDepositModal
+          isOpen={isDepositModalOpen}
+          onClose={() => {
+            setIsDepositModalOpen(false);
+            setDepositModalCustomer(null);
+            setDepositModalTxId(undefined);
+          }}
+          customer={depositModalCustomer}
+          transactions={transactions}
+          currentUser={currentUser}
+          initialMode={depositModalMode}
+          initialTransactionId={depositModalTxId}
+          onRecordDepositOrPayment={onRecordCustomerDepositOrPayment}
+        />
+      )}
+
+      {onProcessCustomerReturn && (
+        <CustomerReturnModal
+          isOpen={isReturnModalOpen}
+          onClose={() => {
+            setIsReturnModalOpen(false);
+            setReturnModalCustomer(null);
+            setReturnModalTxId(undefined);
+          }}
+          customer={returnModalCustomer}
+          transactions={transactions}
+          products={products}
+          existingReturns={customerReturns}
+          currentUser={currentUser}
+          initialTransactionId={returnModalTxId}
+          storeName={storeName}
+          storeKraPin={storeKraPin}
+          onProcessReturn={onProcessCustomerReturn}
+        />
+      )}
+
+      {onSaveCustomerComplaint && (
+        <CustomerComplaintModal
+          isOpen={isComplaintModalOpen}
+          onClose={() => {
+            setIsComplaintModalOpen(false);
+            setComplaintModalCustomer(null);
+            setEditingComplaint(null);
+          }}
+          customer={complaintModalCustomer}
+          complaintToEdit={editingComplaint}
+          transactions={transactions}
+          products={products}
+          currentUser={currentUser}
+          onSaveComplaint={onSaveCustomerComplaint}
+        />
+      )}
 
       <CustomerContactsListModal
         isOpen={isCustomerContactsListOpen}

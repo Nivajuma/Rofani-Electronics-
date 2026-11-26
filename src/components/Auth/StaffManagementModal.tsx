@@ -47,6 +47,7 @@ import {
   getWorkerPermissions,
   hasWorkerPermission,
   DEFAULT_ROLE_WORKER_PERMISSIONS,
+  DEFAULT_EMPTY_PERMISSIONS,
   PERMISSION_DEFINITIONS,
   ALL_SELECTABLE_ROLES,
   applyRoleToWorker,
@@ -62,9 +63,12 @@ import {
   ALL_21_GRANULAR_ROLES,
   assignAll21RolesToWorker,
   PRIMARY_ROLES,
+  formatRoleDisplayLabel,
+  isProtectedOwnerAccount,
 } from '../../utils/permissions';
 import { FlexibleWorkerPermissionsModal } from './FlexibleWorkerPermissionsModal';
 import { FlexibleRolesMatrixView } from './FlexibleRolesMatrixView';
+import { AssignedRolesPermissionsSection } from './AssignedRolesPermissionsSection';
 
 interface StaffManagementModalProps {
   isOpen: boolean;
@@ -299,14 +303,19 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
       if (!confirmUse) return;
     }
 
-    const userRoles = addRoles.length > 0 ? addRoles : [role];
-    const combinedPerms = getCombinedPermissionsForRoles(userRoles);
+    const cleanRoles = addRoles.filter((r) => r !== 'Custom');
+    const resolvedPrimaryRole: Role = cleanRoles.includes('Admin')
+      ? 'Admin'
+      : cleanRoles.length > 0
+      ? cleanRoles[0]
+      : role || 'Custom';
+    const combinedPerms = getCombinedPermissionsForRoles(cleanRoles);
     const newUser: User = {
       id: `usr-${Date.now()}`,
       name: name.trim(),
-      role: userRoles.includes('Admin') ? 'Admin' : userRoles[0],
-      roles: userRoles,
-      assignedRoles: userRoles,
+      role: resolvedPrimaryRole,
+      roles: cleanRoles,
+      assignedRoles: cleanRoles,
       phone: phone.trim() || undefined,
       email: email.trim() || `${name.toLowerCase().replace(/[^a-z0-9]/g, '.')}@rofani.co.ke`,
       status: status,
@@ -316,12 +325,12 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
       commissionRate: Number(commissionRate) || 0,
       notes: notes.trim() || undefined,
       customRoleTitle: addCustomRoleTitle.trim() || undefined,
-      permissions: { ...combinedPerms, ...addPermissions },
+      permissions: { ...DEFAULT_EMPTY_PERMISSIONS, ...combinedPerms, ...addPermissions },
     };
 
     onAddUser(newUser);
     setShowAddModal(false);
-    showNotification(`Worker "${newUser.name}" successfully added with ${userRoles.length} assigned roles!`, 'success');
+    showNotification(`Worker "${newUser.name}" successfully added with ${cleanRoles.length} assigned roles!`, 'success');
   };
 
   const handleSaveEditWorker = (e: React.FormEvent) => {
@@ -334,11 +343,15 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
     }
 
     const currentRoles = getUserRoles(editingUser);
-    const isOwner = editingUser.id === 'usr-1' || editingUser.email?.toLowerCase() === 'admin@rofani.co.ke';
+    const isOwner = isProtectedOwnerAccount(editingUser);
     const finalRoles = isOwner && !currentRoles.includes('Admin') ? [...currentRoles, 'Admin' as Role] : currentRoles;
     const finalUser: User = {
       ...editingUser,
-      role: finalRoles.includes('Admin') ? 'Admin' : finalRoles[0],
+      role: finalRoles.includes('Admin')
+        ? 'Admin'
+        : finalRoles.length > 0
+        ? finalRoles[0]
+        : 'Custom',
       roles: finalRoles,
       assignedRoles: finalRoles,
     };
@@ -950,16 +963,21 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
 
                       <div className="flex flex-col items-end gap-1 shrink-0">
                         <div className="flex flex-wrap justify-end gap-1 max-w-[200px]">
-                          {getUserRoles(u).map((r) => (
+                          {getUserRoles(u).slice(0, 4).map((r) => (
                             <span
                               key={r}
-                              className={`px-2 py-0.5 rounded-lg border text-[10px] font-mono font-bold ${
+                              className={`px-2 py-0.5 rounded-lg border text-[10px] font-semibold ${
                                 roleBadges[r]?.badge || badgeConfig.badge
                               }`}
                             >
-                              {r}
+                              {formatRoleDisplayLabel(r)}
                             </span>
                           ))}
+                          {getUserRoles(u).length > 4 && (
+                            <span className="px-1.5 py-0.5 rounded-lg border border-slate-700 bg-slate-800 text-[10px] font-mono font-bold text-slate-300">
+                              +{getUserRoles(u).length - 4}
+                            </span>
+                          )}
                         </div>
                         <span
                           className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${
@@ -1046,138 +1064,25 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
                         </select>
                       </div>
 
-                      {/* Multi-Role Quick Toggles (Worker can hold more than 3 roles simultaneously, up to 21 roles) */}
-                      <div>
-                        <div className="text-[10px] text-slate-400 mb-1 flex items-center justify-between">
-                          <span className="font-semibold text-slate-300 flex items-center gap-1.5">
-                            <ShieldCheck className="w-3 h-3 text-sky-400" />
-                            <span>Assigned Roles ({getUserRoles(u).length} Active - Multi-Role Allowed):</span>
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => handleAssignAll21Roles(u)}
-                            className="text-[9px] bg-emerald-950/80 hover:bg-emerald-900 text-emerald-300 border border-emerald-700/80 px-2 py-0.5 rounded font-bold transition flex items-center gap-1"
-                            title="Assign all 21 operational and functional roles to this worker"
-                          >
-                            <Sparkles className="w-2.5 h-2.5 text-amber-400" />
-                            <span>Assign All 21 Roles</span>
-                          </button>
-                        </div>
-                        <div className="flex flex-wrap gap-1">
-                          {ALL_ROLES.map((r) => {
-                            const isAssigned = hasRole(u, r);
-                            const badge = getRoleBadge(r);
-                            return (
-                              <button
-                                key={r}
-                                type="button"
-                                onClick={() => handleQuickToggleRole(u, r)}
-                                className={`px-2 py-0.5 rounded-lg text-[10px] font-bold border transition flex items-center gap-1 cursor-pointer ${
-                                  isAssigned
-                                    ? `${badge.badge} shadow-sm`
-                                    : 'bg-slate-950/60 text-slate-500 border-slate-800 hover:border-slate-700 hover:text-slate-300'
-                                }`}
-                                title={`Click to ${isAssigned ? 'remove' : 'assign'} ${r}`}
-                              >
-                                {isAssigned ? <Check className="w-2.5 h-2.5" /> : <Plus className="w-2.5 h-2.5" />}
-                                <span>{r}</span>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
-
-                      {/* Quick Toggleable Role Category Badges */}
-                      <div>
-                        <div className="text-[10px] text-slate-400 mb-1 flex items-center justify-between">
-                          <span className="font-semibold text-slate-400">Assign Role Bundles:</span>
-                          <span className="text-[9px] text-slate-500">Tap to toggle on/off</span>
-                        </div>
-                        <div className="flex flex-wrap gap-1.5">
-                          {(() => {
-                            const perms = getWorkerPermissions(u);
-                            const isSalesActive = perms.canMakeSales && perms.canManageCustomerOrders;
-                            const isStockInsActive = perms.canAddStockIn && perms.canManageSupplierOrders;
-                            const isStockSetupActive = perms.canAddNewProducts && perms.canCountUpdateStockBalance;
-                            const isExpensesActive = perms.canAddExpenses;
-                            const isOtherActive = perms.canGiveDiscounts || perms.canGenerateBarcode;
-
-                            return (
-                              <>
-                                <button
-                                  type="button"
-                                  onClick={() => handleQuickToggleCategory(u, 'sales')}
-                                  className={`px-2 py-0.5 rounded-lg text-[10px] font-bold border transition flex items-center gap-1 ${
-                                    isSalesActive
-                                      ? 'bg-emerald-950/80 text-emerald-300 border-emerald-600/80 hover:bg-emerald-900/80'
-                                      : 'bg-slate-950/60 text-slate-400 border-slate-800 hover:border-slate-700 hover:text-slate-300'
-                                  }`}
-                                  title="Toggle Sales Role (Make sales, manage customer orders, order status, customers, sales commission)"
-                                >
-                                  {isSalesActive ? <Check className="w-2.5 h-2.5 text-emerald-400" /> : <Plus className="w-2.5 h-2.5 text-slate-500" />}
-                                  <span>Sales Role</span>
-                                </button>
-
-                                <button
-                                  type="button"
-                                  onClick={() => handleQuickToggleCategory(u, 'stockIns')}
-                                  className={`px-2 py-0.5 rounded-lg text-[10px] font-bold border transition flex items-center gap-1 ${
-                                    isStockInsActive
-                                      ? 'bg-cyan-950/80 text-cyan-300 border-cyan-600/80 hover:bg-cyan-900/80'
-                                      : 'bg-slate-950/60 text-slate-400 border-slate-800 hover:border-slate-700 hover:text-slate-300'
-                                  }`}
-                                  title="Toggle Stock Ins Role (Add stock in, supplier orders, manage supplies, bad stock)"
-                                >
-                                  {isStockInsActive ? <Check className="w-2.5 h-2.5 text-cyan-400" /> : <Plus className="w-2.5 h-2.5 text-slate-500" />}
-                                  <span>Stock Ins Role</span>
-                                </button>
-
-                                <button
-                                  type="button"
-                                  onClick={() => handleQuickToggleCategory(u, 'stockSetup')}
-                                  className={`px-2 py-0.5 rounded-lg text-[10px] font-bold border transition flex items-center gap-1 ${
-                                    isStockSetupActive
-                                      ? 'bg-indigo-950/80 text-indigo-300 border-indigo-600/80 hover:bg-indigo-900/80'
-                                      : 'bg-slate-950/60 text-slate-400 border-slate-800 hover:border-slate-700 hover:text-slate-300'
-                                  }`}
-                                  title="Toggle Stock Setup Role (Add products, offers, view out of stock, count & update balance)"
-                                >
-                                  {isStockSetupActive ? <Check className="w-2.5 h-2.5 text-indigo-400" /> : <Plus className="w-2.5 h-2.5 text-slate-500" />}
-                                  <span>Stock Setup Role</span>
-                                </button>
-
-                                <button
-                                  type="button"
-                                  onClick={() => handleQuickToggleCategory(u, 'expenses')}
-                                  className={`px-2 py-0.5 rounded-lg text-[10px] font-bold border transition flex items-center gap-1 ${
-                                    isExpensesActive
-                                      ? 'bg-amber-950/80 text-amber-300 border-amber-600/80 hover:bg-amber-900/80'
-                                      : 'bg-slate-950/60 text-slate-400 border-slate-800 hover:border-slate-700 hover:text-slate-300'
-                                  }`}
-                                  title="Toggle Expenses Role (Add daily operating expenses)"
-                                >
-                                  {isExpensesActive ? <Check className="w-2.5 h-2.5 text-amber-400" /> : <Plus className="w-2.5 h-2.5 text-slate-500" />}
-                                  <span>Expenses Role</span>
-                                </button>
-
-                                <button
-                                  type="button"
-                                  onClick={() => handleQuickToggleCategory(u, 'other')}
-                                  className={`px-2 py-0.5 rounded-lg text-[10px] font-bold border transition flex items-center gap-1 ${
-                                    isOtherActive
-                                      ? 'bg-purple-950/80 text-purple-300 border-purple-600/80 hover:bg-purple-900/80'
-                                      : 'bg-slate-950/60 text-slate-400 border-slate-800 hover:border-slate-700 hover:text-slate-300'
-                                  }`}
-                                  title="Toggle Other Roles (Give discounts, edit daily entries, return stocks, generate barcodes, preview receipts)"
-                                >
-                                  {isOtherActive ? <Check className="w-2.5 h-2.5 text-purple-400" /> : <Plus className="w-2.5 h-2.5 text-slate-500" />}
-                                  <span>Other Roles</span>
-                                </button>
-                              </>
-                            );
-                          })()}
-                        </div>
-                      </div>
+                      {/* Redesigned Assigned Roles & Categorized Permissions */}
+                      <AssignedRolesPermissionsSection
+                        compact
+                        roles={getUserRoles(u)}
+                        permissions={getWorkerPermissions(u)}
+                        primaryRole={u.role}
+                        isOwnerProtected={isProtectedOwnerAccount(u)}
+                        canAssignAdmin={effectiveRole === 'Admin'}
+                        onChange={({ roles: nextRoles, permissions: nextPerms, primaryRole }) => {
+                          onUpdateUser({
+                            ...u,
+                            role: primaryRole,
+                            roles: nextRoles,
+                            assignedRoles: nextRoles,
+                            permissions: nextPerms,
+                          });
+                        }}
+                        onNotify={(msg, type) => showNotification(msg, type || 'info')}
+                      />
                     </div>
 
                     {/* Flexible Roles & Permissions Summary */}
@@ -1338,7 +1243,13 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
                       onChange={(e) => {
                         const newRole = e.target.value as Role;
                         setRole(newRole);
-                        setAddPermissions({ ...DEFAULT_ROLE_WORKER_PERMISSIONS[newRole] });
+                        if (newRole === 'Custom') {
+                          setAddRoles([]);
+                          setAddPermissions({ ...DEFAULT_EMPTY_PERMISSIONS });
+                        } else {
+                          setAddRoles([newRole]);
+                          setAddPermissions({ ...DEFAULT_ROLE_WORKER_PERMISSIONS[newRole] });
+                        }
                       }}
                       className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 focus:outline-none focus:border-sky-500 font-semibold"
                     >
@@ -1350,142 +1261,24 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
                       <option value="Inventory Staff">Inventory Staff (Stock & Receiving)</option>
                       <option value="Manager">Manager (Full Store Operations)</option>
                       <option value="Admin">Admin (Full System Access)</option>
+                      <option value="Custom">Custom Permissions</option>
                     </select>
-
-                    {/* Quick Role Preset Pills */}
-                    <div className="flex flex-wrap gap-1 mt-1.5">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setRole('Sales Role');
-                          setAddPermissions({ ...DEFAULT_ROLE_WORKER_PERMISSIONS['Sales Role'] });
-                        }}
-                        className={`px-2 py-0.5 rounded text-[10px] font-bold border transition ${
-                          role === 'Sales Role'
-                            ? 'bg-emerald-950 text-emerald-300 border-emerald-700'
-                            : 'bg-slate-950 text-slate-400 border-slate-800 hover:text-slate-200'
-                        }`}
-                      >
-                        Sales Role
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setRole('Stock Ins Role');
-                          setAddPermissions({ ...DEFAULT_ROLE_WORKER_PERMISSIONS['Stock Ins Role'] });
-                        }}
-                        className={`px-2 py-0.5 rounded text-[10px] font-bold border transition ${
-                          role === 'Stock Ins Role'
-                            ? 'bg-cyan-950 text-cyan-300 border-cyan-700'
-                            : 'bg-slate-950 text-slate-400 border-slate-800 hover:text-slate-200'
-                        }`}
-                      >
-                        Stock Ins Role
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setRole('Stock Setup Role');
-                          setAddPermissions({ ...DEFAULT_ROLE_WORKER_PERMISSIONS['Stock Setup Role'] });
-                        }}
-                        className={`px-2 py-0.5 rounded text-[10px] font-bold border transition ${
-                          role === 'Stock Setup Role'
-                            ? 'bg-indigo-950 text-indigo-300 border-indigo-700'
-                            : 'bg-slate-950 text-slate-400 border-slate-800 hover:text-slate-200'
-                        }`}
-                      >
-                        Stock Setup Role
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setRole('Expenses Role');
-                          setAddPermissions({ ...DEFAULT_ROLE_WORKER_PERMISSIONS['Expenses Role'] });
-                        }}
-                        className={`px-2 py-0.5 rounded text-[10px] font-bold border transition ${
-                          role === 'Expenses Role'
-                            ? 'bg-amber-950 text-amber-300 border-amber-700'
-                            : 'bg-slate-950 text-slate-400 border-slate-800 hover:text-slate-200'
-                        }`}
-                      >
-                        Expenses Role
-                      </button>
-                    </div>
-
-                    {/* Multi-Role Assignment (Worker can hold more than 3 roles simultaneously, up to 21 roles) */}
-                    <div className="bg-slate-950 border border-slate-800 p-2.5 rounded-xl space-y-1.5 mt-2">
-                      <div className="flex items-center justify-between text-[11px]">
-                        <span className="text-slate-300 font-semibold flex items-center gap-1">
-                          <ShieldCheck className="w-3.5 h-3.5 text-sky-400" />
-                          <span>Assign Multiple Roles ({addRoles.length} of {ALL_ROLES.length} Selected):</span>
-                        </span>
-                        <div className="flex items-center gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const all21AndPrimary = Array.from(new Set([...ALL_ROLES]));
-                              setAddRoles(all21AndPrimary);
-                              setRole(all21AndPrimary.includes('Admin') ? 'Admin' : all21AndPrimary[0]);
-                              const combined = getCombinedPermissionsForRoles(all21AndPrimary);
-                              setAddPermissions(combined);
-                            }}
-                            className="text-[10px] bg-emerald-950/80 hover:bg-emerald-900 text-emerald-300 border border-emerald-700/80 px-2 py-0.5 rounded font-bold transition flex items-center gap-1"
-                          >
-                            <Sparkles className="w-2.5 h-2.5 text-amber-400" />
-                            <span>Assign All 21 Roles</span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setAddRoles(['Cashier']);
-                              setRole('Cashier');
-                              setAddPermissions({ ...DEFAULT_ROLE_WORKER_PERMISSIONS.Cashier });
-                            }}
-                            className="text-[10px] bg-slate-900 hover:bg-slate-800 text-slate-400 border border-slate-800 px-2 py-0.5 rounded font-semibold transition"
-                          >
-                            Reset
-                          </button>
-                        </div>
-                      </div>
-                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
-                        {ALL_ROLES.map((r) => {
-                          const isSelected = addRoles.includes(r);
-                          return (
-                            <button
-                              key={r}
-                              type="button"
-                              onClick={() => {
-                                let next: Role[];
-                                if (isSelected) {
-                                  if (addRoles.length <= 1) return;
-                                  next = addRoles.filter((item) => item !== r);
-                                } else {
-                                  next = [...addRoles, r];
-                                }
-                                setAddRoles(next);
-                                setRole(next.includes('Admin') ? 'Admin' : next[0]);
-                                const combined = getCombinedPermissionsForRoles(next);
-                                setAddPermissions((prev) => ({ ...combined, ...prev }));
-                              }}
-                              className={`p-1.5 rounded-lg text-left border text-[11px] font-bold transition flex items-center justify-between cursor-pointer ${
-                                isSelected
-                                  ? 'bg-sky-950/80 text-sky-300 border-sky-600'
-                                  : 'bg-slate-900 text-slate-400 border-slate-800 hover:text-slate-200'
-                              }`}
-                            >
-                              <span className="truncate">{r}</span>
-                              {isSelected ? (
-                                <Check className="w-3 h-3 text-sky-400 shrink-0" />
-                              ) : (
-                                <Plus className="w-3 h-3 text-slate-600 shrink-0" />
-                              )}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
                   </div>
                 </div>
+
+                {/* Redesigned Assigned Roles & Categorized Permissions */}
+                <AssignedRolesPermissionsSection
+                  roles={addRoles}
+                  permissions={addPermissions}
+                  primaryRole={role}
+                  canAssignAdmin={effectiveRole === 'Admin'}
+                  onChange={({ roles: nextRoles, permissions: nextPerms, primaryRole }) => {
+                    setAddRoles(nextRoles);
+                    setRole(primaryRole);
+                    setAddPermissions(nextPerms);
+                  }}
+                  onNotify={(msg, type) => showNotification(msg, type || 'info')}
+                />
 
                 {/* Phone & Email */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -1630,61 +1423,7 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
                   />
                 </div>
 
-                {/* Flexible Permissions Quick Configuration Toggle */}
-                <div className="bg-slate-950 border border-slate-800 rounded-2xl overflow-hidden">
-                  <div
-                    onClick={() => setShowAddPermissionsSection(!showAddPermissionsSection)}
-                    className="p-3 bg-slate-900/80 hover:bg-slate-900 flex items-center justify-between cursor-pointer select-none"
-                  >
-                    <div className="flex items-center gap-2">
-                      <ShieldCheck className="w-4 h-4 text-emerald-400" />
-                      <div>
-                        <div className="text-xs font-bold text-slate-200">
-                          Configure Flexible Permissions ({Object.values(addPermissions).filter(Boolean).length} / 21 Enabled)
-                        </div>
-                        <div className="text-[10px] text-slate-400">
-                          {showAddPermissionsSection ? 'Click to collapse permissions checklist' : 'Click to customize individual roles for this worker'}
-                        </div>
-                      </div>
-                    </div>
-                    <span className="text-xs font-mono font-bold text-sky-400">
-                      {showAddPermissionsSection ? '▲ Hide' : '▼ Customize (21 Roles)'}
-                    </span>
-                  </div>
 
-                  {showAddPermissionsSection && (
-                    <div className="p-3 space-y-2.5 max-h-56 overflow-y-auto border-t border-slate-800">
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-                        {PERMISSION_DEFINITIONS.map((def) => {
-                          const isChecked = !!addPermissions[def.key];
-                          return (
-                            <label
-                              key={def.key}
-                              className={`p-2 rounded-xl border flex items-center justify-between gap-2 cursor-pointer transition ${
-                                isChecked
-                                  ? 'bg-emerald-950/30 border-emerald-800/80 text-slate-100'
-                                  : 'bg-slate-900/40 border-slate-800 text-slate-400'
-                              }`}
-                            >
-                              <span className="text-[11px] font-semibold">{def.label}</span>
-                              <input
-                                type="checkbox"
-                                checked={isChecked}
-                                onChange={() =>
-                                  setAddPermissions((prev) => ({
-                                    ...prev,
-                                    [def.key]: !prev[def.key],
-                                  }))
-                                }
-                                className="w-3.5 h-3.5 rounded text-emerald-500 focus:ring-0 bg-slate-900 border-slate-700"
-                              />
-                            </label>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  )}
-                </div>
 
                 {/* Action Buttons */}
                 <div className="pt-3 border-t border-slate-800 flex justify-end gap-2">
@@ -1771,86 +1510,29 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
                       <option value="Inventory Staff">Inventory Staff (Stock & Receiving)</option>
                       <option value="Manager">Manager (Full Store Operations)</option>
                       <option value="Admin">Admin (Full System Access)</option>
+                      <option value="Custom">Custom Permissions</option>
                     </select>
                   </div>
                 </div>
 
-                {/* Multi-Role Assignment Section */}
-                <div className="bg-slate-950/80 border border-slate-800 p-3 rounded-xl space-y-2">
-                  <div className="flex items-center justify-between">
-                    <label className="text-slate-200 font-semibold text-xs flex items-center gap-1.5">
-                      <ShieldCheck className="w-3.5 h-3.5 text-sky-400" />
-                      <span>Assigned Roles (Select multiple roles — worker can hold more than 3 roles simultaneously, up to 21 roles):</span>
-                    </label>
-                    <div className="flex items-center gap-1.5">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const allRolesList = Array.from(new Set([...ALL_ROLES]));
-                          const combined = getCombinedPermissionsForRoles(allRolesList);
-                          setEditingUser({
-                            ...editingUser,
-                            roles: allRolesList,
-                            assignedRoles: allRolesList,
-                            role: allRolesList.includes('Admin') ? 'Admin' : allRolesList[0],
-                            permissions: { ...combined, ...editingUser.permissions },
-                          });
-                        }}
-                        className="text-[10px] bg-emerald-950/80 hover:bg-emerald-900 text-emerald-300 border border-emerald-700/80 px-2 py-0.5 rounded font-bold transition flex items-center gap-1"
-                      >
-                        <Sparkles className="w-2.5 h-2.5 text-amber-400" />
-                        <span>Assign All 21 Roles</span>
-                      </button>
-                      <span className="text-[10px] text-sky-400 font-mono font-bold">
-                        {getUserRoles(editingUser).length} of {ALL_ROLES.length} Roles
-                      </span>
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                    {ALL_ROLES.map((r) => {
-                      const currentRoles = getUserRoles(editingUser);
-                      const isChecked = currentRoles.includes(r);
-                      return (
-                        <button
-                          key={r}
-                          type="button"
-                          onClick={() => {
-                            let nextRoles: Role[];
-                            if (isChecked) {
-                              if (currentRoles.length <= 1) {
-                                showNotification('Worker must have at least one role.', 'error');
-                                return;
-                              }
-                              if (r === 'Admin' && (editingUser.id === 'usr-1' || editingUser.email?.toLowerCase() === 'admin@rofani.co.ke')) {
-                                showNotification('Store owner account must retain Administrator role.', 'error');
-                                return;
-                              }
-                              nextRoles = currentRoles.filter((item) => item !== r);
-                            } else {
-                              nextRoles = [...currentRoles, r];
-                            }
-                            const combined = getCombinedPermissionsForRoles(nextRoles);
-                            setEditingUser({
-                              ...editingUser,
-                              roles: nextRoles,
-                              assignedRoles: nextRoles,
-                              role: nextRoles.includes('Admin') ? 'Admin' : nextRoles[0],
-                              permissions: { ...combined, ...editingUser.permissions },
-                            });
-                          }}
-                          className={`p-2 rounded-xl text-left border text-xs font-bold transition flex items-center justify-between cursor-pointer ${
-                            isChecked
-                              ? 'bg-sky-900/40 text-sky-200 border-sky-500 shadow-sm'
-                              : 'bg-slate-900 text-slate-400 border-slate-800 hover:text-slate-200'
-                          }`}
-                        >
-                          <span className="truncate">{r}</span>
-                          {isChecked ? <Check className="w-3.5 h-3.5 text-sky-300 shrink-0" /> : <Plus className="w-3.5 h-3.5 text-slate-600 shrink-0" />}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
+                {/* Redesigned Assigned Roles & Categorized Permissions */}
+                <AssignedRolesPermissionsSection
+                  roles={getUserRoles(editingUser)}
+                  permissions={getWorkerPermissions(editingUser)}
+                  primaryRole={editingUser.role}
+                  isOwnerProtected={isProtectedOwnerAccount(editingUser)}
+                  canAssignAdmin={effectiveRole === 'Admin'}
+                  onChange={({ roles: nextRoles, permissions: nextPerms, primaryRole }) => {
+                    setEditingUser({
+                      ...editingUser,
+                      role: primaryRole,
+                      roles: nextRoles,
+                      assignedRoles: nextRoles,
+                      permissions: nextPerms,
+                    });
+                  }}
+                  onNotify={(msg, type) => showNotification(msg, type || 'info')}
+                />
 
                 {/* Phone & Email */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

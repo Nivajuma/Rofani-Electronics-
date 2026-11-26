@@ -17,12 +17,16 @@ async function startServer() {
 
   // Initialize Gemini AI Client
   const getGeminiClient = () => {
-    const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
+    const apiKey =
+      process.env.GEMINI_API_KEY ||
+      process.env.GOOGLE_GENERATIVE_AI_API_KEY ||
+      process.env.GOOGLE_API_KEY ||
+      process.env.API_KEY;
     if (!apiKey) return null;
     return new GoogleGenAI({
       apiKey,
       httpOptions: {
-        timeout: 18000,
+        timeout: 25000,
         headers: {
           'User-Agent': 'aistudio-build',
         },
@@ -110,7 +114,7 @@ async function startServer() {
 
     for (const model of candidateModels) {
       const attemptTimeoutMs =
-        requestParams.timeoutMs || (model === 'gemini-4-hydrogen' ? 8000 : 15000);
+        requestParams.timeoutMs || (model === 'gemini-4-hydrogen' ? 11000 : 15000);
       try {
         const baseConfig = requestParams.config ? { ...requestParams.config } : {};
         if (!baseConfig.abortSignal) {
@@ -652,11 +656,12 @@ TASK:
 
       const systemInstruction = `You are "ROFANI AI Co-Pilot", a concise, practical POS tutor & retail strategist for Rofani POS in Kenya.
 Help users with:
-1. Sales & Checkout (Cash, M-Pesa STK Push/Till/Paybill, Card, Split Payments, Customer Credit/Layby, Calculator Give Change).
+1. Sales & Checkout (Cash, M-Pesa STK Push/Till/Paybill, Card, Split Payments, Customer Credit/Layby, Advance Deposits wallet redemption, Calculator Give Change).
 2. Inventory & Low Stock (restocking, AI product photo scan, barcode labels, inter-branch stock transfers).
-3. Multi-Shop Management (adding new branches, switching stores, cloud + local/email backups).
-4. Reports & Taxes (daily sales, expenses, profit, staff wages/commissions; optional tax is Off by default in Settings -> Transaction).
-5. Plans & Referrals: 7-day free trial (22 days with a referral code), +30 days free per referred shop, paid plans 30d KSh 500 / 3m KSh 1,350 / 6m KSh 2,650 / 12m KSh 5,000. Support: rofanipos@gmail.com, WhatsApp +254 734 128 888, Calls +254 734 128 888 / +254 713 128 888.
+3. Customers, Partial Payments & Returns (customer advance deposits, partial balance settlements, partial/cash goods returns with Credit Note PDFs, resellable stock restoration vs damaged write-off, customer complaints).
+4. Multi-Shop Management (adding new branches, Multi-Branch Business Group switcher, cloud + local/email backups).
+5. Reports & KRA Compliance (daily sales, expenses, profit, staff wages/commissions; KRA & e-TIMS Compliance Center for iTax TOT 1.5%, VAT 16%, Credit Notes, VSCU/OSCU config & JSON payload export).
+6. Plans & Customer Care: 7-day free trial (22 days with a referral code), +30 days free per referred shop, paid plans 30d KSh 500 / 3m KSh 1,350 / 6m KSh 2,650 / 12m KSh 5,000. Human Customer Care: rofanipos@gmail.com, WhatsApp +254 734 128 888, Calls +254 734 128 888 / +254 713 128 888.
 
 Active Store Context:
 - Store: ${context?.storeName || 'Rofani POS'} | Role: ${context?.role || 'Staff'} | View: ${context?.activeTab || 'POS'}
@@ -677,7 +682,6 @@ Formatting Rules:
 
       const response = await generateContentWithFallback(ai, {
         contents: prompt,
-        timeoutMs: 5500,
         config: {
           systemInstruction,
         },
@@ -690,8 +694,12 @@ Formatting Rules:
       }
       res.json({ reply: replyText });
     } catch (err: any) {
-      console.error('Gemini AI Assistant error:', err?.message || err);
       const mapped = mapGeminiHttpError(err, 'Unable to get a response from Gemini AI right now. Please try again.');
+      if (mapped.status === 504 || mapped.status === 429 || mapped.status === 503) {
+        console.warn('Gemini AI Assistant transient response:', mapped.status, err?.message || err);
+      } else {
+        console.error('Gemini AI Assistant error:', err?.message || err);
+      }
       res.status(mapped.status).json({ error: mapped.error });
     }
   });

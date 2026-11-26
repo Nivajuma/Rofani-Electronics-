@@ -1,48 +1,50 @@
-import { GoogleGenAI, Type } from '@google/genai';
+import { GoogleGenAI, ThinkingLevel, Type } from '@google/genai';
 
 async function generateWithFallback(
   ai: GoogleGenAI,
   requestParams: { contents: any; config?: any }
 ) {
-  const candidateModels = ['gemini-4-hydrogen', 'gemini-3.1-flash-lite'];
+  const candidateModels = ['gemini-4-hydrogen', 'gemini-3.1-flash-lite'] as const;
   let lastError: any = null;
 
   for (const model of candidateModels) {
-    for (let attempt = 1; attempt <= 2; attempt++) {
-      try {
-        return await ai.models.generateContent({
-          model,
-          contents: requestParams.contents,
-          config: requestParams.config,
-        });
-      } catch (err: any) {
-        lastError = err;
-        const errMsg = String(err?.message || '');
-        const status =
-          err?.status ||
-          err?.code ||
-          (errMsg.includes('503') ? 503 : errMsg.includes('429') ? 429 : errMsg.includes('404') ? 404 : 0);
-
-        const isTransient =
-          status === 503 ||
-          status === 429 ||
-          errMsg.includes('high demand') ||
-          errMsg.includes('UNAVAILABLE') ||
-          errMsg.includes('RESOURCE_EXHAUSTED') ||
-          errMsg.includes('temporarily unavailable');
-
-        if (isTransient) {
-          if (attempt === 1) {
-            await new Promise((resolve) => setTimeout(resolve, 600));
-            continue;
-          }
-          break;
-        }
-        if (status === 404 || errMsg.includes('not found') || errMsg.includes('is not supported')) {
-          break;
-        }
-        throw err;
+    const attemptTimeoutMs = model === 'gemini-4-hydrogen' ? 5000 : 4000;
+    try {
+      const config: any = {
+        ...(requestParams.config || {}),
+        abortSignal: AbortSignal.timeout(attemptTimeoutMs),
+      };
+      if (model === 'gemini-4-hydrogen' && !config.thinkingConfig) {
+        config.thinkingConfig = { thinkingLevel: ThinkingLevel.LOW };
       }
+      return await ai.models.generateContent({
+        model,
+        contents: requestParams.contents,
+        config,
+      });
+    } catch (err: any) {
+      lastError = err;
+      const errMsg = String(err?.message || '');
+      const name = String(err?.name || '');
+      const status =
+        err?.status ||
+        err?.code ||
+        (errMsg.includes('503') ? 503 : errMsg.includes('429') ? 429 : errMsg.includes('404') ? 404 : 0);
+
+      const isRetryable =
+        name === 'TimeoutError' ||
+        name === 'AbortError' ||
+        status === 503 ||
+        status === 429 ||
+        status === 404 ||
+        /timeout|timed out|aborted|high demand|UNAVAILABLE|RESOURCE_EXHAUSTED|temporarily unavailable|not found|is not supported/i.test(
+          errMsg
+        );
+
+      if (isRetryable) {
+        continue;
+      }
+      throw err;
     }
   }
   throw lastError;
@@ -68,14 +70,19 @@ export default async function handler(req: any, res: any) {
   }
 
   try {
-    const { imageBase64, productsCatalog = [], storeCategories = [] } = req.body || {};
+    const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : req.body || {};
+    const { imageBase64, productsCatalog = [], storeCategories = [] } = body;
 
     if (!imageBase64 || typeof imageBase64 !== 'string') {
       res.status(400).json({ error: 'imageBase64 image is required' });
       return;
     }
 
-    const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
+    const apiKey =
+      process.env.GEMINI_API_KEY ||
+      process.env.GOOGLE_GENERATIVE_AI_API_KEY ||
+      process.env.GOOGLE_API_KEY ||
+      process.env.API_KEY;
     if (!apiKey) {
       res.status(503).json({
         error:
@@ -87,6 +94,7 @@ export default async function handler(req: any, res: any) {
     const ai = new GoogleGenAI({
       apiKey,
       httpOptions: {
+        timeout: 9000,
         headers: {
           'User-Agent': 'aistudio-build',
         },

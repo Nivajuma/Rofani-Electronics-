@@ -20,10 +20,24 @@ import {
   AlertTriangle,
   Send,
   Users,
-  Star
+  Star,
+  Wallet,
+  RotateCcw,
+  MessageSquareWarning,
+  PackageCheck,
 } from 'lucide-react';
-import { Customer, Transaction } from '../../types';
-import { exportCustomerAccountStatementPDF, exportReceiptPDF } from '../../utils/pdfGenerator';
+import {
+  Customer,
+  CustomerComplaint,
+  CustomerDepositRecord,
+  CustomerReturnRecord,
+  Transaction,
+} from '../../types';
+import {
+  exportCustomerAccountStatementPDF,
+  exportCustomerReturnPDF,
+  exportReceiptPDF,
+} from '../../utils/pdfGenerator';
 import { formatKSh } from '../../utils/currency';
 
 interface CustomerDetailsModalProps {
@@ -31,8 +45,14 @@ interface CustomerDetailsModalProps {
   onClose: () => void;
   customer: Customer | null;
   transactions: Transaction[];
+  deposits?: CustomerDepositRecord[];
+  returns?: CustomerReturnRecord[];
+  complaints?: CustomerComplaint[];
   onOpenEdit: (customer: Customer) => void;
   onOpenRepayment: (customer: Customer) => void;
+  onOpenDeposit?: (customer: Customer, mode?: 'deposit' | 'partial_payment', txId?: string) => void;
+  onOpenReturn?: (customer: Customer, txId?: string) => void;
+  onOpenComplaint?: (customer: Customer, existing?: CustomerComplaint) => void;
   onOpenContactsList?: (customer: Customer) => void;
 }
 
@@ -41,12 +61,19 @@ export const CustomerDetailsModal: React.FC<CustomerDetailsModalProps> = ({
   onClose,
   customer,
   transactions,
+  deposits = [],
+  returns = [],
+  complaints = [],
   onOpenEdit,
   onOpenRepayment,
+  onOpenDeposit,
+  onOpenReturn,
+  onOpenComplaint,
   onOpenContactsList,
 }) => {
-  const [activeSubTab, setActiveSubTab] = useState<'purchases' | 'profile'>('purchases');
-  const [selectedTxForReceipt, setSelectedTxForReceipt] = useState<Transaction | null>(null);
+  const [activeSubTab, setActiveSubTab] = useState<
+    'purchases' | 'deposits' | 'returns' | 'complaints' | 'profile'
+  >('purchases');
 
   if (!isOpen || !customer) return null;
 
@@ -60,8 +87,14 @@ export const CustomerDetailsModal: React.FC<CustomerDetailsModalProps> = ({
 
   const totalSpent = customerTxs.reduce((sum, tx) => sum + tx.grandTotal, 0) || customer.totalPurchases;
   const balanceDue = customer.currentBalanceDue || 0;
+  const depositBalance = customer.depositBalance || 0;
   const creditLimit = customer.creditLimit || 20000;
   const creditUtilization = creditLimit > 0 ? Math.min(100, Math.round((balanceDue / creditLimit) * 100)) : 0;
+
+  const customerDeposits = deposits.filter((d) => d.customerId === customer.id);
+  const customerReturns = returns.filter((r) => r.customerId === customer.id);
+  const customerComplaints = complaints.filter((c) => c.customerId === customer.id);
+  const openComplaintsCount = customerComplaints.filter((c) => c.status !== 'Resolved').length;
 
   // Send WhatsApp Statement Reminder
   const handleSendWhatsAppReminder = () => {
@@ -132,7 +165,19 @@ export const CustomerDetailsModal: React.FC<CustomerDetailsModalProps> = ({
 
           {/* Quick Action Buttons */}
           <div className="flex items-center gap-2 flex-wrap">
-            {balanceDue > 0 && (
+            {onOpenDeposit && (
+              <button
+                onClick={() => {
+                  onClose();
+                  onOpenDeposit(customer, balanceDue > 0 ? 'partial_payment' : 'deposit');
+                }}
+                className="px-3 py-2 bg-sky-600 hover:bg-sky-500 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-md shadow-sky-600/20 cursor-pointer"
+              >
+                <Wallet className="w-4 h-4" /> {balanceDue > 0 ? 'Partial Pay / Deposit' : '+ Deposit'}
+              </button>
+            )}
+
+            {balanceDue > 0 && !onOpenDeposit && (
               <button
                 onClick={() => {
                   onClose();
@@ -141,6 +186,30 @@ export const CustomerDetailsModal: React.FC<CustomerDetailsModalProps> = ({
                 className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-md shadow-emerald-600/20"
               >
                 <DollarSign className="w-4 h-4" /> Collect Debt
+              </button>
+            )}
+
+            {onOpenReturn && customerTxs.length > 0 && (
+              <button
+                onClick={() => {
+                  onClose();
+                  onOpenReturn(customer);
+                }}
+                className="px-3 py-2 bg-amber-600/20 hover:bg-amber-600/35 text-amber-300 border border-amber-500/40 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+              >
+                <RotateCcw className="w-4 h-4" /> Process Return
+              </button>
+            )}
+
+            {onOpenComplaint && (
+              <button
+                onClick={() => {
+                  onClose();
+                  onOpenComplaint(customer);
+                }}
+                className="px-3 py-2 bg-rose-950/70 hover:bg-rose-900/80 text-rose-300 border border-rose-700/60 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+              >
+                <MessageSquareWarning className="w-4 h-4" /> Log Complaint
               </button>
             )}
 
@@ -183,81 +252,118 @@ export const CustomerDetailsModal: React.FC<CustomerDetailsModalProps> = ({
         </div>
 
         {/* Financial Metrics Cards */}
-        <div className="p-6 bg-slate-900/60 border-b border-slate-800 grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
-          <div className="bg-slate-950 p-3.5 rounded-2xl border border-slate-800">
+        <div className="p-5 bg-slate-900/60 border-b border-slate-800 grid grid-cols-2 sm:grid-cols-5 gap-3 text-xs">
+          <div className="bg-slate-950 p-3 rounded-2xl border border-slate-800">
             <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">
-              Total Purchases
+              Total Sales
             </span>
-            <div className="text-base font-extrabold text-slate-100 font-mono mt-1">
+            <div className="text-sm font-extrabold text-slate-100 font-mono mt-1">
               {formatKSh(totalSpent, { showDecimals: true })}
             </div>
-            <span className="text-[10px] text-slate-500 mt-0.5 block">{customerTxs.length} recorded sales</span>
+            <span className="text-[10px] text-slate-500 mt-0.5 block">{customerTxs.length} sales</span>
           </div>
 
-          <div className="bg-slate-950 p-3.5 rounded-2xl border border-slate-800">
+          <div className="bg-slate-950 p-3 rounded-2xl border border-slate-800">
             <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">
-              Balance Due (Debt)
+              Deposit Credit
             </span>
-            <div className={`text-base font-extrabold font-mono mt-1 ${balanceDue > 0 ? 'text-rose-400' : 'text-emerald-400'}`}>
+            <div className="text-sm font-extrabold text-emerald-400 font-mono mt-1">
+              {formatKSh(depositBalance, { showDecimals: true })}
+            </div>
+            <span className="text-[10px] text-slate-500 mt-0.5 block">Advance wallet</span>
+          </div>
+
+          <div className="bg-slate-950 p-3 rounded-2xl border border-slate-800">
+            <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">
+              Balance Due
+            </span>
+            <div className={`text-sm font-extrabold font-mono mt-1 ${balanceDue > 0 ? 'text-rose-400' : 'text-emerald-400'}`}>
               {formatKSh(balanceDue, { showDecimals: true })}
             </div>
             <span className="text-[10px] text-slate-500 mt-0.5 block">
-              {balanceDue > 0 ? 'Payment pending' : 'Zero outstanding'}
+              {creditUtilization}% of {formatKSh(creditLimit)} cap
             </span>
           </div>
 
-          <div className="bg-slate-950 p-3.5 rounded-2xl border border-slate-800">
+          <div className="bg-slate-950 p-3 rounded-2xl border border-slate-800">
             <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">
-              Credit Limit Used
+              Goods Returns
             </span>
-            <div className="text-base font-bold text-slate-200 font-mono mt-1 flex items-center justify-between">
-              <span>{creditUtilization}%</span>
-              <span className="text-[10px] text-slate-400 font-normal">Cap: {formatKSh(creditLimit)}</span>
+            <div className="text-sm font-bold text-amber-300 font-mono mt-1">
+              {customerReturns.length} returns
             </div>
-            <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden mt-1.5">
-              <div
-                className={`h-full rounded-full ${
-                  creditUtilization > 80 ? 'bg-rose-500' : creditUtilization > 50 ? 'bg-amber-500' : 'bg-sky-500'
-                }`}
-                style={{ width: `${creditUtilization}%` }}
-              />
-            </div>
+            <span className="text-[10px] text-slate-500 mt-0.5 block">
+              +{customerReturns.reduce((s, r) => s + r.restockedTotalUnits, 0)} restocked
+            </span>
           </div>
 
-          <div className="bg-slate-950 p-3.5 rounded-2xl border border-slate-800">
+          <div className="bg-slate-950 p-3 rounded-2xl border border-slate-800">
             <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">
-              Average Order Value
+              Complaints
             </span>
-            <div className="text-base font-bold text-sky-400 font-mono mt-1">
-              {formatKSh(customerTxs.length > 0 ? Math.round(totalSpent / customerTxs.length) : totalSpent)}
+            <div className={`text-sm font-bold font-mono mt-1 ${openComplaintsCount > 0 ? 'text-rose-400' : 'text-slate-300'}`}>
+              {openComplaintsCount} Open
             </div>
-            <span className="text-[10px] text-slate-500 mt-0.5 block">Per transaction</span>
+            <span className="text-[10px] text-slate-500 mt-0.5 block">{customerComplaints.length} total logged</span>
           </div>
         </div>
 
         {/* Sub-Tab Switcher */}
-        <div className="px-6 pt-4 bg-slate-900 border-b border-slate-800 flex items-center gap-4 text-xs font-semibold">
+        <div className="px-6 pt-3 bg-slate-900 border-b border-slate-800 flex items-center gap-4 text-xs font-semibold overflow-x-auto">
           <button
             onClick={() => setActiveSubTab('purchases')}
-            className={`pb-3 border-b-2 transition flex items-center gap-2 ${
+            className={`pb-3 border-b-2 transition flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${
               activeSubTab === 'purchases'
                 ? 'border-sky-500 text-sky-400 font-bold'
                 : 'border-transparent text-slate-400 hover:text-slate-200'
             }`}
           >
-            <ShoppingBag className="w-4 h-4" />
-            <span>Transaction & Invoice History ({customerTxs.length})</span>
+            <ShoppingBag className="w-3.5 h-3.5" />
+            <span>Sales &amp; Partial Pay ({customerTxs.length})</span>
+          </button>
+          <button
+            onClick={() => setActiveSubTab('deposits')}
+            className={`pb-3 border-b-2 transition flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${
+              activeSubTab === 'deposits'
+                ? 'border-emerald-500 text-emerald-400 font-bold'
+                : 'border-transparent text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <Wallet className="w-3.5 h-3.5" />
+            <span>Deposits &amp; Ledger ({customerDeposits.length})</span>
+          </button>
+          <button
+            onClick={() => setActiveSubTab('returns')}
+            className={`pb-3 border-b-2 transition flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${
+              activeSubTab === 'returns'
+                ? 'border-amber-500 text-amber-400 font-bold'
+                : 'border-transparent text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <RotateCcw className="w-3.5 h-3.5" />
+            <span>Returns &amp; Restock ({customerReturns.length})</span>
+          </button>
+          <button
+            onClick={() => setActiveSubTab('complaints')}
+            className={`pb-3 border-b-2 transition flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${
+              activeSubTab === 'complaints'
+                ? 'border-rose-500 text-rose-400 font-bold'
+                : 'border-transparent text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <MessageSquareWarning className="w-3.5 h-3.5" />
+            <span>Complaints ({customerComplaints.length})</span>
           </button>
           <button
             onClick={() => setActiveSubTab('profile')}
-            className={`pb-3 border-b-2 transition flex items-center gap-2 ${
+            className={`pb-3 border-b-2 transition flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${
               activeSubTab === 'profile'
                 ? 'border-sky-500 text-sky-400 font-bold'
                 : 'border-transparent text-slate-400 hover:text-slate-200'
             }`}
           >
-            <User className="w-4 h-4" />
-            <span>Customer Profile & Tax Info</span>
+            <User className="w-3.5 h-3.5" />
+            <span>Profile &amp; Tax PIN</span>
           </button>
         </div>
 
@@ -321,18 +427,197 @@ export const CustomerDetailsModal: React.FC<CustomerDetailsModalProps> = ({
                             </span>
                           </td>
                           <td className="p-3 text-center font-sans">
-                            <button
-                              onClick={() => exportReceiptPDF(tx)}
-                              title="Download Thermal Receipt PDF"
-                              className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg transition"
-                            >
-                              <Receipt className="w-3.5 h-3.5 text-sky-400" />
-                            </button>
+                            <div className="flex items-center justify-center gap-1">
+                              {tx.balanceDue > 0 && onOpenDeposit && (
+                                <button
+                                  onClick={() => {
+                                    onClose();
+                                    onOpenDeposit(customer, 'partial_payment', tx.id);
+                                  }}
+                                  title="Record Partial / Full Payment on this Invoice"
+                                  className="px-2 py-1 bg-emerald-600/20 hover:bg-emerald-600 text-emerald-300 hover:text-white rounded-lg text-[10px] font-bold cursor-pointer"
+                                >
+                                  Pay
+                                </button>
+                              )}
+                              {onOpenReturn && tx.returnStatus !== 'Full Return' && (
+                                <button
+                                  onClick={() => {
+                                    onClose();
+                                    onOpenReturn(customer, tx.id);
+                                  }}
+                                  title="Process Goods Return & Restock"
+                                  className="px-2 py-1 bg-amber-600/20 hover:bg-amber-600 text-amber-300 hover:text-white rounded-lg text-[10px] font-bold cursor-pointer"
+                                >
+                                  Return
+                                </button>
+                              )}
+                              <button
+                                onClick={() => exportReceiptPDF(tx)}
+                                title="Download Thermal Receipt PDF"
+                                className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg transition cursor-pointer"
+                              >
+                                <Receipt className="w-3.5 h-3.5 text-sky-400" />
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
+                </div>
+              )}
+            </div>
+          )}
+
+          {activeSubTab === 'deposits' && (
+            <div className="space-y-3 text-xs">
+              {customerDeposits.length === 0 ? (
+                <div className="p-10 text-center text-slate-500 bg-slate-950/40 rounded-2xl border border-slate-800">
+                  <Wallet className="w-9 h-9 mx-auto text-slate-600 mb-2" />
+                  <p className="font-semibold text-slate-300">No deposits or partial payments logged yet</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {customerDeposits.map((dep) => (
+                    <div
+                      key={dep.id}
+                      className="p-3.5 bg-slate-950 border border-slate-800 rounded-2xl flex flex-wrap items-center justify-between gap-2"
+                    >
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono font-bold text-sky-400">{dep.receiptRef}</span>
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-800 text-slate-300 uppercase">
+                            {dep.type.replace(/_/g, ' ')}
+                          </span>
+                          {dep.linkedReceiptNumber && (
+                            <span className="text-[11px] font-mono text-amber-300">
+                              → {dep.linkedReceiptNumber}
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-[11px] text-slate-400 mt-1">
+                          {new Date(dep.date).toLocaleString()} • {dep.paymentMethod.toUpperCase()}
+                          {dep.referenceNo ? ` (${dep.referenceNo})` : ''} • By {dep.recordedBy}
+                        </div>
+                        {dep.notes && <div className="text-[11px] text-slate-300 mt-0.5">{dep.notes}</div>}
+                      </div>
+                      <div className="text-right font-mono font-extrabold text-sm text-emerald-400">
+                        {formatKSh(dep.amount, { showDecimals: true })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {activeSubTab === 'returns' && (
+            <div className="space-y-3 text-xs">
+              {customerReturns.length === 0 ? (
+                <div className="p-10 text-center text-slate-500 bg-slate-950/40 rounded-2xl border border-slate-800">
+                  <RotateCcw className="w-9 h-9 mx-auto text-slate-600 mb-2" />
+                  <p className="font-semibold text-slate-300">No goods returns recorded for this customer</p>
+                </div>
+              ) : (
+                <div className="space-y-2.5">
+                  {customerReturns.map((ret) => (
+                    <div key={ret.id} className="p-4 bg-slate-950 border border-slate-800 rounded-2xl space-y-2">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono font-bold text-amber-300">{ret.returnNumber}</span>
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-800 text-slate-200 font-mono">
+                            CN: {ret.creditNoteNumber}
+                          </span>
+                          <span className="text-[11px] text-slate-400">
+                            Orig: {ret.originalReceiptNumber}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono font-extrabold text-amber-300">
+                            {formatKSh(ret.totalRefundAmount, { showDecimals: true })}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => exportCustomerReturnPDF(ret)}
+                            className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-sky-300 rounded-lg text-[10px] font-bold cursor-pointer"
+                          >
+                            Credit Note PDF
+                          </button>
+                        </div>
+                      </div>
+                      <div className="text-[11px] text-slate-400">
+                        {new Date(ret.date).toLocaleString()} • Reason: <strong className="text-slate-200">{ret.reason}</strong>
+                      </div>
+                      <div className="flex flex-wrap gap-2 pt-1">
+                        {ret.items.map((it) => (
+                          <span
+                            key={it.productId}
+                            className={`px-2.5 py-1 rounded-xl text-[10px] font-semibold border flex items-center gap-1 ${
+                              it.addedBackToStock
+                                ? 'bg-emerald-950/60 border-emerald-700/60 text-emerald-300'
+                                : 'bg-rose-950/60 border-rose-800/60 text-rose-300'
+                            }`}
+                          >
+                            <PackageCheck className="w-3 h-3" />
+                            {it.productName} x{it.quantityReturned}:{' '}
+                            {it.addedBackToStock ? 'Added Back to Stock' : 'Damaged Write-Off'}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {activeSubTab === 'complaints' && (
+            <div className="space-y-3 text-xs">
+              {customerComplaints.length === 0 ? (
+                <div className="p-10 text-center text-slate-500 bg-slate-950/40 rounded-2xl border border-slate-800">
+                  <MessageSquareWarning className="w-9 h-9 mx-auto text-slate-600 mb-2" />
+                  <p className="font-semibold text-slate-300">No complaints logged for this customer</p>
+                </div>
+              ) : (
+                <div className="space-y-2.5">
+                  {customerComplaints.map((cmp) => (
+                    <div key={cmp.id} className="p-4 bg-slate-950 border border-slate-800 rounded-2xl space-y-2">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono font-bold text-rose-400">{cmp.complaintNumber}</span>
+                          <span className="font-bold text-white">{cmp.subject}</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                            cmp.status === 'Resolved'
+                              ? 'bg-emerald-500/20 text-emerald-300'
+                              : 'bg-rose-500/20 text-rose-300'
+                          }`}>
+                            {cmp.status}
+                          </span>
+                          {onOpenComplaint && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                onClose();
+                                onOpenComplaint(customer, cmp);
+                              }}
+                              className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-sky-300 rounded-lg text-[10px] font-bold cursor-pointer"
+                            >
+                              Update
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      <p className="text-slate-300 text-[11px]">{cmp.description}</p>
+                      {cmp.resolutionNotes && (
+                        <p className="text-emerald-300 text-[11px] bg-emerald-950/40 p-2 rounded-xl border border-emerald-800/40">
+                          Resolution: {cmp.resolutionNotes}
+                        </p>
+                      )}
+                    </div>
+                  ))}
                 </div>
               )}
             </div>

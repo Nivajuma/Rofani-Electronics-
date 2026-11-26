@@ -1294,7 +1294,7 @@ export const WorkerPayrollView: React.FC<WorkerPayrollViewProps> = ({
                   <span>- KSh {viewingPayslip.otherDeductions.toLocaleString()}</span>
                 </div>
                 <div className="flex justify-between text-emerald-400 font-bold text-sm border-t border-slate-800 pt-2">
-                  <span>Net Paid ({viewingPayslip.paymentMethod.toUpperCase()})</span>
+                  <span>Net Paid ({(viewingPayslip.paymentMethod || 'cash').toUpperCase()})</span>
                   <span>KSh {viewingPayslip.netPayPaid.toLocaleString()}</span>
                 </div>
               </div>

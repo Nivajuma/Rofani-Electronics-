@@ -65,6 +65,8 @@ import {
   OnlineOrder,
   PurchaseOrder,
   CashTransaction,
+  CustomerReturnRecord,
+  EtimsComplianceConfig,
 } from '../../types';
 import { BarcodeScannerModal } from './BarcodeScannerModal';
 import { AiReceiptScannerModal } from './AiReceiptScannerModal';
@@ -153,6 +155,7 @@ interface POSViewProps {
   onlineOrders?: OnlineOrder[];
   purchaseOrders?: PurchaseOrder[];
   cashTransactions?: CashTransaction[];
+  customerReturns?: CustomerReturnRecord[];
 }
 
 export const POSView: React.FC<POSViewProps> = ({
@@ -187,6 +190,7 @@ export const POSView: React.FC<POSViewProps> = ({
   onlineOrders = [],
   purchaseOrders = [],
   cashTransactions = [],
+  customerReturns = [],
 }) => {
   const [txSettings] = useTransactionSettings(activeStoreId);
   const [shopControls] = useShopProtectionSettings(activeStoreId);
@@ -1024,6 +1028,7 @@ export const POSView: React.FC<POSViewProps> = ({
     setShowCheckoutModal(false);
     setShowMpesaPromptModal(false);
     setShowNewSaleConfirmModal(false);
+    setApplyDepositAmount(0);
     setPaymentEntries([{ method: txSettings.cashSaleByDefault ? 'cash' : (txSettings.defaultPaymentMethod || 'mpesa'), amount: 0, reference: '' }]);
     setSaleNotes('');
     setBillingPartyName('');
@@ -1145,6 +1150,8 @@ export const POSView: React.FC<POSViewProps> = ({
       });
     }
   }, [txSettings.cashSaleByDefault, txSettings.defaultPaymentMethod, cart.length, showCheckoutModal]);
+
+  const [applyDepositAmount, setApplyDepositAmount] = useState<number>(0);
 
   const [saleNotes, setSaleNotes] = useState<string>(
     () => initialSavedDraftRef.current?.saleNotes ?? ''
@@ -1862,12 +1869,62 @@ export const POSView: React.FC<POSViewProps> = ({
     return sum + (tx.cashierCommissionAmount || Math.round(tx.grandTotal * ((tx.cashierCommissionRate || 5) / 100)));
   }, 0);
 
+  const liveSelectedCustomer =
+    customers.find((c) => c.id === selectedCustomer.id) || selectedCustomer;
+  const availableCustomerDeposit = Math.max(0, Number(liveSelectedCustomer?.depositBalance) || 0);
+
+  const computeCartTaxBreakdown = () => {
+    const isTaxEnabled = txSettings.enableTransactionWiseTax && kraTaxModeSetting !== 'none';
+    const hasItemTaxOverride = cart.some((c) => Boolean(c.product.kraTaxType));
+    if (hasItemTaxOverride) {
+      let vat16Total = 0;
+      let zeroRatedTotal = 0;
+      let exemptTotal = 0;
+      let totTotal = 0;
+      cart.forEach((item) => {
+        const lineAmt = Number(item.total) || 0;
+        const t = item.product.kraTaxType;
+        if (t === 'Standard VAT (16%)') {
+          vat16Total += lineAmt - lineAmt / 1.16;
+        } else if (t === 'Zero-Rated (0%)') {
+          zeroRatedTotal += lineAmt;
+        } else if (t === 'Exempt') {
+          exemptTotal += lineAmt;
+        } else {
+          if (isTaxEnabled && kraTaxModeSetting === 'vat') {
+            vat16Total += lineAmt - lineAmt / 1.16;
+          } else if (isTaxEnabled && kraTaxModeSetting === 'tot') {
+            totTotal += lineAmt * 0.015;
+          } else {
+            exemptTotal += lineAmt;
+          }
+        }
+      });
+      return {
+        vat16Total: Number(vat16Total.toFixed(2)),
+        zeroRatedTotal: Number(zeroRatedTotal.toFixed(2)),
+        exemptTotal: Number(exemptTotal.toFixed(2)),
+        totTotal: Number(totTotal.toFixed(2)),
+      };
+    }
+    return {
+      vat16Total:
+        isTaxEnabled && kraTaxModeSetting === 'vat'
+          ? Number((grandTotal - grandTotal / 1.16).toFixed(2))
+          : 0,
+      zeroRatedTotal: 0,
+      exemptTotal: !isTaxEnabled ? grandTotal : 0,
+      totTotal: isTaxEnabled && kraTaxModeSetting === 'tot' ? Number((grandTotal * 0.015).toFixed(2)) : 0,
+    };
+  };
+
   // Open Checkout Modal
   const handleOpenCheckout = () => {
     if (cart.length === 0) return;
     const preferredMethod: PaymentMethod = txSettings.cashSaleByDefault
       ? 'cash'
       : ((txSettings.defaultPaymentMethod as PaymentMethod) || 'mpesa');
+    setApplyDepositAmount(0);
     setPaymentEntries([{ method: preferredMethod, amount: grandTotal, reference: '' }]);
     // IMPORTANT: Preserve existing backdated saleDate if selected; only default if empty
     if (!saleDate) {
@@ -1951,16 +2008,8 @@ export const POSView: React.FC<POSViewProps> = ({
 
     const cuin = isEtimsRequested ? `CUIN-2026-${Math.floor(100000 + Math.random() * 900000)}` : undefined;
     const cusn = isEtimsRequested ? `CUSN-KENYA-${Math.floor(10000000 + Math.random() * 90000000)}` : undefined;
-    const isTaxEnabled = txSettings.enableTransactionWiseTax && kraTaxModeSetting !== 'none';
-    const taxBreakdown = {
-      vat16Total:
-        isTaxEnabled && kraTaxModeSetting === 'vat'
-          ? Number((grandTotal - grandTotal / 1.16).toFixed(2))
-          : 0,
-      zeroRatedTotal: 0,
-      exemptTotal: !isTaxEnabled ? grandTotal : 0,
-      totTotal: isTaxEnabled && kraTaxModeSetting === 'tot' ? Number((grandTotal * 0.015).toFixed(2)) : 0,
-    };
+    const taxBreakdown = computeCartTaxBreakdown();
+    const etimsCfg = safeGetJSON<EtimsComplianceConfig | null>('rofani_kra_etims_config', null);
 
     const newTx: Transaction = {
       id: `tx-${Date.now()}`,
@@ -1998,6 +2047,11 @@ export const POSView: React.FC<POSViewProps> = ({
       customerKraPin: isEtimsRequested && customerKraPin ? customerKraPin.trim() : undefined,
       cuin,
       cusn,
+      etimsComplianceMode: isEtimsRequested
+        ? etimsCfg?.integrationMode === 'vscu_connected'
+          ? 'vscu_certified'
+          : 'etims_ready'
+        : undefined,
       taxBreakdown,
       billingPartyName: txSettings.enableBillingPartyName && billingPartyName.trim() ? billingPartyName.trim() : undefined,
       customerPoNumber: txSettings.enableCustomerPoDetails && customerPoNumber.trim() ? customerPoNumber.trim() : undefined,
@@ -2145,7 +2199,11 @@ export const POSView: React.FC<POSViewProps> = ({
       ? (overridePayments as PaymentBreakdown[])
       : paymentEntries;
 
-    const totalPaid = activePayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+    const appliedDeposit = Array.isArray(overridePayments)
+      ? 0
+      : Math.min(availableCustomerDeposit, Math.max(0, Number(applyDepositAmount) || 0), grandTotal);
+    const cashAndDigitalPaid = activePayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+    const totalPaid = cashAndDigitalPaid + appliedDeposit;
     const balanceDue = Math.max(0, grandTotal - totalPaid);
     let paymentStatus: 'Paid' | 'Partial' | 'Unpaid' = 'Paid';
 
@@ -2166,16 +2224,8 @@ export const POSView: React.FC<POSViewProps> = ({
 
     const cuin = isEtimsRequested ? `CUIN-2026-${Math.floor(100000 + Math.random() * 900000)}` : undefined;
     const cusn = isEtimsRequested ? `CUSN-KENYA-${Math.floor(10000000 + Math.random() * 90000000)}` : undefined;
-    const isTaxEnabled = txSettings.enableTransactionWiseTax && kraTaxModeSetting !== 'none';
-    const taxBreakdown = {
-      vat16Total:
-        isTaxEnabled && kraTaxModeSetting === 'vat'
-          ? Number((grandTotal - grandTotal / 1.16).toFixed(2))
-          : 0,
-      zeroRatedTotal: 0,
-      exemptTotal: !isTaxEnabled ? grandTotal : 0,
-      totTotal: isTaxEnabled && kraTaxModeSetting === 'tot' ? Number((grandTotal * 0.015).toFixed(2)) : 0,
-    };
+    const taxBreakdown = computeCartTaxBreakdown();
+    const etimsCfg = safeGetJSON<EtimsComplianceConfig | null>('rofani_kra_etims_config', null);
 
     const effectiveCustomerName = selectedCustomer.name;
     const effectiveCustomerPhone = selectedCustomer.phone;
@@ -2208,10 +2258,11 @@ export const POSView: React.FC<POSViewProps> = ({
       amountPaid: totalPaid,
       balanceDue,
       paymentStatus,
+      depositAppliedAmount: appliedDeposit > 0 ? appliedDeposit : undefined,
       payments: activePayments
         .map((p) => ({ ...p, amount: Number(p.amount) || 0 }))
         .filter((p) => p.amount > 0),
-      paymentMethod: activePayments[0]?.method || 'cash',
+      paymentMethod: activePayments[0]?.method || (appliedDeposit > 0 ? 'cash' : 'cash'),
       customerId: selectedCustomer.id,
       customerName: effectiveCustomerName,
       customerPhone: effectiveCustomerPhone,
@@ -2227,6 +2278,11 @@ export const POSView: React.FC<POSViewProps> = ({
       customerKraPin: isEtimsRequested && customerKraPin ? customerKraPin.trim() : undefined,
       cuin,
       cusn,
+      etimsComplianceMode: isEtimsRequested
+        ? etimsCfg?.integrationMode === 'vscu_connected'
+          ? 'vscu_certified'
+          : 'etims_ready'
+        : undefined,
       taxBreakdown,
       billingPartyName: txSettings.enableBillingPartyName && billingPartyName.trim() ? billingPartyName.trim() : undefined,
       customerPoNumber: txSettings.enableCustomerPoDetails && customerPoNumber.trim() ? customerPoNumber.trim() : undefined,
@@ -2277,13 +2333,14 @@ export const POSView: React.FC<POSViewProps> = ({
       return prod;
     });
 
-    // Update Customer Purchase History & Credit Balance
+    // Update Customer Purchase History, Deposit Wallet & Credit Balance
     const updatedCustomers = customers.map((cust) => {
       if (cust.id === selectedCustomer.id) {
         return {
           ...cust,
           totalPurchases: cust.totalPurchases + grandTotal,
-          currentBalanceDue: cust.currentBalanceDue + balanceDue
+          currentBalanceDue: cust.currentBalanceDue + balanceDue,
+          depositBalance: Math.max(0, (cust.depositBalance || 0) - appliedDeposit),
         };
       }
       return cust;
@@ -4485,6 +4542,76 @@ export const POSView: React.FC<POSViewProps> = ({
                 </div>
               </div>
 
+              {/* Customer Advance Deposit Wallet Application */}
+              {availableCustomerDeposit > 0 && (
+                <div className="bg-emerald-950/30 border border-emerald-500/40 rounded-xl p-3 space-y-2 text-xs">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <div className="font-bold text-emerald-300">
+                        Customer Advance Deposit / Store Credit Available
+                      </div>
+                      <div className="text-[11px] text-emerald-200/80">
+                        Wallet Balance: <strong className="font-mono">KSh {availableCustomerDeposit.toLocaleString()}</strong>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const maxApplicable = Math.min(availableCustomerDeposit, grandTotal);
+                          setApplyDepositAmount(maxApplicable);
+                          if (paymentEntries.length === 1) {
+                            setPaymentEntries([{ ...paymentEntries[0], amount: Math.max(0, grandTotal - maxApplicable) }]);
+                          }
+                        }}
+                        className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[11px] cursor-pointer"
+                      >
+                        Apply Max (KSh {Math.min(availableCustomerDeposit, grandTotal).toLocaleString()})
+                      </button>
+                      {applyDepositAmount > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setApplyDepositAmount(0);
+                            if (paymentEntries.length === 1) {
+                              setPaymentEntries([{ ...paymentEntries[0], amount: grandTotal }]);
+                            }
+                          }}
+                          className="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold text-[11px] cursor-pointer"
+                        >
+                          Clear
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] text-slate-300">Apply Deposit Amount:</span>
+                    <div className="relative flex-1 max-w-[180px]">
+                      <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 text-[10px]">KSh</span>
+                      <input
+                        type="number"
+                        min={0}
+                        max={Math.min(availableCustomerDeposit, grandTotal)}
+                        value={applyDepositAmount === 0 ? '' : applyDepositAmount}
+                        placeholder="0"
+                        onChange={(e) => {
+                          const capped = Math.min(
+                            availableCustomerDeposit,
+                            grandTotal,
+                            Math.max(0, parseFloat(e.target.value) || 0)
+                          );
+                          setApplyDepositAmount(capped);
+                          if (paymentEntries.length === 1) {
+                            setPaymentEntries([{ ...paymentEntries[0], amount: Math.max(0, grandTotal - capped) }]);
+                          }
+                        }}
+                        className="w-full bg-slate-900 border border-emerald-700/60 text-emerald-200 pl-9 pr-2 py-1.5 rounded-lg font-mono font-bold text-xs focus:outline-none focus:border-emerald-500"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* Payment Methods Rows */}
               <div className="space-y-3">
                 <div className="flex justify-between items-center text-xs font-semibold text-slate-300">
@@ -4606,11 +4733,19 @@ export const POSView: React.FC<POSViewProps> = ({
 
               {/* Payment Math Summary */}
               {(() => {
-                const totalPaid = paymentEntries.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+                const cashAndDigitalPaid = paymentEntries.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+                const appliedDeposit = Math.min(availableCustomerDeposit, Math.max(0, Number(applyDepositAmount) || 0), grandTotal);
+                const totalPaid = cashAndDigitalPaid + appliedDeposit;
                 const balanceDue = grandTotal - totalPaid;
 
                 return (
                   <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 text-xs space-y-1.5">
+                    {appliedDeposit > 0 && (
+                      <div className="flex justify-between text-emerald-300">
+                        <span>Applied from Deposit Wallet:</span>
+                        <span className="font-mono font-bold">KSh {appliedDeposit.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                      </div>
+                    )}
                     <div className="flex justify-between text-slate-400">
                       <span>Total Paid Now:</span>
                       <span className="font-mono font-bold text-slate-200">KSh {totalPaid.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
@@ -5319,6 +5454,10 @@ export const POSView: React.FC<POSViewProps> = ({
 
             <KraTotComplianceCenter
               transactions={transactions || []}
+              customerReturns={customerReturns}
+              storeName={resolvedStoreName}
+              storeKraPin={storeKraPin}
+              activeStoreId={activeStoreId}
               onClose={() => setShowKraTotModal(false)}
             />
           </div>

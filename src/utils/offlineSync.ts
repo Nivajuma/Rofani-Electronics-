@@ -8,7 +8,17 @@ import { safeGetJSON, safeSetJSON } from './safeStorage';
 
 export interface PendingSyncItem {
   id: string;
-  type: 'sale' | 'product' | 'customer' | 'supplier' | 'expense' | 'restock' | 'user';
+  type:
+    | 'sale'
+    | 'product'
+    | 'customer'
+    | 'supplier'
+    | 'expense'
+    | 'restock'
+    | 'user'
+    | 'customer_deposit'
+    | 'customer_complaint'
+    | 'customer_return';
   description: string;
   timestamp: string;
   data: any;

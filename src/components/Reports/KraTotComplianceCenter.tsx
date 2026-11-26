@@ -1,7 +1,17 @@
-import React, { useState, useMemo } from 'react';
-import { Transaction } from '../../types';
-import { exportKRATaxReportPDF } from '../../utils/pdfGenerator';
+import React, { useState, useMemo, useEffect } from 'react';
+import {
+  Transaction,
+  CustomerReturnRecord,
+  EtimsComplianceConfig,
+  KraTaxClassification,
+} from '../../types';
+import { exportKRATaxReportPDF, exportCustomerReturnPDF } from '../../utils/pdfGenerator';
 import { safeGetJSON, safeSetJSON } from '../../utils/safeStorage';
+import {
+  saveEtimsConfigToCloud,
+  fetchEtimsConfigFromCloud,
+} from '../../lib/cloudSync';
+import { auth, isAuthorizedCloudUser } from '../../lib/firebase';
 import {
   FileText,
   Calendar,
@@ -20,11 +30,19 @@ import {
   Filter,
   Check,
   Building2,
-  Receipt
+  Receipt,
+  Settings2,
+  AlertTriangle,
+  FileJson,
+  RotateCcw,
 } from 'lucide-react';
 
 interface KraTotComplianceCenterProps {
   transactions: Transaction[];
+  customerReturns?: CustomerReturnRecord[];
+  storeName?: string;
+  storeKraPin?: string;
+  activeStoreId?: string;
   onUpdateTransaction?: (tx: Transaction) => void;
   onClose?: () => void;
 }
@@ -39,12 +57,17 @@ export interface MonthlyTotFilingRecord {
 }
 
 const STORAGE_KEY = 'rofani_kra_tot_filings';
+const ETIMS_CONFIG_STORAGE_KEY = 'rofani_kra_etims_config';
 
 export const KraTotComplianceCenter: React.FC<KraTotComplianceCenterProps> = ({
   transactions,
+  customerReturns = [],
+  storeName: propStoreName,
+  storeKraPin: propStoreKraPin,
+  activeStoreId,
   onUpdateTransaction,
 }) => {
-  const [activeTab, setActiveTab] = useState<'schedule' | 'receipts' | 'guide'>('schedule');
+  const [activeTab, setActiveTab] = useState<'schedule' | 'receipts' | 'etims' | 'guide'>('schedule');
   const [filings, setFilings] = useState<Record<string, MonthlyTotFilingRecord>>(() =>
     safeGetJSON<Record<string, MonthlyTotFilingRecord>>(STORAGE_KEY, {})
   );
@@ -59,7 +82,39 @@ export const KraTotComplianceCenter: React.FC<KraTotComplianceCenterProps> = ({
   }, []);
 
   const totRate = taxSettings?.kraTotRate || 1.5;
-  const storeKraPin = taxSettings?.kraPinNumber || 'P051234567X';
+  const resolvedInitialPin = propStoreKraPin || taxSettings?.kraPinNumber || 'P051234567X';
+
+  // VSCU / OSCU eTIMS Config state
+  const [etimsConfig, setEtimsConfig] = useState<EtimsComplianceConfig>(() =>
+    safeGetJSON<EtimsComplianceConfig>(ETIMS_CONFIG_STORAGE_KEY, {
+      taxpayerPin: resolvedInitialPin,
+      branchId: '00',
+      scuId: 'KRACU0300000001',
+      vscuEndpointUrl: '',
+      environment: 'sandbox',
+      integrationMode: 'etims_ready_local',
+      autoIssueEtimsOnVat: true,
+      defaultTaxClassification: 'Turnover Tax / Non-VAT',
+    })
+  );
+  const [isSavingEtimsConfig, setIsSavingEtimsConfig] = useState(false);
+
+  useEffect(() => {
+    if (!isAuthorizedCloudUser(auth.currentUser)) return;
+    let active = true;
+    fetchEtimsConfigFromCloud(activeStoreId)
+      .then((remote) => {
+        if (!active || !remote) return;
+        setEtimsConfig(remote);
+        safeSetJSON(ETIMS_CONFIG_STORAGE_KEY, remote);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [activeStoreId]);
+
+  const storeKraPin = etimsConfig.taxpayerPin || resolvedInitialPin;
 
   // Receipt Archive Filter
   const [receiptFilter, setReceiptFilter] = useState<'all' | 'etims' | 'standard'>('all');
@@ -74,7 +129,7 @@ export const KraTotComplianceCenter: React.FC<KraTotComplianceCenterProps> = ({
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
-    setTimeout(() => setToastMessage(null), 3000);
+    setTimeout(() => setToastMessage(null), 3500);
   };
 
   // Group transactions by calendar month (YYYY-MM)
@@ -109,9 +164,9 @@ export const KraTotComplianceCenter: React.FC<KraTotComplianceCenterProps> = ({
       const dateObj = new Date(year, month - 1, 1);
       const monthLabel = dateObj.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
 
-      const grossTurnover = txs.reduce((sum, t) => sum + (Number(t.grandTotal) || 0), 0);
-      const exemptTurnover = 0;
-      const taxableTurnover = grossTurnover - exemptTurnover;
+      const grossTurnover = txs.reduce((sum, t) => sum + Math.max(0, (Number(t.grandTotal) || 0) - (Number(t.returnedAmount) || 0)), 0);
+      const exemptTurnover = txs.reduce((sum, t) => sum + (Number(t.taxBreakdown?.exemptTotal) || 0), 0);
+      const taxableTurnover = Math.max(0, grossTurnover - exemptTurnover);
       const totPayable = taxableTurnover * (totRate / 100);
 
       const etimsCount = txs.filter((t) => t.isEtimsRequested || (t.cuin && t.isEtimsRequested !== false)).length;
@@ -173,7 +228,7 @@ export const KraTotComplianceCenter: React.FC<KraTotComplianceCenterProps> = ({
 
   // Overall totals
   const totalAllTurnover = useMemo(
-    () => transactions.reduce((sum, t) => sum + (Number(t.grandTotal) || 0), 0),
+    () => transactions.reduce((sum, t) => sum + Math.max(0, (Number(t.grandTotal) || 0) - (Number(t.returnedAmount) || 0)), 0),
     [transactions]
   );
   const totalAllTotLiability = totalAllTurnover * (totRate / 100);
@@ -244,8 +299,9 @@ export const KraTotComplianceCenter: React.FC<KraTotComplianceCenterProps> = ({
     showToast(`Exported ${monthItem.monthLabel} KRA iTax CSV!`);
   };
 
-  // Export Official PDF Return
-  const handleExportPdf = (monthItem: (typeof monthlyData)[0]) => {
+  // Resolve store name cleanly
+  const resolvedStoreName = useMemo(() => {
+    if (propStoreName && propStoreName.trim()) return propStoreName.trim();
     const customShop = safeGetJSON<string>('rofani_settings_shop_name', '');
     const legacyNames = [
       'rofani electronic',
@@ -255,15 +311,18 @@ export const KraTotComplianceCenter: React.FC<KraTotComplianceCenterProps> = ({
       'rofani electronics & boutique',
       'rofani electronics and boutique',
     ];
-    const resolvedStore =
-      customShop && !legacyNames.includes(customShop.trim().toLowerCase())
-        ? customShop.trim()
-        : 'Rofani POS';
+    return customShop && !legacyNames.includes(customShop.trim().toLowerCase())
+      ? customShop.trim()
+      : 'Rofani POS';
+  }, [propStoreName]);
+
+  // Export Official PDF Return
+  const handleExportPdf = (monthItem: (typeof monthlyData)[0]) => {
     exportKRATaxReportPDF(monthItem.transactions, monthItem.monthLabel, {
       totRate,
       kraPin: storeKraPin,
       prnNumber: monthItem.prnNumber,
-      storeName: resolvedStore,
+      storeName: resolvedStoreName,
     });
     showToast(`Generated official PDF return for ${monthItem.monthLabel}!`);
   };
@@ -278,6 +337,8 @@ export const KraTotComplianceCenter: React.FC<KraTotComplianceCenterProps> = ({
       isEtimsRequested: true,
       cuin,
       cusn,
+      etimsComplianceMode:
+        etimsConfig.integrationMode === 'vscu_connected' ? 'vscu_certified' : 'etims_ready',
     };
 
     if (onUpdateTransaction) {
@@ -293,7 +354,119 @@ export const KraTotComplianceCenter: React.FC<KraTotComplianceCenterProps> = ({
       console.warn('Could not update sales:', e);
     }
 
-    showToast(`Receipt ${tx.receiptNumber} converted to KRA e-TIMS (CUIN: ${cuin})!`);
+    showToast(`Receipt ${tx.receiptNumber} tagged with e-TIMS fiscal ref (${cuin})!`);
+  };
+
+  // Save VSCU / OSCU Configuration
+  const handleSaveEtimsConfig = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSavingEtimsConfig(true);
+    const cleanedConfig: EtimsComplianceConfig = {
+      ...etimsConfig,
+      taxpayerPin: etimsConfig.taxpayerPin.trim().toUpperCase(),
+      branchId: etimsConfig.branchId.trim() || '00',
+      scuId: etimsConfig.scuId.trim().toUpperCase(),
+      vscuEndpointUrl: etimsConfig.vscuEndpointUrl.trim(),
+      integrationMode: etimsConfig.vscuEndpointUrl.trim() ? etimsConfig.integrationMode : 'etims_ready_local',
+      updatedAt: new Date().toISOString(),
+    };
+    setEtimsConfig(cleanedConfig);
+    safeSetJSON(ETIMS_CONFIG_STORAGE_KEY, cleanedConfig);
+    try {
+      if (isAuthorizedCloudUser(auth.currentUser)) {
+        await saveEtimsConfigToCloud(cleanedConfig, activeStoreId);
+      }
+      showToast('KRA e-TIMS VSCU/OSCU configuration saved!');
+    } catch {
+      showToast('Saved e-TIMS configuration locally (offline fallback).');
+    } finally {
+      setIsSavingEtimsConfig(false);
+    }
+  };
+
+  // Export KRA eTIMS JSON Payload (saveSales & creditNote schema)
+  const handleExportEtimsJsonPayload = () => {
+    const fiscalInvoices = transactions.filter(
+      (tx) => tx.isEtimsRequested || (tx.cuin && tx.isEtimsRequested !== false)
+    );
+    const payload = {
+      generatedAt: new Date().toISOString(),
+      complianceMode: etimsConfig.integrationMode,
+      tin: storeKraPin,
+      bhfId: etimsConfig.branchId || '00',
+      scuId: etimsConfig.scuId,
+      environment: etimsConfig.environment,
+      saveSales: fiscalInvoices.map((tx) => ({
+        invcNo: tx.receiptNumber,
+        orgInvcNo: 0,
+        custTin: tx.customerKraPin || null,
+        custNm: tx.customerName || 'Walk-in Customer',
+        salesTyCd: 'N',
+        rcptTyCd: 'S',
+        pmtTyCd: tx.paymentMethod === 'mpesa' ? '06' : tx.paymentMethod === 'credit_card' ? '05' : '01',
+        salesSttsCd: '02',
+        cfmDt: tx.date,
+        salesDt: tx.date.slice(0, 10).replace(/-/g, ''),
+        totItemCnt: tx.items.length,
+        taxblAmtB: tx.taxBreakdown?.vat16Total ? Number((tx.grandTotal / 1.16).toFixed(2)) : 0,
+        taxAmtB: tx.taxBreakdown?.vat16Total || 0,
+        totTaxAmt: (tx.taxBreakdown?.vat16Total || 0) + (tx.taxBreakdown?.totTotal || 0),
+        totAmt: tx.grandTotal,
+        localCuinRef: tx.cuin || null,
+        itemList: tx.items.map((it, idx) => ({
+          itemSeq: idx + 1,
+          itemCd: it.product.sku || it.product.id,
+          itemNm: it.product.name,
+          qty: it.quantity,
+          prc: it.unitPrice,
+          splyAmt: it.total,
+          dcAmt: it.discount * it.quantity,
+          taxTyCd:
+            it.product.kraTaxType === 'Standard VAT (16%)'
+              ? 'B'
+              : it.product.kraTaxType === 'Zero-Rated (0%)'
+              ? 'C'
+              : it.product.kraTaxType === 'Exempt'
+              ? 'D'
+              : 'A',
+          totAmt: it.total,
+        })),
+      })),
+      creditNotes: customerReturns.map((ret) => ({
+        cnInvcNo: ret.creditNoteNumber,
+        orgInvcNo: ret.originalReceiptNumber,
+        orgCuin: ret.originalCuin || null,
+        custTin: ret.customerKraPin || null,
+        custNm: ret.customerName,
+        rcptTyCd: 'R',
+        salesTyCd: 'N',
+        cfmDt: ret.date,
+        totAmt: ret.totalRefundAmount,
+        restockedUnits: ret.restockedTotalUnits,
+        damagedUnits: ret.damagedTotalUnits,
+        reason: ret.reason,
+        itemList: ret.items.map((it, idx) => ({
+          itemSeq: idx + 1,
+          itemCd: it.sku || it.productId,
+          itemNm: it.productName,
+          qty: it.quantityReturned,
+          prc: it.unitPrice,
+          totAmt: it.refundSubtotal,
+          restocked: it.addedBackToStock,
+        })),
+      })),
+    };
+
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `Rofani_KRA_eTIMS_Payload_${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    showToast(`Exported e-TIMS JSON payload (${fiscalInvoices.length} invoices, ${customerReturns.length} credit notes)!`);
   };
 
   // Filtered Receipts for Archive
@@ -317,6 +490,9 @@ export const KraTotComplianceCenter: React.FC<KraTotComplianceCenterProps> = ({
     });
   }, [transactions, receiptFilter, receiptSearch]);
 
+  const isVscuConnected =
+    etimsConfig.integrationMode === 'vscu_connected' && Boolean(etimsConfig.vscuEndpointUrl.trim());
+
   return (
     <div className="w-full space-y-4">
       {/* Toast Notification */}
@@ -335,30 +511,38 @@ export const KraTotComplianceCenter: React.FC<KraTotComplianceCenterProps> = ({
               KRA
             </div>
             <div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <h3 className="font-extrabold text-white text-base">
                   KRA Turnover Tax (TOT) & e-TIMS Compliance Center
                 </h3>
-                <span className="bg-amber-500/20 text-amber-300 text-[10px] font-bold px-2 py-0.5 rounded-full border border-amber-500/30">
-                  Mandatory Monthly Return
+                <span
+                  className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                    isVscuConnected
+                      ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                      : 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+                  }`}
+                >
+                  {isVscuConnected ? 'VSCU/OSCU Configured' : 'e-TIMS Ready (Local Formatting)'}
                 </span>
               </div>
               <p className="text-xs text-slate-300">
-                Taxpayer PIN: <span className="font-mono font-bold text-amber-300">{storeKraPin}</span> • Standard Rate: <span className="font-bold text-white">{totRate}% on Gross Sales</span>
+                Taxpayer PIN: <span className="font-mono font-bold text-amber-300">{storeKraPin}</span> • Standard TOT Rate: <span className="font-bold text-white">{totRate}% on Gross Sales</span>
               </p>
             </div>
           </div>
 
           <div className="bg-slate-950/80 border border-slate-800 px-3 py-1.5 rounded-xl text-[11px] text-slate-300 flex items-center gap-2">
-            <ShieldCheck className="w-4 h-4 text-emerald-400" />
-            <span>e-TIMS: <strong className="text-white">Optional per Customer</strong></span>
+            <ShieldCheck className={`w-4 h-4 ${isVscuConnected ? 'text-emerald-400' : 'text-amber-400'}`} />
+            <span>
+              VSCU Link: <strong className="text-white">{isVscuConnected ? etimsConfig.environment.toUpperCase() : 'Offline / Local'}</strong>
+            </span>
             <span className="text-slate-600">|</span>
-            <span>TOT: <strong className="text-amber-300">Mandatory Monthly</strong></span>
+            <span>TOT: <strong className="text-amber-300">Monthly iTax Ready</strong></span>
           </div>
         </div>
 
         <div className="pt-2 border-t border-amber-500/20 text-xs text-amber-200/90 leading-relaxed">
-          💡 <strong>How Kenya Retail Tax Works:</strong> Walk-in customers who do not request fiscal e-TIMS invoices receive standard receipts. However, <strong>every single sale</strong> contributes to your monthly Gross Sales Turnover. Under KRA Section 12D, Turnover Tax (TOT) must be filed and paid on or before the <strong>20th of the following month</strong> on the KRA iTax portal.
+          💡 <strong>Compliance Transparency:</strong> Rofani POS computes KRA VAT (16%), Zero-Rated, Exempt &amp; TOT (1.5%), captures buyer/seller KRA PINs, generates iTax CSV/PDF returns, and formats KRA e-TIMS invoices &amp; Credit Notes. For <strong>live real-time KRA CUIN server signing</strong>, connect an accredited KRA VSCU/OSCU middleware URL in the <strong>e-TIMS &amp; Credit Notes</strong> tab.
         </div>
       </div>
 
@@ -374,7 +558,7 @@ export const KraTotComplianceCenter: React.FC<KraTotComplianceCenterProps> = ({
             KSh {currentMonthSummary.grossTurnover.toLocaleString(undefined, { minimumFractionDigits: 2 })}
           </div>
           <div className="text-[11px] text-slate-400 mt-1">
-            Across <strong className="text-slate-200">{currentMonthSummary.txCount}</strong> total retail sales
+            Across <strong className="text-slate-200">{currentMonthSummary.txCount}</strong> total retail sales (net of returns)
           </div>
         </div>
 
@@ -393,14 +577,14 @@ export const KraTotComplianceCenter: React.FC<KraTotComplianceCenterProps> = ({
           </div>
         </div>
 
-        {/* Card 3: e-TIMS Adoption Split */}
+        {/* Card 3: e-TIMS Adoption Split & Credit Notes */}
         <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl">
           <div className="text-[11px] text-slate-400 font-semibold uppercase tracking-wider flex items-center justify-between">
-            <span>Receipt Types (All-Time)</span>
+            <span>e-TIMS Invoices &amp; Credit Notes</span>
             <QrCode className="w-4 h-4 text-emerald-400" />
           </div>
           <div className="text-2xl font-black text-emerald-400 font-mono mt-1">
-            {totalEtimsAll} <span className="text-xs font-normal text-slate-400">e-TIMS / {transactions.length} Total</span>
+            {totalEtimsAll} <span className="text-xs font-normal text-slate-400">Invoices / {customerReturns.length} Credit Notes</span>
           </div>
           <div className="text-[11px] text-slate-400 mt-1">
             {transactions.length > 0
@@ -425,7 +609,7 @@ export const KraTotComplianceCenter: React.FC<KraTotComplianceCenterProps> = ({
       </div>
 
       {/* SUB-TABS NAVIGATION */}
-      <div className="flex items-center gap-2 border-b border-slate-800 pb-2">
+      <div className="flex flex-wrap items-center gap-2 border-b border-slate-800 pb-2">
         <button
           type="button"
           onClick={() => setActiveTab('schedule')}
@@ -436,7 +620,7 @@ export const KraTotComplianceCenter: React.FC<KraTotComplianceCenterProps> = ({
           }`}
         >
           <Calendar className="w-3.5 h-3.5" />
-          <span>Monthly KRA TOT Return Schedule ({monthlyData.length} Months)</span>
+          <span>Monthly KRA TOT Schedule ({monthlyData.length} Months)</span>
         </button>
 
         <button
@@ -449,7 +633,20 @@ export const KraTotComplianceCenter: React.FC<KraTotComplianceCenterProps> = ({
           }`}
         >
           <Receipt className="w-3.5 h-3.5" />
-          <span>Sales & e-TIMS Receipt Archive ({transactions.length})</span>
+          <span>Sales &amp; e-TIMS Archive ({transactions.length})</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('etims')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer ${
+            activeTab === 'etims'
+              ? 'bg-amber-600 text-white shadow-md shadow-amber-600/30'
+              : 'bg-slate-900 text-slate-400 hover:text-white hover:bg-slate-800'
+          }`}
+        >
+          <Settings2 className="w-3.5 h-3.5" />
+          <span>e-TIMS Readiness, VSCU &amp; Credit Notes ({customerReturns.length})</span>
         </button>
 
         <button
@@ -462,7 +659,7 @@ export const KraTotComplianceCenter: React.FC<KraTotComplianceCenterProps> = ({
           }`}
         >
           <HelpCircle className="w-3.5 h-3.5" />
-          <span>KRA iTax Filing & Payment Guide</span>
+          <span>KRA iTax Filing Guide</span>
         </button>
       </div>
 
@@ -718,7 +915,9 @@ export const KraTotComplianceCenter: React.FC<KraTotComplianceCenterProps> = ({
                             + Generate e-TIMS
                           </button>
                         ) : (
-                          <span className="text-[10px] text-emerald-400 font-semibold">Certified ✓</span>
+                          <span className="text-[10px] text-emerald-400 font-semibold">
+                            {tx.etimsComplianceMode === 'vscu_certified' ? 'VSCU Ready ✓' : 'e-TIMS Ref ✓'}
+                          </span>
                         )}
                       </td>
                     </tr>
@@ -730,7 +929,308 @@ export const KraTotComplianceCenter: React.FC<KraTotComplianceCenterProps> = ({
         </div>
       )}
 
-      {/* TAB 3: STEP-BY-STEP FILING GUIDE */}
+      {/* TAB 3: E-TIMS READINESS, VSCU/OSCU CONFIG & CREDIT NOTES */}
+      {activeTab === 'etims' && (
+        <div className="space-y-4">
+          {/* Honest Compliance Readiness Checklist */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div className="bg-slate-900 border border-emerald-500/30 rounded-2xl p-4 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <h4 className="font-extrabold text-sm text-emerald-300 flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                  <span>Built-in KRA Tax &amp; e-TIMS Ready Features</span>
+                </h4>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-700">
+                  Active Today
+                </span>
+              </div>
+              <ul className="space-y-1.5 text-xs text-slate-300">
+                <li className="flex items-start gap-2">
+                  <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" />
+                  <span><strong>Store &amp; Buyer KRA PIN Capture:</strong> Captures taxpayer PINs on invoices, customer profiles, and Credit Notes.</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" />
+                  <span><strong>Item Tax Classification:</strong> Tracks VAT 16%, Zero-Rated (0%), Exempt, and Turnover Tax (1.5%).</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" />
+                  <span><strong>iTax Monthly TOT Returns &amp; PRN Ledger:</strong> Automatic gross/net turnover calculation and iTax CSV/PDF export.</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" />
+                  <span><strong>Credit Notes &amp; e-TIMS JSON Schema Export:</strong> Links returns (<code className="text-amber-300">CN-...</code>) to original receipts &amp; exports KRA <code className="text-sky-300">saveSales</code> / <code className="text-sky-300">creditNote</code> JSON payloads.</span>
+                </li>
+              </ul>
+            </div>
+
+            <div className="bg-slate-900 border border-amber-500/30 rounded-2xl p-4 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <h4 className="font-extrabold text-sm text-amber-300 flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 text-amber-400" />
+                  <span>Live KRA Server Transmission Status</span>
+                </h4>
+                <span
+                  className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                    isVscuConnected
+                      ? 'bg-emerald-950 text-emerald-300 border-emerald-700'
+                      : 'bg-amber-950 text-amber-300 border-amber-700'
+                  }`}
+                >
+                  {isVscuConnected ? 'Endpoint Configured' : 'Local Mode Only'}
+                </span>
+              </div>
+              <p className="text-xs text-slate-300 leading-relaxed">
+                Rofani POS formats receipts, QR fiscal metadata, and Credit Notes in KRA e-TIMS structure out-of-the-box.
+                However, <strong>live real-time CUIN signing by KRA servers</strong> is not active by default because KRA requires each merchant to onboard on{' '}
+                <a href="https://etims.kra.go.ke" target="_blank" rel="noreferrer" className="text-amber-400 underline font-semibold">
+                  etims.kra.go.ke
+                </a>{' '}
+                and link an accredited VSCU/OSCU control unit or middleware URL below.
+              </p>
+              <div className="pt-1 flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleExportEtimsJsonPayload}
+                  className="px-3.5 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs flex items-center gap-1.5 transition shadow-md shadow-sky-600/20 cursor-pointer"
+                >
+                  <FileJson className="w-3.5 h-3.5" />
+                  <span>Export KRA e-TIMS JSON Payload</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* VSCU / OSCU Control Unit Settings Form */}
+          <form
+            onSubmit={handleSaveEtimsConfig}
+            className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-4"
+          >
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800 pb-3">
+              <div>
+                <h4 className="font-extrabold text-sm text-white flex items-center gap-2">
+                  <Settings2 className="w-4 h-4 text-amber-400" />
+                  <span>KRA VSCU / OSCU Control Unit Configuration</span>
+                </h4>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Enter your KRA GavaConnect / VSCU middleware details once onboarded with KRA.
+                </p>
+              </div>
+              <button
+                type="submit"
+                disabled={isSavingEtimsConfig}
+                className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer self-start sm:self-auto"
+              >
+                <Check className="w-3.5 h-3.5" />
+                <span>{isSavingEtimsConfig ? 'Saving...' : 'Save e-TIMS Config'}</span>
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 text-xs">
+              <div>
+                <label className="block text-slate-400 font-semibold mb-1">Taxpayer KRA PIN</label>
+                <input
+                  type="text"
+                  value={etimsConfig.taxpayerPin}
+                  onChange={(e) => setEtimsConfig((p) => ({ ...p, taxpayerPin: e.target.value.toUpperCase() }))}
+                  placeholder="P051234567X"
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-amber-300 font-mono font-bold focus:outline-none focus:border-amber-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-400 font-semibold mb-1">Branch ID (bhfId)</label>
+                <input
+                  type="text"
+                  value={etimsConfig.branchId}
+                  onChange={(e) => setEtimsConfig((p) => ({ ...p, branchId: e.target.value }))}
+                  placeholder="00"
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 font-mono focus:outline-none focus:border-amber-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-400 font-semibold mb-1">Control Unit Serial (SCU ID)</label>
+                <input
+                  type="text"
+                  value={etimsConfig.scuId}
+                  onChange={(e) => setEtimsConfig((p) => ({ ...p, scuId: e.target.value.toUpperCase() }))}
+                  placeholder="KRACU0300000001"
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 font-mono focus:outline-none focus:border-amber-500"
+                />
+              </div>
+
+              <div className="sm:col-span-2">
+                <label className="block text-slate-400 font-semibold mb-1">
+                  Accredited VSCU / OSCU Middleware Endpoint URL (Optional)
+                </label>
+                <input
+                  type="url"
+                  value={etimsConfig.vscuEndpointUrl}
+                  onChange={(e) =>
+                    setEtimsConfig((p) => ({
+                      ...p,
+                      vscuEndpointUrl: e.target.value,
+                      integrationMode: e.target.value.trim() ? 'vscu_connected' : 'etims_ready_local',
+                    }))
+                  }
+                  placeholder="https://vscu-gateway.yourdomain.co.ke/etims/v1"
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 font-mono focus:outline-none focus:border-amber-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-400 font-semibold mb-1">Default Tax Classification</label>
+                <select
+                  value={etimsConfig.defaultTaxClassification}
+                  onChange={(e) =>
+                    setEtimsConfig((p) => ({
+                      ...p,
+                      defaultTaxClassification: e.target.value as KraTaxClassification,
+                    }))
+                  }
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 focus:outline-none focus:border-amber-500"
+                >
+                  <option value="Turnover Tax / Non-VAT">Turnover Tax (TOT 1.5%)</option>
+                  <option value="Standard VAT (16%)">Standard Rated VAT (16%)</option>
+                  <option value="Zero-Rated (0%)">Zero-Rated (0%)</option>
+                  <option value="Exempt">VAT Exempt</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-3 pt-1 text-xs">
+              <div className="flex items-center gap-4">
+                <label className="flex items-center gap-2 cursor-pointer text-slate-300">
+                  <input
+                    type="checkbox"
+                    checked={etimsConfig.autoIssueEtimsOnVat}
+                    onChange={(e) =>
+                      setEtimsConfig((p) => ({ ...p, autoIssueEtimsOnVat: e.target.checked }))
+                    }
+                    className="w-4 h-4 rounded border-slate-700 bg-slate-950 text-amber-500"
+                  />
+                  <span>Auto-tag VAT/Corporate invoices for e-TIMS export</span>
+                </label>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <span className="text-slate-400">Environment:</span>
+                <button
+                  type="button"
+                  onClick={() => setEtimsConfig((p) => ({ ...p, environment: 'sandbox' }))}
+                  className={`px-2.5 py-1 rounded-lg font-bold cursor-pointer ${
+                    etimsConfig.environment === 'sandbox'
+                      ? 'bg-amber-600 text-white'
+                      : 'bg-slate-800 text-slate-400'
+                  }`}
+                >
+                  Sandbox
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setEtimsConfig((p) => ({ ...p, environment: 'production' }))}
+                  className={`px-2.5 py-1 rounded-lg font-bold cursor-pointer ${
+                    etimsConfig.environment === 'production'
+                      ? 'bg-emerald-600 text-white'
+                      : 'bg-slate-800 text-slate-400'
+                  }`}
+                >
+                  Production
+                </button>
+              </div>
+            </div>
+          </form>
+
+          {/* KRA eTIMS Credit Notes Schedule (Linked to Customer Returns) */}
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
+            <div className="p-4 bg-slate-950/70 border-b border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <h4 className="font-extrabold text-sm text-white flex items-center gap-2">
+                  <RotateCcw className="w-4 h-4 text-rose-400" />
+                  <span>KRA Credit Notes Issued on Goods Returns ({customerReturns.length})</span>
+                </h4>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Every customer return automatically creates a Credit Note referencing the original receipt &amp; CUIN so your net turnover stays accurate.
+                </p>
+              </div>
+            </div>
+
+            {customerReturns.length === 0 ? (
+              <div className="p-6 text-center text-xs text-slate-400">
+                No customer returns or credit notes have been recorded yet. Process a return inside Customers Management to auto-generate a KRA Credit Note here.
+              </div>
+            ) : (
+              <div className="w-full overflow-x-auto">
+                <table className="w-full text-left text-xs text-slate-300 min-w-[780px]">
+                  <thead className="bg-slate-950 text-slate-400 font-semibold uppercase text-[10px] tracking-wider border-b border-slate-800">
+                    <tr>
+                      <th className="p-3">Credit Note #</th>
+                      <th className="p-3">Original Receipt / CUIN</th>
+                      <th className="p-3">Customer</th>
+                      <th className="p-3">Date</th>
+                      <th className="p-3 text-center">Stock Restored / Damaged</th>
+                      <th className="p-3 text-right">Refund Value</th>
+                      <th className="p-3 text-center">PDF</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800 font-mono text-[11px]">
+                    {customerReturns.map((ret) => (
+                      <tr key={ret.id} className="hover:bg-slate-800/60 transition">
+                        <td className="p-3">
+                          <div className="font-bold text-rose-300">{ret.creditNoteNumber}</div>
+                          {ret.creditNoteCuin && (
+                            <div className="text-[10px] text-amber-400">CN CUIN: {ret.creditNoteCuin}</div>
+                          )}
+                        </td>
+                        <td className="p-3">
+                          <div className="text-slate-200 font-semibold">{ret.originalReceiptNumber}</div>
+                          {ret.originalCuin && (
+                            <div className="text-[10px] text-slate-400">Orig: {ret.originalCuin}</div>
+                          )}
+                        </td>
+                        <td className="p-3 font-sans">
+                          <div className="text-slate-200 font-medium">{ret.customerName}</div>
+                          {ret.customerKraPin && (
+                            <div className="text-[10px] text-amber-400 font-mono">PIN: {ret.customerKraPin}</div>
+                          )}
+                        </td>
+                        <td className="p-3 font-sans text-slate-400">
+                          {new Date(ret.date).toLocaleDateString()}
+                        </td>
+                        <td className="p-3 text-center font-sans">
+                          <span className="text-emerald-400 font-bold">+{ret.restockedTotalUnits}</span>
+                          <span className="text-slate-600 mx-1">/</span>
+                          <span className="text-amber-400 font-bold">{ret.damagedTotalUnits} dmg</span>
+                        </td>
+                        <td className="p-3 text-right font-bold text-rose-300">
+                          KSh {ret.totalRefundAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                        </td>
+                        <td className="p-3 text-center font-sans">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              exportCustomerReturnPDF(ret, {
+                                storeName: resolvedStoreName,
+                                storeKraPin,
+                              })
+                            }
+                            className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-sky-300 text-[10px] font-bold inline-flex items-center gap-1 cursor-pointer"
+                          >
+                            <Download className="w-3 h-3" /> Credit Note
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* TAB 4: STEP-BY-STEP FILING GUIDE */}
       {activeTab === 'guide' && (
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4 text-slate-200">
           <div className="border-b border-slate-800 pb-3">

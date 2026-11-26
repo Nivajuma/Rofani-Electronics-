@@ -42,13 +42,12 @@ import {
   applyRoleToWorker,
   hasRole,
   getUserRoles,
-  setWorkerRoles,
-  toggleRoleOnWorker,
-  ALL_ROLES,
   getCombinedPermissionsForRoles,
-  ALL_21_GRANULAR_ROLES,
-  assignAll21RolesToWorker,
+  getWorkerPermissions,
+  formatRoleDisplayLabel,
+  isProtectedOwnerAccount,
 } from '../../utils/permissions';
+import { AssignedRolesPermissionsSection } from '../Auth/AssignedRolesPermissionsSection';
 
 interface WorkerDirectoryViewProps {
   allUsers: User[];
@@ -581,16 +580,21 @@ export const WorkerDirectoryView: React.FC<WorkerDirectoryViewProps> = ({
 
                   <div className="flex flex-col items-end gap-1">
                     <div className="flex flex-wrap justify-end gap-1 max-w-[200px]">
-                      {getUserRoles(u).map((r) => (
+                      {getUserRoles(u).slice(0, 4).map((r) => (
                         <span
                           key={r}
-                          className={`px-2 py-0.5 rounded-lg border text-[10px] font-mono font-bold ${
+                          className={`px-2 py-0.5 rounded-lg border text-[10px] font-semibold ${
                             roleBadges[r]?.badge || badgeConfig.badge
                           }`}
                         >
-                          {r}
+                          {formatRoleDisplayLabel(r)}
                         </span>
                       ))}
+                      {getUserRoles(u).length > 4 && (
+                        <span className="px-1.5 py-0.5 rounded-lg border border-slate-700 bg-slate-800 text-[10px] font-mono font-bold text-slate-300">
+                          +{getUserRoles(u).length - 4}
+                        </span>
+                      )}
                     </div>
                     <span
                       className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${
@@ -719,85 +723,26 @@ export const WorkerDirectoryView: React.FC<WorkerDirectoryViewProps> = ({
                   </div>
                 )}
 
-                {/* Multi-Role Quick Assignment Bar */}
-                <div className="bg-slate-950/80 border border-slate-800/80 p-2.5 rounded-2xl space-y-2 text-xs">
-                  <div className="flex items-center justify-between gap-2 flex-wrap">
-                    <span className="text-slate-300 font-semibold text-[11px] flex items-center gap-1.5">
-                      <ShieldCheck className="w-3.5 h-3.5 text-sky-400" />
-                      <span>Assigned Roles ({getUserRoles(u).length}):</span>
-                    </span>
-                    <div className="flex items-center gap-1.5">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (!onUpdateUser) return;
-                          const updated = assignAll21RolesToWorker(u);
-                          onUpdateUser(updated);
-                          showToast(`Assigned all 21 functional roles to ${u.name}!`, 'success');
-                        }}
-                        className="text-[9px] bg-emerald-950/80 hover:bg-emerald-900 text-emerald-300 border border-emerald-700/80 px-2 py-0.5 rounded font-bold transition flex items-center gap-1"
-                        title="Assign all 21 operational and functional roles to this worker"
-                      >
-                        <Sparkles className="w-2.5 h-2.5 text-amber-400" />
-                        <span>Assign All 21 Roles</span>
-                      </button>
-                      <select
-                        value={u.role}
-                        onChange={(e) => {
-                          const newRole = e.target.value as Role;
-                          if (onUpdateUser) {
-                            const updated = applyRoleToWorker(u, newRole);
-                            onUpdateUser(updated);
-                            showToast(`Primary role set to "${newRole}" for ${u.name}!`, 'success');
-                          }
-                        }}
-                        className="bg-slate-900 border border-slate-700 text-slate-200 text-xs font-bold rounded-lg px-2 py-0.5 focus:outline-none focus:border-sky-500 cursor-pointer shadow-sm hover:border-slate-600 transition"
-                        title="Set primary role"
-                      >
-                        <option value="Sales Role">Sales Role</option>
-                        <option value="Stock Ins Role">Stock Ins Role</option>
-                        <option value="Stock Setup Role">Stock Setup Role</option>
-                        <option value="Expenses Role">Expenses Role</option>
-                        <option value="Cashier">Cashier</option>
-                        <option value="Inventory Staff">Inventory Staff</option>
-                        <option value="Manager">Manager</option>
-                        <option value="Admin">Admin</option>
-                      </select>
-                    </div>
-                  </div>
-
-                  {/* Multi-Role Toggle Chips (Worker can hold more than 3 roles simultaneously, up to 21 roles) */}
-                  <div className="flex flex-wrap gap-1">
-                    {ALL_ROLES.map((r) => {
-                      const isAssigned = hasRole(u, r);
-                      const badge = getRoleBadge(r);
-                      return (
-                        <button
-                          key={r}
-                          type="button"
-                          onClick={() => {
-                            if (!onUpdateUser) return;
-                            const updated = toggleRoleOnWorker(u, r);
-                            onUpdateUser(updated);
-                            showToast(
-                              `${isAssigned ? 'Removed' : 'Added'} "${r}" ${isAssigned ? 'from' : 'to'} ${u.name}!`,
-                              'success'
-                            );
-                          }}
-                          className={`px-2 py-0.5 rounded-lg text-[10px] font-bold border transition flex items-center gap-1 cursor-pointer ${
-                            isAssigned
-                              ? `${badge.badge} shadow-sm`
-                              : 'bg-slate-900/60 text-slate-500 border-slate-800 hover:border-slate-700 hover:text-slate-300'
-                          }`}
-                          title={`Click to ${isAssigned ? 'remove' : 'assign'} ${r}`}
-                        >
-                          {isAssigned ? <Check className="w-2.5 h-2.5" /> : <Plus className="w-2.5 h-2.5" />}
-                          <span>{r}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
+                {/* Redesigned Scannable Assigned Roles & Permissions */}
+                <AssignedRolesPermissionsSection
+                  compact
+                  roles={getUserRoles(u)}
+                  permissions={getWorkerPermissions(u)}
+                  primaryRole={u.role}
+                  isOwnerProtected={isProtectedOwnerAccount(u)}
+                  canAssignAdmin={hasRole(currentUser, 'Admin')}
+                  onChange={({ roles: nextRoles, permissions: nextPerms, primaryRole }) => {
+                    if (!onUpdateUser) return;
+                    onUpdateUser({
+                      ...u,
+                      role: primaryRole,
+                      roles: nextRoles,
+                      assignedRoles: nextRoles,
+                      permissions: nextPerms,
+                    });
+                  }}
+                  onNotify={(msg, type) => showToast(msg, type || 'info')}
+                />
 
                 {/* Worker Action Buttons */}
                 <div className="flex items-center justify-between pt-2 border-t border-slate-800 text-xs">
@@ -1100,61 +1045,25 @@ export const WorkerDirectoryView: React.FC<WorkerDirectoryViewProps> = ({
                   </select>
                 </div>
 
-                {/* Multi-Role Assignment Section */}
-                <div className="col-span-1 sm:col-span-2 bg-slate-950/80 border border-slate-800 p-3 rounded-xl space-y-2">
-                  <div className="flex items-center justify-between">
-                    <label className="text-slate-200 font-semibold text-xs flex items-center gap-1.5">
-                      <ShieldCheck className="w-3.5 h-3.5 text-sky-400" />
-                      <span>Assigned Roles (Select multiple roles — worker can hold more than 3 roles simultaneously):</span>
-                    </label>
-                    <span className="text-[10px] text-sky-400 font-mono font-bold">
-                      {getUserRoles(editingUser).length} of 8 Roles Active
-                    </span>
-                  </div>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                    {ALL_ROLES.map((r) => {
-                      const currentRoles = getUserRoles(editingUser);
-                      const isChecked = currentRoles.includes(r);
-                      return (
-                        <button
-                          key={r}
-                          type="button"
-                          onClick={() => {
-                            let nextRoles: Role[];
-                            if (isChecked) {
-                              if (currentRoles.length <= 1) {
-                                showToast('Worker must have at least one role.', 'error');
-                                return;
-                              }
-                              if (r === 'Admin' && (editingUser.id === 'usr-1' || editingUser.email?.toLowerCase() === 'admin@rofani.co.ke')) {
-                                showToast('Store owner account must retain Administrator role.', 'error');
-                                return;
-                              }
-                              nextRoles = currentRoles.filter((item) => item !== r);
-                            } else {
-                              nextRoles = [...currentRoles, r];
-                            }
-                            const combined = getCombinedPermissionsForRoles(nextRoles);
-                            setEditingUser({
-                              ...editingUser,
-                              roles: nextRoles,
-                              assignedRoles: nextRoles,
-                              role: nextRoles.includes('Admin') ? 'Admin' : nextRoles[0],
-                              permissions: { ...combined, ...editingUser.permissions },
-                            });
-                          }}
-                          className={`p-2 rounded-xl text-left border text-xs font-bold transition flex items-center justify-between cursor-pointer ${
-                            isChecked
-                              ? 'bg-purple-900/40 text-purple-200 border-purple-500 shadow-sm'
-                              : 'bg-slate-900 text-slate-400 border-slate-800 hover:text-slate-200'
-                          }`}
-                        >
-                          <span className="truncate">{r}</span>
-                          {isChecked ? <Check className="w-3.5 h-3.5 text-purple-300 shrink-0" /> : <Plus className="w-3.5 h-3.5 text-slate-600 shrink-0" />}
-                        </button>
-                      );
-                    })}
-                  </div>
+                {/* Redesigned Assigned Roles & Categorized Permissions */}
+                <div className="col-span-1 sm:col-span-2">
+                  <AssignedRolesPermissionsSection
+                    roles={getUserRoles(editingUser)}
+                    permissions={getWorkerPermissions(editingUser)}
+                    primaryRole={editingUser.role}
+                    isOwnerProtected={isProtectedOwnerAccount(editingUser)}
+                    canAssignAdmin={hasRole(currentUser, 'Admin')}
+                    onChange={({ roles: nextRoles, permissions: nextPerms, primaryRole }) => {
+                      setEditingUser({
+                        ...editingUser,
+                        role: primaryRole,
+                        roles: nextRoles,
+                        assignedRoles: nextRoles,
+                        permissions: nextPerms,
+                      });
+                    }}
+                    onNotify={(msg, type) => showToast(msg, type || 'info')}
+                  />
                 </div>
               </div>
 

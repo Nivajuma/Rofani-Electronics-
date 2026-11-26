@@ -29,7 +29,7 @@ import {
   Lock,
   Trash2
 } from 'lucide-react';
-import { Transaction, Product, Customer, Supplier, Expense, PurchaseOrder, User, WorkerSalaryPayout, StaffCommissionPayout } from '../../types';
+import { Transaction, Product, Customer, Supplier, Expense, PurchaseOrder, User, WorkerSalaryPayout, StaffCommissionPayout, CustomerReturnRecord } from '../../types';
 import { KraTotComplianceCenter } from './KraTotComplianceCenter';
 import { DailyOverviewCard } from './DailyOverviewCard';
 import { WorkersWagesCommissionsReport } from '../Attendance/WorkersWagesCommissionsReport';
@@ -44,6 +44,7 @@ interface ReportsViewProps {
   suppliers: Supplier[];
   expenses: Expense[];
   purchaseOrders?: PurchaseOrder[];
+  customerReturns?: CustomerReturnRecord[];
   auditLogs?: any[];
   onBack?: () => void;
   onUpdateTransaction?: (updatedTx: Transaction, updatedProducts: Product[]) => void;
@@ -54,6 +55,7 @@ interface ReportsViewProps {
   salaryPayouts?: WorkerSalaryPayout[];
   commissionPayouts?: StaffCommissionPayout[];
   storeName?: string;
+  storeKraPin?: string;
   onAddExpense?: (expense: Expense) => void;
   inPhoneFrame?: boolean;
 }
@@ -73,6 +75,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   suppliers,
   expenses,
   purchaseOrders = [],
+  customerReturns = [],
   auditLogs = [],
   onBack,
   onUpdateTransaction,
@@ -83,6 +86,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   salaryPayouts = [],
   commissionPayouts = [],
   storeName,
+  storeKraPin,
   onAddExpense,
   inPhoneFrame = false,
 }) => {
@@ -832,6 +836,10 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             {selectedReport.id === 'kra_etims_report' && (
               <KraTotComplianceCenter
                 transactions={transactions}
+                customerReturns={customerReturns}
+                storeName={storeName}
+                storeKraPin={storeKraPin}
+                activeStoreId={activeStoreId}
                 onUpdateTransaction={(updatedTx) => {
                   if (onUpdateTransaction) {
                     onUpdateTransaction(updatedTx, products);

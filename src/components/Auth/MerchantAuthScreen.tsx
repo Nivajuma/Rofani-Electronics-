@@ -11,6 +11,7 @@ import {
   LogIn,
   Lock,
   Gift,
+  Play,
 } from 'lucide-react';
 import {
   signInWithGoogleForCloud,
@@ -21,6 +22,7 @@ import {
 interface MerchantAuthScreenProps {
   hasOfflineOwnerCache?: boolean;
   onContinueOfflineOwner?: () => void;
+  onStartClientDemo?: () => void;
   initialReferralCode?: string;
   onReferralCodeChange?: (code: string) => void;
 }
@@ -28,6 +30,7 @@ interface MerchantAuthScreenProps {
 export const MerchantAuthScreen: React.FC<MerchantAuthScreenProps> = ({
   hasOfflineOwnerCache = false,
   onContinueOfflineOwner,
+  onStartClientDemo,
   initialReferralCode = '',
   onReferralCodeChange,
 }) => {
@@ -254,6 +257,18 @@ export const MerchantAuthScreen: React.FC<MerchantAuthScreenProps> = ({
                 className="w-full py-2.5 px-4 rounded-xl bg-[#0f172a] hover:bg-slate-900 border border-slate-700 text-slate-200 font-semibold text-xs transition cursor-pointer"
               >
                 Popup blocked? Sign in via Redirect
+              </button>
+            )}
+
+            {onStartClientDemo && (
+              <button
+                type="button"
+                id="btn-auth-launch-client-demo"
+                onClick={onStartClientDemo}
+                className="w-full py-3 px-4 rounded-2xl bg-slate-800 hover:bg-slate-700/90 border border-slate-600/80 text-white font-bold text-xs flex items-center justify-center gap-2 transition cursor-pointer"
+              >
+                <Play className="w-3.5 h-3.5 text-emerald-400 fill-current shrink-0" />
+                <span>Try Live Client Demo (No Sign-In)</span>
               </button>
             )}
           </div>

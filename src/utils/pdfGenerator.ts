@@ -1,6 +1,6 @@
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { Transaction, Product, Customer, Supplier, Expense, StaffCommissionPayout, WorkerSalaryPayout, User, RestockRecord } from '../types';
+import { Transaction, Product, Customer, Supplier, Expense, StaffCommissionPayout, WorkerSalaryPayout, User, RestockRecord, CustomerReturnRecord } from '../types';
 import {
   ROFANI_MASTER_KRA_PIN,
   SUPPORT_PHONE_PRIMARY,
@@ -148,7 +148,7 @@ export const exportProfitReportPDF = (
     exp.date,
     exp.category,
     exp.description,
-    exp.paymentMethod.toUpperCase(),
+    (exp.paymentMethod || 'cash').toUpperCase(),
     `KSh ${exp.amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}`
   ]);
 
@@ -493,6 +493,12 @@ export const exportReceiptPDF = (
   doc.text(`KSh ${tx.grandTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}`, 74, y, { align: 'right' });
   y += 5;
 
+  if ((tx.depositAppliedAmount || 0) > 0) {
+    doc.text('Deposit Credit Applied:', 6, y);
+    doc.text(`KSh ${Number(tx.depositAppliedAmount).toLocaleString(undefined, { minimumFractionDigits: 2 })}`, 74, y, { align: 'right' });
+    y += 4;
+  }
+
   doc.setFontSize(8);
   doc.setFont('helvetica', 'normal');
   doc.text(`Amount Paid:`, 6, y);
@@ -504,6 +510,15 @@ export const exportReceiptPDF = (
     doc.setTextColor(220, 38, 38);
     doc.text(`Balance Due (Credit):`, 6, y);
     doc.text(`KSh ${tx.balanceDue.toLocaleString(undefined, { minimumFractionDigits: 2 })}`, 74, y, { align: 'right' });
+    doc.setTextColor(0, 0, 0);
+    y += 4;
+  }
+
+  if ((tx.returnedAmount || 0) > 0) {
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(180, 83, 9);
+    doc.text(`Returned / Credit Note:`, 6, y);
+    doc.text(`-KSh ${Number(tx.returnedAmount).toLocaleString(undefined, { minimumFractionDigits: 2 })}`, 74, y, { align: 'right' });
     doc.setTextColor(0, 0, 0);
     y += 4;
   }
@@ -1221,4 +1236,112 @@ export const exportSubscriptionInvoicePDF = (invoice: SubscriptionInvoiceData) =
   const safeStore = (invoice.storeName || 'Store').replace(/[^a-zA-Z0-9_-]/g, '_');
   doc.save(`Rofani_Subscription_Invoice_${safeStore}_${invoice.invoiceNumber}.pdf`);
 };
+
+/**
+ * 16. Export Customer Goods Return & Credit Note PDF (with Stock Restoration & KRA eTIMS Ref)
+ */
+export const exportCustomerReturnPDF = (
+  ret: CustomerReturnRecord,
+  options?: { storeName?: string; storeKraPin?: string }
+) => {
+  const doc = new jsPDF();
+  const storeName = options?.storeName || 'Rofani POS';
+  const resolvedKraPin = resolveActiveStoreKraPin(options?.storeKraPin);
+
+  addReportHeader(
+    doc,
+    ret.isEtimsCreditNote
+      ? 'CUSTOMER RETURN & KRA e-TIMS CREDIT NOTE'
+      : 'CUSTOMER GOODS RETURN & CREDIT NOTE SLIP',
+    `Return #: ${ret.returnNumber} | Credit Note #: ${ret.creditNoteNumber}`,
+    storeName
+  );
+
+  doc.setFontSize(9.5);
+  doc.setFont('helvetica', 'bold');
+  doc.text('RETURN & FISCAL REFERENCE', 14, 36);
+  doc.text('CUSTOMER & SETTLEMENT SUMMARY', 110, 36);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9);
+  doc.text(`Return Slip #: ${ret.returnNumber}`, 14, 42);
+  doc.text(`Credit Note #: ${ret.creditNoteNumber}`, 14, 47);
+  doc.text(`Original Receipt #: ${ret.originalReceiptNumber}`, 14, 52);
+  doc.text(`Return Date: ${new Date(ret.date).toLocaleString()}`, 14, 57);
+  doc.text(`Seller Tax PIN: ${resolvedKraPin || 'N/A'}`, 14, 62);
+  if (ret.originalCuin || ret.creditNoteCuin) {
+    doc.text(
+      `eTIMS Refs: Orig CUIN ${ret.originalCuin || 'N/A'} | CN CUIN ${ret.creditNoteCuin || 'READY'}`,
+      14,
+      67
+    );
+  }
+
+  doc.text(`Customer: ${ret.customerName}`, 110, 42);
+  doc.text(`Phone: ${ret.customerPhone || 'N/A'}`, 110, 47);
+  doc.text(`Processed By: ${ret.processedBy}`, 110, 52);
+  doc.text(`Refund Mode: ${ret.refundMode.replace(/_/g, ' ').toUpperCase()}`, 110, 57);
+  doc.setFont('helvetica', 'bold');
+  doc.text(
+    `Total Return Value: KSh ${ret.totalRefundAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}`,
+    110,
+    62
+  );
+  doc.setFont('helvetica', 'normal');
+  doc.text(`Reason: ${ret.reason}`, 110, 67);
+
+  const itemRows = ret.items.map((item) => [
+    item.productName,
+    `${item.quantityReturned} / ${item.quantitySold} ${item.unit || 'pcs'}`,
+    `KSh ${item.unitPrice.toLocaleString()}`,
+    `KSh ${item.refundSubtotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}`,
+    item.addedBackToStock
+      ? `RESELLABLE (+${item.quantityReturned} Restocked${
+          item.stockAfterReturn !== undefined ? ` -> Stock: ${item.stockAfterReturn}` : ''
+        })`
+      : 'DAMAGED / WRITE-OFF (0 Restocked)',
+  ]);
+
+  autoTable(doc, {
+    startY: 75,
+    head: [['Product', 'Returned / Sold', 'Unit Price', 'Refund Value', 'Stock Restoration Action']],
+    body: itemRows,
+    theme: 'grid',
+    headStyles: { fillColor: [15, 23, 42], textColor: [255, 255, 255], fontStyle: 'bold' },
+    styles: { fontSize: 8.5, cellPadding: 3 },
+  });
+
+  const finalY = (doc as any).lastAutoTable?.finalY || 120;
+  doc.setFontSize(9.5);
+  doc.setFont('helvetica', 'bold');
+  doc.text('FINANCIAL & INVENTORY RECONCILIATION', 14, finalY + 10);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9);
+  doc.text(
+    `• Cash / M-Pesa Refund Paid Out: KSh ${ret.cashRefundAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}${
+      ret.cashRefundChannel ? ` (${ret.cashRefundChannel.toUpperCase()}${ret.cashRefundRef ? ` - ${ret.cashRefundRef}` : ''})` : ''
+    }`,
+    14,
+    finalY + 16
+  );
+  doc.text(
+    `• Debt Balance Offset: KSh ${ret.debtReducedAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}`,
+    14,
+    finalY + 21
+  );
+  doc.text(
+    `• Store Deposit Credit Issued: KSh ${ret.creditIssuedAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}`,
+    14,
+    finalY + 26
+  );
+  doc.text(
+    `• Stock Restored to Sellable Inventory: ${ret.restockedTotalUnits} unit(s) | Damaged Write-Off: ${ret.damagedTotalUnits} unit(s)`,
+    14,
+    finalY + 31
+  );
+
+  doc.save(`Return_CreditNote_${ret.creditNoteNumber}.pdf`);
+};
+
 

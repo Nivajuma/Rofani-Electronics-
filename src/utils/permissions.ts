@@ -26,160 +26,160 @@ export interface PermissionDefinition {
 }
 
 export const PERMISSION_DEFINITIONS: PermissionDefinition[] = [
-  // SALES ROLE
+  // SALES & CHECKOUT
   {
     key: 'canMakeSales',
-    label: 'Can make sales',
+    label: 'Make Sales',
     category: 'sales',
-    categoryLabel: 'SALES ROLE',
+    categoryLabel: 'Sales & Checkout',
     description: 'Ring up POS sales, add items to cart, and process checkout payments.',
   },
   {
     key: 'canManageCustomerOrders',
-    label: 'Can make / manage customers orders',
+    label: 'Manage Customer Orders',
     category: 'sales',
-    categoryLabel: 'SALES ROLE',
+    categoryLabel: 'Sales & Checkout',
     description: 'Create, edit, cancel, and oversee online and local customer sales orders.',
   },
   {
     key: 'canUpdateSalesOrderStatus',
-    label: 'Can update sales order status',
+    label: 'Update Order Status',
     category: 'sales',
-    categoryLabel: 'SALES ROLE',
+    categoryLabel: 'Sales & Checkout',
     description: 'Change order lifecycle status between Pending, Preparing, Ready, Delivered, and Cancelled.',
   },
   {
     key: 'canViewManageCustomers',
-    label: 'Can view and manage customers',
+    label: 'View & Manage Customers',
     category: 'sales',
-    categoryLabel: 'SALES ROLE',
-    description: 'Access customer profiles, record customer debts, and update credit allowances.',
+    categoryLabel: 'Sales & Checkout',
+    description: 'Access customer profiles, record customer debts, deposits, and credit allowances.',
   },
   {
     key: 'canEnableSalesCommission',
-    label: 'Can enable sales commission',
+    label: 'Enable Sales Commission',
     category: 'sales',
-    categoryLabel: 'SALES ROLE',
+    categoryLabel: 'Sales & Checkout',
     description: 'View sales performance commission, configure targets, and calculate staff commissions.',
   },
 
-  // STOCK INS ROLES
+  // STOCK & SUPPLIERS
   {
     key: 'canAddStockIn',
-    label: 'Can add stock in',
+    label: 'Add Stock-In',
     category: 'stockIns',
-    categoryLabel: 'STOCK INS ROLES',
+    categoryLabel: 'Stock & Suppliers',
     description: 'Receive incoming stock shipments, restock inventory items, and log purchase bills.',
   },
   {
     key: 'canManageSupplierOrders',
-    label: 'Can make/manage orders to suppliers',
+    label: 'Manage Supplier Orders',
     category: 'stockIns',
-    categoryLabel: 'STOCK INS ROLES',
+    categoryLabel: 'Stock & Suppliers',
     description: 'Issue purchase orders, track supplier restocking requests, and manage deliveries.',
   },
   {
     key: 'canViewManageSupplies',
-    label: 'Can view and manage supplies',
+    label: 'View & Manage Supplies',
     category: 'stockIns',
-    categoryLabel: 'STOCK INS ROLES',
+    categoryLabel: 'Stock & Suppliers',
     description: 'View supplier directory, vendor contact information, and supplier order histories.',
   },
   {
     key: 'canAddBadStock',
-    label: 'Can add bad stock',
+    label: 'Add Bad Stock',
     category: 'stockIns',
-    categoryLabel: 'STOCK INS ROLES',
+    categoryLabel: 'Stock & Suppliers',
     description: 'Write off expired, damaged, or defective goods and record inventory shrinkage.',
   },
 
-  // STOCK SETUP ROLES
+  // STOCK SETUP
   {
     key: 'canAddNewProducts',
-    label: 'Can add new products',
+    label: 'Add New Products',
     category: 'stockSetup',
-    categoryLabel: 'STOCK SETUP ROLES',
+    categoryLabel: 'Stock & Suppliers',
     description: 'Create new catalog products, input categories, cost prices, and selling prices.',
   },
   {
     key: 'canCreateOffers',
-    label: 'Can creat offers',
+    label: 'Create Offers',
     category: 'stockSetup',
-    categoryLabel: 'STOCK SETUP ROLES',
+    categoryLabel: 'Expenses, Offers & Entries',
     description: 'Set up promotional deals, bundle packages, discounts, and flash sales.',
   },
   {
     key: 'canViewOutOfStock',
-    label: 'Can view items out of stock',
+    label: 'View Out-of-Stock Items',
     category: 'stockSetup',
-    categoryLabel: 'STOCK SETUP ROLES',
+    categoryLabel: 'Stock & Suppliers',
     description: 'View low-stock alarms, out-of-stock items, and automated reorder reminders.',
   },
   {
     key: 'canCountUpdateStockBalance',
-    label: 'Can count and update stock balance',
+    label: 'Count & Update Stock Balance',
     category: 'stockSetup',
-    categoryLabel: 'STOCK SETUP ROLES',
+    categoryLabel: 'Stock & Suppliers',
     description: 'Perform physical stock-take counting and reconcile system balances with physical inventory.',
   },
 
-  // EXPENSES ROLES
+  // EXPENSES
   {
     key: 'canAddExpenses',
-    label: 'Can add expenses',
+    label: 'Add Expenses',
     category: 'expenses',
-    categoryLabel: 'EXPENSES ROLES',
+    categoryLabel: 'Expenses, Offers & Entries',
     description: 'Record operating expenses, petty cash outflows, rent, utility bills, and transport costs.',
   },
 
-  // OTHER ROLES
+  // OTHER PERMISSIONS
   {
     key: 'canGiveDiscounts',
-    label: 'can give discounts',
+    label: 'Give Discounts',
     category: 'other',
-    categoryLabel: 'OTHER ROLES',
+    categoryLabel: 'Sales & Checkout',
     description: 'Apply percentage or fixed cash discounts during checkout without supervisor PIN authorization.',
   },
   {
     key: 'canEditDailyEntries',
-    label: 'Can edit daily entries',
+    label: 'Edit Daily Entries',
     category: 'other',
-    categoryLabel: 'OTHER ROLES',
+    categoryLabel: 'Expenses, Offers & Entries',
     description: 'Modify logged sales, shift notes, payment methods, and cash records for today.',
   },
   {
     key: 'canDeleteDailyEntries',
-    label: 'Can delete daily entries',
+    label: 'Delete Daily Entries',
     category: 'other',
-    categoryLabel: 'OTHER ROLES',
+    categoryLabel: 'Expenses, Offers & Entries',
     description: 'Void or delete today\'s recorded transactions, ledger entries, or sales invoices.',
   },
   {
     key: 'canBackdateEntries',
-    label: 'Can backdate entries',
+    label: 'Backdate Entries',
     category: 'other',
-    categoryLabel: 'OTHER ROLES',
+    categoryLabel: 'Sales & Checkout',
     description: 'Record sales, expenses, or stock adjustments with a date earlier than today.',
   },
   {
     key: 'canReturnStocks',
-    label: 'Can return stocks',
+    label: 'Return Stocks',
     category: 'other',
-    categoryLabel: 'OTHER ROLES',
+    categoryLabel: 'Sales & Checkout',
     description: 'Process customer returns, issue refund payments, and restock returned items.',
   },
   {
     key: 'canGenerateBarcode',
-    label: 'Can generate barcode',
+    label: 'Generate Barcodes',
     category: 'other',
-    categoryLabel: 'OTHER ROLES',
+    categoryLabel: 'Stock & Suppliers',
     description: 'Auto-generate EAN/Code128 barcodes and batch print sticky product labels.',
   },
   {
     key: 'canPreviewReceipt',
-    label: 'Can previer receipt',
+    label: 'Preview Receipt',
     category: 'other',
-    categoryLabel: 'OTHER ROLES',
+    categoryLabel: 'Sales & Checkout',
     description: 'Preview, download, and reprint thermal 58mm/80mm or standard A4 invoice receipts.',
   },
 ];
@@ -526,172 +526,228 @@ export const ALL_21_GRANULAR_ROLES: GranularRoleInfo[] = [
   {
     role: 'Can make sales',
     key: 'canMakeSales',
-    label: 'Can make sales',
+    label: 'Make Sales',
     category: 'sales',
-    categoryLabel: 'SALES ROLES',
+    categoryLabel: 'Sales & Checkout',
     description: 'Ring up POS sales, add items to cart, and process checkout payments.',
   },
   {
     role: 'Can make / manage customers orders',
     key: 'canManageCustomerOrders',
-    label: 'Can make / manage customers orders',
+    label: 'Manage Customer Orders',
     category: 'sales',
-    categoryLabel: 'SALES ROLES',
+    categoryLabel: 'Sales & Checkout',
     description: 'Create, edit, cancel, and oversee online and local customer sales orders.',
   },
   {
     role: 'Can update sales order status',
     key: 'canUpdateSalesOrderStatus',
-    label: 'Can update sales order status',
+    label: 'Update Order Status',
     category: 'sales',
-    categoryLabel: 'SALES ROLES',
+    categoryLabel: 'Sales & Checkout',
     description: 'Change order lifecycle status between Pending, Preparing, Ready, Delivered, and Cancelled.',
   },
   {
     role: 'Can view and manage customers',
     key: 'canViewManageCustomers',
-    label: 'Can view and manage customers',
+    label: 'View & Manage Customers',
     category: 'sales',
-    categoryLabel: 'SALES ROLES',
-    description: 'Access customer profiles, record customer debts, and update credit allowances.',
+    categoryLabel: 'Sales & Checkout',
+    description: 'Access customer profiles, record customer debts, deposits, and credit allowances.',
   },
   {
     role: 'Can enable sales commission',
     key: 'canEnableSalesCommission',
-    label: 'Can enable sales commission',
+    label: 'Enable Sales Commission',
     category: 'sales',
-    categoryLabel: 'SALES ROLES',
+    categoryLabel: 'Sales & Checkout',
     description: 'View sales performance commission, configure targets, and calculate staff commissions.',
   },
   {
     role: 'Can add stock in',
     key: 'canAddStockIn',
-    label: 'Can add stock in',
+    label: 'Add Stock-In',
     category: 'stockIns',
-    categoryLabel: 'STOCK INS ROLES',
+    categoryLabel: 'Stock & Suppliers',
     description: 'Receive incoming stock shipments, restock inventory items, and log purchase bills.',
   },
   {
     role: 'Can make/manage orders to suppliers',
     key: 'canManageSupplierOrders',
-    label: 'Can make/manage orders to suppliers',
+    label: 'Manage Supplier Orders',
     category: 'stockIns',
-    categoryLabel: 'STOCK INS ROLES',
+    categoryLabel: 'Stock & Suppliers',
     description: 'Issue purchase orders, track supplier restocking requests, and manage deliveries.',
   },
   {
     role: 'Can view and manage supplies',
     key: 'canViewManageSupplies',
-    label: 'Can view and manage supplies',
+    label: 'View & Manage Supplies',
     category: 'stockIns',
-    categoryLabel: 'STOCK INS ROLES',
+    categoryLabel: 'Stock & Suppliers',
     description: 'View supplier directory, vendor contact information, and supplier order histories.',
   },
   {
     role: 'Can add bad stock',
     key: 'canAddBadStock',
-    label: 'Can add bad stock',
+    label: 'Add Bad Stock',
     category: 'stockIns',
-    categoryLabel: 'STOCK INS ROLES',
+    categoryLabel: 'Stock & Suppliers',
     description: 'Write off expired, damaged, or defective goods and record inventory shrinkage.',
   },
   {
     role: 'Can add new products',
     key: 'canAddNewProducts',
-    label: 'Can add new products',
+    label: 'Add New Products',
     category: 'stockSetup',
-    categoryLabel: 'STOCK SETUP ROLES',
+    categoryLabel: 'Stock & Suppliers',
     description: 'Create new catalog products, input categories, cost prices, and selling prices.',
   },
   {
     role: 'Can creat offers',
     key: 'canCreateOffers',
-    label: 'Can creat offers',
+    label: 'Create Offers',
     category: 'stockSetup',
-    categoryLabel: 'STOCK SETUP ROLES',
+    categoryLabel: 'Expenses, Offers & Entries',
     description: 'Set up promotional deals, bundle packages, discounts, and flash sales.',
   },
   {
     role: 'Can view items out of stock',
     key: 'canViewOutOfStock',
-    label: 'Can view items out of stock',
+    label: 'View Out-of-Stock Items',
     category: 'stockSetup',
-    categoryLabel: 'STOCK SETUP ROLES',
+    categoryLabel: 'Stock & Suppliers',
     description: 'View low-stock alarms, out-of-stock items, and automated reorder reminders.',
   },
   {
     role: 'Can count and update stock balance',
     key: 'canCountUpdateStockBalance',
-    label: 'Can count and update stock balance',
+    label: 'Count & Update Stock Balance',
     category: 'stockSetup',
-    categoryLabel: 'STOCK SETUP ROLES',
+    categoryLabel: 'Stock & Suppliers',
     description: 'Perform physical stock-take counting and reconcile system balances with physical inventory.',
   },
   {
     role: 'Can add expenses',
     key: 'canAddExpenses',
-    label: 'Can add expenses',
+    label: 'Add Expenses',
     category: 'expenses',
-    categoryLabel: 'EXPENSES ROLES',
+    categoryLabel: 'Expenses, Offers & Entries',
     description: 'Record operating expenses, petty cash outflows, rent, utility bills, and transport costs.',
   },
   {
     role: 'can give discounts',
     key: 'canGiveDiscounts',
-    label: 'can give discounts',
+    label: 'Give Discounts',
     category: 'other',
-    categoryLabel: 'OTHER ROLES',
+    categoryLabel: 'Sales & Checkout',
     description: 'Apply percentage or fixed cash discounts during checkout without supervisor PIN authorization.',
   },
   {
     role: 'Can edit daily entries',
     key: 'canEditDailyEntries',
-    label: 'Can edit daily entries',
+    label: 'Edit Daily Entries',
     category: 'other',
-    categoryLabel: 'OTHER ROLES',
+    categoryLabel: 'Expenses, Offers & Entries',
     description: 'Modify logged sales, shift notes, payment methods, and cash records for today.',
   },
   {
     role: 'Can delete daily entries',
     key: 'canDeleteDailyEntries',
-    label: 'Can delete daily entries',
+    label: 'Delete Daily Entries',
     category: 'other',
-    categoryLabel: 'OTHER ROLES',
+    categoryLabel: 'Expenses, Offers & Entries',
     description: 'Void or delete today\'s recorded transactions, ledger entries, or sales invoices.',
   },
   {
     role: 'Can backdate entries',
     key: 'canBackdateEntries',
-    label: 'Can backdate entries',
+    label: 'Backdate Entries',
     category: 'other',
-    categoryLabel: 'OTHER ROLES',
+    categoryLabel: 'Sales & Checkout',
     description: 'Record sales, expenses, or stock adjustments with a date earlier than today.',
   },
   {
     role: 'Can return stocks',
     key: 'canReturnStocks',
-    label: 'Can return stocks',
+    label: 'Return Stocks',
     category: 'other',
-    categoryLabel: 'OTHER ROLES',
+    categoryLabel: 'Sales & Checkout',
     description: 'Process customer returns, issue refund payments, and restock returned items.',
   },
   {
     role: 'Can generate barcode',
     key: 'canGenerateBarcode',
-    label: 'Can generate barcode',
+    label: 'Generate Barcodes',
     category: 'other',
-    categoryLabel: 'OTHER ROLES',
+    categoryLabel: 'Stock & Suppliers',
     description: 'Auto-generate EAN/Code128 barcodes and batch print sticky product labels.',
   },
   {
     role: 'Can previer receipt',
     key: 'canPreviewReceipt',
-    label: 'Can previer receipt',
+    label: 'Preview Receipt',
     category: 'other',
-    categoryLabel: 'OTHER ROLES',
+    categoryLabel: 'Sales & Checkout',
     description: 'Preview, download, and reprint thermal 58mm/80mm or standard A4 invoice receipts.',
   },
 ];
+
+const ROLE_DISPLAY_LABEL_MAP: Record<string, string> = {
+  'Admin': 'Admin',
+  'Manager': 'Manager',
+  'Cashier': 'Cashier',
+  'Inventory Staff': 'Inventory Staff',
+  'Sales Role': 'Sales Role',
+  'Stock Ins Role': 'Stock Ins Role',
+  'Stock Setup Role': 'Stock Setup',
+  'Expenses Role': 'Expenses Role',
+  'Can make sales': 'Make Sales',
+  'Can make / manage customers orders': 'Manage Customer Orders',
+  'Can update sales order status': 'Update Order Status',
+  'Can view and manage customers': 'View & Manage Customers',
+  'Can enable sales commission': 'Enable Sales Commission',
+  'Can add stock in': 'Add Stock-In',
+  'Can make/manage orders to suppliers': 'Manage Supplier Orders',
+  'Can view and manage supplies': 'View & Manage Supplies',
+  'Can add bad stock': 'Add Bad Stock',
+  'Can add new products': 'Add New Products',
+  'Can creat offers': 'Create Offers',
+  'Can view items out of stock': 'View Out-of-Stock Items',
+  'Can count and update stock balance': 'Count & Update Stock Balance',
+  'Can add expenses': 'Add Expenses',
+  'can give discounts': 'Give Discounts',
+  'Can edit daily entries': 'Edit Daily Entries',
+  'Can delete daily entries': 'Delete Daily Entries',
+  'Can backdate entries': 'Backdate Entries',
+  'Can return stocks': 'Return Stocks',
+  'Can generate barcode': 'Generate Barcodes',
+  'Can previer receipt': 'Preview Receipt',
+};
+
+export function formatRoleDisplayLabel(role: string): string {
+  const raw = (role || '').trim();
+  if (!raw) return '';
+  if (ROLE_DISPLAY_LABEL_MAP[raw]) return ROLE_DISPLAY_LABEL_MAP[raw];
+  const lower = raw.toLowerCase();
+  const matchedEntry = Object.entries(ROLE_DISPLAY_LABEL_MAP).find(
+    ([k]) => k.toLowerCase() === lower
+  );
+  if (matchedEntry) return matchedEntry[1];
+  return raw
+    .split(/\s+/)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
+}
+
+export function isProtectedOwnerAccount(user?: User | null): boolean {
+  if (!user) return false;
+  return (
+    user.id === 'usr-1' ||
+    user.email?.toLowerCase() === 'admin@rofani.co.ke' ||
+    user.email?.toLowerCase() === 'nivajuma@gmail.com'
+  );
+}
 
 /**
  * 8 Core store classifications and department bundle roles
@@ -732,15 +788,15 @@ export function getUserRoles(user?: User | null): Role[] {
     });
   }
 
-  // 2. Primary role
-  if (user.role && typeof user.role === 'string' && user.role.trim()) {
+  // 2. Primary role (skip 'Custom' placeholder used when roles are cleared)
+  if (user.role && typeof user.role === 'string' && user.role.trim() && user.role !== 'Custom') {
     list.add(user.role as Role);
   }
 
   // 3. Backwards-compatible assignedRoles array
   if (Array.isArray(user.assignedRoles)) {
     user.assignedRoles.forEach((r) => {
-      if (r && typeof r === 'string' && r.trim()) {
+      if (r && typeof r === 'string' && r.trim() && r !== 'Custom') {
         list.add(r as Role);
       }
     });
@@ -756,7 +812,11 @@ export function getUserRoles(user?: User | null): Role[] {
   }
 
   const result = Array.from(list);
-  return result.length > 0 ? result : [user.role || 'Cashier'];
+  if (result.length > 0) return result;
+  if (user.role === 'Custom' && Array.isArray(user.roles) && user.roles.length === 0) {
+    return [];
+  }
+  return [user.role || 'Cashier'];
 }
 
 /**
@@ -889,7 +949,7 @@ export function getCombinedPermissionsForRoles(roles: Role[]): WorkerPermissions
   if (roles.some((r) => r?.toString().toLowerCase() === 'admin')) {
     return { ...DEFAULT_ROLE_WORKER_PERMISSIONS['Admin'] };
   }
-  const combined = { ...DEFAULT_ROLE_WORKER_PERMISSIONS['Cashier'] };
+  const combined: WorkerPermissions = { ...DEFAULT_EMPTY_PERMISSIONS };
 
   roles.forEach((r) => {
     // 1. Check if it's one of the bundle roles
@@ -905,7 +965,8 @@ export function getCombinedPermissionsForRoles(roles: Role[]): WorkerPermissions
     const granular = ALL_21_GRANULAR_ROLES.find(
       (g) =>
         g.role.toLowerCase() === r.toString().toLowerCase() ||
-        g.key.toLowerCase() === r.toString().toLowerCase()
+        g.key.toLowerCase() === r.toString().toLowerCase() ||
+        g.label.toLowerCase() === r.toString().toLowerCase()
     );
     if (granular) {
       combined[granular.key] = true;
@@ -915,9 +976,8 @@ export function getCombinedPermissionsForRoles(roles: Role[]): WorkerPermissions
   return combined;
 }
 
-
 /**
- * Assign all 21 granular roles to a worker (full master operational access)
+ * Assign all roles and granular permissions to a worker
  */
 export function assignAll21RolesToWorker(worker: User): User {
   const all21RoleNames = ALL_21_GRANULAR_ROLES.map((r) => r.role);

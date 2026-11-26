@@ -180,12 +180,138 @@ export interface Customer {
   contactsList?: CustomerContactItem[]; // Associated contacts, alternative numbers, or branch contacts
   totalPurchases: number;
   currentBalanceDue: number; // For credit / partial payments
+  depositBalance?: number; // Advance customer deposit / store credit wallet balance
   debtBalance?: number;
   kraPin?: string; // Tax PIN / KRA PIN for invoice
   creditLimit?: number; // Maximum allowed credit balance
   customerType?: 'Individual' | 'Wholesaler' | 'Corporate' | 'VIP';
   notes?: string;
   createdAt?: string;
+  updatedAt?: string;
+}
+
+export type CustomerDepositEntryType =
+  | 'deposit'
+  | 'partial_payment'
+  | 'deposit_applied'
+  | 'refund_credit';
+
+export interface CustomerDepositRecord {
+  id: string;
+  receiptRef: string; // e.g. "DEP-20261126-401" or "PAY-20261126-102"
+  type: CustomerDepositEntryType;
+  customerId: string;
+  customerName: string;
+  customerPhone?: string;
+  amount: number;
+  paymentMethod: PaymentMethod | 'store_credit';
+  referenceNo?: string;
+  linkedTransactionId?: string;
+  linkedReceiptNumber?: string;
+  balanceAfterDebt?: number;
+  depositBalanceAfter?: number;
+  notes?: string;
+  recordedBy: string;
+  date: string; // ISO string
+  updatedAt?: string;
+}
+
+export type ComplaintStatus = 'Open' | 'In Review' | 'Resolved' | 'Escalated';
+export type ComplaintPriority = 'Low' | 'Medium' | 'High' | 'Urgent';
+export type ComplaintCategory =
+  | 'Product Quality / Defect'
+  | 'Wrong / Missing Item'
+  | 'Pricing / Billing'
+  | 'Delivery / Service'
+  | 'Warranty / Return'
+  | 'Other';
+
+export interface CustomerComplaint {
+  id: string;
+  complaintNumber: string; // e.g. "CMP-2026-0041"
+  customerId: string;
+  customerName: string;
+  customerPhone?: string;
+  linkedTransactionId?: string;
+  linkedReceiptNumber?: string;
+  productId?: string;
+  productName?: string;
+  category: ComplaintCategory;
+  priority: ComplaintPriority;
+  status: ComplaintStatus;
+  subject: string;
+  description: string;
+  resolutionNotes?: string;
+  resolvedAt?: string;
+  resolvedBy?: string;
+  assignedTo?: string;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type ReturnRestockCondition = 'resellable' | 'damaged';
+export type ReturnRefundMode =
+  | 'cash'
+  | 'mpesa'
+  | 'store_deposit'
+  | 'debt_offset'
+  | 'partial_cash_and_credit';
+
+export interface CustomerReturnItem {
+  productId: string;
+  productName: string;
+  sku?: string;
+  unit?: string;
+  quantitySold: number;
+  quantityReturned: number;
+  unitPrice: number;
+  refundSubtotal: number;
+  restockCondition: ReturnRestockCondition;
+  addedBackToStock: boolean;
+  stockBeforeReturn?: number;
+  stockAfterReturn?: number;
+}
+
+export interface CustomerReturnRecord {
+  id: string;
+  returnNumber: string; // e.g. "RET-20261126-014"
+  creditNoteNumber: string; // e.g. "CN-20261126-014"
+  originalTransactionId: string;
+  originalReceiptNumber: string;
+  originalCuin?: string;
+  isEtimsCreditNote?: boolean;
+  creditNoteCuin?: string;
+  customerId: string;
+  customerName: string;
+  customerPhone?: string;
+  customerKraPin?: string;
+  items: CustomerReturnItem[];
+  totalRefundAmount: number;
+  refundMode: ReturnRefundMode;
+  cashRefundAmount: number; // Cash or M-Pesa paid out
+  cashRefundChannel?: 'cash' | 'mpesa';
+  cashRefundRef?: string;
+  creditIssuedAmount: number; // Added to customer deposit wallet
+  debtReducedAmount: number; // Offset against customer credit balance
+  restockedTotalUnits: number;
+  damagedTotalUnits: number;
+  reason: string;
+  notes?: string;
+  processedBy: string;
+  date: string; // ISO string
+  updatedAt?: string;
+}
+
+export interface EtimsComplianceConfig {
+  taxpayerPin: string;
+  branchId: string; // KRA eTIMS bhfId e.g. "00"
+  scuId: string; // Control Unit Serial Number e.g. "KRACU0300001234"
+  vscuEndpointUrl: string; // Optional accredited VSCU/OSCU middleware URL
+  environment: 'sandbox' | 'production';
+  integrationMode: 'etims_ready_local' | 'vscu_connected';
+  autoIssueEtimsOnVat: boolean;
+  defaultTaxClassification: KraTaxClassification;
   updatedAt?: string;
 }
 
@@ -298,6 +424,11 @@ export interface Transaction {
     exemptTotal: number;
     totTotal: number;
   };
+  returnedAmount?: number;
+  returnStatus?: 'None' | 'Partial Return' | 'Full Return';
+  depositAppliedAmount?: number;
+  creditNoteRef?: string;
+  etimsComplianceMode?: 'etims_ready' | 'vscu_certified';
   editedAt?: string;
   updatedAt?: string;
 }
@@ -469,6 +600,7 @@ export type CashInCategory =
   | 'Owner Capital / Equity'
   | 'Bank Withdrawal to Vault'
   | 'Customer Debt Payment'
+  | 'Customer Deposit'
   | 'Asset Sale'
   | 'Refund Received'
   | 'Other Cash In';
@@ -480,6 +612,7 @@ export type CashOutCategory =
   | 'Mobile Loan Repayment'
   | 'Bank Deposit (Vault to Bank)'
   | 'Supplier Cash Payment'
+  | 'Customer Return Refund'
   | 'Petty Cash Payout'
   | 'Owner Drawings / Dividends'
   | 'Tax & County License Payment'
@@ -649,7 +782,8 @@ export type SensitiveActionType =
   | 'RESET_SYSTEM_DATA'
   | 'DELETE_CUSTOMER'
   | 'DELETE_SUPPLIER'
-  | 'OVERRIDE_DISCOUNT';
+  | 'OVERRIDE_DISCOUNT'
+  | 'CUSTOMER_RETURN';
 
 export type SensitiveActionCategory = 'expenses' | 'inventory' | 'stock' | 'sales' | 'security' | 'contacts';
 

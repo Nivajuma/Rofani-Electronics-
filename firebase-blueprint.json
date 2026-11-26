@@ -147,9 +147,66 @@
         "name": { "type": "string", "maxLength": 200 },
         "phone": { "type": "string", "maxLength": 64 },
         "currentBalanceDue": { "type": "number" },
+        "depositBalance": { "type": "number" },
         "updatedAt": { "type": "string", "maxLength": 64 }
       },
       "required": ["id", "name"]
+    },
+    "CustomerDeposit": {
+      "title": "CustomerDeposit",
+      "description": "Customer advance deposit, partial payment settlement, or store credit application",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "receiptRef": { "type": "string", "maxLength": 128 },
+        "type": { "type": "string", "enum": ["deposit", "partial_payment", "deposit_applied", "refund_credit"] },
+        "customerId": { "type": "string", "maxLength": 128 },
+        "customerName": { "type": "string", "maxLength": 200 },
+        "amount": { "type": "number" },
+        "paymentMethod": { "type": "string", "maxLength": 64 },
+        "date": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "customerId", "amount", "type"]
+    },
+    "CustomerComplaint": {
+      "title": "CustomerComplaint",
+      "description": "Customer service, product defect, or billing complaint tracker",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "complaintNumber": { "type": "string", "maxLength": 64 },
+        "customerId": { "type": "string", "maxLength": 128 },
+        "customerName": { "type": "string", "maxLength": 200 },
+        "category": { "type": "string", "maxLength": 128 },
+        "priority": { "type": "string", "enum": ["Low", "Medium", "High", "Urgent"] },
+        "status": { "type": "string", "enum": ["Open", "In Review", "Resolved", "Escalated"] },
+        "subject": { "type": "string", "maxLength": 200 },
+        "description": { "type": "string", "maxLength": 2000 },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "customerId", "subject", "status"]
+    },
+    "CustomerReturn": {
+      "title": "CustomerReturn",
+      "description": "Customer partial or full goods return, credit note, refund settlement, and stock restoration audit",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "returnNumber": { "type": "string", "maxLength": 64 },
+        "creditNoteNumber": { "type": "string", "maxLength": 64 },
+        "originalTransactionId": { "type": "string", "maxLength": 128 },
+        "customerId": { "type": "string", "maxLength": 128 },
+        "customerName": { "type": "string", "maxLength": 200 },
+        "totalRefundAmount": { "type": "number" },
+        "refundMode": { "type": "string", "maxLength": 64 },
+        "restockedTotalUnits": { "type": "number" },
+        "damagedTotalUnits": { "type": "number" },
+        "date": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "originalTransactionId", "customerId", "totalRefundAmount"]
     },
     "Supplier": {
       "title": "Supplier",
@@ -309,6 +366,18 @@
     "/stores/{storeId}/customers/{customerId}": {
       "schema": { "$ref": "#/entities/Customer" },
       "description": "Tenant-isolated customer profiles"
+    },
+    "/stores/{storeId}/customer_deposits/{depositId}": {
+      "schema": { "$ref": "#/entities/CustomerDeposit" },
+      "description": "Tenant-isolated customer advance deposits and partial invoice payment ledgers"
+    },
+    "/stores/{storeId}/customer_complaints/{complaintId}": {
+      "schema": { "$ref": "#/entities/CustomerComplaint" },
+      "description": "Tenant-isolated customer complaints and resolution logs"
+    },
+    "/stores/{storeId}/customer_returns/{returnId}": {
+      "schema": { "$ref": "#/entities/CustomerReturn" },
+      "description": "Tenant-isolated customer goods returns, credit notes, and stock restoration records"
     },
     "/stores/{storeId}/suppliers/{supplierId}": {
       "schema": { "$ref": "#/entities/Supplier" },

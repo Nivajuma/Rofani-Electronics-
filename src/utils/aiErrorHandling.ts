@@ -64,7 +64,7 @@ export async function parseAiHttpResponse<T = any>(
   const errorMessage =
     candidateErrText.trim() ||
     (response.status === 503
-      ? 'AI service is temporarily unavailable or not configured. Check Settings > Secrets or enter details manually.'
+      ? 'AI service is temporarily unavailable or GEMINI_API_KEY is not configured. Check Vercel Environment Variables / AI Studio Secrets.'
       : fallbackMessage);
 
   return {

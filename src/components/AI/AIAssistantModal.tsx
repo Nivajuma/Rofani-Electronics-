@@ -295,7 +295,7 @@ export const AIAssistantModal: React.FC<AIAssistantModalProps> = ({
 
   const fetchAssistantReply = async (payloadBody: string) => {
     const controller = new AbortController();
-    const timeoutId = window.setTimeout(() => controller.abort(), 16000);
+    const timeoutId = window.setTimeout(() => controller.abort(), 28000);
     try {
       const response = await fetch('/api/ai/assistant', {
         method: 'POST',
@@ -385,7 +385,7 @@ export const AIAssistantModal: React.FC<AIAssistantModalProps> = ({
         setCooldownSeconds(5);
       }
       console.warn('AI Assistant request could not complete:', errMsgText || err);
-      const isTimeout = err?.name === 'AbortError';
+      const isTimeout = err?.name === 'AbortError' || /timeout|timed out|aborted/i.test(errMsgText);
       setMessages((prev) => [
         ...prev,
         {

@@ -38,6 +38,10 @@ import {
   SubscriptionPaymentRecord,
   ReferralCodeLookup,
   ReferralRewardClaim,
+  CustomerDepositRecord,
+  CustomerComplaint,
+  CustomerReturnRecord,
+  EtimsComplianceConfig,
 } from '../types';
 
 const DEFAULT_FIRESTORE_WRITE_TIMEOUT_MS = 18000;
@@ -3111,3 +3115,186 @@ export async function syncCrossBranchStaffAssignment(params: {
 
   return updatedUser;
 }
+
+// ---------------- CUSTOMER DEPOSITS & PARTIAL PAYMENTS LIVE SYNC ----------------
+
+export function subscribeToCustomerDeposits(
+  onUpdate: (records: CustomerDepositRecord[]) => void,
+  onError?: (err: any) => void,
+  storeId?: string
+) {
+  const sid = resolveCloudStoreId(storeId);
+  const path = getScopedCollectionPath('customer_deposits', sid);
+  const colRef = getScopedCollectionRef('customer_deposits', sid);
+  return onSnapshot(
+    colRef,
+    (snapshot) => {
+      const loaded: CustomerDepositRecord[] = [];
+      snapshot.forEach((d) => {
+        loaded.push({ id: d.id, ...d.data() } as CustomerDepositRecord);
+      });
+      loaded.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      onUpdate(loaded);
+    },
+    (error) => {
+      handleFirestoreError(error, OperationType.LIST, path);
+      if (onError) onError(error);
+    }
+  );
+}
+
+export async function saveCustomerDepositToCloud(
+  record: CustomerDepositRecord,
+  storeId?: string
+): Promise<void> {
+  const sid = resolveCloudStoreId(storeId);
+  const path = `${getScopedCollectionPath('customer_deposits', sid)}/${record.id}`;
+  try {
+    const docRef = getScopedDocRef('customer_deposits', record.id, sid);
+    const cleaned = cleanForFirestore({
+      ...record,
+      updatedAt: record.updatedAt || new Date().toISOString(),
+    });
+    await withFirestoreTimeout(
+      setDoc(docRef, cleaned, { merge: true }),
+      `saving customer deposit ${record.receiptRef || record.id}`
+    );
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+    throw error;
+  }
+}
+
+// ---------------- CUSTOMER COMPLAINTS LIVE SYNC ----------------
+
+export function subscribeToCustomerComplaints(
+  onUpdate: (complaints: CustomerComplaint[]) => void,
+  onError?: (err: any) => void,
+  storeId?: string
+) {
+  const sid = resolveCloudStoreId(storeId);
+  const path = getScopedCollectionPath('customer_complaints', sid);
+  const colRef = getScopedCollectionRef('customer_complaints', sid);
+  return onSnapshot(
+    colRef,
+    (snapshot) => {
+      const loaded: CustomerComplaint[] = [];
+      snapshot.forEach((d) => {
+        loaded.push({ id: d.id, ...d.data() } as CustomerComplaint);
+      });
+      loaded.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      onUpdate(loaded);
+    },
+    (error) => {
+      handleFirestoreError(error, OperationType.LIST, path);
+      if (onError) onError(error);
+    }
+  );
+}
+
+export async function saveCustomerComplaintToCloud(
+  complaint: CustomerComplaint,
+  storeId?: string
+): Promise<void> {
+  const sid = resolveCloudStoreId(storeId);
+  const path = `${getScopedCollectionPath('customer_complaints', sid)}/${complaint.id}`;
+  try {
+    const docRef = getScopedDocRef('customer_complaints', complaint.id, sid);
+    const cleaned = cleanForFirestore({
+      ...complaint,
+      updatedAt: complaint.updatedAt || new Date().toISOString(),
+    });
+    await withFirestoreTimeout(
+      setDoc(docRef, cleaned, { merge: true }),
+      `saving customer complaint ${complaint.complaintNumber || complaint.id}`
+    );
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+    throw error;
+  }
+}
+
+// ---------------- CUSTOMER GOODS RETURNS & RESTOCK LIVE SYNC ----------------
+
+export function subscribeToCustomerReturns(
+  onUpdate: (returns: CustomerReturnRecord[]) => void,
+  onError?: (err: any) => void,
+  storeId?: string
+) {
+  const sid = resolveCloudStoreId(storeId);
+  const path = getScopedCollectionPath('customer_returns', sid);
+  const colRef = getScopedCollectionRef('customer_returns', sid);
+  return onSnapshot(
+    colRef,
+    (snapshot) => {
+      const loaded: CustomerReturnRecord[] = [];
+      snapshot.forEach((d) => {
+        loaded.push({ id: d.id, ...d.data() } as CustomerReturnRecord);
+      });
+      loaded.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      onUpdate(loaded);
+    },
+    (error) => {
+      handleFirestoreError(error, OperationType.LIST, path);
+      if (onError) onError(error);
+    }
+  );
+}
+
+export async function saveCustomerReturnToCloud(
+  ret: CustomerReturnRecord,
+  storeId?: string
+): Promise<void> {
+  const sid = resolveCloudStoreId(storeId);
+  const path = `${getScopedCollectionPath('customer_returns', sid)}/${ret.id}`;
+  try {
+    const docRef = getScopedDocRef('customer_returns', ret.id, sid);
+    const cleaned = cleanForFirestore({
+      ...ret,
+      updatedAt: ret.updatedAt || new Date().toISOString(),
+    });
+    await withFirestoreTimeout(
+      setDoc(docRef, cleaned, { merge: true }),
+      `saving customer return ${ret.returnNumber || ret.id}`
+    );
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+    throw error;
+  }
+}
+
+// ---------------- KRA ETIMS VSCU CONFIGURATION SYNC ----------------
+
+export async function saveEtimsConfigToCloud(
+  config: EtimsComplianceConfig,
+  storeId?: string
+): Promise<void> {
+  const sid = resolveCloudStoreId(storeId);
+  const path = `${getScopedCollectionPath('store_settings', sid)}/etims_config`;
+  try {
+    const docRef = getScopedDocRef('store_settings', 'etims_config', sid);
+    await withFirestoreTimeout(
+      setDoc(docRef, cleanForFirestore({ ...config, updatedAt: new Date().toISOString() }), { merge: true }),
+      'saving KRA eTIMS configuration'
+    );
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+    throw error;
+  }
+}
+
+export async function fetchEtimsConfigFromCloud(
+  storeId?: string
+): Promise<EtimsComplianceConfig | null> {
+  const sid = resolveCloudStoreId(storeId);
+  const path = `${getScopedCollectionPath('store_settings', sid)}/etims_config`;
+  try {
+    const docRef = getScopedDocRef('store_settings', 'etims_config', sid);
+    const snap = await withFirestoreTimeout(getDoc(docRef), 'fetching KRA eTIMS configuration');
+    return snap.exists() ? (snap.data() as EtimsComplianceConfig) : null;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.GET, path);
+    return null;
+  }
+}
+

@@ -46,6 +46,16 @@ import { GeneralSettingsView } from './GeneralSettingsView';
 import { PrintAndTaxSettingsView } from './PrintAndTaxSettingsView';
 import { TransactionSettingsView } from './TransactionSettingsView';
 import { ShopControlsSettingsView } from './ShopControlsSettingsView';
+import { AssignedRolesPermissionsSection } from '../Auth/AssignedRolesPermissionsSection';
+import {
+  DEFAULT_EMPTY_PERMISSIONS,
+  DEFAULT_ROLE_WORKER_PERMISSIONS,
+  formatRoleDisplayLabel,
+  getCombinedPermissionsForRoles,
+  getUserRoles,
+  getWorkerPermissions,
+  isProtectedOwnerAccount,
+} from '../../utils/permissions';
 
 interface SettingsDashboardViewProps {
   products: Product[];
@@ -410,9 +420,12 @@ export const SettingsDashboardView: React.FC<SettingsDashboardViewProps> = ({
   const [workerName, setWorkerName] = useState('');
   const [workerPhone, setWorkerPhone] = useState('');
   const [workerRole, setWorkerRole] = useState<Role>('Cashier');
+  const [workerRoles, setWorkerRoles] = useState<Role[]>(['Cashier']);
   const [workerCommission, setWorkerCommission] = useState<number>(3);
   const [workerPin, setWorkerPin] = useState('1234');
-  const [workerPermissions, setWorkerPermissions] = useState<string[]>([]);
+  const [workerPermsObj, setWorkerPermsObj] = useState<WorkerPermissions>({
+    ...DEFAULT_ROLE_WORKER_PERMISSIONS.Cashier,
+  });
 
   const generateRandomPin = () => {
     const randomPin = Math.floor(1000 + Math.random() * 9000).toString();
@@ -425,9 +438,10 @@ export const SettingsDashboardView: React.FC<SettingsDashboardViewProps> = ({
     setWorkerName('');
     setWorkerPhone('');
     setWorkerRole('Cashier');
+    setWorkerRoles(['Cashier']);
     setWorkerCommission(3);
     setWorkerPin(Math.floor(1000 + Math.random() * 9000).toString());
-    setWorkerPermissions(['Can make sales', 'Can give discounts & price overrides', 'Can preview receipt', 'Can view and manage customers']);
+    setWorkerPermsObj({ ...DEFAULT_ROLE_WORKER_PERMISSIONS.Cashier });
     setWorkerModalOpen(true);
   };
 
@@ -436,27 +450,53 @@ export const SettingsDashboardView: React.FC<SettingsDashboardViewProps> = ({
     setWorkerName(u.name);
     setWorkerPhone(u.phone || '');
     setWorkerRole(u.role || 'Cashier');
+    setWorkerRoles(getUserRoles(u));
     setWorkerCommission(u.commissionRate ?? 3);
     setWorkerPin(u.pin || '1234');
-    setWorkerPermissions(getWorkerPermissionStrings(u));
+    setWorkerPermsObj(getWorkerPermissions(u));
     setWorkerModalOpen(true);
   };
 
-  const handleTogglePermission = (perm: string) => {
-    setWorkerPermissions(prev => {
-      const currentList = Array.isArray(prev) ? prev : [];
-      return currentList.includes(perm) ? currentList.filter(p => p !== perm) : [...currentList, perm];
+  const handleInlineUserRolesChange = async (
+    targetUser: User,
+    next: { roles: Role[]; permissions: WorkerPermissions; primaryRole: Role }
+  ) => {
+    const isOwner = isProtectedOwnerAccount(targetUser);
+    const cleanRoles = next.roles.filter((r) => r !== 'Custom');
+    const finalRoles =
+      isOwner && !cleanRoles.includes('Admin')
+        ? (['Admin', ...cleanRoles] as Role[])
+        : cleanRoles;
+    const finalPrimary: Role = finalRoles.includes('Admin')
+      ? 'Admin'
+      : next.primaryRole || (finalRoles.length > 0 ? finalRoles[0] : 'Custom');
+
+    const updatedUser: User = {
+      ...targetUser,
+      role: finalPrimary,
+      roles: finalRoles,
+      assignedRoles: finalRoles,
+      permissions: isOwner
+        ? { ...DEFAULT_ROLE_WORKER_PERMISSIONS.Admin }
+        : { ...DEFAULT_EMPTY_PERMISSIONS, ...next.permissions },
+    };
+
+    setLocalStaffUsers((prev) => {
+      const nextList = prev.map((u) => (u.id === updatedUser.id ? updatedUser : u));
+      safeSetJSON('pos_store_staff_users', nextList);
+      safeSetJSON('retail_pos_users', nextList);
+      return nextList;
     });
-  };
 
-  const handleAssignAllRoles = () => {
-    setWorkerPermissions([...ALL_AVAILABLE_PERMISSIONS]);
-    triggerNotify('✨ All granular roles & permissions assigned!');
-  };
+    if (onUpdateUser) {
+      onUpdateUser(updatedUser);
+    }
 
-  const handleClearAllRoles = () => {
-    setWorkerPermissions([]);
-    triggerNotify('🧹 All permissions cleared.');
+    try {
+      await saveUserToCloud(updatedUser);
+    } catch (err) {
+      console.warn('Direct cloud save notification:', err);
+    }
   };
 
   const handleSaveWorker = async (e: React.FormEvent) => {
@@ -466,35 +506,38 @@ export const SettingsDashboardView: React.FC<SettingsDashboardViewProps> = ({
 
     const trimmedPhone = workerPhone.trim();
     const trimmedPin = workerPin.trim() || '1234';
-    const chosenRole = (workerRole || 'Cashier') as Role;
-    const sanitizedPerms = Array.isArray(workerPermissions) ? workerPermissions : [];
+    const existing = editingWorkerId
+      ? localStaffUsers.find((u) => u.id === editingWorkerId)
+      : undefined;
+    const isOwner = isProtectedOwnerAccount(existing);
 
-    // Build permissions object with boolean keys for maximum compatibility
-    const permissionsObj: Record<string, boolean> = {};
-    sanitizedPerms.forEach((permLabel) => {
-      const key = PERMISSION_LABEL_TO_KEY[permLabel];
-      if (key) {
-        permissionsObj[key] = true;
-      }
-      permissionsObj[permLabel] = true;
-    });
-
-    // Combined roles list
-    const combinedRoles: Role[] = Array.from(new Set([chosenRole, ...(sanitizedPerms as any)]));
+    const cleanRoles = workerRoles.filter((r) => r !== 'Custom');
+    const finalRoles =
+      isOwner && !cleanRoles.includes('Admin')
+        ? (['Admin', ...cleanRoles] as Role[])
+        : cleanRoles;
+    const chosenRole: Role = finalRoles.includes('Admin')
+      ? 'Admin'
+      : finalRoles.length > 0
+      ? finalRoles[0]
+      : workerRole || 'Custom';
+    const combinedPerms = getCombinedPermissionsForRoles(finalRoles);
+    const finalPermissions: WorkerPermissions = isOwner
+      ? { ...DEFAULT_ROLE_WORKER_PERMISSIONS.Admin }
+      : { ...DEFAULT_EMPTY_PERMISSIONS, ...combinedPerms, ...workerPermsObj };
 
     if (editingWorkerId) {
-      const existing = localStaffUsers.find((u) => u.id === editingWorkerId);
       const updatedUser: User = {
         ...(existing || {}),
         id: editingWorkerId,
         name: trimmedName,
         phone: trimmedPhone || undefined,
         role: chosenRole,
-        roles: combinedRoles,
-        assignedRoles: combinedRoles as string[],
+        roles: finalRoles,
+        assignedRoles: finalRoles as string[],
         commissionRate: workerCommission,
         pin: trimmedPin,
-        permissions: permissionsObj as Partial<WorkerPermissions>,
+        permissions: finalPermissions,
         status: existing?.status || 'active',
         email: existing?.email || `${trimmedName.toLowerCase().replace(/[^a-z0-9]/g, '.')}@rofani.co.ke`,
         hireDate: existing?.hireDate || new Date().toISOString().slice(0, 10),
@@ -528,12 +571,12 @@ export const SettingsDashboardView: React.FC<SettingsDashboardViewProps> = ({
         name: trimmedName,
         phone: trimmedPhone || undefined,
         role: chosenRole,
-        roles: combinedRoles,
-        assignedRoles: combinedRoles as string[],
+        roles: finalRoles,
+        assignedRoles: finalRoles as string[],
         commissionRate: workerCommission,
         pin: trimmedPin,
         status: 'active',
-        permissions: permissionsObj as Partial<WorkerPermissions>,
+        permissions: finalPermissions,
         email: `${trimmedName.toLowerCase().replace(/[^a-z0-9]/g, '.')}@rofani.co.ke`,
         hireDate: new Date().toISOString().slice(0, 10),
       };
@@ -1350,10 +1393,10 @@ export const SettingsDashboardView: React.FC<SettingsDashboardViewProps> = ({
 
               {activeSubPanel === 'users' && (
                 <div className="space-y-4">
-                  <div className="flex items-center justify-between bg-slate-950/80 border border-slate-800 p-3.5 rounded-2xl">
+                  <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-950/80 border border-slate-800 p-3.5 rounded-2xl">
                     <div>
                       <div className="font-bold text-slate-100 text-sm">Staff & Cashier Directory ({localStaffUsers.length})</div>
-                      <p className="text-[11px] text-slate-400">Manage worker profiles, login PINs, commission rates & granular roles.</p>
+                      <p className="text-[11px] text-slate-400">Manage worker profiles, login PINs, active roles & categorized permissions.</p>
                     </div>
                     <button
                       type="button"
@@ -1364,20 +1407,19 @@ export const SettingsDashboardView: React.FC<SettingsDashboardViewProps> = ({
                     </button>
                   </div>
 
-                  <div className="space-y-2.5 max-h-72 overflow-y-auto pr-1">
+                  <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-1">
                     {localStaffUsers.length === 0 ? (
                       <div className="p-8 text-center text-slate-400 text-xs">No workers configured yet. Click "+ Add New Worker" to create one.</div>
                     ) : (
                       localStaffUsers.map((u) => {
                         const currentActiveUser = safeGetJSON<any>('pos_active_cashier', safeGetJSON<any>('pos_current_session', safeGetJSON<any>('retail_pos_active_user', null)));
                         const isOnlineActive = currentActiveUser && (currentActiveUser.id === u.id || currentActiveUser.name?.toLowerCase() === u.name?.toLowerCase());
-                        const activePerms = getWorkerPermissionStrings(u);
-                        const displayedPerms = activePerms.slice(0, 5);
-                        const extraCount = activePerms.length - displayedPerms.length;
+                        const userRoles = getUserRoles(u);
+                        const userPermissions = getWorkerPermissions(u);
 
                         return (
-                        <div key={u.id} className="p-3.5 bg-slate-950 border border-slate-800 rounded-2xl space-y-2 hover:border-slate-700 transition">
-                          <div className="flex items-center justify-between gap-3">
+                        <div key={u.id} className="p-3.5 bg-slate-950 border border-slate-800 rounded-2xl space-y-3 hover:border-slate-700 transition">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                             <div>
                               <div className="flex items-center gap-2 flex-wrap">
                                 <span className="font-bold text-slate-100 text-sm">{u.name}</span>
@@ -1386,7 +1428,7 @@ export const SettingsDashboardView: React.FC<SettingsDashboardViewProps> = ({
                                   u.role === 'Manager' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40' :
                                   'bg-sky-500/20 text-sky-300 border border-sky-500/40'
                                 }`}>
-                                  {u.role || 'Cashier'}
+                                  {formatRoleDisplayLabel(u.role || 'Cashier')}
                                 </span>
 
                                 {/* Live Presence Badge */}
@@ -1430,21 +1472,19 @@ export const SettingsDashboardView: React.FC<SettingsDashboardViewProps> = ({
                             </div>
                           </div>
 
-                          {/* Active Permission Badges */}
-                          {activePerms.length > 0 && (
-                            <div className="flex flex-wrap gap-1 pt-2 border-t border-slate-800">
-                              {displayedPerms.map((pStr, pIdx) => (
-                                <span key={pIdx} className="text-[9px] bg-blue-950/80 text-blue-300 border border-blue-500/30 px-2 py-0.5 rounded-md font-medium">
-                                  {pStr}
-                                </span>
-                              ))}
-                              {extraCount > 0 && (
-                                <span className="text-[9px] bg-slate-800 text-slate-400 border border-slate-700 px-2 py-0.5 rounded-md font-semibold">
-                                  +{extraCount} more
-                                </span>
-                              )}
-                            </div>
-                          )}
+                          {/* Redesigned Assigned Roles & Categorized Permissions */}
+                          <div className="pt-2 border-t border-slate-800/80">
+                            <AssignedRolesPermissionsSection
+                              compact
+                              roles={userRoles}
+                              permissions={userPermissions}
+                              primaryRole={u.role || 'Cashier'}
+                              isOwnerProtected={isProtectedOwnerAccount(u)}
+                              canAssignAdmin
+                              onChange={(next) => handleInlineUserRolesChange(u, next)}
+                              onNotify={(msg) => triggerNotify(msg)}
+                            />
+                          </div>
                         </div>
                       );
                     })
@@ -1621,8 +1661,12 @@ export const SettingsDashboardView: React.FC<SettingsDashboardViewProps> = ({
                     onChange={(e) => {
                       const newRole = e.target.value as Role;
                       setWorkerRole(newRole);
-                      if (newRole === 'Admin') {
-                        setWorkerPermissions([...ALL_AVAILABLE_PERMISSIONS]);
+                      if (newRole === 'Custom') {
+                        setWorkerRoles([]);
+                        setWorkerPermsObj({ ...DEFAULT_EMPTY_PERMISSIONS });
+                      } else {
+                        setWorkerRoles([newRole]);
+                        setWorkerPermsObj({ ...DEFAULT_ROLE_WORKER_PERMISSIONS[newRole] });
                       }
                     }}
                     className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2.5 text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium"
@@ -1631,6 +1675,11 @@ export const SettingsDashboardView: React.FC<SettingsDashboardViewProps> = ({
                     <option value="Manager">Manager</option>
                     <option value="Cashier">Cashier</option>
                     <option value="Inventory Staff">Inventory Staff</option>
+                    <option value="Sales Role">Sales Role</option>
+                    <option value="Stock Ins Role">Stock Ins Role</option>
+                    <option value="Stock Setup Role">Stock Setup Role</option>
+                    <option value="Expenses Role">Expenses Role</option>
+                    <option value="Custom">Custom Permissions</option>
                   </select>
                 </div>
 
@@ -1670,66 +1719,23 @@ export const SettingsDashboardView: React.FC<SettingsDashboardViewProps> = ({
                 </div>
               </div>
 
-              {/* Categorized Permission Chips & Checkboxes Grid */}
-              <div className="space-y-3 pt-2 border-t border-slate-800">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <label className="font-bold text-slate-200 text-sm">Granular Permission Chips & Capabilities</label>
-                    <p className="text-[11px] text-slate-400">Select specific operations categorized by functional area.</p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={handleAssignAllRoles}
-                      className="px-3 py-1.5 bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 border border-blue-500/40 rounded-xl text-xs font-bold flex items-center gap-1 transition cursor-pointer"
-                    >
-                      <Sparkles className="w-3.5 h-3.5 text-blue-400" />
-                      <span>✨ Assign All Roles</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleClearAllRoles}
-                      className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold flex items-center gap-1 transition cursor-pointer"
-                    >
-                      <Trash2 className="w-3.5 h-3.5 text-slate-400" />
-                      <span>Clear All</span>
-                    </button>
-                  </div>
-                </div>
-
-                <div className="space-y-4 max-h-64 overflow-y-auto pr-1 bg-slate-950 border border-slate-800 rounded-2xl p-3.5">
-                  {PERMISSION_CATEGORIES.map((catGroup, cIdx) => (
-                    <div key={cIdx} className="space-y-2">
-                      <div className="text-xs font-extrabold text-blue-400 tracking-wider uppercase border-b border-slate-800 pb-1">
-                        {catGroup.category}
-                      </div>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                        {catGroup.permissions.map((perm) => {
-                          const isChecked = hasPermission(workerPermissions, perm);
-                          return (
-                            <label
-                              key={perm}
-                              onClick={() => handleTogglePermission(perm)}
-                              className={`flex items-center gap-2.5 p-2.5 rounded-xl border transition cursor-pointer select-none ${
-                                isChecked
-                                  ? 'bg-blue-950/50 border-blue-600/60 text-blue-200 font-bold shadow-xs'
-                                  : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700'
-                              }`}
-                            >
-                              <input
-                                type="checkbox"
-                                checked={isChecked}
-                                onChange={() => {}}
-                                className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 bg-slate-950 border-slate-700 shrink-0"
-                              />
-                              <span className="text-xs leading-snug">{perm}</span>
-                            </label>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  ))}
-                </div>
+              {/* Redesigned Assigned Roles & Categorized Permissions */}
+              <div className="pt-2 border-t border-slate-800">
+                <AssignedRolesPermissionsSection
+                  roles={workerRoles}
+                  permissions={workerPermsObj}
+                  primaryRole={workerRole}
+                  isOwnerProtected={isProtectedOwnerAccount(
+                    editingWorkerId ? localStaffUsers.find((u) => u.id === editingWorkerId) : null
+                  )}
+                  canAssignAdmin
+                  onChange={({ roles: nextRoles, permissions: nextPerms, primaryRole }) => {
+                    setWorkerRoles(nextRoles);
+                    setWorkerRole(primaryRole);
+                    setWorkerPermsObj(nextPerms);
+                  }}
+                  onNotify={(msg) => triggerNotify(msg)}
+                />
               </div>
 
               <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">

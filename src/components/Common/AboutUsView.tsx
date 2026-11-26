@@ -17,6 +17,7 @@ import {
   Sparkles,
   Users,
   Lightbulb,
+  Play,
 } from 'lucide-react';
 import {
   SUPPORT_EMAIL,
@@ -34,6 +35,7 @@ export interface AboutUsViewProps {
   onOpenPlansPricing?: () => void;
   onOpenAiAssistant?: () => void;
   onOpenSuggestFeature?: () => void;
+  onStartClientDemo?: () => void;
   inPhoneFrame?: boolean;
 }
 
@@ -134,6 +136,7 @@ export const AboutUsView: React.FC<AboutUsViewProps> = ({
   onOpenPlansPricing,
   onOpenAiAssistant,
   onOpenSuggestFeature,
+  onStartClientDemo,
   inPhoneFrame = false,
 }) => {
   const rootRef = useRef<HTMLDivElement>(null);
@@ -282,6 +285,16 @@ export const AboutUsView: React.FC<AboutUsViewProps> = ({
               >
                 <Lightbulb className="w-3.5 h-3.5 text-amber-400" />
                 <span>Suggest a Feature</span>
+              </button>
+            )}
+            {onStartClientDemo && (
+              <button
+                type="button"
+                onClick={onStartClientDemo}
+                className="px-4 py-2 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-emerald-300 text-xs font-bold flex items-center gap-1.5 whitespace-nowrap shrink-0 transition cursor-pointer"
+              >
+                <Play className="w-3.5 h-3.5 text-emerald-400 fill-current" />
+                <span>Launch Live Client Demo</span>
               </button>
             )}
           </div>

@@ -45,7 +45,8 @@ import {
   QrCode,
   Lightbulb,
   CreditCard,
-  GitBranch
+  GitBranch,
+  Play,
 } from 'lucide-react';
 import { TabKey } from '../../utils/permissions';
 import { User, StoreSubscriptionProfile } from '../../types';
@@ -90,6 +91,9 @@ export interface AppMenuViewProps {
   isMultiBranch?: boolean;
   businessGroupName?: string;
   branchCount?: number;
+  isClientDemoMode?: boolean;
+  onStartClientDemo?: () => void;
+  onExitClientDemo?: () => void;
 }
 
 type InfoModalType =
@@ -129,6 +133,9 @@ export const AppMenuView: React.FC<AppMenuViewProps> = ({
   isMultiBranch = false,
   businessGroupName,
   branchCount = 1,
+  isClientDemoMode = false,
+  onStartClientDemo,
+  onExitClientDemo,
 }) => {
   const [accordions, setAccordions] = useState<Record<string, boolean>>({
     sale: false,
@@ -950,6 +957,34 @@ export const AppMenuView: React.FC<AppMenuViewProps> = ({
             </div>
             <ChevronRight className="w-4 h-4 text-slate-400 shrink-0" />
           </button>
+
+          {(onStartClientDemo || onExitClientDemo) && (
+            <button
+              type="button"
+              id="btn-menu-live-client-demo"
+              onClick={() => {
+                if (isClientDemoMode && onExitClientDemo) {
+                  onExitClientDemo();
+                } else if (onStartClientDemo) {
+                  onStartClientDemo();
+                }
+              }}
+              className="w-full min-h-[52px] px-4 py-3 flex items-center justify-between hover:bg-slate-800/70 transition text-left cursor-pointer"
+            >
+              <div className="flex items-center gap-3.5 min-w-0">
+                <Play className="w-4 h-4 text-emerald-400 fill-current shrink-0" strokeWidth={1.75} />
+                <span className="text-[13px] font-semibold text-white truncate">
+                  {isClientDemoMode ? 'Exit Live Client Demo' : 'Live Client Demo Sandbox'}
+                </span>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <span className="px-2 py-0.5 rounded-md bg-emerald-500/15 border border-emerald-500/30 text-[10px] font-bold text-emerald-300">
+                  {isClientDemoMode ? 'Active' : 'Pitch Mode'}
+                </span>
+                <ChevronRight className="w-4 h-4 text-slate-400 shrink-0" />
+              </div>
+            </button>
+          )}
 
           {/* Grow Your Business Accordion */}
           <div>

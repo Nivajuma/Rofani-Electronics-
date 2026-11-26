@@ -137,6 +137,14 @@ export const SENSITIVE_ACTION_SPECS: Record<SensitiveActionType, ActionAuthoriza
     description: 'Overrides standard item prices with a custom promotional discount at checkout.',
     qualifyingRoles: ['Admin', 'Manager', 'can give discounts'],
   },
+  CUSTOMER_RETURN: {
+    actionType: 'CUSTOMER_RETURN',
+    label: 'Customer Goods Return & Stock Restoration',
+    category: 'stock',
+    requiredPermission: 'canReturnStocks',
+    description: 'Processes partial or full customer goods return, issues cash/M-Pesa refund or store credit, and restores resellable items back to inventory.',
+    qualifyingRoles: ['Admin', 'Manager', 'Inventory Staff', 'Can return stocks'],
+  },
 };
 
 /**

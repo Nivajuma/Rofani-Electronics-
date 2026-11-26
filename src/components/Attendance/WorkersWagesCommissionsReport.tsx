@@ -355,7 +355,7 @@ export const WorkersWagesCommissionsReport: React.FC<WorkersWagesCommissionsRepo
       }
       if (exp.workerName) {
         const lower = exp.workerName.trim().toLowerCase();
-        const byName = allUsers.find((u) => u.name.trim().toLowerCase() === lower);
+        const byName = allUsers.find((u) => (u.name || '').trim().toLowerCase() === lower);
         if (byName) return { key: byName.id, user: byName, displayName: byName.name };
         return { key: `name:${lower}`, displayName: exp.workerName.trim() };
       }
@@ -370,7 +370,7 @@ export const WorkersWagesCommissionsReport: React.FC<WorkersWagesCommissionsRepo
       const parsed = parseWorkerNameFromWageDescription(exp.description || '');
       if (parsed) {
         const lower = parsed.toLowerCase();
-        const exact = allUsers.find((u) => u.name.trim().toLowerCase() === lower);
+        const exact = allUsers.find((u) => (u.name || '').trim().toLowerCase() === lower);
         if (exact) return { key: exact.id, user: exact, displayName: exact.name };
         return { key: `name:${lower}`, displayName: parsed };
       }
@@ -425,16 +425,17 @@ export const WorkersWagesCommissionsReport: React.FC<WorkersWagesCommissionsRepo
           exp.id.startsWith('exp-sal-') &&
           toLocalYmd(exp.date) === pDate &&
           Math.abs((Number(exp.amount) || 0) - p.netPayPaid) < 1 &&
-          (exp.description || '').toLowerCase().includes(p.employeeName.toLowerCase())
+          (exp.description || '').toLowerCase().includes((p.employeeName || '').toLowerCase())
         );
       });
       if (alreadyInExpenses) return;
 
+      const empNameLower = (p.employeeName || '').trim().toLowerCase();
       const userMatch =
         allUsers.find((u) => u.id === p.employeeId) ||
-        allUsers.find((u) => u.name.trim().toLowerCase() === p.employeeName.trim().toLowerCase());
-      const key = userMatch ? userMatch.id : `name:${p.employeeName.trim().toLowerCase()}`;
-      const bucket = ensureRow(key, userMatch, p.employeeName);
+        allUsers.find((u) => (u.name || '').trim().toLowerCase() === empNameLower);
+      const key = userMatch ? userMatch.id : `name:${empNameLower || 'staff'}`;
+      const bucket = ensureRow(key, userMatch, p.employeeName || 'Staff Member');
       bucket.wageEntries.push({
         id: p.id,
         date: pDate,
@@ -462,7 +463,7 @@ export const WorkersWagesCommissionsReport: React.FC<WorkersWagesCommissionsRepo
       }
       const rawName = (tx.salesRepName || tx.cashierName || '').trim();
       if (!matchedUser && rawName) {
-        matchedUser = allUsers.find((u) => u.name.trim().toLowerCase() === rawName.toLowerCase());
+        matchedUser = allUsers.find((u) => (u.name || '').trim().toLowerCase() === rawName.toLowerCase());
       }
 
       if (matchedUser) {
@@ -480,10 +481,11 @@ export const WorkersWagesCommissionsReport: React.FC<WorkersWagesCommissionsRepo
       const cpDate = toLocalYmd(cp.endDate || cp.date);
       if (cpDate < effectiveFrom || cpDate > effectiveTo) return;
       if (cp.status !== 'Paid') return;
+      const cpNameLower = (cp.employeeName || '').trim().toLowerCase();
       const userMatch =
         allUsers.find((u) => u.id === cp.employeeId) ||
-        allUsers.find((u) => u.name.trim().toLowerCase() === cp.employeeName.trim().toLowerCase());
-      const key = userMatch ? userMatch.id : `name:${cp.employeeName.trim().toLowerCase()}`;
+        allUsers.find((u) => (u.name || '').trim().toLowerCase() === cpNameLower);
+      const key = userMatch ? userMatch.id : `name:${cpNameLower || 'staff'}`;
       const bucket = rowMap.get(key);
       if (bucket) {
         bucket.commissionAlreadyPaid += Number(cp.commissionEarned || cp.paidAmount) || 0;
@@ -524,7 +526,7 @@ export const WorkersWagesCommissionsReport: React.FC<WorkersWagesCommissionsRepo
         if (selectedWorkerFilter !== 'All' && r.workerKey !== selectedWorkerFilter) return false;
         if (searchQuery.trim()) {
           const q = searchQuery.trim().toLowerCase();
-          return r.workerName.toLowerCase().includes(q) || r.role.toLowerCase().includes(q);
+          return (r.workerName || '').toLowerCase().includes(q) || (r.role || '').toLowerCase().includes(q);
         }
         return true;
       })
@@ -569,7 +571,7 @@ export const WorkersWagesCommissionsReport: React.FC<WorkersWagesCommissionsRepo
 
   const buildFullStatementText = (): string => {
     const lines: string[] = [
-      `${storeName.toUpperCase()} — WORKERS WAGES & COMMISSIONS STATEMENT`,
+      `${(storeName || 'ROFANI POS').toUpperCase()} — WORKERS WAGES & COMMISSIONS STATEMENT`,
       `Period: ${formatReadableDate(effectiveFrom)} to ${formatReadableDate(effectiveTo)}`,
       `----------------------------------------`,
     ];
@@ -1142,7 +1144,7 @@ export const WorkersWagesCommissionsReport: React.FC<WorkersWagesCommissionsRepo
                                           <div className="min-w-0">
                                             <div className="font-semibold text-slate-200 truncate">{w.description}</div>
                                             <div className="text-[10px] text-slate-400 font-mono">
-                                              {w.date} · {w.paymentMethod.toUpperCase()}
+                                              {w.date} · {(w.paymentMethod || 'cash').toUpperCase()}
                                             </div>
                                           </div>
                                           <span className="font-mono tabular-nums font-bold text-amber-300 shrink-0">
@@ -1171,7 +1173,15 @@ export const WorkersWagesCommissionsReport: React.FC<WorkersWagesCommissionsRepo
                                               {tx.receiptNumber} · {tx.customerName || 'Walk-in'}
                                             </div>
                                             <div className="text-[10px] text-slate-400 font-mono">
-                                              {toLocalYmd(tx.date)} · {tx.paymentMethod.toUpperCase()}
+                                              {toLocalYmd(tx.date)} ·{' '}
+                                              {(
+                                                tx.paymentMethod ||
+                                                tx.payments
+                                                  ?.map((p) => p.method)
+                                                  .filter(Boolean)
+                                                  .join(' + ') ||
+                                                'cash'
+                                              ).toUpperCase()}
                                             </div>
                                           </div>
                                           <span className="font-mono tabular-nums font-bold text-sky-300 shrink-0">

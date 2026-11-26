@@ -42,6 +42,7 @@ interface PhoneDeviceFrameProps {
   onOpenConflictAssistant?: () => void;
   hideBottomNav?: boolean;
   quickToolsBar?: React.ReactNode;
+  topDemoBanner?: React.ReactNode;
 }
 
 export const PhoneDeviceFrame: React.FC<PhoneDeviceFrameProps> = ({
@@ -65,6 +66,7 @@ export const PhoneDeviceFrame: React.FC<PhoneDeviceFrameProps> = ({
   onOpenConflictAssistant,
   hideBottomNav = false,
   quickToolsBar,
+  topDemoBanner,
 }) => {
   const isLandscape = phoneOrientation === 'landscape';
 
@@ -112,7 +114,12 @@ export const PhoneDeviceFrame: React.FC<PhoneDeviceFrameProps> = ({
   };
 
   return (
-    <div className="min-h-dvh h-dvh sm:h-auto sm:min-h-dvh bg-slate-900 sm:bg-slate-950 text-slate-100 flex flex-col items-center justify-center p-0 sm:py-4 sm:px-4 overflow-hidden sm:overflow-x-hidden selection:bg-blue-600 selection:text-white relative print-unlock-overflow">
+    <div className="min-h-dvh h-dvh sm:h-auto sm:min-h-dvh bg-slate-900 sm:bg-slate-950 text-slate-100 flex flex-col items-center justify-center p-0 sm:pb-4 overflow-hidden sm:overflow-x-hidden selection:bg-blue-600 selection:text-white relative print-unlock-overflow">
+      {topDemoBanner && (
+        <div className="w-full shrink-0 sm:mb-3 z-40">
+          {topDemoBanner}
+        </div>
+      )}
       {/* SMARTPHONE DEVICE CONTAINER FRAME */}
       <div
         className={`relative transition-all duration-300 ease-in-out bg-slate-900 border-0 sm:border-[12px] border-slate-800 rounded-none sm:rounded-[52px] shadow-2xl shadow-blue-900/30 overflow-hidden flex flex-col print-unlock-overflow ${getFrameDimensions()}`}

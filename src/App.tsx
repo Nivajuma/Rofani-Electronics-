@@ -52,7 +52,8 @@ import {
   LogOut,
   Gift,
   Info,
-  Lightbulb
+  Lightbulb,
+  Play
 } from 'lucide-react';
 import {
   Product,
@@ -82,7 +83,12 @@ import {
   SensitiveActionType,
   PurchaseOrder,
   StoreSubscriptionProfile,
-  DigitalBusinessCard
+  DigitalBusinessCard,
+  CustomerDepositRecord,
+  CustomerComplaint,
+  CustomerReturnRecord,
+  CustomerReturnItem,
+  ReturnRefundMode,
 } from './types';
 import {
   INITIAL_USERS,
@@ -138,6 +144,7 @@ import { CategoryManagerModal } from './components/Inventory/CategoryManagerModa
 import { CameraStartupPrompt } from './components/Common/CameraStartupPrompt';
 import { AppMenuView } from './components/Common/AppMenuView';
 import { AboutUsView } from './components/Common/AboutUsView';
+import { LiveClientDemoOverlay } from './components/Demo/LiveClientDemoOverlay';
 import { ShopQrShareModal } from './components/Common/ShopQrShareModal';
 import { DailyEndOfDaySummaryModal } from './components/Common/DailyEndOfDaySummaryModal';
 import { DailyEmailBackupModal } from './components/Settings/DailyEmailBackupModal';
@@ -243,6 +250,12 @@ import {
   getCachedGroupBranches,
   saveCachedGroupBranches,
   syncCrossBranchStaffAssignment,
+  subscribeToCustomerDeposits,
+  saveCustomerDepositToCloud,
+  subscribeToCustomerComplaints,
+  saveCustomerComplaintToCloud,
+  subscribeToCustomerReturns,
+  saveCustomerReturnToCloud,
 } from './lib/cloudSync';
 import { registerNativeBiometricCredential } from './utils/biometricAuth';
 import { loadMpesaConfig, saveMpesaConfig } from './utils/mpesa';
@@ -271,12 +284,26 @@ import {
 import {
   ACTIVE_SCOPE_STORAGE_KEY,
   VERIFIED_OWNER_CACHE_KEY,
+  CLIENT_DEMO_STORE_ID,
+  CLIENT_DEMO_MODE_KEY,
+  clearClientDemoStorage,
   setActiveTenantStoreId,
   getActiveTenantStoreId,
   getActiveBranchCloudStoreId,
   setActiveBranchCloudStoreId,
   resolveTenantStorageKey,
 } from './utils/tenantScope';
+import {
+  createClientDemoProfiles,
+  seedClientDemoSandbox,
+  buildFreshDemoTransactions,
+  buildFreshDemoExpenses,
+  buildFreshDemoAttendance,
+  buildDemoLocations,
+  buildFreshDemoCustomerDeposits,
+  buildFreshDemoCustomerComplaints,
+  buildFreshDemoCustomerReturns,
+} from './utils/demoPreset';
 import { safeGetJSON, safeSetJSON, checkAndRunRollingSalesArchive } from './utils/safeStorage';
 import {
   getAllProductImagesFromIndexedDB,
@@ -765,6 +792,20 @@ export default function App() {
   const [isFirebaseAuthReady, setIsFirebaseAuthReady] = useState<boolean>(() => Boolean(auth.currentUser));
   const [hasAuthSettledFromFirebase, setHasAuthSettledFromFirebase] = useState<boolean>(() => Boolean(auth.currentUser));
   const [allowOfflineOwnerMode, setAllowOfflineOwnerMode] = useState<boolean>(false);
+  const [isClientDemoMode, setIsClientDemoMode] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const demoParam = (params.get('demo') || '').toLowerCase();
+      if (demoParam === '1' || demoParam === 'true') {
+        localStorage.setItem(CLIENT_DEMO_MODE_KEY, '1');
+        return true;
+      }
+      return localStorage.getItem(CLIENT_DEMO_MODE_KEY) === '1';
+    } catch {
+      return false;
+    }
+  });
   const [storeProfile, setStoreProfile] = useState<StoreSubscriptionProfile | null>(() =>
     safeGetJSON<StoreSubscriptionProfile | null>('rofani_pos_store_profile', null)
   );
@@ -851,10 +892,13 @@ export default function App() {
   }, []);
 
   const isOwnerAccount =
-    isOwnerCloudUser(firebaseUser) ||
-    (!hasAuthSettledFromFirebase && Boolean(cachedCloudSession?.isOwner)) ||
-    (allowOfflineOwnerMode && typeof window !== 'undefined' && localStorage.getItem(VERIFIED_OWNER_CACHE_KEY) === '1');
-  const primaryCloudStoreId = getStoreIdForUser(firebaseUser) || cachedCloudSession?.uid || null;
+    !isClientDemoMode &&
+    (isOwnerCloudUser(firebaseUser) ||
+      (!hasAuthSettledFromFirebase && Boolean(cachedCloudSession?.isOwner)) ||
+      (allowOfflineOwnerMode && typeof window !== 'undefined' && localStorage.getItem(VERIFIED_OWNER_CACHE_KEY) === '1'));
+  const primaryCloudStoreId = isClientDemoMode
+    ? CLIENT_DEMO_STORE_ID
+    : getStoreIdForUser(firebaseUser) || cachedCloudSession?.uid || null;
   const activeCloudStoreId = primaryCloudStoreId;
   const effectiveCloudStoreId = activeBranchStoreId || primaryCloudStoreId;
   const activeBranchProfile = useMemo(() => {
@@ -864,8 +908,10 @@ export default function App() {
     }
     return storeProfile;
   }, [groupBranches, effectiveCloudStoreId, storeProfile]);
-  const isCloudAuthReady = isFirebaseAuthReady && isAuthorizedCloudUser(firebaseUser);
-  const canAutoSyncCloud = () => getIsOnline() && isAuthorizedCloudUser(auth.currentUser);
+  const isCloudAuthReady =
+    !isClientDemoMode && isFirebaseAuthReady && isAuthorizedCloudUser(firebaseUser);
+  const canAutoSyncCloud = () =>
+    !isClientDemoMode && getIsOnline() && isAuthorizedCloudUser(auth.currentUser);
   const prevTenantScopeRef = useRef<string>(getActiveTenantStoreId());
 
   const reloadAppStateForTenantScope = (
@@ -873,6 +919,9 @@ export default function App() {
     ownerMode: boolean,
     profileOverride?: StoreSubscriptionProfile | null
   ) => {
+    const isDemoScope =
+      targetScope === CLIENT_DEMO_STORE_ID ||
+      targetScope.startsWith(`${CLIENT_DEMO_STORE_ID}_br_`);
     const isOwnerScope = targetScope === OWNER_PRIMARY_STORE_ID || ownerMode;
     const isUnauthScope = targetScope === '__unauthenticated__';
 
@@ -895,12 +944,13 @@ export default function App() {
           if (Array.isArray(parsed)) return parsed as T[];
         }
       } catch {}
-      return isOwnerScope ? ownerFallback : [];
+      return isOwnerScope || isDemoScope ? ownerFallback : [];
     };
 
     const isBlankMode =
-      safeGetJSON<boolean>('rofani_pos_blank_mode', false) ||
-      Boolean(profileOverride?.skipLegacySeed);
+      !isDemoScope &&
+      (safeGetJSON<boolean>('rofani_pos_blank_mode', false) ||
+        Boolean(profileOverride?.skipLegacySeed));
 
     const nextProducts = mergeProductListsByTimestamp(
       loadArr<Product>('retail_pos_products', isBlankMode ? [] : INITIAL_PRODUCTS),
@@ -911,25 +961,32 @@ export default function App() {
     productsRef.current = nextProducts;
     setProductsState(nextProducts);
 
-    getFromIDB(resolveTenantStorageKey('retail_pos_products', targetScope))
-      .then((idbProds) => {
-        if (Array.isArray(idbProds) && idbProds.length > 0 && getActiveTenantStoreId() === targetScope) {
-          const merged = mergeProductListsByTimestamp(
-            productsRef.current,
-            idbProds,
-            getDeletedProductIds(),
-            getPendingProductMap()
-          );
-          productsRef.current = merged;
-          setProductsState(merged);
-        }
-        hasHydratedProductsFromIdbRef.current = true;
-      })
-      .catch(() => {
-        hasHydratedProductsFromIdbRef.current = true;
-      });
+    if (isDemoScope) {
+      hasHydratedProductsFromIdbRef.current = true;
+    } else {
+      getFromIDB(resolveTenantStorageKey('retail_pos_products', targetScope))
+        .then((idbProds) => {
+          if (Array.isArray(idbProds) && idbProds.length > 0 && getActiveTenantStoreId() === targetScope) {
+            const merged = mergeProductListsByTimestamp(
+              productsRef.current,
+              idbProds,
+              getDeletedProductIds(),
+              getPendingProductMap()
+            );
+            productsRef.current = merged;
+            setProductsState(merged);
+          }
+          hasHydratedProductsFromIdbRef.current = true;
+        })
+        .catch(() => {
+          hasHydratedProductsFromIdbRef.current = true;
+        });
+    }
 
-    const nextSales = loadArr<Transaction>('retail_pos_transactions', INITIAL_TRANSACTIONS);
+    const nextSales = loadArr<Transaction>(
+      'retail_pos_transactions',
+      isDemoScope ? buildFreshDemoTransactions() : INITIAL_TRANSACTIONS
+    );
     transactionsRef.current = nextSales;
     setTransactionsState(nextSales);
 
@@ -937,15 +994,42 @@ export default function App() {
     customersRef.current = nextCustomers;
     setCustomers(nextCustomers);
 
+    setCustomerDeposits(
+      loadArr<CustomerDepositRecord>(
+        'retail_pos_customer_deposits',
+        isDemoScope ? buildFreshDemoCustomerDeposits() : []
+      )
+    );
+    setCustomerComplaints(
+      loadArr<CustomerComplaint>(
+        'retail_pos_customer_complaints',
+        isDemoScope ? buildFreshDemoCustomerComplaints() : []
+      )
+    );
+    setCustomerReturns(
+      loadArr<CustomerReturnRecord>(
+        'retail_pos_customer_returns',
+        isDemoScope ? buildFreshDemoCustomerReturns() : []
+      )
+    );
+
     const nextSuppliers = loadArr<Supplier>('retail_pos_suppliers', INITIAL_SUPPLIERS);
     suppliersRef.current = nextSuppliers;
     setSuppliers(nextSuppliers);
 
-    const nextExpenses = loadArr<Expense>('retail_pos_expenses', INITIAL_EXPENSES);
+    const nextExpenses = loadArr<Expense>(
+      'retail_pos_expenses',
+      isDemoScope ? buildFreshDemoExpenses() : INITIAL_EXPENSES
+    );
     expensesRef.current = nextExpenses;
     setExpensesState(nextExpenses);
 
-    setAttendanceRecords(loadArr<AttendanceRecord>('retail_pos_attendance', INITIAL_ATTENDANCE));
+    setAttendanceRecords(
+      loadArr<AttendanceRecord>(
+        'retail_pos_attendance',
+        isDemoScope ? buildFreshDemoAttendance() : INITIAL_ATTENDANCE
+      )
+    );
     setCashTransactions(loadArr<CashTransaction>('retail_pos_cash_transactions', INITIAL_CASH_TRANSACTIONS));
     setRestockRecords(loadArr<RestockRecord>('retail_pos_restock_records', INITIAL_RESTOCK_RECORDS));
     setPurchaseOrdersState(loadArr<PurchaseOrder>('retail_pos_purchase_orders', INITIAL_PURCHASE_ORDERS));
@@ -959,23 +1043,24 @@ export default function App() {
     setScanLogs(loadArr<BarcodeScanLog>('retail_pos_barcode_scan_logs', INITIAL_BARCODE_SCAN_LOGS));
     setAuditLogs(loadAuditLogsFromStorage());
 
-    const fallbackUsers: User[] = isOwnerScope
-      ? INITIAL_USERS
-      : [
-          {
-            id: 'usr-owner',
-            name:
-              auth.currentUser?.displayName ||
-              profileOverride?.storeName ||
-              auth.currentUser?.email?.split('@')[0] ||
-              'Store Owner',
-            role: 'Admin',
-            roles: ['Admin'],
-            email: auth.currentUser?.email || '',
-            pin: '1234',
-            status: 'active',
-          },
-        ];
+    const fallbackUsers: User[] =
+      isOwnerScope || isDemoScope
+        ? INITIAL_USERS
+        : [
+            {
+              id: 'usr-owner',
+              name:
+                auth.currentUser?.displayName ||
+                profileOverride?.storeName ||
+                auth.currentUser?.email?.split('@')[0] ||
+                'Store Owner',
+              role: 'Admin',
+              roles: ['Admin'],
+              email: auth.currentUser?.email || '',
+              pin: '1234',
+              status: 'active',
+            },
+          ];
 
     const loadedUsers = loadArr<User>('retail_pos_users', fallbackUsers);
     const nextUsers = loadedUsers.length > 0 ? loadedUsers : fallbackUsers;
@@ -991,15 +1076,19 @@ export default function App() {
       setCurrentUser(nextActiveUser);
     }
 
-    const defaultPinReq = isOwnerScope ? true : false;
-    const savedPinReq = safeGetJSON<boolean>('retail_pos_require_pin_startup', defaultPinReq);
+    const defaultPinReq = isOwnerScope && !isDemoScope ? true : false;
+    const savedPinReq = isDemoScope
+      ? false
+      : safeGetJSON<boolean>('retail_pos_require_pin_startup', defaultPinReq);
     setRequirePinOnStartup(savedPinReq);
     setMasterPin(safeGetJSON<string>('retail_pos_master_pin', '1234'));
-    setIsTerminalLocked(safeGetJSON<boolean>('retail_pos_terminal_locked', savedPinReq));
+    setIsTerminalLocked(isDemoScope ? false : safeGetJSON<boolean>('retail_pos_terminal_locked', savedPinReq));
 
     const savedStores = safeGetJSON<StoreLocation[] | null>('retail_pos_stores', null);
     if (savedStores && Array.isArray(savedStores) && savedStores.length > 0) {
       setStores(savedStores);
+    } else if (isDemoScope) {
+      setStores(buildDemoLocations(profileOverride?.storeName || 'Rofani Demo Flagship'));
     } else if (isOwnerScope) {
       setStores(INITIAL_STORES);
     } else {
@@ -1021,6 +1110,45 @@ export default function App() {
 
   // Synchronize active tenant scope, reload isolated state, and bind Firestore stores/{userId}
   useEffect(() => {
+    if (isClientDemoMode) {
+      const hasSeededDemo = Boolean(
+        localStorage.getItem(resolveTenantStorageKey('retail_pos_products', CLIENT_DEMO_STORE_ID))
+      );
+      let demoBranches = getCachedGroupBranches(CLIENT_DEMO_STORE_ID);
+      let defaultMainProfile: StoreSubscriptionProfile;
+      if (!hasSeededDemo || demoBranches.length === 0) {
+        const seeded = seedClientDemoSandbox();
+        defaultMainProfile = seeded.mainProfile;
+        demoBranches = seeded.branches;
+      } else {
+        defaultMainProfile =
+          demoBranches.find((b) => b.id === CLIENT_DEMO_STORE_ID) ||
+          createClientDemoProfiles().mainProfile;
+      }
+
+      const validDemoScope =
+        activeBranchStoreId &&
+        (activeBranchStoreId === CLIENT_DEMO_STORE_ID ||
+          activeBranchStoreId.startsWith(`${CLIENT_DEMO_STORE_ID}_br_`))
+          ? activeBranchStoreId
+          : CLIENT_DEMO_STORE_ID;
+      const activeDemoBranch =
+        demoBranches.find((b) => b.id === validDemoScope) || defaultMainProfile;
+
+      if (prevTenantScopeRef.current !== validDemoScope) {
+        prevTenantScopeRef.current = validDemoScope;
+        reloadAppStateForTenantScope(validDemoScope, false, activeDemoBranch);
+      } else {
+        setActiveTenantStoreId(validDemoScope);
+      }
+
+      setStoreProfile(activeDemoBranch);
+      setGroupBranches(demoBranches);
+      setIsCheckingStoreProfile(false);
+      setIsTerminalLocked(false);
+      return;
+    }
+
     if (!isFirebaseAuthReady) return;
 
     let nextLocalScope = '__unauthenticated__';
@@ -1321,7 +1449,7 @@ export default function App() {
       if (unsubscribeProfile) unsubscribeProfile();
       if (unsubscribeRewards) unsubscribeRewards();
     };
-  }, [isFirebaseAuthReady, hasAuthSettledFromFirebase, firebaseUser?.uid, allowOfflineOwnerMode]);
+  }, [isClientDemoMode, isFirebaseAuthReady, hasAuthSettledFromFirebase, firebaseUser?.uid, allowOfflineOwnerMode]);
 
   // Hydrate Store Security (PIN / Password / Biometric Unlock) from Firestore
   useEffect(() => {
@@ -1913,6 +2041,16 @@ export default function App() {
     safeGetJSON('retail_pos_customers', getActiveTenantStoreId() === OWNER_PRIMARY_STORE_ID ? INITIAL_CUSTOMERS : [])
   );
 
+  const [customerDeposits, setCustomerDeposits] = useState<CustomerDepositRecord[]>(() =>
+    safeGetJSON<CustomerDepositRecord[]>('retail_pos_customer_deposits', [])
+  );
+  const [customerComplaints, setCustomerComplaints] = useState<CustomerComplaint[]>(() =>
+    safeGetJSON<CustomerComplaint[]>('retail_pos_customer_complaints', [])
+  );
+  const [customerReturns, setCustomerReturns] = useState<CustomerReturnRecord[]>(() =>
+    safeGetJSON<CustomerReturnRecord[]>('retail_pos_customer_returns', [])
+  );
+
   const [suppliers, setSuppliers] = useState<Supplier[]>(() =>
     safeGetJSON('retail_pos_suppliers', getActiveTenantStoreId() === OWNER_PRIMARY_STORE_ID ? INITIAL_SUPPLIERS : [])
   );
@@ -2443,6 +2581,18 @@ export default function App() {
   }, [customers]);
 
   useEffect(() => {
+    safeSetJSON('retail_pos_customer_deposits', customerDeposits);
+  }, [customerDeposits]);
+
+  useEffect(() => {
+    safeSetJSON('retail_pos_customer_complaints', customerComplaints);
+  }, [customerComplaints]);
+
+  useEffect(() => {
+    safeSetJSON('retail_pos_customer_returns', customerReturns);
+  }, [customerReturns]);
+
+  useEffect(() => {
     safeSetJSON('retail_pos_expenses', expenses);
   }, [expenses]);
 
@@ -2889,6 +3039,80 @@ export default function App() {
     };
   }, [isCloudAuthReady, firebaseUser?.uid, effectiveCloudStoreId]);
 
+  // Real-time synchronization subscriptions for Customer Deposits, Complaints & Goods Returns
+  useEffect(() => {
+    const activeUid = effectiveCloudStoreId || firebaseUser?.uid;
+    if (!isCloudAuthReady || !activeUid) return;
+
+    const mergeByTimestamp = <T extends { id: string; updatedAt?: string }>(
+      localList: T[],
+      incomingList: T[],
+      sortKey: keyof T
+    ): T[] => {
+      const map = new Map<string, T>();
+      localList.forEach((item) => map.set(item.id, item));
+      incomingList.forEach((remote) => {
+        const existing = map.get(remote.id);
+        if (!existing) {
+          map.set(remote.id, remote);
+        } else {
+          const remoteMs = remote.updatedAt ? Date.parse(remote.updatedAt) : 0;
+          const localMs = existing.updatedAt ? Date.parse(existing.updatedAt) : 0;
+          if (remoteMs >= localMs) {
+            map.set(remote.id, remote);
+          }
+        }
+      });
+      return Array.from(map.values()).sort((a, b) => {
+        const da = Date.parse(String(a[sortKey] || '')) || 0;
+        const db = Date.parse(String(b[sortKey] || '')) || 0;
+        return db - da;
+      });
+    };
+
+    let unsubDeposits: (() => void) | undefined;
+    let unsubComplaints: (() => void) | undefined;
+    let unsubReturns: (() => void) | undefined;
+
+    try {
+      unsubDeposits = subscribeToCustomerDeposits(
+        (incoming) => {
+          if (incoming && incoming.length > 0) {
+            setCustomerDeposits((prev) => mergeByTimestamp(prev, incoming, 'date'));
+          }
+        },
+        (err) => console.warn('Customer deposits subscription notice:', err),
+        activeUid
+      );
+      unsubComplaints = subscribeToCustomerComplaints(
+        (incoming) => {
+          if (incoming && incoming.length > 0) {
+            setCustomerComplaints((prev) => mergeByTimestamp(prev, incoming, 'createdAt'));
+          }
+        },
+        (err) => console.warn('Customer complaints subscription notice:', err),
+        activeUid
+      );
+      unsubReturns = subscribeToCustomerReturns(
+        (incoming) => {
+          if (incoming && incoming.length > 0) {
+            setCustomerReturns((prev) => mergeByTimestamp(prev, incoming, 'date'));
+          }
+        },
+        (err) => console.warn('Customer returns subscription notice:', err),
+        activeUid
+      );
+    } catch (err) {
+      console.warn('Could not subscribe to customer ledgers:', err);
+    }
+
+    return () => {
+      if (unsubDeposits) unsubDeposits();
+      if (unsubComplaints) unsubComplaints();
+      if (unsubReturns) unsubReturns();
+    };
+  }, [isCloudAuthReady, firebaseUser?.uid, effectiveCloudStoreId]);
+
   const syncInFlightPromiseRef = useRef<Promise<SyncRetryResult> | null>(null);
 
   // Offline and bidirectional cloud sync handler (serialized via in-flight promise lock to avoid race conditions)
@@ -2974,6 +3198,12 @@ export default function App() {
               await saveRestockRecordToCloud(item.data);
             } else if (item.type === 'user') {
               await saveUserToCloud(item.data);
+            } else if (item.type === 'customer_deposit') {
+              await saveCustomerDepositToCloud(item.data);
+            } else if (item.type === 'customer_complaint') {
+              await saveCustomerComplaintToCloud(item.data);
+            } else if (item.type === 'customer_return') {
+              await saveCustomerReturnToCloud(item.data);
             }
             removePendingSyncItem(item.id);
             syncedCount += 1;
@@ -4015,7 +4245,7 @@ export default function App() {
     let isCheckRunning = false;
 
     const performDailyBackupCheck = async () => {
-      if (isCheckRunning || isCancelled) return;
+      if (isCheckRunning || isCancelled || isClientDemoMode) return;
       isCheckRunning = true;
       try {
         const settings = getBackupSettings();
@@ -4485,6 +4715,46 @@ export default function App() {
         }
       });
     }
+
+    // Record deposit wallet deduction entry if customer used advance deposit at POS checkout
+    if ((stampedTx.depositAppliedAmount || 0) > 0) {
+      const custSnapshot = stampedUpdatedCustomers.find((c) => c.id === stampedTx.customerId);
+      const depositUsedRecord: CustomerDepositRecord = {
+        id: `dep-app-${Date.now()}`,
+        receiptRef: `USE-${stampedTx.receiptNumber}`,
+        type: 'deposit_applied',
+        customerId: stampedTx.customerId || 'cust-1',
+        customerName: stampedTx.customerName || 'Customer',
+        customerPhone: stampedTx.customerPhone,
+        amount: stampedTx.depositAppliedAmount || 0,
+        paymentMethod: 'store_credit',
+        referenceNo: stampedTx.receiptNumber,
+        linkedTransactionId: stampedTx.id,
+        linkedReceiptNumber: stampedTx.receiptNumber,
+        balanceAfterDebt: custSnapshot?.currentBalanceDue ?? 0,
+        depositBalanceAfter: custSnapshot?.depositBalance ?? 0,
+        notes: `Applied from Advance Deposit Wallet at POS checkout`,
+        recordedBy: stampedTx.cashierName || currentUser.name,
+        date: nowIso,
+        updatedAt: nowIso,
+      };
+      setCustomerDeposits((prev) => [depositUsedRecord, ...prev]);
+      if (!canAutoSyncCloud()) {
+        addPendingSyncItem({
+          type: 'customer_deposit',
+          description: `Deposit Applied: ${depositUsedRecord.customerName}`,
+          data: depositUsedRecord,
+        });
+      } else {
+        saveCustomerDepositToCloud(depositUsedRecord).catch(() => {
+          addPendingSyncItem({
+            type: 'customer_deposit',
+            description: `Deposit Applied: ${depositUsedRecord.customerName}`,
+            data: depositUsedRecord,
+          });
+        });
+      }
+    }
   };
 
   const handleAddCustomer = (newCust: Customer) => {
@@ -4696,6 +4966,460 @@ export default function App() {
       notes: notes || undefined,
     };
     setCashTransactions((prev) => [cashEntry, ...prev]);
+  };
+
+  const handleRecordCustomerDepositOrPayment = (params: {
+    customerId: string;
+    mode: 'deposit' | 'partial_payment';
+    amount: number;
+    paymentMethod: PaymentMethod | 'store_credit';
+    linkedTransactionId?: string;
+    referenceNo?: string;
+    notes?: string;
+  }) => {
+    const {
+      customerId,
+      mode,
+      amount,
+      paymentMethod,
+      linkedTransactionId,
+      referenceNo,
+      notes,
+    } = params;
+    const cleanAmount = Math.max(0, Number(amount) || 0);
+    if (cleanAmount <= 0) return;
+
+    const nowIso = new Date().toISOString();
+    const targetCustomer = customersRef.current.find((c) => c.id === customerId);
+    if (!targetCustomer) return;
+
+    const currentDebt = Math.max(0, Number(targetCustomer.currentBalanceDue) || 0);
+    const currentDeposit = Math.max(0, Number(targetCustomer.depositBalance) || 0);
+
+    let nextDebt = currentDebt;
+    let nextDeposit = currentDeposit;
+
+    if (mode === 'deposit') {
+      nextDeposit = currentDeposit + cleanAmount;
+    } else {
+      nextDebt = Math.max(0, currentDebt - cleanAmount);
+      if (paymentMethod === 'store_credit') {
+        nextDeposit = Math.max(0, currentDeposit - cleanAmount);
+      }
+    }
+
+    const updatedCustomer: Customer = {
+      ...targetCustomer,
+      currentBalanceDue: nextDebt,
+      depositBalance: nextDeposit,
+      updatedAt: nowIso,
+    };
+
+    setCustomers((prev) => prev.map((c) => (c.id === customerId ? updatedCustomer : c)));
+
+    // Settle linked invoice or FIFO across open invoices if partial_payment
+    let linkedReceiptNumber: string | undefined;
+    const updatedTransactions: Transaction[] = [];
+    if (mode === 'partial_payment') {
+      let remainingToAllocate = cleanAmount;
+      setTransactions((prev) => {
+        const nextList = prev.map((tx) => {
+          if (tx.customerId !== customerId) return tx;
+          const txBal = Math.max(0, Number(tx.balanceDue) || 0);
+          if (txBal <= 0) return tx;
+          if (linkedTransactionId && tx.id !== linkedTransactionId) return tx;
+          if (remainingToAllocate <= 0) return tx;
+
+          const applied = Math.min(txBal, remainingToAllocate);
+          remainingToAllocate -= applied;
+          if (!linkedReceiptNumber) linkedReceiptNumber = tx.receiptNumber;
+
+          const newAmountPaid = (Number(tx.amountPaid) || 0) + applied;
+          const newBalanceDue = Math.max(0, txBal - applied);
+          const updatedTx: Transaction = {
+            ...tx,
+            amountPaid: newAmountPaid,
+            balanceDue: newBalanceDue,
+            paymentStatus: newBalanceDue <= 0 ? 'Paid' : 'Partial',
+            updatedAt: nowIso,
+          };
+          updatedTransactions.push(updatedTx);
+          return updatedTx;
+        });
+        return nextList;
+      });
+    }
+
+    const prefix = mode === 'deposit' ? 'DEP' : 'PAY';
+    const receiptRef = `${prefix}-${nowIso.slice(0, 10).replace(/-/g, '')}-${Date.now().toString().slice(-4)}`;
+
+    const record: CustomerDepositRecord = {
+      id: `cust-dep-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      receiptRef,
+      type: mode,
+      customerId,
+      customerName: targetCustomer.name,
+      customerPhone: targetCustomer.phone,
+      amount: cleanAmount,
+      paymentMethod,
+      referenceNo: referenceNo?.trim() || receiptRef,
+      linkedTransactionId,
+      linkedReceiptNumber,
+      balanceAfterDebt: nextDebt,
+      depositBalanceAfter: nextDeposit,
+      notes: notes?.trim() || undefined,
+      recordedBy: `${currentUser.name} (${currentUser.role})`,
+      date: nowIso,
+      updatedAt: nowIso,
+    };
+
+    setCustomerDeposits((prev) => [record, ...prev]);
+
+    // Log into Cash Management unless paid strictly from existing Deposit Wallet (store_credit)
+    if (paymentMethod !== 'store_credit') {
+      const cashEntry: CashTransaction = {
+        id: `cash-in-${Date.now()}`,
+        type: 'CASH_IN',
+        category: mode === 'deposit' ? 'Customer Deposit' : 'Customer Debt Payment',
+        amount: cleanAmount,
+        date: nowIso,
+        sourceDestination: targetCustomer.name,
+        referenceNo: record.referenceNo,
+        paymentMethod:
+          paymentMethod === 'cheque'
+            ? 'cheque'
+            : paymentMethod === 'mpesa'
+            ? 'mpesa'
+            : paymentMethod === 'credit_card' || paymentMethod === 'upi'
+            ? 'bank_transfer'
+            : 'cash',
+        description:
+          mode === 'deposit'
+            ? `Advance deposit from ${targetCustomer.name}${notes ? ` - ${notes}` : ''}`
+            : `Invoice partial/debt payment from ${targetCustomer.name}${linkedReceiptNumber ? ` (${linkedReceiptNumber})` : ''}`,
+        recordedBy: `${currentUser.name} (${currentUser.role})`,
+        status: 'Completed',
+        notes: notes?.trim() || undefined,
+      };
+      setCashTransactions((prev) => [cashEntry, ...prev]);
+    }
+
+    // Cloud sync or queue
+    if (!canAutoSyncCloud()) {
+      addPendingSyncItem({ type: 'customer', description: `Customer Wallet: ${updatedCustomer.name}`, data: updatedCustomer });
+      addPendingSyncItem({ type: 'customer_deposit', description: `${mode}: ${updatedCustomer.name}`, data: record });
+      updatedTransactions.forEach((tx) =>
+        addPendingSyncItem({ type: 'sale', description: `Invoice Balance Update: ${tx.receiptNumber}`, data: tx })
+      );
+    } else {
+      saveCustomerToCloud(updatedCustomer).catch(() =>
+        addPendingSyncItem({ type: 'customer', description: `Customer Wallet: ${updatedCustomer.name}`, data: updatedCustomer })
+      );
+      saveCustomerDepositToCloud(record).catch(() =>
+        addPendingSyncItem({ type: 'customer_deposit', description: `${mode}: ${updatedCustomer.name}`, data: record })
+      );
+      updatedTransactions.forEach((tx) =>
+        saveTransactionToCloud(tx).catch(() =>
+          addPendingSyncItem({ type: 'sale', description: `Invoice Balance Update: ${tx.receiptNumber}`, data: tx })
+        )
+      );
+    }
+  };
+
+  const handleProcessCustomerReturn = (params: {
+    customer: Customer;
+    transaction: Transaction;
+    items: CustomerReturnItem[];
+    refundMode: ReturnRefundMode;
+    cashRefundAmount: number;
+    cashRefundChannel?: 'cash' | 'mpesa';
+    cashRefundRef?: string;
+    reason: string;
+    notes?: string;
+  }): CustomerReturnRecord => {
+    const {
+      customer,
+      transaction,
+      items,
+      refundMode,
+      cashRefundAmount,
+      cashRefundChannel,
+      cashRefundRef,
+      reason,
+      notes,
+    } = params;
+
+    const nowIso = new Date().toISOString();
+    const dateStamp = nowIso.slice(0, 10).replace(/-/g, '');
+    const suffix = Date.now().toString().slice(-4);
+    const returnNumber = `RET-${dateStamp}-${suffix}`;
+    const creditNoteNumber = `CN-${dateStamp}-${suffix}`;
+
+    const totalRefundAmount = items.reduce((s, it) => s + (Number(it.refundSubtotal) || 0), 0);
+    const restockedTotalUnits = items.reduce((s, it) => s + (it.addedBackToStock ? it.quantityReturned : 0), 0);
+    const damagedTotalUnits = items.reduce((s, it) => s + (!it.addedBackToStock ? it.quantityReturned : 0), 0);
+
+    let cleanCashRefund = Math.max(0, Number(cashRefundAmount) || 0);
+    let creditIssuedAmount = 0;
+    let debtReducedAmount = 0;
+
+    if (refundMode === 'cash' || refundMode === 'mpesa') {
+      cleanCashRefund = totalRefundAmount;
+    } else if (refundMode === 'store_deposit') {
+      cleanCashRefund = 0;
+      creditIssuedAmount = totalRefundAmount;
+    } else if (refundMode === 'debt_offset') {
+      cleanCashRefund = 0;
+      debtReducedAmount = Math.min(Math.max(0, customer.currentBalanceDue || 0), totalRefundAmount);
+      creditIssuedAmount = Math.max(0, totalRefundAmount - debtReducedAmount);
+    } else if (refundMode === 'partial_cash_and_credit') {
+      cleanCashRefund = Math.min(totalRefundAmount, cleanCashRefund);
+      creditIssuedAmount = Math.max(0, totalRefundAmount - cleanCashRefund);
+    }
+
+    // 1. Restore active inventory ONLY for items marked 'resellable' (addedBackToStock === true)
+    const restockMap = new Map<string, number>();
+    items.forEach((it) => {
+      if (it.addedBackToStock && it.quantityReturned > 0) {
+        restockMap.set(it.productId, (restockMap.get(it.productId) || 0) + it.quantityReturned);
+      }
+    });
+
+    const enrichedItems: CustomerReturnItem[] = items.map((it) => {
+      const prod = productsRef.current.find((p) => p.id === it.productId);
+      const before = prod ? prod.stockQuantity : it.stockBeforeReturn ?? 0;
+      const added = it.addedBackToStock ? it.quantityReturned : 0;
+      return {
+        ...it,
+        stockBeforeReturn: before,
+        stockAfterReturn: before + added,
+      };
+    });
+
+    const updatedProductsToSync: Product[] = [];
+    if (restockMap.size > 0) {
+      const activeBranchKey = effectiveCloudStoreId || activeStoreId;
+      setProducts((prev) =>
+        prev.map((prod) => {
+          const addQty = restockMap.get(prod.id);
+          if (!addQty) return prod;
+          const nextQty = (Number(prod.stockQuantity) || 0) + addQty;
+          const updatedStoreStock =
+            prod.storeStock && activeBranchKey
+              ? { ...prod.storeStock, [activeBranchKey]: (prod.storeStock[activeBranchKey] || 0) + addQty }
+              : prod.storeStock;
+          const nextProd: Product = {
+            ...prod,
+            stockQuantity: nextQty,
+            stock: typeof prod.stock === 'number' ? prod.stock + addQty : nextQty,
+            storeStock: updatedStoreStock,
+            updatedAt: nowIso,
+          };
+          updatedProductsToSync.push(nextProd);
+          return nextProd;
+        })
+      );
+    }
+
+    // 2. Update Original Transaction return reconciliation
+    const prevReturned = Number(transaction.returnedAmount) || 0;
+    const newReturnedTotal = Math.min(transaction.grandTotal, prevReturned + totalRefundAmount);
+    const updatedOriginalTx: Transaction = {
+      ...transaction,
+      returnedAmount: newReturnedTotal,
+      returnStatus: newReturnedTotal >= transaction.grandTotal - 0.01 ? 'Full Return' : 'Partial Return',
+      creditNoteRef: creditNoteNumber,
+      balanceDue: Math.max(0, (Number(transaction.balanceDue) || 0) - debtReducedAmount),
+      updatedAt: nowIso,
+    };
+    setTransactions((prev) =>
+      prev.map((t) => (t.id === transaction.id ? updatedOriginalTx : t))
+    );
+
+    // 3. Update Customer Balance Due & Deposit Wallet
+    const latestCust = customersRef.current.find((c) => c.id === customer.id) || customer;
+    const updatedCustomer: Customer = {
+      ...latestCust,
+      currentBalanceDue: Math.max(0, (latestCust.currentBalanceDue || 0) - debtReducedAmount),
+      depositBalance: (latestCust.depositBalance || 0) + creditIssuedAmount,
+      updatedAt: nowIso,
+    };
+    setCustomers((prev) => prev.map((c) => (c.id === customer.id ? updatedCustomer : c)));
+
+    // 4. Create Return & Credit Note Record
+    const isEtims = Boolean(transaction.isEtimsRequested || transaction.cuin);
+    const returnRecord: CustomerReturnRecord = {
+      id: `ret-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      returnNumber,
+      creditNoteNumber,
+      originalTransactionId: transaction.id,
+      originalReceiptNumber: transaction.receiptNumber,
+      originalCuin: transaction.cuin,
+      isEtimsCreditNote: isEtims,
+      creditNoteCuin: isEtims ? `CN-CUIN-2026-${Math.floor(100000 + Math.random() * 900000)}` : undefined,
+      customerId: customer.id,
+      customerName: customer.name,
+      customerPhone: customer.phone,
+      customerKraPin: customer.kraPin || transaction.customerKraPin,
+      items: enrichedItems,
+      totalRefundAmount,
+      refundMode,
+      cashRefundAmount: cleanCashRefund,
+      cashRefundChannel: cleanCashRefund > 0 ? (cashRefundChannel || (refundMode === 'mpesa' ? 'mpesa' : 'cash')) : undefined,
+      cashRefundRef: cashRefundRef?.trim() || undefined,
+      creditIssuedAmount,
+      debtReducedAmount,
+      restockedTotalUnits,
+      damagedTotalUnits,
+      reason: reason.trim(),
+      notes: notes?.trim() || undefined,
+      processedBy: `${currentUser.name} (${currentUser.role})`,
+      date: nowIso,
+      updatedAt: nowIso,
+    };
+    setCustomerReturns((prev) => [returnRecord, ...prev]);
+
+    // 5. Log store deposit wallet credit entry if refund went into Deposit Wallet
+    let refundDepositRecord: CustomerDepositRecord | null = null;
+    if (creditIssuedAmount > 0) {
+      refundDepositRecord = {
+        id: `dep-ret-${Date.now()}`,
+        receiptRef: creditNoteNumber,
+        type: 'refund_credit',
+        customerId: customer.id,
+        customerName: customer.name,
+        customerPhone: customer.phone,
+        amount: creditIssuedAmount,
+        paymentMethod: 'store_credit',
+        referenceNo: returnNumber,
+        linkedTransactionId: transaction.id,
+        linkedReceiptNumber: transaction.receiptNumber,
+        balanceAfterDebt: updatedCustomer.currentBalanceDue,
+        depositBalanceAfter: updatedCustomer.depositBalance,
+        notes: `Store credit issued from ${returnNumber} (${reason})`,
+        recordedBy: `${currentUser.name} (${currentUser.role})`,
+        date: nowIso,
+        updatedAt: nowIso,
+      };
+      setCustomerDeposits((prev) => [refundDepositRecord!, ...prev]);
+    }
+
+    // 6. Log CASH_OUT entry if cash or M-Pesa was paid back to customer
+    if (cleanCashRefund > 0) {
+      const cashOutEntry: CashTransaction = {
+        id: `cash-out-${Date.now()}`,
+        type: 'CASH_OUT',
+        category: 'Customer Return Refund',
+        amount: cleanCashRefund,
+        date: nowIso,
+        sourceDestination: customer.name,
+        referenceNo: cashRefundRef?.trim() || returnNumber,
+        paymentMethod: (cashRefundChannel || refundMode) === 'mpesa' ? 'mpesa' : 'cash',
+        description: `Customer goods return refund (${returnNumber} / ${creditNoteNumber}) for receipt ${transaction.receiptNumber}`,
+        recordedBy: `${currentUser.name} (${currentUser.role})`,
+        status: 'Completed',
+        notes: `${restockedTotalUnits} unit(s) restored to stock, ${damagedTotalUnits} unit(s) marked damaged.`,
+      };
+      setCashTransactions((prev) => [cashOutEntry, ...prev]);
+    }
+
+    // 7. Immutable Sensitive Audit Log for Stock Restoration / Write-Off
+    const auditLog = buildSensitiveActionLog({
+      actionType: 'CUSTOMER_RETURN',
+      actionTitle: `Customer Return ${returnNumber} (${creditNoteNumber})`,
+      user: currentUser,
+      authorizingRole: currentUser.role,
+      targetId: returnRecord.id,
+      targetName: `${customer.name} — ${transaction.receiptNumber}`,
+      details: {
+        summary: `Refunded KSh ${totalRefundAmount.toLocaleString()} (${refundMode}). Stock added back: +${restockedTotalUnits} unit(s); Damaged/Quarantined: ${damagedTotalUnits} unit(s).`,
+        metadata: {
+          returnNumber,
+          creditNoteNumber,
+          restockedTotalUnits,
+          damagedTotalUnits,
+          items: enrichedItems.map((i) => ({
+            productName: i.productName,
+            qtyReturned: i.quantityReturned,
+            condition: i.restockCondition,
+            stockBefore: i.stockBeforeReturn,
+            stockAfter: i.stockAfterReturn,
+          })),
+        },
+      },
+      reason,
+      severity: 'high',
+    });
+    handleRecordAuditLog(auditLog);
+
+    // 8. Sync to Cloud or Pending Queue
+    if (!canAutoSyncCloud()) {
+      addPendingSyncItem({ type: 'customer_return', description: `Return ${returnNumber}`, data: returnRecord });
+      addPendingSyncItem({ type: 'sale', description: `Return Update: ${updatedOriginalTx.receiptNumber}`, data: updatedOriginalTx });
+      addPendingSyncItem({ type: 'customer', description: `Customer Return: ${updatedCustomer.name}`, data: updatedCustomer });
+      if (refundDepositRecord) {
+        addPendingSyncItem({ type: 'customer_deposit', description: `Refund Credit: ${customer.name}`, data: refundDepositRecord });
+      }
+      updatedProductsToSync.forEach((p) =>
+        addPendingSyncItem({ type: 'product', description: `Return Restock: ${p.name} (+stock)`, data: p })
+      );
+    } else {
+      saveCustomerReturnToCloud(returnRecord).catch(() =>
+        addPendingSyncItem({ type: 'customer_return', description: `Return ${returnNumber}`, data: returnRecord })
+      );
+      saveTransactionToCloud(updatedOriginalTx).catch(() =>
+        addPendingSyncItem({ type: 'sale', description: `Return Update: ${updatedOriginalTx.receiptNumber}`, data: updatedOriginalTx })
+      );
+      saveCustomerToCloud(updatedCustomer).catch(() =>
+        addPendingSyncItem({ type: 'customer', description: `Customer Return: ${updatedCustomer.name}`, data: updatedCustomer })
+      );
+      if (refundDepositRecord) {
+        saveCustomerDepositToCloud(refundDepositRecord).catch(() =>
+          addPendingSyncItem({ type: 'customer_deposit', description: `Refund Credit: ${customer.name}`, data: refundDepositRecord })
+        );
+      }
+      if (updatedProductsToSync.length > 0) {
+        batchSaveProductsToCloud(updatedProductsToSync).catch(() =>
+          updatedProductsToSync.forEach((p) =>
+            addPendingSyncItem({ type: 'product', description: `Return Restock: ${p.name}`, data: p })
+          )
+        );
+      }
+    }
+
+    return returnRecord;
+  };
+
+  const handleSaveCustomerComplaint = (complaint: CustomerComplaint) => {
+    const nowIso = new Date().toISOString();
+    const stamped: CustomerComplaint = {
+      ...complaint,
+      updatedAt: nowIso,
+    };
+    setCustomerComplaints((prev) => {
+      const idx = prev.findIndex((c) => c.id === stamped.id);
+      if (idx > -1) {
+        const copy = [...prev];
+        copy[idx] = stamped;
+        return copy;
+      }
+      return [stamped, ...prev];
+    });
+    if (!canAutoSyncCloud()) {
+      addPendingSyncItem({
+        type: 'customer_complaint',
+        description: `Complaint ${stamped.complaintNumber}`,
+        data: stamped,
+      });
+    } else {
+      saveCustomerComplaintToCloud(stamped).catch(() => {
+        addPendingSyncItem({
+          type: 'customer_complaint',
+          description: `Complaint ${stamped.complaintNumber}`,
+          data: stamped,
+        });
+      });
+    }
   };
 
   const handleRecordSupplierPayment = (
@@ -5764,6 +6488,16 @@ export default function App() {
   };
 
   const handleUpgradeToMultiBranch = async (businessGroupName: string) => {
+    if (isClientDemoMode) {
+      const cleanName = (businessGroupName || '').trim() || 'Rofani Demo Retail Group';
+      setStoreProfile((prev) => (prev ? { ...prev, isMultiBranch: true, businessGroupName: cleanName } : prev));
+      setGroupBranches((prev) => {
+        const next = prev.map((b) => ({ ...b, isMultiBranch: true, businessGroupName: cleanName }));
+        saveCachedGroupBranches(CLIENT_DEMO_STORE_ID, next);
+        return next;
+      });
+      return;
+    }
     const primaryId = primaryCloudStoreId || firebaseUser?.uid || OWNER_PRIMARY_STORE_ID;
     const updated = await upgradeStoreToMultiBranchGroup({
       primaryStoreId: primaryId,
@@ -5796,6 +6530,61 @@ export default function App() {
     branchPhone?: string;
     branchManagerName?: string;
   }) => {
+    if (isClientDemoMode) {
+      const nowIso = new Date().toISOString();
+      const slug = branchInput.branchName
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '_')
+        .replace(/^_|_$/g, '')
+        .slice(0, 18);
+      const demoBranchId = `${CLIENT_DEMO_STORE_ID}_br_${slug || Date.now()}`;
+      const newDemoBranch: StoreSubscriptionProfile = {
+        id: demoBranchId,
+        ownerUid: 'demo-owner-uid',
+        ownerEmail: 'demo@rofanipos.app',
+        storeName: branchInput.branchName.trim(),
+        phone: branchInput.branchPhone?.trim() || '+254 734 128 888',
+        planType: 'trial',
+        subscriptionStatus: 'active',
+        expiresAt: new Date(Date.now() + 22 * 86400000).toISOString(),
+        referralCode: 'ROFANI-DEMO26',
+        isMultiBranch: true,
+        businessGroupName: storeProfile?.businessGroupName || 'Rofani Demo Retail Group',
+        parentStoreId: CLIENT_DEMO_STORE_ID,
+        isBranchStore: true,
+        branchCode: branchInput.branchCode || `BR-${groupBranches.length + 1}`,
+        branchCity: branchInput.branchCity || 'Nairobi',
+        branchAddress: branchInput.branchAddress || 'Branch Outlet',
+        branchManagerName: branchInput.branchManagerName || 'Branch Manager',
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      };
+      try {
+        localStorage.setItem(
+          resolveTenantStorageKey('retail_pos_products', demoBranchId),
+          JSON.stringify(INITIAL_PRODUCTS.slice(0, 24))
+        );
+        localStorage.setItem(
+          resolveTenantStorageKey('retail_pos_transactions', demoBranchId),
+          JSON.stringify(buildFreshDemoTransactions().slice(0, 2))
+        );
+        localStorage.setItem(
+          resolveTenantStorageKey('retail_pos_users', demoBranchId),
+          JSON.stringify(INITIAL_USERS)
+        );
+        localStorage.setItem(
+          resolveTenantStorageKey('retail_pos_stores', demoBranchId),
+          JSON.stringify(buildDemoLocations(newDemoBranch.storeName))
+        );
+      } catch {}
+      setGroupBranches((prev) => {
+        const next = [...prev.filter((b) => b.id !== demoBranchId), newDemoBranch];
+        saveCachedGroupBranches(CLIENT_DEMO_STORE_ID, next);
+        return next;
+      });
+      return;
+    }
+
     const primaryId = primaryCloudStoreId || firebaseUser?.uid || OWNER_PRIMARY_STORE_ID;
     const ownerUid = firebaseUser?.uid || storeProfile?.ownerUid || primaryId;
     const ownerEmail = (firebaseUser?.email || storeProfile?.ownerEmail || 'owner@rofanipos.app').toLowerCase();
@@ -5827,7 +6616,9 @@ export default function App() {
     const isMainBranch = targetStoreId === primaryId;
     const targetBranch = groupBranches.find((b) => b.id === targetStoreId) || storeProfile;
     const nextScope = isMainBranch
-      ? isOwnerAccount
+      ? isClientDemoMode
+        ? CLIENT_DEMO_STORE_ID
+        : isOwnerAccount
         ? OWNER_PRIMARY_STORE_ID
         : primaryId
       : targetStoreId;
@@ -5836,6 +6627,9 @@ export default function App() {
     setActiveBranchStoreIdState(isMainBranch ? null : targetStoreId);
     prevTenantScopeRef.current = nextScope;
     reloadAppStateForTenantScope(nextScope, nextScope === OWNER_PRIMARY_STORE_ID, targetBranch);
+    if (isClientDemoMode && targetBranch) {
+      setStoreProfile(targetBranch);
+    }
     if (targetBranch?.storeName) {
       setStores((prev) =>
         prev.map((s, idx) =>
@@ -5847,6 +6641,20 @@ export default function App() {
   };
 
   const handleSyncCrossBranchStaff = async (user: User, targetBranchIds: string[]) => {
+    if (isClientDemoMode) {
+      const updatedUser: User = {
+        ...user,
+        assignedBranchIds: targetBranchIds,
+        updatedAt: new Date().toISOString(),
+      };
+      setAllUsers((prev) => prev.map((u) => (u.id === updatedUser.id ? updatedUser : u)));
+      if (currentUser.id === updatedUser.id) {
+        setCurrentUser(updatedUser);
+        safeSetJSON('retail_pos_active_user', updatedUser);
+      }
+      return;
+    }
+
     const allBranchIds =
       groupBranches.length > 0
         ? groupBranches.map((b) => b.id)
@@ -5860,6 +6668,75 @@ export default function App() {
     if (currentUser.id === updatedUser.id) {
       setCurrentUser(updatedUser);
       safeSetJSON('retail_pos_active_user', updatedUser);
+    }
+  };
+
+  const handleStartClientDemo = () => {
+    try {
+      localStorage.setItem(CLIENT_DEMO_MODE_KEY, '1');
+      if (typeof window !== 'undefined') {
+        const url = new URL(window.location.href);
+        url.searchParams.set('demo', '1');
+        window.history.replaceState({}, '', url.toString());
+      }
+    } catch {}
+    const { mainProfile, branches } = seedClientDemoSandbox();
+    setActiveBranchCloudStoreId(null);
+    setActiveBranchStoreIdState(null);
+    setIsClientDemoMode(true);
+    setStoreProfile(mainProfile);
+    setGroupBranches(branches);
+    prevTenantScopeRef.current = CLIENT_DEMO_STORE_ID;
+    reloadAppStateForTenantScope(CLIENT_DEMO_STORE_ID, false, mainProfile);
+    setIsTerminalLocked(false);
+    setActiveTab('pos');
+  };
+
+  const handleResetClientDemo = () => {
+    const { mainProfile, branches } = seedClientDemoSandbox();
+    setActiveBranchCloudStoreId(null);
+    setActiveBranchStoreIdState(null);
+    setStoreProfile(mainProfile);
+    setGroupBranches(branches);
+    prevTenantScopeRef.current = CLIENT_DEMO_STORE_ID;
+    reloadAppStateForTenantScope(CLIENT_DEMO_STORE_ID, false, mainProfile);
+    setIsTerminalLocked(false);
+  };
+
+  const handleExitClientDemo = () => {
+    try {
+      localStorage.removeItem(CLIENT_DEMO_MODE_KEY);
+      clearClientDemoStorage();
+      if (typeof window !== 'undefined') {
+        const url = new URL(window.location.href);
+        if (url.searchParams.has('demo')) {
+          url.searchParams.delete('demo');
+          window.history.replaceState({}, '', url.toString());
+        }
+      }
+    } catch {}
+
+    setActiveBranchCloudStoreId(null);
+    setActiveBranchStoreIdState(null);
+    setIsClientDemoMode(false);
+
+    if (firebaseUser && isAuthorizedCloudUser(firebaseUser)) {
+      const nextScope = isOwnerCloudUser(firebaseUser)
+        ? OWNER_PRIMARY_STORE_ID
+        : getStoreIdForUser(firebaseUser) || firebaseUser.uid;
+      prevTenantScopeRef.current = nextScope;
+      reloadAppStateForTenantScope(nextScope, isOwnerCloudUser(firebaseUser));
+    } else if (
+      allowOfflineOwnerMode &&
+      typeof window !== 'undefined' &&
+      localStorage.getItem(VERIFIED_OWNER_CACHE_KEY) === '1'
+    ) {
+      prevTenantScopeRef.current = OWNER_PRIMARY_STORE_ID;
+      reloadAppStateForTenantScope(OWNER_PRIMARY_STORE_ID, true);
+    } else {
+      prevTenantScopeRef.current = '__unauthenticated__';
+      setStoreProfile(null);
+      setGroupBranches([]);
     }
   };
 
@@ -5882,7 +6759,7 @@ export default function App() {
     setGroupBranches((prev) =>
       prev.map((b) => (b.id === targetCloudStoreId ? { ...b, storeName: normalizedName } : b))
     );
-    if (targetCloudStoreId && targetCloudStoreId !== '__unauthenticated__' && isAuthorizedCloudUser(firebaseUser)) {
+    if (!isClientDemoMode && targetCloudStoreId && targetCloudStoreId !== '__unauthenticated__' && isAuthorizedCloudUser(firebaseUser)) {
       updateStoreProfileDetails(targetCloudStoreId, { storeName: normalizedName }).catch(() => {});
     }
   };
@@ -5897,7 +6774,7 @@ export default function App() {
       return updated;
     });
     const targetCloudStoreId = effectiveCloudStoreId || getActiveTenantStoreId();
-    if (targetCloudStoreId && targetCloudStoreId !== '__unauthenticated__' && isAuthorizedCloudUser(firebaseUser)) {
+    if (!isClientDemoMode && targetCloudStoreId && targetCloudStoreId !== '__unauthenticated__' && isAuthorizedCloudUser(firebaseUser)) {
       await updateStoreProfileDetails(targetCloudStoreId, { businessCard: nextCard });
     }
   };
@@ -5913,7 +6790,7 @@ export default function App() {
       return updated;
     });
     const targetCloudStoreId = effectiveCloudStoreId || getActiveTenantStoreId();
-    if (targetCloudStoreId && targetCloudStoreId !== '__unauthenticated__' && isAuthorizedCloudUser(firebaseUser)) {
+    if (!isClientDemoMode && targetCloudStoreId && targetCloudStoreId !== '__unauthenticated__' && isAuthorizedCloudUser(firebaseUser)) {
       updateStoreProfileDetails(targetCloudStoreId, { preferredLabelSizeId: formatId }).catch(() => {});
     }
   };
@@ -6736,6 +7613,7 @@ export default function App() {
           onlineOrders={onlineOrders}
           purchaseOrders={purchaseOrders}
           cashTransactions={cashTransactions}
+          customerReturns={customerReturns}
         />
       )}
 
@@ -6811,11 +7689,19 @@ export default function App() {
           products={products}
           currentUser={currentUser}
           offers={offers}
+          customerDeposits={customerDeposits}
+          customerComplaints={customerComplaints}
+          customerReturns={customerReturns}
+          storeName={displayedStoreName}
+          storeKraPin={storeProfile?.kraPin}
           onSaveCustomer={handleSaveCustomer}
           onDeleteCustomer={handleDeleteCustomer}
           onSaveSupplier={handleSaveSupplier}
           onDeleteSupplier={handleDeleteSupplier}
           onRecordCustomerDebtPayment={handleRecordCustomerDebtPayment}
+          onRecordCustomerDepositOrPayment={handleRecordCustomerDepositOrPayment}
+          onProcessCustomerReturn={handleProcessCustomerReturn}
+          onSaveCustomerComplaint={handleSaveCustomerComplaint}
           onRecordSupplierPayment={handleRecordSupplierPayment}
           onImportCustomers={handleImportCustomers}
           onImportSuppliers={handleImportSuppliers}
@@ -6897,6 +7783,7 @@ export default function App() {
           customers={customers}
           suppliers={suppliers}
           expenses={expenses}
+          customerReturns={customerReturns}
           auditLogs={auditLogs}
           onUpdateTransaction={handleUpdateTransaction}
           onDeleteTransaction={handleDeleteTransaction}
@@ -6906,6 +7793,7 @@ export default function App() {
           salaryPayouts={salaryPayouts}
           commissionPayouts={commissionPayouts}
           storeName={displayedStoreName}
+          storeKraPin={storeProfile?.kraPin}
           onAddExpense={handleAddExpense}
           inPhoneFrame={deviceFormat === 'phone'}
         />
@@ -7015,7 +7903,7 @@ export default function App() {
             if (!cleanPin) return;
             setStoreProfile((prev) => (prev ? { ...prev, kraPin: cleanPin } : prev));
             const targetCloudStoreId = primaryCloudStoreId || getActiveTenantStoreId();
-            if (targetCloudStoreId && isAuthorizedCloudUser(firebaseUser)) {
+            if (!isClientDemoMode && targetCloudStoreId && isAuthorizedCloudUser(firebaseUser)) {
               await updateStoreProfileDetails(targetCloudStoreId, { kraPin: cleanPin });
             }
           }}
@@ -7066,6 +7954,9 @@ export default function App() {
             await signOutFromCloud();
           }}
           cloudUserEmail={firebaseUser?.email}
+          isClientDemoMode={isClientDemoMode}
+          onStartClientDemo={handleStartClientDemo}
+          onExitClientDemo={handleExitClientDemo}
         />
       )}
 
@@ -7075,6 +7966,7 @@ export default function App() {
           onOpenPlansPricing={() => setShowPlansModal(true)}
           onOpenAiAssistant={() => setShowAiAssistantModal(true)}
           onOpenSuggestFeature={() => setShowSuggestFeatureModal(true)}
+          onStartClientDemo={!isClientDemoMode ? handleStartClientDemo : undefined}
           inPhoneFrame={deviceFormat === 'phone'}
         />
       )}
@@ -7090,7 +7982,7 @@ export default function App() {
 
   // Instant Local-First Startup: if a cached verified session exists, open the POS immediately (<100ms)
   // while Firebase Auth & Firestore connect quietly in the background (max 3s check for new users).
-  if (!isFirebaseAuthReady && !hasCachedVerifiedSession) {
+  if (!isClientDemoMode && !isFirebaseAuthReady && !hasCachedVerifiedSession) {
     return (
       <div className="min-h-screen bg-[#0f172a] text-slate-100 flex items-center justify-center p-6 font-sans">
         <div className="flex flex-col items-center gap-3">
@@ -7107,6 +7999,7 @@ export default function App() {
   // Only show MerchantAuthScreen when Firebase Auth has genuinely settled as signed-out (or for unauthenticated cold starts).
   const isWaitingForCachedAuthHydration = !hasAuthSettledFromFirebase && hasCachedVerifiedSession;
   if (
+    !isClientDemoMode &&
     isFirebaseAuthReady &&
     !isWaitingForCachedAuthHydration &&
     !isAuthorizedCloudUser(firebaseUser) &&
@@ -7117,6 +8010,7 @@ export default function App() {
         hasOfflineOwnerCache={hasCachedOwnerAccess}
         initialReferralCode={pendingReferralCode}
         onReferralCodeChange={updatePendingReferralCode}
+        onStartClientDemo={handleStartClientDemo}
         onContinueOfflineOwner={() => {
           setActiveTenantStoreId(OWNER_PRIMARY_STORE_ID);
           setAllowOfflineOwnerMode(true);
@@ -7190,12 +8084,13 @@ export default function App() {
   }
 
   const isSubscriptionExpired =
+    !isClientDemoMode &&
     !isOwnerAccount &&
     Boolean(storeProfile) &&
     (storeProfile!.subscriptionStatus === 'expired' ||
       (Boolean(storeProfile!.expiresAt) && Date.parse(storeProfile!.expiresAt) <= Date.now()));
 
-  if (isAuthorizedCloudUser(firebaseUser) && isSubscriptionExpired && storeProfile) {
+  if (!isClientDemoMode && isAuthorizedCloudUser(firebaseUser) && isSubscriptionExpired && storeProfile) {
     return (
       <div className="min-h-screen bg-[#0f172a]">
         <SubscriptionPlansModal
@@ -7256,6 +8151,26 @@ export default function App() {
           conflictCount={syncConflicts.length}
           onOpenConflictAssistant={() => setIsConflictModalOpen(true)}
           hideBottomNav={activeTab === 'pos' && isMobileSearchActive}
+          topDemoBanner={
+            isClientDemoMode ? (
+              <LiveClientDemoOverlay
+                activeTab={activeTab}
+                deviceFormat={deviceFormat}
+                storeName={displayedStoreName}
+                productsCount={products.length}
+                transactionsCount={transactions.length}
+                branchCount={Math.max(1, groupBranches.length)}
+                isSignedInAccount={isAuthorizedCloudUser(firebaseUser)}
+                onSelectTab={(tab) => setActiveTab(tab)}
+                onToggleDeviceFormat={() => setDeviceFormat('computer')}
+                onOpenBarcodePrinter={() => setShowPrintBarcodesModal(true)}
+                onOpenMultiBranch={() => setShowMultiBranchModal(true)}
+                onOpenBusinessCard={() => setShowBusinessCardModal(true)}
+                onResetDemo={handleResetClientDemo}
+                onExitDemo={handleExitClientDemo}
+              />
+            ) : undefined
+          }
           quickToolsBar={
             <MobileQuickToolsBar
               placement="phoneFrame"
@@ -8106,6 +9021,44 @@ export default function App() {
             </div>
           </button>
 
+          {/* Live Client Demo Mode Toggle */}
+          <button
+            type="button"
+            id="btn-sidebar-client-demo"
+            onClick={() => {
+              if (isClientDemoMode) {
+                handleExitClientDemo();
+              } else {
+                handleStartClientDemo();
+              }
+              setIsMobileMenuOpen(false);
+            }}
+            title={
+              isClientDemoMode
+                ? 'Exit Live Client Demo Sandbox'
+                : 'Launch isolated Live Client Demo for new prospective customers'
+            }
+            className={`w-full flex items-center ${isSidebarCollapsed ? 'justify-center px-2' : 'justify-between px-3'} py-2.5 rounded-lg transition border cursor-pointer ${
+              isClientDemoMode
+                ? 'bg-emerald-950/70 border-emerald-500/50 text-emerald-200 hover:bg-emerald-900/60'
+                : 'bg-slate-800/70 border-slate-700/70 text-emerald-300 hover:bg-slate-800'
+            }`}
+          >
+            <div className="flex items-center gap-3">
+              <Play className="w-4 h-4 shrink-0 text-emerald-400 fill-current" />
+              {!isSidebarCollapsed && (
+                <span className="font-semibold">
+                  {isClientDemoMode ? 'Exit Client Demo' : 'Live Client Demo'}
+                </span>
+              )}
+            </div>
+            {!isSidebarCollapsed && (
+              <span className="text-[9px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-1.5 py-0.5 rounded font-bold uppercase">
+                {isClientDemoMode ? 'Active' : 'Pitch'}
+              </span>
+            )}
+          </button>
+
           {/* Suggest a Special Feature */}
           <button
             type="button"
@@ -8285,15 +9238,36 @@ export default function App() {
 
       {/* Main Container */}
       <main className="flex-1 flex flex-col min-w-0 overflow-hidden print-unlock-overflow">
-        {/* Real-Time Offline and Pending Cloud Sync Notification Banner */}
-        <div className="print:hidden">
-          <OfflineSyncBanner
-            onTriggerSync={syncPendingQueueToCloud}
-            onOpenCloudSync={() => setShowCloudSyncModal(true)}
-            conflictCount={syncConflicts.length}
-            onOpenConflictAssistant={() => setIsConflictModalOpen(true)}
+        {isClientDemoMode && (
+          <LiveClientDemoOverlay
+            activeTab={activeTab}
+            deviceFormat={deviceFormat}
+            storeName={displayedStoreName}
+            productsCount={products.length}
+            transactionsCount={transactions.length}
+            branchCount={Math.max(1, groupBranches.length)}
+            isSignedInAccount={isAuthorizedCloudUser(firebaseUser)}
+            onSelectTab={(tab) => setActiveTab(tab)}
+            onToggleDeviceFormat={() => setDeviceFormat('phone')}
+            onOpenBarcodePrinter={() => setShowPrintBarcodesModal(true)}
+            onOpenMultiBranch={() => setShowMultiBranchModal(true)}
+            onOpenBusinessCard={() => setShowBusinessCardModal(true)}
+            onResetDemo={handleResetClientDemo}
+            onExitDemo={handleExitClientDemo}
           />
-        </div>
+        )}
+
+        {/* Real-Time Offline and Pending Cloud Sync Notification Banner */}
+        {!isClientDemoMode && (
+          <div className="print:hidden">
+            <OfflineSyncBanner
+              onTriggerSync={syncPendingQueueToCloud}
+              onOpenCloudSync={() => setShowCloudSyncModal(true)}
+              conflictCount={syncConflicts.length}
+              onOpenConflictAssistant={() => setIsConflictModalOpen(true)}
+            />
+          </div>
+        )}
 
         {/* Firestore Quota Notice Banner */}
         {isCloudQuotaExceeded && showQuotaBanner && (

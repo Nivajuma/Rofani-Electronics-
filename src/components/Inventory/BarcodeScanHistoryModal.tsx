@@ -1365,7 +1365,15 @@ export const BarcodeScanHistoryContent: React.FC<BarcodeScanHistoryProps> = ({
       {/* CONFIRM CLEAR MODAL */}
       {confirmClearOpen && (
         <div className="fixed inset-0 z-60 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 max-w-sm w-full space-y-4 shadow-2xl text-slate-100">
+          <div className="relative bg-slate-900 border border-slate-800 rounded-3xl p-5 max-w-sm w-full space-y-4 shadow-2xl text-slate-100">
+            <button
+              type="button"
+              onClick={() => setConfirmClearOpen(false)}
+              className="absolute top-3.5 right-3.5 p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 hover:text-white transition cursor-pointer"
+              aria-label="Close clear history dialog"
+            >
+              <X className="w-4 h-4" />
+            </button>
             <div className="w-10 h-10 rounded-2xl bg-rose-500/20 text-rose-400 flex items-center justify-center border border-rose-500/30">
               <Trash2 className="w-5 h-5" />
             </div>

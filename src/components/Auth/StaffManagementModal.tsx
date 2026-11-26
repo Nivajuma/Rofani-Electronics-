@@ -535,7 +535,15 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
   if (!isDirectlyAuthorized && !isSupervisorUnlocked) {
     return (
       <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-4">
-        <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-md shadow-2xl p-6 flex flex-col items-center text-center animate-in fade-in zoom-in-95 duration-200">
+        <div className="relative bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-md shadow-2xl p-6 flex flex-col items-center text-center animate-in fade-in zoom-in-95 duration-200">
+          <button
+            type="button"
+            onClick={onClose}
+            className="absolute top-4 right-4 p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 hover:text-white transition cursor-pointer"
+            aria-label="Close authorization dialog"
+          >
+            <X className="w-4 h-4" />
+          </button>
           <div className="w-16 h-16 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 mb-4 shadow-inner">
             <Lock className="w-8 h-8" />
           </div>
@@ -1698,9 +1706,17 @@ export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
         {/* MODAL 3: DELETE WORKER CONFIRMATION DIALOG */}
         {deleteTargetUser && (
           <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-4">
-            <div className="bg-slate-900 border border-rose-900/60 rounded-3xl w-full max-w-md shadow-2xl overflow-hidden p-6 space-y-4">
-              <div className="flex items-center gap-3">
-                <div className="p-3 bg-rose-950 border border-rose-800 text-rose-400 rounded-2xl">
+            <div className="relative bg-slate-900 border border-rose-900/60 rounded-3xl w-full max-w-md shadow-2xl overflow-hidden p-6 space-y-4">
+              <button
+                type="button"
+                onClick={() => setDeleteTargetUser(null)}
+                className="absolute top-4 right-4 p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 hover:text-white transition cursor-pointer"
+                aria-label="Close delete worker dialog"
+              >
+                <X className="w-4 h-4" />
+              </button>
+              <div className="flex items-center gap-3 pr-8">
+                <div className="p-3 bg-rose-950 border border-rose-800 text-rose-400 rounded-2xl shrink-0">
                   <Trash2 className="w-6 h-6" />
                 </div>
                 <div>

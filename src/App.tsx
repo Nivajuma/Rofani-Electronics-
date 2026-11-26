@@ -53,7 +53,8 @@ import {
   Gift,
   Info,
   Lightbulb,
-  Play
+  Play,
+  ArrowLeft
 } from 'lucide-react';
 import {
   Product,
@@ -554,13 +555,52 @@ export default function App() {
 
   type AppTab = (typeof VALID_TABS)[number];
 
-  const [activeTab, setActiveTab] = useState<AppTab>(() =>
+  const [activeTab, setRawActiveTab] = useState<AppTab>(() =>
     safeGetJSON<AppTab>('retail_pos_active_tab', 'pos', (val) => VALID_TABS.includes(val))
   );
+  const [viewHistory, setViewHistory] = useState<AppTab[]>([]);
+  const activeTabRef = useRef<AppTab>(activeTab);
+  const viewHistoryRef = useRef<AppTab[]>(viewHistory);
 
   useEffect(() => {
+    activeTabRef.current = activeTab;
     safeSetJSON('retail_pos_active_tab', activeTab);
   }, [activeTab]);
+
+  useEffect(() => {
+    viewHistoryRef.current = viewHistory;
+  }, [viewHistory]);
+
+  const setActiveTab = useCallback((nextOrUpdater: AppTab | ((prev: AppTab) => AppTab)) => {
+    const prevTab = activeTabRef.current;
+    const nextTab = typeof nextOrUpdater === 'function' ? nextOrUpdater(prevTab) : nextOrUpdater;
+    if (!VALID_TABS.includes(nextTab)) return;
+    if (nextTab !== prevTab) {
+      setViewHistory((prev) => {
+        const nextHistory = prev[prev.length - 1] === prevTab ? prev : [...prev, prevTab];
+        return nextHistory.slice(-20);
+      });
+      activeTabRef.current = nextTab;
+      setRawActiveTab(nextTab);
+    }
+  }, []);
+
+  const navigateBack = useCallback(() => {
+    const history = viewHistoryRef.current;
+    if (history.length > 0) {
+      const targetTab = history[history.length - 1];
+      const nextHistory = history.slice(0, -1);
+      viewHistoryRef.current = nextHistory;
+      setViewHistory(nextHistory);
+      activeTabRef.current = targetTab;
+      setRawActiveTab(targetTab);
+      return;
+    }
+    if (activeTabRef.current !== 'pos') {
+      activeTabRef.current = 'pos';
+      setRawActiveTab('pos');
+    }
+  }, []);
 
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(() =>
     safeGetJSON<boolean>('retail_pos_sidebar_collapsed', false, (val) => typeof val === 'boolean')
@@ -2549,7 +2589,6 @@ export default function App() {
   storesRef.current = stores;
   const activeStoreIdRef = useRef<string>(activeStoreId);
   activeStoreIdRef.current = activeStoreId;
-  const activeTabRef = useRef<AppTab>(activeTab);
   activeTabRef.current = activeTab;
   const storeProfileRef = useRef<StoreSubscriptionProfile | null>(storeProfile);
   storeProfileRef.current = storeProfile;
@@ -7550,6 +7589,24 @@ export default function App() {
 
   const fontScaleClass = fontScale === 'large' ? 'text-base' : 'text-sm';
 
+  const SUB_PAGE_LABELS: Record<AppTab, string> = {
+    pos: 'Point of Sale',
+    inventory: 'Stock & Inventory',
+    purchasing: 'Purchases & Receiving',
+    stocktake: 'Physical Stock Count',
+    contacts: 'Customers & Suppliers',
+    cashmanagement: 'Cash In & Cash Out Management',
+    expenses: 'Daily Expenses',
+    attendance: 'Staff, Wages & Roles',
+    reports: 'Reports & Analytics',
+    onlinestore: 'Online Storefront',
+    onlineorders: 'Online Orders & Offers',
+    settings: 'Settings & Security',
+    auditlogs: 'Audit Logs',
+    menu: 'All Modules & Menu',
+    about: 'About Rofani POS',
+  };
+
   // Helper function to render active tab view content
   const renderActiveTabContent = () => {
     const isTabPermitted =
@@ -7562,6 +7619,7 @@ export default function App() {
           currentTab={activeTab as TabKey}
           currentUser={currentUser}
           allUsers={allUsers}
+          onBack={navigateBack}
           onNavigateToAllowedTab={(tab) => {
             setActiveTab(tab);
             if (tab !== 'inventory') setInventoryLowStockOnly(false);
@@ -7579,8 +7637,43 @@ export default function App() {
       );
     }
 
+    const hasSelfBackHeader = ['pos', 'cashmanagement', 'reports', 'about', 'auditlogs'].includes(activeTab);
+
     return (
       <>
+        {!hasSelfBackHeader && (
+          <div className="print:hidden sticky top-0 z-20 bg-slate-900/95 backdrop-blur-md border-b border-slate-800 px-3 sm:px-4 py-2 mb-3 rounded-xl flex items-center justify-between gap-2 shadow-sm">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <button
+                type="button"
+                onClick={navigateBack}
+                className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-100 hover:text-white text-xs font-bold inline-flex items-center gap-1.5 min-h-[36px] shrink-0 cursor-pointer transition active:scale-95"
+                aria-label="Back to previous screen"
+              >
+                <ArrowLeft className="w-4 h-4 text-sky-400" />
+                <span>Back</span>
+              </button>
+              <span className="text-xs sm:text-sm font-extrabold text-slate-100 truncate">
+                {SUB_PAGE_LABELS[activeTab] || 'Rofani POS'}
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setViewHistory([]);
+                activeTabRef.current = 'pos';
+                setRawActiveTab('pos');
+                setInventoryLowStockOnly(false);
+              }}
+              className="p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 hover:text-white cursor-pointer shrink-0 transition"
+              title="Close and return to Home POS"
+              aria-label="Close to Home POS"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+
         {activeTab === 'pos' && (
         <POSView
           products={products}
@@ -7729,6 +7822,7 @@ export default function App() {
           onDeleteFinancingFacility={handleDeleteFinancingFacility}
           onRecordFacilityRepayment={handleRecordFacilityRepayment}
           onDisburseFacilityFunds={handleDisburseFacilityFunds}
+          onBack={navigateBack}
         />
       )}
 
@@ -7796,6 +7890,7 @@ export default function App() {
           storeKraPin={storeProfile?.kraPin}
           onAddExpense={handleAddExpense}
           inPhoneFrame={deviceFormat === 'phone'}
+          onBack={navigateBack}
         />
       )}
 
@@ -7803,7 +7898,7 @@ export default function App() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
           <AuditLogsView
             logs={auditLogs}
-            onClose={() => setActiveTab('reports')}
+            onClose={navigateBack}
           />
         </div>
       )}
@@ -7962,7 +8057,7 @@ export default function App() {
 
       {activeTab === 'about' && (
         <AboutUsView
-          onBack={() => setActiveTab(deviceFormat === 'phone' ? 'menu' : 'pos')}
+          onBack={navigateBack}
           onOpenPlansPricing={() => setShowPlansModal(true)}
           onOpenAiAssistant={() => setShowAiAssistantModal(true)}
           onOpenSuggestFeature={() => setShowSuggestFeatureModal(true)}

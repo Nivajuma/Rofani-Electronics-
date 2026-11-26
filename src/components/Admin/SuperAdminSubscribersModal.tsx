@@ -352,7 +352,7 @@ export const SuperAdminSubscribersModal: React.FC<SuperAdminSubscribersModalProp
             <button
               type="button"
               onClick={onClose}
-              className="hidden sm:inline-flex p-2 rounded-xl bg-slate-900 hover:bg-slate-700 border border-slate-700 text-slate-300 hover:text-white cursor-pointer shrink-0 transition"
+              className="inline-flex p-2 rounded-xl bg-slate-900 hover:bg-slate-700 border border-slate-700 text-slate-300 hover:text-white cursor-pointer shrink-0 transition"
               aria-label="Close"
             >
               <X className="w-4 h-4" />

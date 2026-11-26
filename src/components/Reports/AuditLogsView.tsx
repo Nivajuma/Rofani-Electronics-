@@ -20,6 +20,8 @@ import {
   Info,
   CheckCircle,
   Layers,
+  ArrowLeft,
+  X,
 } from 'lucide-react';
 import { SensitiveActionLog, SensitiveActionCategory, Role } from '../../types';
 import { exportAuditLogsToCSV } from '../../utils/auditLogger';
@@ -185,14 +187,25 @@ export const AuditLogsView: React.FC<AuditLogsViewProps> = ({
     <div className="space-y-4">
       {/* Header Bar */}
       <div className="bg-slate-900 border border-slate-800 p-4 sm:p-5 rounded-2xl shadow-lg flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <div className="p-3 bg-sky-950 border border-sky-800 text-sky-400 rounded-xl shadow-inner">
+        <div className="flex items-start sm:items-center gap-3">
+          {onClose && (
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-100 hover:text-white text-xs font-bold inline-flex items-center gap-1.5 shrink-0 transition active:scale-95 cursor-pointer"
+              aria-label="Back to previous screen"
+            >
+              <ArrowLeft className="w-4 h-4 text-sky-400" />
+              <span>Back</span>
+            </button>
+          )}
+          <div className="p-3 bg-sky-950 border border-sky-800 text-sky-400 rounded-xl shadow-inner shrink-0">
             <ShieldCheck className="w-6 h-6" />
           </div>
           <div>
             <div className="flex items-center gap-2">
               <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full bg-sky-500/20 text-sky-300 border border-sky-500/30">
-                Security & Compliance
+                Security &amp; Compliance
               </span>
               <span className="text-xs text-slate-400 font-mono">Immutable Audit Trail</span>
             </div>
@@ -213,10 +226,13 @@ export const AuditLogsView: React.FC<AuditLogsViewProps> = ({
           </button>
           {onClose && (
             <button
+              type="button"
               onClick={onClose}
-              className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white text-xs font-bold rounded-xl transition cursor-pointer"
+              className="p-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 hover:text-white rounded-xl transition cursor-pointer"
+              aria-label="Close audit logs"
+              title="Close"
             >
-              Close
+              <X className="w-4 h-4" />
             </button>
           )}
         </div>

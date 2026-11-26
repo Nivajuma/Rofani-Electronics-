@@ -22,7 +22,8 @@ import {
   ShieldCheck,
   Zap,
   ShoppingBasket,
-  MessageSquare
+  MessageSquare,
+  X
 } from 'lucide-react';
 import { safeGetJSON, safeSetJSON } from '../../utils/safeStorage';
 
@@ -806,7 +807,15 @@ export const OnlineStorefrontView: React.FC<OnlineStorefrontViewProps> = ({
       {/* Order Created Success Dialog */}
       {createdOrder && (
         <div className="fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-emerald-500/50 rounded-2xl w-full max-w-md p-6 text-center space-y-4 shadow-2xl">
+          <div className="relative bg-slate-900 border border-emerald-500/50 rounded-2xl w-full max-w-md p-6 text-center space-y-4 shadow-2xl">
+            <button
+              type="button"
+              onClick={() => setCreatedOrder(null)}
+              className="absolute top-3.5 right-3.5 p-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 hover:text-white transition cursor-pointer"
+              aria-label="Close order dialog"
+            >
+              <X className="w-4 h-4" />
+            </button>
             <div className="w-12 h-12 bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-full flex items-center justify-center mx-auto">
               <CheckCircle2 className="w-7 h-7" />
             </div>

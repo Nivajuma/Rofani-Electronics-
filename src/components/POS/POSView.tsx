@@ -5163,9 +5163,17 @@ export const POSView: React.FC<POSViewProps> = ({
       {/* MODAL: CONFIRM START NEW SALE WHEN CART NOT EMPTY */}
       {showNewSaleConfirmModal && (
         <div className="fixed inset-0 z-[125] bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-md shadow-2xl p-6 space-y-4">
-            <div className="flex items-center gap-3">
-              <div className="p-3 bg-emerald-950 border border-emerald-800 text-emerald-400 rounded-xl">
+          <div className="relative bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-md shadow-2xl p-6 space-y-4">
+            <button
+              type="button"
+              onClick={() => setShowNewSaleConfirmModal(false)}
+              className="absolute top-4 right-4 p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 hover:text-white transition cursor-pointer"
+              aria-label="Close new sale dialog"
+            >
+              <X className="w-4 h-4" />
+            </button>
+            <div className="flex items-center gap-3 pr-8">
+              <div className="p-3 bg-emerald-950 border border-emerald-800 text-emerald-400 rounded-xl shrink-0">
                 <ShoppingBag className="w-6 h-6" />
               </div>
               <div>

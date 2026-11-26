@@ -2574,7 +2574,15 @@ export const CustomersSuppliersView: React.FC<CustomersSuppliersViewProps> = ({
             className="bg-slate-900 border border-slate-800 rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-4 relative text-slate-100"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setCustomerToDelete(null)}
+              className="absolute top-4 right-4 p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 hover:text-white transition cursor-pointer"
+              aria-label="Close delete customer dialog"
+            >
+              <X className="w-4 h-4" />
+            </button>
+            <div className="flex items-center gap-3 pr-8">
               <div className="w-12 h-12 rounded-2xl bg-rose-500/10 border border-rose-500/20 flex items-center justify-center text-rose-400 shrink-0">
                 <Trash2 className="w-6 h-6" />
               </div>
@@ -2583,7 +2591,7 @@ export const CustomersSuppliersView: React.FC<CustomersSuppliersViewProps> = ({
                   Delete Customer Profile?
                 </h3>
                 <p className="text-xs text-slate-400">
-                  Permanent removal from directory & cloud database
+                  Permanent removal from directory &amp; cloud database
                 </p>
               </div>
             </div>
@@ -2644,7 +2652,15 @@ export const CustomersSuppliersView: React.FC<CustomersSuppliersViewProps> = ({
             className="bg-slate-900 border border-slate-800 rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-4 relative text-slate-100"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setSupplierToDelete(null)}
+              className="absolute top-4 right-4 p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 hover:text-white transition cursor-pointer"
+              aria-label="Close delete supplier dialog"
+            >
+              <X className="w-4 h-4" />
+            </button>
+            <div className="flex items-center gap-3 pr-8">
               <div className="w-12 h-12 rounded-2xl bg-rose-500/10 border border-rose-500/20 flex items-center justify-center text-rose-400 shrink-0">
                 <Trash2 className="w-6 h-6" />
               </div>
@@ -2721,9 +2737,17 @@ export const CustomersSuppliersView: React.FC<CustomersSuppliersViewProps> = ({
           onClick={() => setDeleteNoticeMessage(null)}
         >
           <div
-            className="bg-slate-900 border border-slate-800 rounded-3xl max-w-sm w-full p-6 shadow-2xl text-center space-y-4"
+            className="relative bg-slate-900 border border-slate-800 rounded-3xl max-w-sm w-full p-6 shadow-2xl text-center space-y-4"
             onClick={(e) => e.stopPropagation()}
           >
+            <button
+              type="button"
+              onClick={() => setDeleteNoticeMessage(null)}
+              className="absolute top-3.5 right-3.5 p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 hover:text-white transition cursor-pointer"
+              aria-label="Close notice dialog"
+            >
+              <X className="w-4 h-4" />
+            </button>
             <div className="w-12 h-12 bg-amber-500/10 border border-amber-500/20 rounded-2xl flex items-center justify-center text-amber-400 mx-auto">
               <AlertTriangle className="w-6 h-6" />
             </div>

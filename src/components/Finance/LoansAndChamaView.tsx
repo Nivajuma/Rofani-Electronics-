@@ -112,11 +112,11 @@ export const LoansAndChamaView: React.FC<LoansAndChamaViewProps> = ({
   const [disburseNotes, setDisburseNotes] = useState('');
 
   // --- CALCULATIONS ---
-  const totalPrincipalBorrowed = facilities.reduce((sum, f) => sum + f.principalAmount, 0);
-  const totalRepayable = facilities.reduce((sum, f) => sum + f.totalRepayableAmount, 0);
-  const totalRepaidSoFar = facilities.reduce((sum, f) => sum + (f.totalRepaid || 0), 0);
-  const totalOutstandingRemaining = facilities.reduce((sum, f) => sum + (f.balanceRemaining || 0), 0);
-  const activeCount = facilities.filter((f) => (f.balanceRemaining || 0) > 0).length;
+  const totalPrincipalBorrowed = facilities.reduce((sum, f) => sum + (Number(f.principalAmount) || 0), 0);
+  const totalRepayable = facilities.reduce((sum, f) => sum + (Number(f.totalRepayableAmount) || 0), 0);
+  const totalRepaidSoFar = facilities.reduce((sum, f) => sum + (Number(f.totalRepaid) || 0), 0);
+  const totalOutstandingRemaining = facilities.reduce((sum, f) => sum + (Number(f.balanceRemaining) || 0), 0);
+  const activeCount = facilities.filter((f) => (Number(f.balanceRemaining) || 0) > 0).length;
 
   // Filtered Facilities
   const filteredFacilities = facilities.filter((f) => {

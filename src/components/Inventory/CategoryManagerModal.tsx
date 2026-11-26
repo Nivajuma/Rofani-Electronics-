@@ -646,10 +646,18 @@ export const CategoryManagerModal: React.FC<CategoryManagerModalProps> = ({
           onClick={() => setCategoryToDelete(null)}
         >
           <div
-            className="bg-slate-900 border border-slate-800 rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-4 text-slate-100"
+            className="relative bg-slate-900 border border-slate-800 rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-4 text-slate-100"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setCategoryToDelete(null)}
+              className="absolute top-4 right-4 p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 hover:text-white transition cursor-pointer"
+              aria-label="Close delete category dialog"
+            >
+              <X className="w-4 h-4" />
+            </button>
+            <div className="flex items-center gap-3 pr-8">
               <div className="w-12 h-12 rounded-2xl bg-rose-500/10 border border-rose-500/20 flex items-center justify-center text-rose-400 shrink-0">
                 <Trash2 className="w-6 h-6" />
               </div>
@@ -732,10 +740,18 @@ export const CategoryManagerModal: React.FC<CategoryManagerModalProps> = ({
           onClick={() => setSubToDelete(null)}
         >
           <div
-            className="bg-slate-900 border border-slate-800 rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-4 text-slate-100"
+            className="relative bg-slate-900 border border-slate-800 rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-4 text-slate-100"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setSubToDelete(null)}
+              className="absolute top-4 right-4 p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 hover:text-white transition cursor-pointer"
+              aria-label="Close delete subcategory dialog"
+            >
+              <X className="w-4 h-4" />
+            </button>
+            <div className="flex items-center gap-3 pr-8">
               <div className="w-12 h-12 rounded-2xl bg-rose-500/10 border border-rose-500/20 flex items-center justify-center text-rose-400 shrink-0">
                 <Trash2 className="w-6 h-6" />
               </div>

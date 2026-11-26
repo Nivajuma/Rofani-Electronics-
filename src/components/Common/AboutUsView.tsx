@@ -206,10 +206,11 @@ export const AboutUsView: React.FC<AboutUsViewProps> = ({
           <button
             type="button"
             onClick={onBack}
-            className="w-9 h-9 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700/80 text-slate-200 flex items-center justify-center shrink-0 transition cursor-pointer"
-            aria-label="Go back"
+            className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-100 hover:text-white text-xs font-bold inline-flex items-center gap-1.5 shrink-0 transition active:scale-95 cursor-pointer"
+            aria-label="Back to previous screen"
           >
-            <ArrowLeft className="w-4 h-4" />
+            <ArrowLeft className="w-4 h-4 text-sky-400" />
+            <span>Back</span>
           </button>
           <div className="min-w-0">
             <h1 className="text-sm sm:text-base font-bold text-white truncate">

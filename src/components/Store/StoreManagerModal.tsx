@@ -1114,9 +1114,17 @@ export const StoreManagerModal: React.FC<StoreManagerModalProps> = ({
       {/* MODAL: DELETE STORE CONFIRMATION */}
       {storeToDelete && (
         <div className="fixed inset-0 z-[120] bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 max-w-md w-full space-y-4 shadow-2xl">
-            <div className="flex items-center gap-3 text-rose-400">
-              <AlertTriangle className="w-6 h-6" />
+          <div className="relative bg-slate-900 border border-slate-800 rounded-2xl p-5 max-w-md w-full space-y-4 shadow-2xl">
+            <button
+              type="button"
+              onClick={() => setStoreToDelete(null)}
+              className="absolute top-3.5 right-3.5 p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 hover:text-white transition cursor-pointer"
+              aria-label="Close delete branch dialog"
+            >
+              <X className="w-4 h-4" />
+            </button>
+            <div className="flex items-center gap-3 text-rose-400 pr-8">
+              <AlertTriangle className="w-6 h-6 shrink-0" />
               <h3 className="text-base font-black text-white">Delete Store Branch?</h3>
             </div>
             <p className="text-xs text-slate-300 leading-relaxed">
@@ -1148,9 +1156,17 @@ export const StoreManagerModal: React.FC<StoreManagerModalProps> = ({
       {/* MODAL: RESET DEMO STORES CONFIRMATION */}
       {showResetDemoConfirm && (
         <div className="fixed inset-0 z-[120] bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 max-w-md w-full space-y-4 shadow-2xl">
-            <div className="flex items-center gap-3 text-amber-400">
-              <RotateCcw className="w-6 h-6" />
+          <div className="relative bg-slate-900 border border-slate-800 rounded-2xl p-5 max-w-md w-full space-y-4 shadow-2xl">
+            <button
+              type="button"
+              onClick={() => setShowResetDemoConfirm(false)}
+              className="absolute top-3.5 right-3.5 p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 hover:text-white transition cursor-pointer"
+              aria-label="Close reset demo stores dialog"
+            >
+              <X className="w-4 h-4" />
+            </button>
+            <div className="flex items-center gap-3 text-amber-400 pr-8">
+              <RotateCcw className="w-6 h-6 shrink-0" />
               <h3 className="text-base font-black text-white">Reset Demo Store Outlets?</h3>
             </div>
             <p className="text-xs text-slate-300 leading-relaxed">
@@ -1180,9 +1196,17 @@ export const StoreManagerModal: React.FC<StoreManagerModalProps> = ({
       {/* MODAL: KEEP ONLY THIS STORE CONFIRMATION */}
       {showKeepSingleConfirm && (
         <div className="fixed inset-0 z-[120] bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 max-w-md w-full space-y-4 shadow-2xl">
-            <div className="flex items-center gap-3 text-indigo-400">
-              <Sparkles className="w-6 h-6" />
+          <div className="relative bg-slate-900 border border-slate-800 rounded-2xl p-5 max-w-md w-full space-y-4 shadow-2xl">
+            <button
+              type="button"
+              onClick={() => setShowKeepSingleConfirm(null)}
+              className="absolute top-3.5 right-3.5 p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 hover:text-white transition cursor-pointer"
+              aria-label="Close keep store dialog"
+            >
+              <X className="w-4 h-4" />
+            </button>
+            <div className="flex items-center gap-3 text-indigo-400 pr-8">
+              <Sparkles className="w-6 h-6 shrink-0" />
               <h3 className="text-base font-black text-white">Keep Only "{showKeepSingleConfirm.name}"?</h3>
             </div>
             <p className="text-xs text-slate-300 leading-relaxed">

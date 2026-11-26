@@ -35,7 +35,8 @@ import {
   Users,
   Smartphone,
   Calendar,
-  AlertTriangle
+  AlertTriangle,
+  ArrowLeft
 } from 'lucide-react';
 import {
   CashTransaction,
@@ -71,7 +72,17 @@ interface CashManagementViewProps {
   onDeleteFinancingFacility?: (facilityId: string) => void;
   onRecordFacilityRepayment?: (facilityId: string, repayment: FacilityRepayment, autoLogCashOut?: boolean) => void;
   onDisburseFacilityFunds?: (facilityId: string, amount: number, ref: string, autoLogCashIn?: boolean) => void;
+  onBack?: () => void;
 }
+
+const safeNum = (val: unknown): number => {
+  if (typeof val === 'number') return Number.isFinite(val) ? val : 0;
+  if (typeof val === 'string') {
+    const parsed = parseFloat(val.replace(/,/g, '').trim());
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  return 0;
+};
 
 const CASH_IN_CATEGORIES: CashInCategory[] = [
   'Bank Loan',
@@ -115,6 +126,7 @@ export const CashManagementView: React.FC<CashManagementViewProps> = ({
   onDeleteFinancingFacility,
   onRecordFacilityRepayment,
   onDisburseFacilityFunds,
+  onBack,
 }) => {
   // Main Tab Navigation
   const VALID_CASH_TABS = ['ledger', 'loans', 'payables', 'denominations', 'balancesheet'] as const;
@@ -202,27 +214,27 @@ export const CashManagementView: React.FC<CashManagementViewProps> = ({
   const totalCashIn = useMemo(() => {
     return cashTransactions
       .filter((t) => t.type === 'CASH_IN')
-      .reduce((sum, t) => sum + t.amount, 0);
+      .reduce((sum, t) => sum + safeNum(t.amount), 0);
   }, [cashTransactions]);
 
   const totalCashOut = useMemo(() => {
     return cashTransactions
       .filter((t) => t.type === 'CASH_OUT')
-      .reduce((sum, t) => sum + t.amount, 0);
+      .reduce((sum, t) => sum + safeNum(t.amount), 0);
   }, [cashTransactions]);
 
   // POS Direct Cash Inflows (cash sales)
   const posCashSales = useMemo(() => {
     return transactions
-      .filter((t) => t.paymentMethod === 'cash')
-      .reduce((sum, t) => sum + t.total, 0);
+      .filter((t) => String(t.paymentMethod || '').toLowerCase() === 'cash')
+      .reduce((sum, t) => sum + safeNum(t.total ?? (t as any).totalAmount), 0);
   }, [transactions]);
 
   // Cash Paid Expenses
   const cashExpensesTotal = useMemo(() => {
     return expenses
-      .filter((e) => e.paymentMethod === 'cash')
-      .reduce((sum, e) => sum + e.amount, 0);
+      .filter((e) => String(e.paymentMethod || '').toLowerCase() === 'cash')
+      .reduce((sum, e) => sum + safeNum(e.amount), 0);
   }, [expenses]);
 
   // Total Loans & Chama Inflows Specifically
@@ -236,7 +248,7 @@ export const CashManagementView: React.FC<CashManagementViewProps> = ({
             t.category === 'SACCO / Microfinance Loan' ||
             t.category === 'Mobile / Digital Loan')
       )
-      .reduce((sum, t) => sum + t.amount, 0);
+      .reduce((sum, t) => sum + safeNum(t.amount), 0);
   }, [cashTransactions]);
 
   // Total Financing Repayments Outflows
@@ -250,30 +262,30 @@ export const CashManagementView: React.FC<CashManagementViewProps> = ({
             t.category === 'Chama Contribution / Table Banking' ||
             t.category === 'Mobile Loan Repayment')
       )
-      .reduce((sum, t) => sum + t.amount, 0);
+      .reduce((sum, t) => sum + safeNum(t.amount), 0);
   }, [cashTransactions]);
 
   // Net Cash Vault Balance
-  const netVaultBalance = totalCashIn + posCashSales - totalCashOut - cashExpensesTotal;
+  const netVaultBalance = safeNum(totalCashIn + posCashSales - totalCashOut - cashExpensesTotal);
 
   // Supplier Payables Total
   const totalSupplierPayables = useMemo(() => {
-    return suppliers.reduce((sum, s) => sum + (s.currentBalance || 0), 0);
+    return suppliers.reduce((sum, s) => sum + safeNum(s.currentBalance), 0);
   }, [suppliers]);
 
   // Outstanding Loan / Chama Debt Total
   const totalOutstandingLoanDebt = useMemo(() => {
-    return financingFacilities.reduce((sum, f) => sum + (f.balanceRemaining || 0), 0);
+    return financingFacilities.reduce((sum, f) => sum + safeNum(f.balanceRemaining), 0);
   }, [financingFacilities]);
 
   // Customer Receivables Total
   const totalCustomerReceivables = useMemo(() => {
-    return customers.reduce((sum, c) => sum + (c.debtBalance || 0), 0);
+    return customers.reduce((sum, c) => sum + safeNum(c.debtBalance ?? c.currentBalanceDue), 0);
   }, [customers]);
 
   // Inventory Cost Valuation Total
   const totalInventoryCost = useMemo(() => {
-    return products.reduce((sum, p) => sum + p.buyingPrice * p.stock, 0);
+    return products.reduce((sum, p) => sum + safeNum(p.buyingPrice) * safeNum(p.stock), 0);
   }, [products]);
 
   // Filtered Ledger Transactions
@@ -303,12 +315,12 @@ export const CashManagementView: React.FC<CashManagementViewProps> = ({
       // Search term
       if (searchTerm.trim()) {
         const term = searchTerm.toLowerCase();
-        const matchesDesc = tx.description.toLowerCase().includes(term);
-        const matchesSource = tx.sourceDestination.toLowerCase().includes(term);
-        const matchesRef = tx.referenceNo.toLowerCase().includes(term);
-        const matchesCat = tx.category.toLowerCase().includes(term);
-        const matchesAmt = tx.amount.toString().includes(term);
-        const matchesUser = tx.recordedBy.toLowerCase().includes(term);
+        const matchesDesc = (tx.description || '').toLowerCase().includes(term);
+        const matchesSource = (tx.sourceDestination || '').toLowerCase().includes(term);
+        const matchesRef = (tx.referenceNo || '').toLowerCase().includes(term);
+        const matchesCat = (tx.category || '').toLowerCase().includes(term);
+        const matchesAmt = safeNum(tx.amount).toString().includes(term);
+        const matchesUser = (tx.recordedBy || '').toLowerCase().includes(term);
         if (!matchesDesc && !matchesSource && !matchesRef && !matchesCat && !matchesAmt && !matchesUser) {
           return false;
         }
@@ -566,14 +578,27 @@ export const CashManagementView: React.FC<CashManagementViewProps> = ({
       {/* ========================================================= */}
       {/* 1. TOP HEADER & FAST ACTION BUTTONS */}
       {/* ========================================================= */}
-      <div className="bg-slate-900 border border-slate-800 p-6 rounded-3xl shadow-2xl flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2 text-sky-400 font-extrabold text-xs uppercase tracking-wider mb-1">
-            <Wallet className="w-4 h-4" /> Treasury & Liquidity Management
+      <div className="bg-slate-900 border border-slate-800 p-4 sm:p-6 rounded-3xl shadow-2xl flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div className="space-y-2">
+          <div className="flex items-center gap-2.5 flex-wrap">
+            {onBack && (
+              <button
+                type="button"
+                onClick={onBack}
+                className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-100 hover:text-white text-xs font-bold inline-flex items-center gap-1.5 min-h-[38px] cursor-pointer transition active:scale-95 shrink-0"
+                aria-label="Back to previous screen"
+              >
+                <ArrowLeft className="w-4 h-4 text-sky-400" />
+                <span>Back</span>
+              </button>
+            )}
+            <div className="flex items-center gap-2 text-sky-400 font-extrabold text-xs uppercase tracking-wider">
+              <Wallet className="w-4 h-4" /> Treasury &amp; Liquidity Management
+            </div>
           </div>
-          <h2 className="text-3xl font-black text-slate-100 tracking-tight">Cash In & Cash Out Management</h2>
+          <h2 className="text-2xl sm:text-3xl font-black text-slate-100 tracking-tight">Cash In &amp; Cash Out Management</h2>
           <p className="text-xs text-slate-400 mt-1">
-            Track bank loans, chama merry-go-round payouts, SACCO facilities, supplier cash vouchers, bank deposits & vault liquidity
+            Track bank loans, chama merry-go-round payouts, SACCO facilities, supplier cash vouchers, bank deposits &amp; vault liquidity
           </p>
         </div>
 
@@ -913,7 +938,7 @@ export const CashManagementView: React.FC<CashManagementViewProps> = ({
                               isIn ? 'text-emerald-400' : 'text-rose-400'
                             }`}
                           >
-                            {isIn ? '+' : '-'}KSh {tx.amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                            {isIn ? '+' : '-'}KSh {safeNum(tx.amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                           </td>
 
                           {/* Date */}
@@ -1029,7 +1054,7 @@ export const CashManagementView: React.FC<CashManagementViewProps> = ({
                       <div className="pt-1 border-t border-slate-850 flex justify-between items-center">
                         <span className="text-slate-400 uppercase text-[10px] font-sans font-bold">Outstanding Owed:</span>
                         <strong className={`text-base font-black ${owesBalance ? 'text-rose-400' : 'text-emerald-400'}`}>
-                          KSh {(sup.currentBalance || 0).toLocaleString()}
+                          KSh {safeNum(sup.currentBalance).toLocaleString()}
                         </strong>
                       </div>
                     </div>
@@ -1124,7 +1149,7 @@ export const CashManagementView: React.FC<CashManagementViewProps> = ({
                 <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800/80 flex justify-between items-center">
                   <div>
                     <span className="font-bold text-slate-200 block text-sm">Merchandise Inventory (At Cost Valuation)</span>
-                    <span className="text-[10px] text-slate-400 font-sans">{products.reduce((s, p) => s + p.stock, 0)} items in stock</span>
+                    <span className="text-[10px] text-slate-400 font-sans">{products.reduce((s, p) => s + safeNum(p.stock), 0)} items in stock</span>
                   </div>
                   <strong className="text-emerald-400 text-base font-black">
                     KSh {totalInventoryCost.toLocaleString(undefined, { minimumFractionDigits: 2 })}
@@ -1572,10 +1597,12 @@ export const CashManagementView: React.FC<CashManagementViewProps> = ({
                 <Receipt className="w-4 h-4" /> Official Accounting Voucher
               </div>
               <button
+                type="button"
                 onClick={() => setSelectedTxForVoucher(null)}
-                className="p-1 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-white"
+                className="p-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl text-slate-300 hover:text-white transition cursor-pointer"
+                aria-label="Close voucher modal"
               >
-                ✕
+                <X className="w-4 h-4" />
               </button>
             </div>
 
@@ -1628,7 +1655,7 @@ export const CashManagementView: React.FC<CashManagementViewProps> = ({
                     selectedTxForVoucher.type === 'CASH_IN' ? 'text-emerald-400' : 'text-rose-400'
                   }`}
                 >
-                  KSh {selectedTxForVoucher.amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  KSh {safeNum(selectedTxForVoucher.amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                 </strong>
               </div>
 

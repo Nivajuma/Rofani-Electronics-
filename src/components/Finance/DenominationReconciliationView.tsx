@@ -119,15 +119,16 @@ export const DenominationReconciliationView: React.FC<DenominationReconciliation
     .filter((d) => d.type === 'coin')
     .reduce((sum, d) => sum + (counts[d.value] || 0) * d.value, 0);
 
+  const safeSystemCashBalance = Number.isFinite(Number(systemCashBalance)) ? Number(systemCashBalance) : 0;
   const physicalCashTotal = notesTotal + coinsTotal;
-  const variance = physicalCashTotal - systemCashBalance;
+  const variance = physicalCashTotal - safeSystemCashBalance;
   const isBalanced = Math.abs(variance) < 0.01;
   const isOverage = variance > 0.01;
   const isShortage = variance < -0.01;
 
   // Fill sample count matching system balance
   const handleAutoFillSample = () => {
-    let remaining = Math.max(0, systemCashBalance);
+    let remaining = Math.max(0, safeSystemCashBalance);
     const newCounts: { [key: number]: number } = {};
 
     [1000, 500, 200, 100, 50, 40, 20, 10, 5, 1].forEach((val) => {

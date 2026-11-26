@@ -10,6 +10,7 @@ interface AccessRestrictedViewProps {
   onNavigateToAllowedTab: (tab: TabKey) => void;
   onTemporaryUnlock?: (authorizedBy: User) => void;
   onSwitchUser?: (authorizedUser: User) => void;
+  onBack?: () => void;
 }
 
 export const AccessRestrictedView: React.FC<AccessRestrictedViewProps> = ({
@@ -19,6 +20,7 @@ export const AccessRestrictedView: React.FC<AccessRestrictedViewProps> = ({
   onNavigateToAllowedTab,
   onTemporaryUnlock,
   onSwitchUser,
+  onBack,
 }) => {
   const [pinInput, setPinInput] = useState('');
   const [selectedAdminId, setSelectedAdminId] = useState<string>('');
@@ -105,6 +107,17 @@ export const AccessRestrictedView: React.FC<AccessRestrictedViewProps> = ({
       <div className="w-full max-w-lg bg-white rounded-3xl shadow-xl border border-slate-200 overflow-hidden">
         {/* Header Banner */}
         <div className="bg-gradient-to-br from-slate-900 via-slate-800 to-amber-950 p-6 text-white text-center relative">
+          {onBack && (
+            <button
+              type="button"
+              onClick={onBack}
+              className="absolute top-3 left-3 px-2.5 py-1.5 rounded-xl bg-slate-800/90 hover:bg-slate-700 border border-slate-700 text-slate-100 text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer transition"
+              aria-label="Back to previous screen"
+            >
+              <ArrowLeft className="w-3.5 h-3.5 text-sky-400" />
+              <span>Back</span>
+            </button>
+          )}
           <div className="inline-flex p-3 rounded-2xl bg-amber-500/20 border border-amber-500/30 text-amber-400 mb-3 shadow-inner">
             <ShieldAlert className="w-8 h-8" />
           </div>

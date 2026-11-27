@@ -54,7 +54,9 @@ import {
   Info,
   Lightbulb,
   Play,
-  ArrowLeft
+  ArrowLeft,
+  GitBranch,
+  Check
 } from 'lucide-react';
 import {
   Product,
@@ -90,6 +92,7 @@ import {
   CustomerReturnRecord,
   CustomerReturnItem,
   ReturnRefundMode,
+  BusinessTypeId,
 } from './types';
 import {
   INITIAL_USERS,
@@ -190,6 +193,7 @@ import {
   computeProductDiff,
 } from './utils/auditLogger';
 import { AccessRestrictedView } from './components/Auth/AccessRestrictedView';
+import { getEffectiveBranchStatus } from './utils/branchLicensing';
 import {
   subscribeToProducts,
   saveProductToCloud,
@@ -242,6 +246,7 @@ import {
   normalizeReferralCode,
   subscribeToTransactionSettings,
   subscribeToShopProtectionSettings,
+  saveShopProtectionSettingsToCloud,
   deleteTransactionFromCloud,
   updateStoreProfileDetails,
   isLegacyRofaniStoreBrand,
@@ -269,6 +274,12 @@ import {
   saveShopProtectionSettingsLocal,
   normalizeShopProtectionSettings,
 } from './utils/shopProtectionSettings';
+import {
+  DEFAULT_BUSINESS_TYPE,
+  getBusinessTypeConfig,
+  isValidBusinessTypeId,
+  mergeStarterCategories,
+} from './utils/businessTypes';
 import {
   auth,
   isAuthorizedCloudUser,
@@ -861,6 +872,9 @@ export default function App() {
     return cachedSess?.uid ? getCachedGroupBranches(cachedSess.uid) : [];
   });
   const [showMultiBranchModal, setShowMultiBranchModal] = useState<boolean>(false);
+  const [plansTargetBranch, setPlansTargetBranch] = useState<StoreSubscriptionProfile | null>(null);
+  const [showDesktopBranchMenu, setShowDesktopBranchMenu] = useState<boolean>(false);
+  const [showMobileHeaderBranchMenu, setShowMobileHeaderBranchMenu] = useState<boolean>(false);
 
   const PENDING_REFERRAL_STORAGE_KEY = 'rofani_pending_referral_code';
   const [pendingReferralCode, setPendingReferralCode] = useState<string>(() => {
@@ -1266,6 +1280,9 @@ export default function App() {
       setStoreProfile(prof);
       if (prof) {
         safeSetJSON('rofani_pos_store_profile', prof);
+        if (prof.businessType && isValidBusinessTypeId(prof.businessType)) {
+          safeSetJSON('rofani_pos_business_type', prof.businessType);
+        }
         if (prof.skipLegacySeed) {
           safeSetJSON('rofani_pos_blank_mode', true);
         }
@@ -1559,6 +1576,40 @@ export default function App() {
     storeProfile?.isMultiBranch,
     storeProfile?.businessGroupName,
   ]);
+
+  // Keep active extra branch profile live-synced if Super Admin activates, extends, or suspends it
+  useEffect(() => {
+    if (
+      !isCloudAuthReady ||
+      !effectiveCloudStoreId ||
+      !primaryCloudStoreId ||
+      effectiveCloudStoreId === primaryCloudStoreId
+    ) {
+      return;
+    }
+    let cancelled = false;
+    let unsubscribe: (() => void) | undefined;
+    try {
+      unsubscribe = subscribeToStoreProfile(
+        effectiveCloudStoreId,
+        (branchProf) => {
+          if (cancelled || !branchProf) return;
+          setGroupBranches((prev) => {
+            const next = prev.some((b) => b.id === branchProf.id)
+              ? prev.map((b) => (b.id === branchProf.id ? branchProf : b))
+              : [...prev, branchProf];
+            saveCachedGroupBranches(primaryCloudStoreId, next);
+            return next;
+          });
+        },
+        () => {}
+      );
+    } catch {}
+    return () => {
+      cancelled = true;
+      if (unsubscribe) unsubscribe();
+    };
+  }, [isCloudAuthReady, effectiveCloudStoreId, primaryCloudStoreId]);
 
   const [cloudSyncStatus, setCloudSyncStatus] = useState<'synced' | 'syncing' | 'offline' | 'error' | 'quota_exceeded'>('offline');
   // Strict 3-second maximum cap on any active cloud sync indicator
@@ -6621,7 +6672,7 @@ export default function App() {
         saveCachedGroupBranches(CLIENT_DEMO_STORE_ID, next);
         return next;
       });
-      return;
+      return newDemoBranch;
     }
 
     const primaryId = primaryCloudStoreId || firebaseUser?.uid || OWNER_PRIMARY_STORE_ID;
@@ -6640,6 +6691,8 @@ export default function App() {
       branchPhone: branchInput.branchPhone,
       branchManagerName: branchInput.branchManagerName,
       parentProfile: storeProfile,
+      existingGroupBranches:
+        groupBranches.length > 0 ? groupBranches : storeProfile ? [storeProfile] : [],
       defaultStaff: adminStaff.length > 0 ? adminStaff : undefined,
     });
     setGroupBranches((prev) => {
@@ -6648,6 +6701,7 @@ export default function App() {
       saveCachedGroupBranches(primaryId, next);
       return next;
     });
+    return createdBranch;
   };
 
   const handleSwitchBranchStore = (targetStoreId: string) => {
@@ -6800,6 +6854,98 @@ export default function App() {
     );
     if (!isClientDemoMode && targetCloudStoreId && targetCloudStoreId !== '__unauthenticated__' && isAuthorizedCloudUser(firebaseUser)) {
       updateStoreProfileDetails(targetCloudStoreId, { storeName: normalizedName }).catch(() => {});
+    }
+  };
+
+  const activeBusinessType: BusinessTypeId = isValidBusinessTypeId(storeProfile?.businessType)
+    ? storeProfile!.businessType
+    : (() => {
+        const cached = safeGetJSON<string>('rofani_pos_business_type', DEFAULT_BUSINESS_TYPE);
+        return isValidBusinessTypeId(cached) ? cached : DEFAULT_BUSINESS_TYPE;
+      })();
+
+  const handleLoadRecommendedCategories = (
+    targetBusinessType: BusinessTypeId,
+    options?: { replaceBlankInitial?: boolean }
+  ) => {
+    const btConfig = getBusinessTypeConfig(targetBusinessType);
+    const currentList = Array.isArray(categories) ? categories : [];
+    const initialIds = new Set(INITIAL_CATEGORIES.map((c) => c.id));
+    const hasOnlyUntouchedInitial =
+      currentList.length > 0 && currentList.every((c) => c && initialIds.has(c.id));
+
+    const useCleanSeed =
+      Boolean(options?.replaceBlankInitial) &&
+      productsRef.current.length === 0 &&
+      (hasOnlyUntouchedInitial || currentList.length === 0);
+
+    const merged = mergeStarterCategories(
+      useCleanSeed ? [] : currentList,
+      targetBusinessType,
+      { prioritizeNew: true }
+    );
+
+    safeSetJSON('retail_pos_categories_v2', merged.nextCategories);
+    setCategories(merged.nextCategories);
+
+    if (btConfig.suggestExpiryTracking && !shopControls.enableExpiryAlerts) {
+      const nextControls = saveShopProtectionSettingsLocal(
+        { ...shopControls, enableExpiryAlerts: true },
+        resolvedSettingsStoreId
+      );
+      if (
+        !isClientDemoMode &&
+        resolvedSettingsStoreId &&
+        resolvedSettingsStoreId !== '__unauthenticated__' &&
+        isAuthorizedCloudUser(firebaseUser)
+      ) {
+        saveShopProtectionSettingsToCloud(nextControls, resolvedSettingsStoreId).catch(() => {});
+      }
+    }
+
+    return {
+      addedCategoriesCount: merged.addedCategoriesCount,
+      addedSubcategoriesCount: merged.addedSubcategoriesCount,
+    };
+  };
+
+  const handleUpdateBusinessType = async (nextType: BusinessTypeId) => {
+    safeSetJSON('rofani_pos_business_type', nextType);
+    const targetCloudStoreId = effectiveCloudStoreId || getActiveTenantStoreId();
+
+    setStoreProfile((prev) => {
+      if (!prev) return prev;
+      const updated = { ...prev, businessType: nextType };
+      safeSetJSON('rofani_pos_store_profile', updated);
+      return updated;
+    });
+    setGroupBranches((prev) =>
+      prev.map((b) => (b.id === targetCloudStoreId ? { ...b, businessType: nextType } : b))
+    );
+
+    const btConfig = getBusinessTypeConfig(nextType);
+    if (btConfig.suggestExpiryTracking && !shopControls.enableExpiryAlerts) {
+      const nextControls = saveShopProtectionSettingsLocal(
+        { ...shopControls, enableExpiryAlerts: true },
+        resolvedSettingsStoreId
+      );
+      if (
+        !isClientDemoMode &&
+        resolvedSettingsStoreId &&
+        resolvedSettingsStoreId !== '__unauthenticated__' &&
+        isAuthorizedCloudUser(firebaseUser)
+      ) {
+        saveShopProtectionSettingsToCloud(nextControls, resolvedSettingsStoreId).catch(() => {});
+      }
+    }
+
+    if (
+      !isClientDemoMode &&
+      targetCloudStoreId &&
+      targetCloudStoreId !== '__unauthenticated__' &&
+      isAuthorizedCloudUser(firebaseUser)
+    ) {
+      await updateStoreProfileDetails(targetCloudStoreId, { businessType: nextType }).catch(() => {});
     }
   };
 
@@ -7642,18 +7788,22 @@ export default function App() {
     return (
       <>
         {!hasSelfBackHeader && (
-          <div className="print:hidden sticky top-0 z-20 bg-slate-900/95 backdrop-blur-md border-b border-slate-800 px-3 sm:px-4 py-2 mb-3 rounded-xl flex items-center justify-between gap-2 shadow-sm">
-            <div className="flex items-center gap-2.5 min-w-0">
+          <div
+            className={`print:hidden sticky top-2 z-20 mt-2 mb-2.5 bg-slate-900/95 backdrop-blur-md border border-slate-800 px-3 py-2 rounded-xl flex items-center justify-between gap-2 shadow-sm ${
+              deviceFormat === 'computer' ? 'mx-3 sm:mx-4' : ''
+            }`}
+          >
+            <div className="flex items-center gap-2.5 min-w-0 flex-1">
               <button
                 type="button"
                 onClick={navigateBack}
-                className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-100 hover:text-white text-xs font-bold inline-flex items-center gap-1.5 min-h-[36px] shrink-0 cursor-pointer transition active:scale-95"
+                className="h-9 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-100 hover:text-white text-xs font-bold inline-flex items-center justify-center gap-1.5 shrink-0 cursor-pointer transition active:scale-95"
                 aria-label="Back to previous screen"
               >
-                <ArrowLeft className="w-4 h-4 text-sky-400" />
+                <ArrowLeft className="w-4 h-4 text-sky-400 shrink-0" />
                 <span>Back</span>
               </button>
-              <span className="text-xs sm:text-sm font-extrabold text-slate-100 truncate">
+              <span className="text-xs sm:text-sm font-extrabold text-slate-100 truncate px-0.5 leading-tight">
                 {SUB_PAGE_LABELS[activeTab] || 'Rofani POS'}
               </span>
             </div>
@@ -7665,7 +7815,7 @@ export default function App() {
                 setRawActiveTab('pos');
                 setInventoryLowStockOnly(false);
               }}
-              className="p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 hover:text-white cursor-pointer shrink-0 transition"
+              className="w-9 h-9 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 hover:text-white inline-flex items-center justify-center cursor-pointer shrink-0 transition active:scale-95"
               title="Close and return to Home POS"
               aria-label="Close to Home POS"
             >
@@ -7751,6 +7901,7 @@ export default function App() {
           }}
           onOpenCategoryManager={() => setShowCategoryManagerModal(true)}
           activeStoreId={effectiveCloudStoreId || getActiveTenantStoreId()}
+          businessType={activeBusinessType}
         />
       )}
 
@@ -7891,6 +8042,8 @@ export default function App() {
           onAddExpense={handleAddExpense}
           inPhoneFrame={deviceFormat === 'phone'}
           onBack={navigateBack}
+          groupBranches={groupBranches}
+          onOpenMultiBranch={() => setShowMultiBranchModal(true)}
         />
       )}
 
@@ -8009,6 +8162,9 @@ export default function App() {
           confirmedBackupEmail={storeProfile?.backupEmail || ''}
           backupEmailConfirmed={Boolean(storeProfile?.backupEmailConfirmed)}
           onConfirmBackupEmail={handleConfirmBackupEmail}
+          businessType={activeBusinessType}
+          onUpdateBusinessType={handleUpdateBusinessType}
+          onLoadRecommendedCategories={(bt) => handleLoadRecommendedCategories(bt)}
         />
       )}
 
@@ -8141,6 +8297,7 @@ export default function App() {
             email: firebaseUser.email,
             displayName: firebaseUser.displayName || undefined,
             storeName: formData.storeName,
+            businessType: formData.businessType,
             phone: formData.phone,
             kraPin: formData.kraPin,
             mpesaShortcode: formData.mpesaShortcode,
@@ -8150,8 +8307,10 @@ export default function App() {
           updatePendingReferralCode('');
           setStoreProfile(created);
           safeSetJSON('rofani_pos_store_profile', created);
+          safeSetJSON('rofani_pos_business_type', formData.businessType);
           safeSetJSON('rofani_settings_tax_mode', created.taxMode || 'none');
           safeSetJSON('rofani_settings_enable_vat', false);
+          handleLoadRecommendedCategories(formData.businessType, { replaceBlankInitial: true });
           if (created.referredBy) {
             setReferralRewardToast({
               kind: 'welcome',
@@ -8178,29 +8337,70 @@ export default function App() {
     );
   }
 
+  const handleSubscriptionProfileUpdated = (updated: StoreSubscriptionProfile) => {
+    const primaryId =
+      primaryCloudStoreId || firebaseUser?.uid || OWNER_PRIMARY_STORE_ID;
+    if (updated.id === primaryId || !updated.isBranchStore) {
+      setStoreProfile(updated);
+      safeSetJSON('rofani_pos_store_profile', updated);
+    }
+    setGroupBranches((prev) => {
+      const next = prev.some((b) => b.id === updated.id)
+        ? prev.map((b) => (b.id === updated.id ? updated : b))
+        : [...prev, updated];
+      saveCachedGroupBranches(primaryId, next);
+      return next;
+    });
+    if (plansTargetBranch?.id === updated.id) {
+      setPlansTargetBranch(updated);
+    }
+  };
+
+  const resolvedPlanBranchProfile =
+    plansTargetBranch || activeBranchProfile || storeProfile;
+
+  const lockedBranchTarget = activeBranchProfile || storeProfile;
+  const effectiveActiveBranchStatus = lockedBranchTarget
+    ? getEffectiveBranchStatus(lockedBranchTarget, isOwnerAccount)
+    : 'trial';
   const isSubscriptionExpired =
     !isClientDemoMode &&
     !isOwnerAccount &&
-    Boolean(storeProfile) &&
-    (storeProfile!.subscriptionStatus === 'expired' ||
-      (Boolean(storeProfile!.expiresAt) && Date.parse(storeProfile!.expiresAt) <= Date.now()));
+    Boolean(lockedBranchTarget) &&
+    (effectiveActiveBranchStatus === 'expired' ||
+      effectiveActiveBranchStatus === 'suspended' ||
+      Boolean(lockedBranchTarget?.licensePendingActivation));
 
-  if (!isClientDemoMode && isAuthorizedCloudUser(firebaseUser) && isSubscriptionExpired && storeProfile) {
+  if (
+    !isClientDemoMode &&
+    isAuthorizedCloudUser(firebaseUser) &&
+    isSubscriptionExpired &&
+    lockedBranchTarget
+  ) {
     return (
       <div className="min-h-screen bg-[#0f172a]">
         <SubscriptionPlansModal
           isOpen={true}
           isExpiredLock={true}
           isOwnerAccount={false}
-          storeId={activeCloudStoreId || firebaseUser!.uid}
-          storeProfile={storeProfile}
-          onSubscriptionUpdated={(updated) => setStoreProfile(updated)}
+          storeId={
+            lockedBranchTarget.id || effectiveCloudStoreId || firebaseUser!.uid
+          }
+          storeProfile={lockedBranchTarget}
+          primaryProfile={storeProfile}
+          groupBranches={groupBranches}
+          onSwitchBranch={handleSwitchBranchStore}
+          onSubscriptionUpdated={handleSubscriptionProfileUpdated}
           onOpenAiAssistant={() => setShowAiAssistantModal(true)}
         />
         <AIAssistantModal
           isOpen={showAiAssistantModal}
           onClose={() => setShowAiAssistantModal(false)}
-          activeStoreName={stores.find((s) => s.id === activeStoreId)?.name || storeProfile?.storeName || 'Rofani POS'}
+          activeStoreName={
+            stores.find((s) => s.id === activeStoreId)?.name ||
+            lockedBranchTarget?.storeName ||
+            'Rofani POS'
+          }
           workerRole={currentUser.role}
           activeTab={activeTab}
           lowStockCount={lowStockCount}
@@ -8246,6 +8446,10 @@ export default function App() {
           conflictCount={syncConflicts.length}
           onOpenConflictAssistant={() => setIsConflictModalOpen(true)}
           hideBottomNav={activeTab === 'pos' && isMobileSearchActive}
+          groupBranches={groupBranches}
+          activeBranchStoreId={effectiveCloudStoreId || OWNER_PRIMARY_STORE_ID}
+          onSwitchBranch={handleSwitchBranchStore}
+          onOpenMultiBranch={() => setShowMultiBranchModal(true)}
           topDemoBanner={
             isClientDemoMode ? (
               <LiveClientDemoOverlay
@@ -8334,12 +8538,18 @@ export default function App() {
 
         <SubscriptionPlansModal
           isOpen={showPlansModal}
-          onClose={() => setShowPlansModal(false)}
+          onClose={() => {
+            setShowPlansModal(false);
+            setPlansTargetBranch(null);
+          }}
           isExpiredLock={false}
           isOwnerAccount={isOwnerAccount}
-          storeId={activeCloudStoreId || OWNER_PRIMARY_STORE_ID}
-          storeProfile={storeProfile}
-          onSubscriptionUpdated={(updated) => setStoreProfile(updated)}
+          storeId={resolvedPlanBranchProfile?.id || effectiveCloudStoreId || OWNER_PRIMARY_STORE_ID}
+          storeProfile={resolvedPlanBranchProfile}
+          primaryProfile={storeProfile}
+          groupBranches={groupBranches}
+          onSwitchBranch={handleSwitchBranchStore}
+          onSubscriptionUpdated={handleSubscriptionProfileUpdated}
           onOpenAiAssistant={() => setShowAiAssistantModal(true)}
         />
 
@@ -8576,7 +8786,11 @@ export default function App() {
           onCreateBranch={handleCreateBranchInGroup}
           onSwitchBranch={handleSwitchBranchStore}
           onSyncCrossBranchStaff={handleSyncCrossBranchStaff}
-          onOpenPlansPricing={() => setShowPlansModal(true)}
+          isOwnerAccount={isOwnerAccount}
+          onOpenPlansPricing={(targetBranch) => {
+            setPlansTargetBranch(targetBranch || activeBranchProfile || storeProfile);
+            setShowPlansModal(true);
+          }}
         />
 
         <DailyEndOfDaySummaryModal
@@ -9514,30 +9728,89 @@ export default function App() {
         <div className="print:hidden lg:hidden bg-slate-900 border-b border-slate-800 shrink-0 z-20 text-white">
           {/* Primary Row: Main Menu (left), Brand, and Quick Actions (right) */}
           <div className="px-3 py-2 flex items-center justify-between gap-2 overflow-hidden">
-            <div className="flex items-center gap-2 min-w-0 flex-1 overflow-hidden">
+            <div className="flex items-center gap-2 min-w-0 flex-1">
               <button
                 type="button"
                 onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-                className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white transition cursor-pointer shrink-0 relative z-10 border border-slate-700/70"
+                className="w-8 h-8 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white transition cursor-pointer shrink-0 relative z-10 border border-slate-700/70 flex items-center justify-center"
                 title="Open Navigation Menu"
                 aria-label="Open Navigation Menu"
               >
-                <Menu className="w-5 h-5" />
+                <Menu className="w-4 h-4" />
               </button>
-              <div className="flex items-center gap-1.5 min-w-0 flex-1 overflow-hidden">
+              <div className="flex items-center gap-1.5 min-w-0 flex-1 overflow-visible">
                 <div className="w-7 h-7 bg-blue-600 rounded-lg flex items-center justify-center font-black text-white text-xs shrink-0 shadow-md">
                   R
                 </div>
-                <div className="min-w-0 flex-1">
-                  <span className="font-black text-xs tracking-wider block leading-none truncate">Rofani POS</span>
-                  <span className="text-[9px] text-slate-400 font-mono block truncate">
-                    {(() => {
-                      const activeName = stores.find((s) => s.id === activeStoreId)?.name || storeProfile?.storeName || '';
-                      return activeName && !isLegacyRofaniStoreBrand(activeName)
-                        ? activeName
-                        : 'Retail & Wholesale POS';
-                    })()}
-                  </span>
+                <div className="min-w-0 flex-1 relative">
+                  <span className="font-black text-xs tracking-wide block leading-none whitespace-nowrap">Rofani POS</span>
+                  {groupBranches.length > 1 ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => setShowMobileHeaderBranchMenu((prev) => !prev)}
+                        className="mt-0.5 inline-flex items-center gap-1 max-w-full px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 text-[9px] font-bold text-sky-300 cursor-pointer"
+                      >
+                        <GitBranch className="w-2.5 h-2.5 shrink-0" />
+                        <span className="truncate">{displayedStoreName}</span>
+                        <ChevronDown className="w-2.5 h-2.5 shrink-0" />
+                      </button>
+                      {showMobileHeaderBranchMenu && (
+                        <div className="absolute left-0 top-full mt-1.5 w-60 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl p-1.5 z-50 space-y-1">
+                          <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                            Switch Branch ({groupBranches.length})
+                          </div>
+                          <div className="max-h-48 overflow-y-auto space-y-1">
+                            {groupBranches.map((br) => {
+                              const isCurrent = br.id === (effectiveCloudStoreId || OWNER_PRIMARY_STORE_ID);
+                              const eff = getEffectiveBranchStatus(br, isOwnerAccount);
+                              return (
+                                <button
+                                  key={br.id}
+                                  type="button"
+                                  onClick={() => {
+                                    setShowMobileHeaderBranchMenu(false);
+                                    handleSwitchBranchStore(br.id);
+                                  }}
+                                  className={`w-full text-left px-2.5 py-2 rounded-lg text-xs flex items-center justify-between gap-2 cursor-pointer ${
+                                    isCurrent
+                                      ? 'bg-sky-600/25 border border-sky-500/40 text-white font-bold'
+                                      : 'hover:bg-slate-800 text-slate-200'
+                                  }`}
+                                >
+                                  <div className="min-w-0 flex-1">
+                                    <div className="truncate">{br.branchName || br.storeName}</div>
+                                    <div className="text-[10px] text-slate-400 capitalize">{eff}</div>
+                                  </div>
+                                  {isCurrent && <Check className="w-3.5 h-3.5 text-sky-400 shrink-0" />}
+                                </button>
+                              );
+                            })}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowMobileHeaderBranchMenu(false);
+                              setShowMultiBranchModal(true);
+                            }}
+                            className="w-full mt-1 pt-1.5 border-t border-slate-800 px-2.5 py-1.5 text-[11px] font-bold text-sky-400 hover:text-sky-300 flex items-center gap-1.5 cursor-pointer"
+                          >
+                            <GitBranch className="w-3 h-3" />
+                            <span>Manage Branches &amp; Group Report</span>
+                          </button>
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <span className="text-[9px] text-slate-400 font-mono block truncate">
+                      {(() => {
+                        const activeName = stores.find((s) => s.id === activeStoreId)?.name || storeProfile?.storeName || '';
+                        return activeName && !isLegacyRofaniStoreBrand(activeName)
+                          ? activeName
+                          : 'Retail & Wholesale POS';
+                      })()}
+                    </span>
+                  )}
                 </div>
               </div>
             </div>
@@ -9590,33 +9863,6 @@ export default function App() {
                         : 'bg-emerald-400'
                     }`}
                   />
-                </button>
-              </div>
-
-              {/* Clear Mobile / Desktop Mode Toggle Pill */}
-              <div
-                className="flex items-center bg-slate-950 p-0.5 rounded-xl border border-slate-700/80 shrink-0"
-                role="group"
-                aria-label="Switch between Mobile and Desktop view"
-              >
-                <button
-                  type="button"
-                  id="btn-mobile-header-switch-phone"
-                  onClick={() => setDeviceFormat('phone')}
-                  title="Switch to Mobile Phone Version"
-                  className="px-2 py-1.5 rounded-lg text-[11px] font-bold text-slate-300 hover:text-white hover:bg-slate-800 flex items-center gap-1 transition cursor-pointer"
-                >
-                  <Smartphone className="w-3.5 h-3.5 text-sky-400" />
-                  <span>Mobile</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setDeviceFormat('computer')}
-                  title="Desktop Version Active"
-                  className="px-2 py-1.5 rounded-lg text-[11px] font-extrabold bg-blue-600 text-white flex items-center gap-1 shadow-sm cursor-pointer"
-                >
-                  <Monitor className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">Desktop</span>
                 </button>
               </div>
 
@@ -9875,17 +10121,105 @@ export default function App() {
               <span className="hidden xl:inline">AI Co-Pilot</span>
             </button>
 
-            {/* Multi-Store Branch Selector Button */}
-            <button
-              onClick={() => setShowStoreManagerModal(true)}
-              title="Manage & Switch Multi-Store Branches / Outlets"
-              className="p-2 lg:px-2.5 lg:py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-xl border border-indigo-200 transition flex items-center gap-1.5 text-xs font-bold shadow-sm shrink-0 cursor-pointer"
-            >
-              <Building2 className="w-4 h-4 text-indigo-600 shrink-0" />
-              <span className="hidden xl:inline max-w-[120px] truncate">
-                {displayedStoreName}
-              </span>
-            </button>
+            {/* Multi-Store Branch Selector / 1-Tap Switcher Button */}
+            <div className="relative shrink-0">
+              <button
+                type="button"
+                onClick={() => {
+                  if (groupBranches.length > 1) {
+                    setShowDesktopBranchMenu((prev) => !prev);
+                  } else {
+                    setShowStoreManagerModal(true);
+                  }
+                }}
+                title="Manage & Switch Multi-Store Branches / Outlets"
+                className="p-2 lg:px-2.5 lg:py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-xl border border-indigo-200 transition flex items-center gap-1.5 text-xs font-bold shadow-sm shrink-0 cursor-pointer"
+              >
+                {groupBranches.length > 1 ? (
+                  <GitBranch className="w-4 h-4 text-indigo-600 shrink-0" />
+                ) : (
+                  <Building2 className="w-4 h-4 text-indigo-600 shrink-0" />
+                )}
+                <span className="hidden xl:inline max-w-[120px] truncate">
+                  {displayedStoreName}
+                </span>
+                {groupBranches.length > 1 && <ChevronDown className="w-3.5 h-3.5 text-indigo-600 shrink-0" />}
+              </button>
+
+              {showDesktopBranchMenu && groupBranches.length > 1 && (
+                <div className="absolute right-0 top-full mt-2 w-72 bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl p-2 z-50 text-slate-100 space-y-1.5">
+                  <div className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center justify-between">
+                    <span>Switch Active Branch</span>
+                    <span>{groupBranches.length} Shops</span>
+                  </div>
+                  <div className="max-h-60 overflow-y-auto space-y-1">
+                    {groupBranches.map((br) => {
+                      const isCurrent = br.id === (effectiveCloudStoreId || OWNER_PRIMARY_STORE_ID);
+                      const eff = getEffectiveBranchStatus(br, isOwnerAccount);
+                      return (
+                        <button
+                          key={br.id}
+                          type="button"
+                          onClick={() => {
+                            setShowDesktopBranchMenu(false);
+                            handleSwitchBranchStore(br.id);
+                          }}
+                          className={`w-full text-left px-3 py-2 rounded-xl text-xs flex items-center justify-between gap-2 cursor-pointer transition ${
+                            isCurrent
+                              ? 'bg-sky-600/25 border border-sky-500/40 text-white font-bold'
+                              : 'hover:bg-slate-800 text-slate-200'
+                          }`}
+                        >
+                          <div className="min-w-0 flex-1">
+                            <div className="truncate">{br.branchName || br.storeName}</div>
+                            <div className="text-[10px] text-slate-400 flex items-center gap-1.5">
+                              <span>{br.branchCity || 'Branch'}</span>
+                              <span>•</span>
+                              <span
+                                className={`capitalize font-semibold ${
+                                  eff === 'active'
+                                    ? 'text-emerald-400'
+                                    : eff === 'trial'
+                                    ? 'text-sky-400'
+                                    : 'text-rose-400'
+                                }`}
+                              >
+                                {eff}
+                              </span>
+                            </div>
+                          </div>
+                          {isCurrent && <Check className="w-4 h-4 text-sky-400 shrink-0" />}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div className="pt-1.5 border-t border-slate-800 grid grid-cols-2 gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowDesktopBranchMenu(false);
+                        setShowMultiBranchModal(true);
+                      }}
+                      className="px-2.5 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-[11px] font-bold flex items-center justify-center gap-1 cursor-pointer"
+                    >
+                      <GitBranch className="w-3.5 h-3.5" />
+                      <span>Branch Hub</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowDesktopBranchMenu(false);
+                        setShowStoreManagerModal(true);
+                      }}
+                      className="px-2.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-[11px] font-bold flex items-center justify-center gap-1 cursor-pointer"
+                    >
+                      <Building2 className="w-3.5 h-3.5" />
+                      <span>Stock Transfers</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
 
             {/* Manage Workers (Add, Edit, Delete, PINs) */}
             <button
@@ -10221,12 +10555,18 @@ export default function App() {
       {/* Subscription Plans & M-Pesa Payment Modal */}
       <SubscriptionPlansModal
         isOpen={showPlansModal}
-        onClose={() => setShowPlansModal(false)}
+        onClose={() => {
+          setShowPlansModal(false);
+          setPlansTargetBranch(null);
+        }}
         isExpiredLock={false}
         isOwnerAccount={isOwnerAccount}
-        storeId={activeCloudStoreId || OWNER_PRIMARY_STORE_ID}
-        storeProfile={storeProfile}
-        onSubscriptionUpdated={(updated) => setStoreProfile(updated)}
+        storeId={resolvedPlanBranchProfile?.id || effectiveCloudStoreId || OWNER_PRIMARY_STORE_ID}
+        storeProfile={resolvedPlanBranchProfile}
+        primaryProfile={storeProfile}
+        groupBranches={groupBranches}
+        onSwitchBranch={handleSwitchBranchStore}
+        onSubscriptionUpdated={handleSubscriptionProfileUpdated}
         onOpenAiAssistant={() => setShowAiAssistantModal(true)}
       />
 
@@ -10504,7 +10844,11 @@ export default function App() {
         onCreateBranch={handleCreateBranchInGroup}
         onSwitchBranch={handleSwitchBranchStore}
         onSyncCrossBranchStaff={handleSyncCrossBranchStaff}
-        onOpenPlansPricing={() => setShowPlansModal(true)}
+        isOwnerAccount={isOwnerAccount}
+        onOpenPlansPricing={(targetBranch) => {
+          setPlansTargetBranch(targetBranch || activeBranchProfile || storeProfile);
+          setShowPlansModal(true);
+        }}
       />
 
       <DailyEndOfDaySummaryModal

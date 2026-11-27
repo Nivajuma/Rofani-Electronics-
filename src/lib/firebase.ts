@@ -109,14 +109,19 @@ export async function refreshFirestoreConnection(): Promise<boolean> {
 export const auth: Auth = getAuth(app);
 
 export const OWNER_CLOUD_EMAIL = 'nivajuma@gmail.com';
+export const SUPER_ADMIN_EMAILS = ['nivajuma@gmail.com', 'rofanipos@gmail.com'];
 export const OWNER_PRIMARY_STORE_ID = 'rofani-pos';
+
+export function isSuperAdminEmail(email?: string | null): boolean {
+  if (!email) return false;
+  return SUPER_ADMIN_EMAILS.includes(email.trim().toLowerCase());
+}
 
 export function isOwnerCloudUser(user: FirebaseUser | null | undefined): boolean {
   return Boolean(
     user &&
     user.emailVerified &&
-    user.email &&
-    user.email.toLowerCase() === OWNER_CLOUD_EMAIL
+    isSuperAdminEmail(user.email)
   );
 }
 

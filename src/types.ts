@@ -825,7 +825,7 @@ export interface SensitiveActionLog {
 }
 
 export type SubscriptionPlanType = 'trial' | 'monthly' | 'quarterly' | 'biannual' | 'annual';
-export type SubscriptionStatus = 'active' | 'expired';
+export type SubscriptionStatus = 'trial' | 'active' | 'expired' | 'suspended';
 
 export interface DigitalBusinessCard {
   ownerName: string;
@@ -841,11 +841,23 @@ export interface DigitalBusinessCard {
   updatedAt?: string;
 }
 
+export type BusinessTypeId =
+  | 'boutique'
+  | 'salon'
+  | 'hardware'
+  | 'hospitality'
+  | 'general'
+  | 'electronics'
+  | 'pharmacy';
+
 export interface StoreSubscriptionProfile {
   id: string; // 'rofani-pos' for owner or Firebase Auth UID for merchants
   ownerUid: string;
+  ownerId?: string;
   ownerEmail: string;
   storeName: string;
+  branchName?: string;
+  businessType?: BusinessTypeId;
   phone: string;
   kraPin?: string;
   mpesaShortcode?: string;
@@ -854,6 +866,7 @@ export interface StoreSubscriptionProfile {
   planType: SubscriptionPlanType;
   subscriptionStatus: SubscriptionStatus;
   expiresAt: string; // ISO timestamp
+  expiryDate?: string; // ISO timestamp alias kept in sync with expiresAt
   lastPaymentRef?: string;
   lastPaymentAmount?: number;
   lastPaymentAt?: string;
@@ -881,6 +894,9 @@ export interface StoreSubscriptionProfile {
   businessGroupName?: string;
   parentStoreId?: string;
   isBranchStore?: boolean;
+  isPrimaryBranch?: boolean;
+  maxAllowedBranches?: number;
+  licensePendingActivation?: boolean;
   branchCode?: string;
   branchCity?: string;
   branchAddress?: string;

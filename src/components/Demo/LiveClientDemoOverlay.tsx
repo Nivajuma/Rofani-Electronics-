@@ -263,15 +263,15 @@ export const LiveClientDemoOverlay: React.FC<LiveClientDemoOverlayProps> = ({
       {/* Interactive 5-Step Guided Client Walkthrough Modal */}
       {isTourOpen && (
         <div
-          className="fixed inset-0 z-[290] bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4"
+          className="fixed inset-0 z-[290] bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4"
           onClick={() => setIsTourOpen(false)}
         >
           <div
-            className="w-full max-w-xl bg-slate-900 border border-slate-700/80 rounded-2xl shadow-2xl overflow-hidden text-slate-100"
+            className="w-full max-w-xl bg-slate-900 border border-slate-700/80 rounded-2xl shadow-2xl overflow-hidden text-slate-100 flex flex-col"
             onClick={(e) => e.stopPropagation()}
           >
-            {/* Header */}
-            <div className="px-5 py-4 bg-slate-800/80 border-b border-slate-700/80 flex items-center justify-between gap-3">
+            {/* Pinned Header */}
+            <div className="shrink-0 px-4 sm:px-5 py-3.5 sm:py-4 bg-slate-800/90 border-b border-slate-700/80 flex items-center justify-between gap-3">
               <div className="min-w-0">
                 <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-sky-400">
                   <span>Live Client Walkthrough</span>
@@ -287,137 +287,140 @@ export const LiveClientDemoOverlay: React.FC<LiveClientDemoOverlayProps> = ({
               <button
                 type="button"
                 onClick={() => setIsTourOpen(false)}
-                className="p-1.5 rounded-lg bg-slate-900/70 hover:bg-slate-700 text-slate-400 hover:text-white border border-slate-700 transition cursor-pointer"
+                className="w-8 h-8 rounded-lg bg-slate-900/80 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 flex items-center justify-center shrink-0 transition cursor-pointer"
                 aria-label="Close guided tour"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            {/* Step Progress Tabs */}
-            <div className="px-5 pt-4 grid grid-cols-5 gap-1.5">
-              {DEMO_TOUR_STEPS.map((step, idx) => {
-                const isActive = idx === stepIndex;
-                return (
-                  <button
-                    key={step.id}
-                    type="button"
-                    onClick={() => handleGoToStep(idx, false)}
-                    className={`py-2 px-2 rounded-xl border text-left transition cursor-pointer ${
-                      isActive
-                        ? 'bg-sky-500/15 border-sky-500 text-white'
-                        : 'bg-slate-800/60 border-slate-700/70 text-slate-400 hover:text-slate-200'
-                    }`}
-                  >
-                    <div className="font-mono tabular-nums text-[10px] font-bold text-sky-400">
-                      0{idx + 1}
-                    </div>
-                    <div className="text-[11px] font-semibold truncate mt-0.5">
-                      {step.title.split(' ')[0]}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
+            {/* Vertically Scrollable Walkthrough Body */}
+            <div className="overflow-y-auto max-h-[82vh] pb-24 overscroll-contain">
+              {/* Horizontally Scrollable Step Selector Bar */}
+              <div className="px-4 sm:px-5 pt-4 pb-1 flex flex-nowrap items-stretch gap-2 overflow-x-auto">
+                {DEMO_TOUR_STEPS.map((step, idx) => {
+                  const isActive = idx === stepIndex;
+                  return (
+                    <button
+                      key={step.id}
+                      type="button"
+                      onClick={() => handleGoToStep(idx, false)}
+                      className={`shrink-0 min-w-[88px] sm:min-w-0 sm:flex-1 py-2 px-2.5 rounded-xl border text-left transition cursor-pointer ${
+                        isActive
+                          ? 'bg-sky-500/15 border-sky-500 text-white'
+                          : 'bg-slate-800/60 border-slate-700/70 text-slate-400 hover:text-slate-200'
+                      }`}
+                    >
+                      <div className="font-mono tabular-nums text-[10px] font-bold text-sky-400">
+                        0{idx + 1}
+                      </div>
+                      <div className="text-[11px] font-semibold truncate mt-0.5">
+                        {step.title.split(' ')[0]}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
 
-            {/* Active Step Body */}
-            <div className="p-5 space-y-4">
-              <div className="bg-slate-800 border border-slate-700/80 rounded-xl p-4 space-y-3">
-                <div className="flex items-start gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-sky-500/15 border border-sky-500/30 text-sky-400 flex items-center justify-center shrink-0">
-                    <currentStep.icon className="w-5 h-5" />
+              {/* Active Step Body */}
+              <div className="p-4 sm:p-5 space-y-4">
+                <div className="bg-slate-800 border border-slate-700/80 rounded-xl p-4 space-y-3">
+                  <div className="flex items-start gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-sky-500/15 border border-sky-500/30 text-sky-400 flex items-center justify-center shrink-0">
+                      <currentStep.icon className="w-5 h-5" />
+                    </div>
+                    <div className="min-w-0">
+                      <h4 className="text-sm sm:text-base font-bold text-white leading-snug">
+                        {currentStep.headline}
+                      </h4>
+                      <p className="text-xs text-slate-300 leading-relaxed mt-1.5">
+                        {currentStep.mechanism}
+                      </p>
+                    </div>
                   </div>
-                  <div className="min-w-0">
-                    <h4 className="text-sm sm:text-base font-bold text-white leading-snug">
-                      {currentStep.headline}
-                    </h4>
-                    <p className="text-xs text-slate-300 leading-relaxed mt-1.5">
-                      {currentStep.mechanism}
-                    </p>
+
+                  <div className="pt-2.5 border-t border-slate-700/70 flex items-center justify-between gap-2 text-xs">
+                    <span className="text-emerald-300 font-semibold">
+                      Outcome: {currentStep.outcome}
+                    </span>
                   </div>
                 </div>
 
-                <div className="pt-2.5 border-t border-slate-700/70 flex items-center justify-between gap-2 text-xs">
-                  <span className="text-emerald-300 font-semibold">
-                    Outcome: {currentStep.outcome}
-                  </span>
+                {/* Quick Presenter Utilities */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={handleCopyDemoLink}
+                    className="px-3 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-semibold flex items-center justify-center gap-1.5 whitespace-nowrap transition cursor-pointer"
+                  >
+                    {copiedLink ? (
+                      <Check className="w-3.5 h-3.5 text-emerald-400" />
+                    ) : (
+                      <Copy className="w-3.5 h-3.5 text-sky-400" />
+                    )}
+                    <span>{copiedLink ? 'Demo URL Copied' : 'Copy Client Link'}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleTriggerReset}
+                    className="px-3 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-semibold flex items-center justify-center gap-1.5 whitespace-nowrap transition cursor-pointer"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5 text-amber-400" />
+                    <span>{justReset ? 'Sandbox Reset' : 'Reset Demo Data'}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsTourOpen(false);
+                      onToggleDeviceFormat();
+                    }}
+                    className="px-3 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-semibold flex items-center justify-center gap-1.5 whitespace-nowrap transition cursor-pointer"
+                  >
+                    {deviceFormat === 'phone' ? (
+                      <Monitor className="w-3.5 h-3.5 text-sky-400" />
+                    ) : (
+                      <Smartphone className="w-3.5 h-3.5 text-sky-400" />
+                    )}
+                    <span>
+                      {deviceFormat === 'phone' ? 'Desktop Mode' : 'Mobile Mode'}
+                    </span>
+                  </button>
                 </div>
               </div>
 
-              {/* Quick Presenter Utilities */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                <button
-                  type="button"
-                  onClick={handleCopyDemoLink}
-                  className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-semibold flex items-center justify-center gap-1.5 whitespace-nowrap transition cursor-pointer"
-                >
-                  {copiedLink ? (
-                    <Check className="w-3.5 h-3.5 text-emerald-400" />
-                  ) : (
-                    <Copy className="w-3.5 h-3.5 text-sky-400" />
-                  )}
-                  <span>{copiedLink ? 'Demo URL Copied' : 'Copy Client Link'}</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={handleTriggerReset}
-                  className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-semibold flex items-center justify-center gap-1.5 whitespace-nowrap transition cursor-pointer"
-                >
-                  <RotateCcw className="w-3.5 h-3.5 text-amber-400" />
-                  <span>{justReset ? 'Sandbox Reset' : 'Reset Demo Data'}</span>
-                </button>
+              {/* Step Navigation & Primary CTA Controls */}
+              <div className="mx-4 sm:mx-5 px-4 py-3.5 bg-slate-800/60 border border-slate-700/80 rounded-xl flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleGoToStep(stepIndex - 1, false)}
+                    className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-semibold inline-flex items-center gap-1 whitespace-nowrap transition cursor-pointer"
+                  >
+                    <ChevronLeft className="w-3.5 h-3.5" />
+                    <span>Prev</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleGoToStep(stepIndex + 1, false)}
+                    className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-semibold inline-flex items-center gap-1 whitespace-nowrap transition cursor-pointer"
+                  >
+                    <span>Next</span>
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+
                 <button
                   type="button"
                   onClick={() => {
                     setIsTourOpen(false);
-                    onToggleDeviceFormat();
+                    runStepAction(currentStep);
                   }}
-                  className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-semibold flex items-center justify-center gap-1.5 whitespace-nowrap transition cursor-pointer"
+                  className="px-4 py-2 rounded-xl bg-sky-500 hover:bg-sky-400 text-slate-950 text-xs font-extrabold inline-flex items-center gap-1.5 whitespace-nowrap transition cursor-pointer"
                 >
-                  {deviceFormat === 'phone' ? (
-                    <Monitor className="w-3.5 h-3.5 text-sky-400" />
-                  ) : (
-                    <Smartphone className="w-3.5 h-3.5 text-sky-400" />
-                  )}
-                  <span>
-                    {deviceFormat === 'phone' ? 'Desktop Mode' : 'Mobile Mode'}
-                  </span>
+                  <span>{currentStep.ctaLabel}</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
                 </button>
               </div>
-            </div>
-
-            {/* Footer Controls */}
-            <div className="px-5 py-3.5 bg-slate-800/60 border-t border-slate-700/80 flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => handleGoToStep(stepIndex - 1, false)}
-                  className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-semibold inline-flex items-center gap-1 whitespace-nowrap transition cursor-pointer"
-                >
-                  <ChevronLeft className="w-3.5 h-3.5" />
-                  <span>Prev</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleGoToStep(stepIndex + 1, false)}
-                  className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-semibold inline-flex items-center gap-1 whitespace-nowrap transition cursor-pointer"
-                >
-                  <span>Next</span>
-                  <ChevronRight className="w-3.5 h-3.5" />
-                </button>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setIsTourOpen(false);
-                  runStepAction(currentStep);
-                }}
-                className="px-4 py-2 rounded-xl bg-sky-500 hover:bg-sky-400 text-slate-950 text-xs font-extrabold inline-flex items-center gap-1.5 whitespace-nowrap transition cursor-pointer"
-              >
-                <span>{currentStep.ctaLabel}</span>
-                <ArrowRight className="w-3.5 h-3.5" />
-              </button>
             </div>
           </div>
         </div>

@@ -9,13 +9,17 @@ import {
   Bell,
   Cloud,
   AlertTriangle,
-  Store
+  Store,
+  GitBranch,
+  ChevronDown,
+  Check
 } from 'lucide-react';
-import { User } from '../types';
+import { StoreSubscriptionProfile, User } from '../types';
 import { TabKey } from '../utils/permissions';
 import { OfflineSyncBanner } from './Network/OfflineSyncBanner';
 import { SyncRetryResult } from '../utils/offlineSync';
 import { isLegacyRofaniStoreBrand } from '../lib/cloudSync';
+import { getEffectiveBranchStatus } from '../utils/branchLicensing';
 
 interface PhoneDeviceFrameProps {
   children: React.ReactNode;
@@ -43,6 +47,10 @@ interface PhoneDeviceFrameProps {
   hideBottomNav?: boolean;
   quickToolsBar?: React.ReactNode;
   topDemoBanner?: React.ReactNode;
+  groupBranches?: StoreSubscriptionProfile[];
+  activeBranchStoreId?: string;
+  onSwitchBranch?: (targetStoreId: string) => void;
+  onOpenMultiBranch?: () => void;
 }
 
 export const PhoneDeviceFrame: React.FC<PhoneDeviceFrameProps> = ({
@@ -67,7 +75,12 @@ export const PhoneDeviceFrame: React.FC<PhoneDeviceFrameProps> = ({
   hideBottomNav = false,
   quickToolsBar,
   topDemoBanner,
+  groupBranches = [],
+  activeBranchStoreId,
+  onSwitchBranch,
+  onOpenMultiBranch,
 }) => {
+  const [showBranchMenu, setShowBranchMenu] = React.useState(false);
   const isLandscape = phoneOrientation === 'landscape';
 
   const getFrameDimensions = () => {
@@ -128,29 +141,91 @@ export const PhoneDeviceFrame: React.FC<PhoneDeviceFrameProps> = ({
         }}
       >
         {/* SINGLE COMPACT STICKY MOBILE HEADER */}
-        <header className="print:hidden sticky top-0 bg-slate-900 border-b border-slate-800 flex items-center justify-between gap-1.5 px-3 py-2 shrink-0 z-30">
-          <div className="flex items-center gap-2 min-w-0 flex-1">
-            <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-slate-800 border border-slate-700/80 flex items-center justify-center text-sky-400 shrink-0">
-              <Store className="w-4 h-4" />
+        <header className="print:hidden sticky top-0 bg-slate-900 border-b border-slate-800 flex items-center justify-between gap-2 px-3 py-2 shrink-0 z-30">
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="w-6 h-6 sm:w-7 sm:h-7 rounded-full bg-slate-800 border border-slate-700/80 flex items-center justify-center text-sky-400 shrink-0">
+              <Store className="w-3.5 h-3.5" />
             </div>
-            <div className="min-w-0 flex-1">
-              <h1 className="text-sm font-bold text-white truncate min-w-0 leading-tight">
+            <div className="min-w-0 relative">
+              <h1 className="text-xs sm:text-[13px] font-bold text-white whitespace-nowrap leading-tight">
                 Rofani POS
               </h1>
-              {normalizedCustomStore && (
-                <p className="text-[10px] text-slate-400 truncate leading-tight">
-                  {normalizedCustomStore}
-                </p>
+              {groupBranches.length > 1 && onSwitchBranch ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setShowBranchMenu((prev) => !prev)}
+                    className="mt-0.5 inline-flex items-center gap-1 max-w-[104px] sm:max-w-[125px] px-1.5 py-0.5 rounded-md bg-slate-800 hover:bg-slate-700 border border-slate-700 text-[10px] font-semibold text-sky-300 cursor-pointer"
+                    title="Switch active branch"
+                  >
+                    <GitBranch className="w-2.5 h-2.5 shrink-0" />
+                    <span className="truncate">{normalizedCustomStore || 'Main Branch'}</span>
+                    <ChevronDown className="w-2.5 h-2.5 shrink-0" />
+                  </button>
+                  {showBranchMenu && (
+                    <div className="absolute left-0 top-full mt-1.5 w-60 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl p-1.5 z-50 space-y-1">
+                      <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                        Switch Branch ({groupBranches.length})
+                      </div>
+                      <div className="max-h-48 overflow-y-auto space-y-1">
+                        {groupBranches.map((br) => {
+                          const isCurrent = br.id === activeBranchStoreId;
+                          const eff = getEffectiveBranchStatus(br);
+                          return (
+                            <button
+                              key={br.id}
+                              type="button"
+                              onClick={() => {
+                                setShowBranchMenu(false);
+                                onSwitchBranch(br.id);
+                              }}
+                              className={`w-full text-left px-2.5 py-2 rounded-lg text-xs flex items-center justify-between gap-2 cursor-pointer transition ${
+                                isCurrent
+                                  ? 'bg-sky-600/25 border border-sky-500/40 text-white font-bold'
+                                  : 'hover:bg-slate-800 text-slate-200'
+                              }`}
+                            >
+                              <div className="min-w-0 flex-1">
+                                <div className="truncate">{br.branchName || br.storeName}</div>
+                                <div className="text-[10px] text-slate-400 capitalize">{eff}</div>
+                              </div>
+                              {isCurrent && <Check className="w-3.5 h-3.5 text-sky-400 shrink-0" />}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      {onOpenMultiBranch && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowBranchMenu(false);
+                            onOpenMultiBranch();
+                          }}
+                          className="w-full mt-1 pt-1.5 border-t border-slate-800 px-2.5 py-1.5 text-[11px] font-bold text-sky-400 hover:text-sky-300 flex items-center gap-1.5 cursor-pointer"
+                        >
+                          <GitBranch className="w-3 h-3" />
+                          <span>Manage Branches &amp; Group Report</span>
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </>
+              ) : (
+                normalizedCustomStore && (
+                  <p className="text-[10px] text-slate-400 truncate max-w-[100px] sm:max-w-[120px] leading-tight">
+                    {normalizedCustomStore}
+                  </p>
+                )
               )}
             </div>
           </div>
 
-          <div className="flex items-center gap-1.5 shrink-0 flex-nowrap pr-0.5">
+          <div className="flex items-center gap-1.5 shrink-0 flex-nowrap">
             <button
               type="button"
               id="btn-mobile-header-sell"
               onClick={handleHeaderSellClick}
-              className="bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white font-semibold text-xs px-2.5 py-1.5 rounded-full flex items-center gap-1 shrink-0 shadow-sm transition cursor-pointer whitespace-nowrap"
+              className="h-7 bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white font-semibold text-xs px-2.5 rounded-full flex items-center gap-1 shrink-0 shadow-sm transition cursor-pointer whitespace-nowrap"
               title="Open POS Register / New Sale"
               aria-label="Sell — Open POS Register"
             >
@@ -162,7 +237,7 @@ export const PhoneDeviceFrame: React.FC<PhoneDeviceFrameProps> = ({
               <button
                 type="button"
                 onClick={onOpenCloudSync}
-                className="w-8 h-8 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700/70 text-slate-300 hover:text-white transition relative flex items-center justify-center shrink-0 cursor-pointer"
+                className="w-7 h-7 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700/70 text-slate-300 hover:text-white transition relative flex items-center justify-center shrink-0 cursor-pointer"
                 title={
                   cloudSyncStatus === 'quota_exceeded'
                     ? 'Firestore Daily Quota Reached: Operating in Offline Local Storage Mode'
@@ -173,7 +248,7 @@ export const PhoneDeviceFrame: React.FC<PhoneDeviceFrameProps> = ({
                 aria-label="Cloud Sync Status"
               >
                 <Cloud
-                  className={`w-4 h-4 ${
+                  className={`w-3.5 h-3.5 ${
                     cloudSyncStatus === 'quota_exceeded'
                       ? 'text-amber-400'
                       : cloudSyncStatus === 'error'
@@ -181,7 +256,7 @@ export const PhoneDeviceFrame: React.FC<PhoneDeviceFrameProps> = ({
                       : 'text-sky-400'
                   }`}
                 />
-                <span className={`w-2 h-2 rounded-full absolute top-1 right-1 ${syncDotClass}`} />
+                <span className={`w-1.5 h-1.5 rounded-full absolute top-1 right-1 ${syncDotClass}`} />
               </button>
             )}
 
@@ -195,13 +270,13 @@ export const PhoneDeviceFrame: React.FC<PhoneDeviceFrameProps> = ({
                   if (onSelectStockAlertFilter) onSelectStockAlertFilter();
                 }
               }}
-              className="w-8 h-8 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700/70 text-slate-300 hover:text-white transition relative flex items-center justify-center shrink-0 overflow-visible cursor-pointer"
+              className="w-7 h-7 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700/70 text-slate-300 hover:text-white transition relative flex items-center justify-center shrink-0 overflow-visible cursor-pointer"
               title="Stock Alert Notifications"
               aria-label="Stock Alert Notifications"
             >
-              <Bell className={`w-4 h-4 ${lowStockCount > 0 ? 'text-amber-400' : 'text-slate-300'}`} />
+              <Bell className={`w-3.5 h-3.5 ${lowStockCount > 0 ? 'text-amber-400' : 'text-slate-300'}`} />
               {lowStockCount > 0 && (
-                <span className="absolute -top-1.5 -right-1.5 min-w-[17px] h-[17px] px-1 rounded-full bg-rose-500 text-white text-[9px] font-bold font-mono tabular-nums flex items-center justify-center ring-2 ring-slate-900">
+                <span className="absolute -top-1.5 -right-1.5 min-w-[16px] h-[16px] px-1 rounded-full bg-rose-500 text-white text-[9px] font-bold font-mono tabular-nums flex items-center justify-center ring-2 ring-slate-900">
                   {lowStockCount}
                 </span>
               )}
@@ -210,11 +285,11 @@ export const PhoneDeviceFrame: React.FC<PhoneDeviceFrameProps> = ({
             <button
               type="button"
               onClick={() => onSelectTab('settings')}
-              className="w-8 h-8 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700/70 text-slate-300 hover:text-white transition flex items-center justify-center shrink-0 cursor-pointer"
+              className="w-7 h-7 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700/70 text-slate-300 hover:text-white transition flex items-center justify-center shrink-0 cursor-pointer"
               title="Settings"
               aria-label="Settings"
             >
-              <Settings className="w-4 h-4 text-slate-300" />
+              <Settings className="w-3.5 h-3.5 text-slate-300" />
             </button>
           </div>
         </header>
@@ -247,7 +322,7 @@ export const PhoneDeviceFrame: React.FC<PhoneDeviceFrameProps> = ({
 
         {/* MOBILE MAIN VIEWPORT CONTENT CONTAINER */}
         <div
-          className={`flex-1 min-h-0 overflow-y-auto bg-[#0f172a] text-slate-100 p-3 sm:p-4 scrollbar-thin scrollbar-thumb-slate-800 print-unlock-overflow ${
+          className={`flex-1 min-h-0 overflow-y-auto bg-[#0f172a] text-slate-100 px-3 pt-1.5 sm:px-4 sm:pt-2 scrollbar-thin scrollbar-thumb-slate-800 print-unlock-overflow ${
             hideBottomNav ? 'pb-6' : 'pb-28'
           }`}
         >
@@ -312,12 +387,13 @@ export const PhoneDeviceFrame: React.FC<PhoneDeviceFrameProps> = ({
 
           <button
             type="button"
+            id="btn-phone-bottom-nav-switch-mode"
             onClick={onSwitchToComputer}
-            className="min-h-[44px] flex flex-col items-center justify-center py-1 rounded-xl transition text-slate-400 hover:text-[#38bdf8] cursor-pointer"
-            title="Get Desktop Billing Software"
+            className="min-h-[44px] flex flex-col items-center justify-center py-1 rounded-xl transition text-slate-300 hover:text-[#38bdf8] cursor-pointer"
+            title="Switch to Desktop / Wide Layout"
           >
             <Monitor className="w-5 h-5 mb-0.5 text-[#38bdf8]" />
-            <span className="text-[9px] font-bold tracking-tight whitespace-nowrap">GET DESKTOP</span>
+            <span className="text-[9px] font-bold tracking-tight whitespace-nowrap">DESKTOP VIEW</span>
           </button>
         </nav>
         )}

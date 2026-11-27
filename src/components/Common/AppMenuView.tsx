@@ -16,7 +16,6 @@ import {
   Database,
   Wrench,
   Award,
-  Monitor,
   TrendingUp,
   Settings,
   Bell,
@@ -71,7 +70,7 @@ export interface AppMenuViewProps {
   onOpenAiAssistant?: () => void;
   onOpenBarcodePrinter?: () => void;
   onTriggerSync?: () => Promise<any> | void;
-  onSwitchToComputer: () => void;
+  onSwitchToComputer?: () => void;
   lowStockCount: number;
   storeName?: string;
   currentUser?: User;
@@ -113,7 +112,6 @@ export const AppMenuView: React.FC<AppMenuViewProps> = ({
   onOpenAiAssistant,
   onOpenBarcodePrinter,
   onTriggerSync,
-  onSwitchToComputer,
   lowStockCount,
   storeName = 'Rofani POS',
   currentUser,
@@ -929,18 +927,6 @@ export const AppMenuView: React.FC<AppMenuViewProps> = ({
               </div>
             </button>
           )}
-
-          <button
-            type="button"
-            onClick={onSwitchToComputer}
-            className="w-full min-h-[52px] px-4 py-3 flex items-center justify-between hover:bg-slate-800/70 transition text-left cursor-pointer"
-          >
-            <div className="flex items-center gap-3.5">
-              <Monitor className="w-4 h-4 text-slate-300 shrink-0" strokeWidth={1.75} />
-              <span className="text-[13px] font-semibold text-white">Get Desktop Billing Software</span>
-            </div>
-            <ChevronRight className="w-4 h-4 text-slate-400 shrink-0" />
-          </button>
 
           <button
             type="button"

@@ -16,6 +16,8 @@ import {
   Lightbulb,
   Save,
   MessageCircle,
+  GitBranch,
+  Check,
 } from 'lucide-react';
 import {
   FeatureRequest,
@@ -26,6 +28,9 @@ import {
   fetchAllStoresForSuperAdmin,
   subscribeToAllStoresForSuperAdmin,
   superAdminUpdateStoreSubscription,
+  superAdminBulkUpdateOwnerGroup,
+  superAdminSetOwnerMaxBranches,
+  SuperAdminBranchAction,
   reconcileIncomingReferralRewards,
 } from '../../lib/cloudSync';
 import {
@@ -36,7 +41,15 @@ import {
   subscribeToAllFeatureRequestsForAdmin,
   superAdminUpdateFeatureRequest,
 } from '../../lib/featureRequestsService';
-import { OWNER_PRIMARY_STORE_ID, OWNER_CLOUD_EMAIL } from '../../lib/firebase';
+import {
+  calculateOwnerBundlePricing,
+  getBranchDaysRemaining,
+  getEffectiveBranchStatus,
+  getOwnerMaxAllowedBranches,
+  isBranchLicenseUnlocked,
+  isMasterOwnerStore,
+  resolveIsPrimaryBranch,
+} from '../../utils/branchLicensing';
 
 interface SuperAdminSubscribersModalProps {
   isOpen: boolean;
@@ -51,8 +64,10 @@ export const SuperAdminSubscribersModal: React.FC<SuperAdminSubscribersModalProp
   const [stores, setStores] = useState<StoreSubscriptionProfile[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'trial' | 'expired'>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'trial' | 'expired' | 'suspended'>('all');
   const [actionBusyId, setActionBusyId] = useState<string | null>(null);
+  const [customDaysByTarget, setCustomDaysByTarget] = useState<Record<string, string>>({});
+  const [maxBranchesDrafts, setMaxBranchesDrafts] = useState<Record<string, string>>({});
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   const [featureRequests, setFeatureRequests] = useState<FeatureRequest[]>([]);
@@ -125,7 +140,6 @@ export const SuperAdminSubscribersModal: React.FC<SuperAdminSubscribersModalProp
   }, [isOpen]);
 
   const enrichedStores = useMemo(() => {
-    const now = Date.now();
     const referredByCounts: Record<string, number> = {};
     for (const s of stores) {
       if (s.referredBy) {
@@ -134,22 +148,17 @@ export const SuperAdminSubscribersModal: React.FC<SuperAdminSubscribersModalProp
     }
 
     return stores.map((s) => {
-      const expMs = s.expiresAt ? Date.parse(s.expiresAt) : 0;
-      const isPrimaryOwner =
-        s.id === OWNER_PRIMARY_STORE_ID ||
-        s.ownerEmail?.toLowerCase() === OWNER_CLOUD_EMAIL;
-      const isExpired =
-        !isPrimaryOwner &&
-        (s.subscriptionStatus === 'expired' || (expMs > 0 && expMs <= now));
-      const daysRemaining =
-        expMs > now ? Math.ceil((expMs - now) / 86400000) : 0;
+      const isMaster = isMasterOwnerStore(s);
+      const liveStatus = getEffectiveBranchStatus(s, isMaster);
+      const daysRemaining = getBranchDaysRemaining(s);
       const effectiveReferrals = Math.max(
         s.referralCount || 0,
         referredByCounts[s.id] || 0
       );
       return {
         ...s,
-        liveStatus: (isExpired ? 'expired' : 'active') as 'active' | 'expired',
+        isMaster,
+        liveStatus,
         daysRemaining,
         effectiveReferrals,
         hasPendingReconcile: (referredByCounts[s.id] || 0) > (s.referralCount || 0),
@@ -169,24 +178,26 @@ export const SuperAdminSubscribersModal: React.FC<SuperAdminSubscribersModalProp
   const stats = useMemo(() => {
     const total = enrichedStores.length;
     const active = enrichedStores.filter((s) => s.liveStatus === 'active').length;
-    const trial = enrichedStores.filter(
-      (s) => s.liveStatus === 'active' && s.planType === 'trial'
+    const trial = enrichedStores.filter((s) => s.liveStatus === 'trial').length;
+    const expired = enrichedStores.filter(
+      (s) => s.liveStatus === 'expired' || s.liveStatus === 'suspended'
     ).length;
-    const expired = enrichedStores.filter((s) => s.liveStatus === 'expired').length;
     return { total, active, trial, expired };
   }, [enrichedStores]);
 
   const filteredStores = useMemo(() => {
     return enrichedStores.filter((s) => {
       if (statusFilter === 'active' && s.liveStatus !== 'active') return false;
-      if (statusFilter === 'trial' && !(s.liveStatus === 'active' && s.planType === 'trial'))
-        return false;
+      if (statusFilter === 'trial' && s.liveStatus !== 'trial') return false;
       if (statusFilter === 'expired' && s.liveStatus !== 'expired') return false;
+      if (statusFilter === 'suspended' && s.liveStatus !== 'suspended') return false;
 
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
         return (
           s.storeName?.toLowerCase().includes(q) ||
+          s.branchName?.toLowerCase().includes(q) ||
+          s.businessGroupName?.toLowerCase().includes(q) ||
           s.ownerEmail?.toLowerCase().includes(q) ||
           s.phone?.toLowerCase().includes(q) ||
           s.id?.toLowerCase().includes(q)
@@ -195,6 +206,45 @@ export const SuperAdminSubscribersModal: React.FC<SuperAdminSubscribersModalProp
       return true;
     });
   }, [enrichedStores, searchQuery, statusFilter]);
+
+  const ownerGroups = useMemo(() => {
+    const map = new Map<string, typeof enrichedStores>();
+    filteredStores.forEach((s) => {
+      const ownerKey = (s.ownerId || s.ownerUid || s.parentStoreId || s.id).trim();
+      const arr = map.get(ownerKey) || [];
+      arr.push(s);
+      map.set(ownerKey, arr);
+    });
+
+    return Array.from(map.entries())
+      .map(([ownerKey, branches]) => {
+        const sorted = [...branches].sort((a, b) => {
+          const aPrimary = resolveIsPrimaryBranch(a, ownerKey);
+          const bPrimary = resolveIsPrimaryBranch(b, ownerKey);
+          if (aPrimary && !bPrimary) return -1;
+          if (!aPrimary && bPrimary) return 1;
+          return new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime();
+        });
+        const primary = sorted[0];
+        const activeCount = sorted.filter((b) => isBranchLicenseUnlocked(b, b.isMaster)).length;
+        const maxAllowed = getOwnerMaxAllowedBranches(sorted, primary);
+        const pricing = calculateOwnerBundlePricing(sorted.length);
+        return {
+          ownerKey,
+          primary,
+          branches: sorted,
+          activeCount,
+          totalCount: sorted.length,
+          maxAllowed,
+          pricing,
+        };
+      })
+      .sort((a, b) => {
+        if (a.primary.isMaster && !b.primary.isMaster) return -1;
+        if (!a.primary.isMaster && b.primary.isMaster) return 1;
+        return new Date(b.primary.createdAt || 0).getTime() - new Date(a.primary.createdAt || 0).getTime();
+      });
+  }, [filteredStores]);
 
   const pendingRequestsCount = useMemo(
     () => featureRequests.filter((r) => r.status === 'Pending').length,
@@ -222,26 +272,90 @@ export const SuperAdminSubscribersModal: React.FC<SuperAdminSubscribersModalProp
 
   const handleAction = async (
     store: StoreSubscriptionProfile,
-    action: 'extend_30d' | 'extend_1y' | 'suspend'
+    action: SuperAdminBranchAction,
+    customDays?: number
   ) => {
     setActionBusyId(store.id);
     setFeedback(null);
     try {
-      await superAdminUpdateStoreSubscription(store.id, action, store);
+      await superAdminUpdateStoreSubscription(store.id, action, store, customDays);
       const label =
         action === 'extend_30d'
           ? 'extended by +30 Days'
           : action === 'extend_1y'
           ? 'extended by +1 Year'
+          : action === 'extend_custom'
+          ? `extended by +${customDays || 30} Days`
+          : action === 'activate'
+          ? 'activated'
           : 'suspended';
       setFeedback({
         type: 'success',
-        text: `${store.storeName} subscription ${label}.`,
+        text: `${store.branchName || store.storeName} license ${label}.`,
       });
     } catch (err: any) {
       setFeedback({
         type: 'error',
         text: err?.message || 'Failed to update subscriber status.',
+      });
+    } finally {
+      setActionBusyId(null);
+    }
+  };
+
+  const handleBulkOwnerAction = async (
+    ownerKey: string,
+    groupName: string,
+    ownerBranches: StoreSubscriptionProfile[],
+    action: SuperAdminBranchAction,
+    customDays?: number
+  ) => {
+    setActionBusyId(`group:${ownerKey}`);
+    setFeedback(null);
+    try {
+      const updatedCount = await superAdminBulkUpdateOwnerGroup(ownerBranches, action, customDays);
+      const label =
+        action === 'extend_30d'
+          ? 'extended by +30 Days'
+          : action === 'extend_1y'
+          ? 'extended by +1 Year'
+          : action === 'extend_custom'
+          ? `extended by +${customDays || 30} Days`
+          : action === 'activate'
+          ? 'activated'
+          : 'suspended';
+      setFeedback({
+        type: 'success',
+        text: `${groupName}: ${updatedCount} branch(es) ${label}.`,
+      });
+    } catch (err: any) {
+      setFeedback({
+        type: 'error',
+        text: err?.message || 'Bulk branch update failed.',
+      });
+    } finally {
+      setActionBusyId(null);
+    }
+  };
+
+  const handleSaveMaxBranches = async (
+    ownerKey: string,
+    groupName: string,
+    ownerBranches: StoreSubscriptionProfile[],
+    nextMax: number
+  ) => {
+    setActionBusyId(`max:${ownerKey}`);
+    setFeedback(null);
+    try {
+      const saved = await superAdminSetOwnerMaxBranches(ownerBranches, nextMax);
+      setFeedback({
+        type: 'success',
+        text: `${groupName} max allowed branches updated to ${saved}.`,
+      });
+    } catch (err: any) {
+      setFeedback({
+        type: 'error',
+        text: err?.message || 'Could not update maxAllowedBranches.',
       });
     } finally {
       setActionBusyId(null);
@@ -344,7 +458,7 @@ export const SuperAdminSubscribersModal: React.FC<SuperAdminSubscribersModalProp
                   Super Admin Console
                 </h2>
                 <p className="text-[11px] text-slate-400 truncate">
-                  Manage merchant subscribers &amp; client special feature requests
+                  Multi-branch owner licensing, individual branch controls &amp; feature requests
                 </p>
               </div>
             </div>
@@ -359,7 +473,7 @@ export const SuperAdminSubscribersModal: React.FC<SuperAdminSubscribersModalProp
             </button>
           </div>
 
-          {/* Tabs + Refresh Row (fits cleanly within mobile card width with zero clipping) */}
+          {/* Tabs + Refresh Row */}
           <div className="flex items-center justify-between gap-2 w-full min-w-0">
             <div className="flex-1 sm:flex-initial min-w-0 grid grid-cols-2 sm:inline-flex bg-slate-900 border border-slate-700 rounded-xl p-1 gap-1">
               <button
@@ -416,13 +530,13 @@ export const SuperAdminSubscribersModal: React.FC<SuperAdminSubscribersModalProp
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 py-3.5 shrink-0">
               <div className="bg-[#0f172a] border border-slate-700/70 rounded-xl p-3">
                 <p className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold">
-                  Total Shops
+                  Total Branches
                 </p>
                 <p className="text-lg font-extrabold text-white tabular-nums mt-0.5">{stats.total}</p>
               </div>
               <div className="bg-[#0f172a] border border-emerald-500/30 rounded-xl p-3">
                 <p className="text-[10px] uppercase tracking-wider text-emerald-400 font-semibold">
-                  Active
+                  Paid Active
                 </p>
                 <p className="text-lg font-extrabold text-emerald-300 tabular-nums mt-0.5">
                   {stats.active}
@@ -454,12 +568,12 @@ export const SuperAdminSubscribersModal: React.FC<SuperAdminSubscribersModalProp
                   type="text"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search shop name, email, or phone..."
+                  placeholder="Search business group, branch, email, or phone..."
                   className="w-full bg-[#0f172a] border border-slate-700 rounded-xl pl-9 pr-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-sky-500"
                 />
               </div>
               <div className="inline-flex flex-wrap bg-slate-900 border border-slate-700 rounded-xl p-1 gap-1 self-start max-w-full">
-                {(['all', 'active', 'trial', 'expired'] as const).map((tab) => (
+                {(['all', 'active', 'trial', 'expired', 'suspended'] as const).map((tab) => (
                   <button
                     key={tab}
                     type="button"
@@ -527,150 +641,312 @@ export const SuperAdminSubscribersModal: React.FC<SuperAdminSubscribersModalProp
 
         {/* Main Scroll List */}
         {adminTab === 'subscribers' ? (
-          <div className="flex-1 overflow-y-auto space-y-2.5 pr-1">
+          <div className="flex-1 overflow-y-auto space-y-3 pr-1">
             {isLoading && stores.length === 0 ? (
               <div className="bg-[#0f172a] border border-slate-800 rounded-2xl p-10 text-center text-xs text-slate-400">
                 Loading registered subscriber stores...
               </div>
-            ) : filteredStores.length === 0 ? (
+            ) : ownerGroups.length === 0 ? (
               <div className="bg-[#0f172a] border border-slate-800 rounded-2xl p-10 text-center text-xs text-slate-400 space-y-2">
                 <Users className="w-8 h-8 text-slate-600 mx-auto" />
                 <p>No subscriber shops match this filter.</p>
               </div>
             ) : (
-              filteredStores.map((shop) => {
-                const isPrimaryOwnerStore = shop.id === OWNER_PRIMARY_STORE_ID;
-                const isBusy = actionBusyId === shop.id;
-                const formattedExpiry = shop.expiresAt
-                  ? new Date(shop.expiresAt).toLocaleDateString(undefined, {
-                      month: 'short',
-                      day: 'numeric',
-                      year: 'numeric',
-                    })
-                  : 'N/A';
+              ownerGroups.map((group) => {
+                const { ownerKey, primary, branches, activeCount, totalCount, maxAllowed, pricing } = group;
+                const groupTitle = primary.businessGroupName || primary.storeName || 'Unnamed Owner';
+                const isGroupBusy =
+                  actionBusyId === `group:${ownerKey}` || actionBusyId === `max:${ownerKey}`;
+                const draftMax = maxBranchesDrafts[ownerKey] ?? String(maxAllowed);
+                const groupDaysDraft = customDaysByTarget[`group:${ownerKey}`] ?? '30';
+                const hasMasterStore = branches.some((b) => b.isMaster);
 
                 return (
                   <div
-                    key={shop.id}
-                    className="bg-[#0f172a] border border-slate-700/70 rounded-2xl p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-3.5"
+                    key={ownerKey}
+                    className="bg-[#0f172a] border border-slate-700/80 rounded-2xl p-4 space-y-3"
                   >
-                    <div className="space-y-1.5 min-w-0">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="inline-flex items-center gap-1.5 font-bold text-sm text-white">
-                          <Store className="w-4 h-4 text-sky-400 shrink-0" />
-                          {shop.storeName || 'Unnamed Store'}
-                        </span>
-
-                        <span
-                          className={`px-2 py-0.5 rounded-md text-[10px] font-bold uppercase border ${
-                            shop.liveStatus === 'active'
-                              ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
-                              : 'bg-rose-500/15 text-rose-300 border-rose-500/30'
-                          }`}
-                        >
-                          {shop.liveStatus === 'active' ? 'Active' : 'Expired'}
-                        </span>
-
-                        <span className="px-2 py-0.5 rounded-md bg-slate-800 border border-slate-700 text-slate-300 text-[10px] font-semibold uppercase">
-                          {isPrimaryOwnerStore ? 'Owner Master' : shop.planType || 'trial'}
-                        </span>
-
-                        <span
-                          className={`px-2 py-0.5 rounded-md border text-[10px] font-bold inline-flex items-center gap-1 tabular-nums ${
-                            shop.effectiveReferrals > 0
-                              ? 'bg-amber-500/15 text-amber-300 border-amber-500/35'
-                              : 'bg-slate-800/80 text-slate-400 border-slate-700'
-                          }`}
-                        >
-                          <Gift className="w-3 h-3" />
-                          Referrals: {shop.effectiveReferrals}
-                        </span>
-                      </div>
-
-                      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-slate-400">
-                        <span>{shop.ownerEmail}</span>
-                        {shop.phone && (
-                          <span className="inline-flex items-center gap-1 text-slate-300 font-mono">
-                            <Phone className="w-3 h-3 text-slate-500" />
-                            {shop.phone}
+                    {/* Business Group / Owner Summary Header */}
+                    <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 border-b border-slate-800 pb-3">
+                      <div className="space-y-1 min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="inline-flex items-center gap-1.5 font-extrabold text-sm text-white">
+                            {totalCount > 1 ? (
+                              <GitBranch className="w-4 h-4 text-sky-400 shrink-0" />
+                            ) : (
+                              <Store className="w-4 h-4 text-sky-400 shrink-0" />
+                            )}
+                            {groupTitle}
                           </span>
-                        )}
-                        {shop.kraPin && <span>KRA: {shop.kraPin}</span>}
-                        {shop.mpesaShortcode && (
-                          <span>
-                            {shop.mpesaShortcodeType?.toUpperCase() || 'TILL'}: {shop.mpesaShortcode}
+                          <span className="px-2 py-0.5 rounded-md bg-sky-500/15 border border-sky-500/35 text-sky-300 text-[10px] font-extrabold tabular-nums">
+                            {activeCount} / {totalCount} Active
                           </span>
-                        )}
-                      </div>
-
-                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]">
-                        <span className="text-slate-400">
-                          Expires:{' '}
-                          <strong className="text-slate-200 tabular-nums">{formattedExpiry}</strong>
-                          {shop.liveStatus === 'active' && !isPrimaryOwnerStore && (
-                            <span className="text-sky-400 ml-1">
-                              ({shop.daysRemaining}d left)
+                          <span className="px-2 py-0.5 rounded-md bg-emerald-500/15 border border-emerald-500/35 text-emerald-300 text-[10px] font-bold tabular-nums">
+                            Bundle: KSh {pricing.monthlyTotal.toLocaleString()}/mo · KSh {pricing.annualTotal.toLocaleString()}/yr
+                          </span>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-400">
+                          <span>{primary.ownerEmail}</span>
+                          {primary.phone && (
+                            <span className="inline-flex items-center gap-1 text-slate-300 font-mono">
+                              <Phone className="w-3 h-3 text-slate-500" />
+                              {primary.phone}
                             </span>
                           )}
-                        </span>
-                        {shop.referralCode && (
-                          <span className="text-slate-400">
-                            Code: <strong className="text-amber-300 font-mono">{shop.referralCode}</strong>
-                          </span>
-                        )}
-                        {shop.referredByStoreName && (
-                          <span className="text-emerald-300/90">
-                            Invited by: <strong>{shop.referredByStoreName}</strong>
-                          </span>
-                        )}
-                        {shop.lastPaymentRef && (
-                          <span className="text-slate-400">
-                            Last Ref:{' '}
-                            <strong className="text-emerald-300 font-mono">
-                              {shop.lastPaymentRef}
-                            </strong>
-                            {shop.lastPaymentAmount
-                              ? ` (KSh ${shop.lastPaymentAmount.toLocaleString()})`
-                              : ''}
-                          </span>
-                        )}
+                          {primary.kraPin && <span>KRA: {primary.kraPin}</span>}
+                        </div>
                       </div>
+
+                      {/* Owner Max Branches + Bulk All-Branches Controls */}
+                      {!hasMasterStore && (
+                        <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+                          <div className="inline-flex items-center gap-1 bg-slate-900 border border-slate-700 rounded-xl px-2 py-1 text-[11px]">
+                            <span className="text-slate-400">Max Branches:</span>
+                            <input
+                              type="number"
+                              min={1}
+                              max={100}
+                              value={draftMax}
+                              onChange={(e) =>
+                                setMaxBranchesDrafts((prev) => ({
+                                  ...prev,
+                                  [ownerKey]: e.target.value,
+                                }))
+                              }
+                              className="w-12 bg-slate-800 border border-slate-600 rounded-lg px-1.5 py-0.5 text-center text-white font-mono text-[11px]"
+                            />
+                            <button
+                              type="button"
+                              disabled={isGroupBusy}
+                              onClick={() =>
+                                handleSaveMaxBranches(
+                                  ownerKey,
+                                  groupTitle,
+                                  branches,
+                                  Number(draftMax || maxAllowed)
+                                )
+                              }
+                              className="px-2 py-0.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-white font-bold text-[10px] cursor-pointer disabled:opacity-50"
+                            >
+                              Save
+                            </button>
+                          </div>
+
+                          {totalCount > 1 && (
+                            <>
+                              <button
+                                type="button"
+                                disabled={isGroupBusy}
+                                onClick={() =>
+                                  handleBulkOwnerAction(ownerKey, groupTitle, branches, 'extend_30d')
+                                }
+                                className="px-2.5 py-1.5 rounded-xl bg-sky-500/15 hover:bg-sky-500/25 border border-sky-500/30 text-sky-300 font-bold text-[11px] cursor-pointer disabled:opacity-50"
+                              >
+                                Extend All +30d
+                              </button>
+                              <button
+                                type="button"
+                                disabled={isGroupBusy}
+                                onClick={() =>
+                                  handleBulkOwnerAction(ownerKey, groupTitle, branches, 'extend_1y')
+                                }
+                                className="px-2.5 py-1.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-300 font-bold text-[11px] cursor-pointer disabled:opacity-50"
+                              >
+                                Extend All +1y
+                              </button>
+                              <div className="inline-flex items-center gap-1 bg-slate-900 border border-slate-700 rounded-xl px-1.5 py-1">
+                                <input
+                                  type="number"
+                                  min={1}
+                                  max={3650}
+                                  value={groupDaysDraft}
+                                  onChange={(e) =>
+                                    setCustomDaysByTarget((prev) => ({
+                                      ...prev,
+                                      [`group:${ownerKey}`]: e.target.value,
+                                    }))
+                                  }
+                                  className="w-11 bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-center text-[11px] text-white font-mono"
+                                  title="Custom days to add to all branches"
+                                />
+                                <button
+                                  type="button"
+                                  disabled={isGroupBusy}
+                                  onClick={() =>
+                                    handleBulkOwnerAction(
+                                      ownerKey,
+                                      groupTitle,
+                                      branches,
+                                      'extend_custom',
+                                      Number(groupDaysDraft || 30)
+                                    )
+                                  }
+                                  className="px-2 py-0.5 rounded bg-indigo-500/25 hover:bg-indigo-500/40 text-indigo-200 font-bold text-[10px] cursor-pointer"
+                                >
+                                  +Days All
+                                </button>
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      )}
                     </div>
 
-                    {/* Quick One-Tap Owner Actions */}
-                    {!isPrimaryOwnerStore && (
-                      <div className="flex flex-wrap items-center gap-2 shrink-0">
-                        <button
-                          type="button"
-                          disabled={isBusy}
-                          onClick={() => handleAction(shop, 'extend_30d')}
-                          className="px-3 py-2 rounded-xl bg-sky-500/15 hover:bg-sky-500/25 border border-sky-500/30 text-sky-300 font-bold text-[11px] inline-flex items-center gap-1.5 cursor-pointer transition disabled:opacity-50"
-                        >
-                          <CalendarPlus className="w-3.5 h-3.5" />
-                          Extend +30 Days
-                        </button>
+                    {/* Individual Branch Rows under this Owner */}
+                    <div className="space-y-2">
+                      {branches.map((shop, branchIdx) => {
+                        const isBusy = actionBusyId === shop.id || isGroupBusy;
+                        const isPrimary = resolveIsPrimaryBranch(shop, ownerKey) && branchIdx === 0;
+                        const formattedExpiry = shop.expiresAt
+                          ? new Date(shop.expiresAt).toLocaleDateString(undefined, {
+                              month: 'short',
+                              day: 'numeric',
+                              year: 'numeric',
+                            })
+                          : 'N/A';
+                        const branchDaysDraft = customDaysByTarget[shop.id] ?? '30';
+                        const unlocked = isBranchLicenseUnlocked(shop, shop.isMaster);
+                        const statusPillClass =
+                          shop.liveStatus === 'active'
+                            ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                            : shop.liveStatus === 'trial'
+                            ? 'bg-sky-500/15 text-sky-300 border-sky-500/30'
+                            : shop.liveStatus === 'suspended'
+                            ? 'bg-rose-500/20 text-rose-300 border-rose-500/45'
+                            : 'bg-amber-500/15 text-amber-300 border-amber-500/35';
 
-                        <button
-                          type="button"
-                          disabled={isBusy}
-                          onClick={() => handleAction(shop, 'extend_1y')}
-                          className="px-3 py-2 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-300 font-bold text-[11px] inline-flex items-center gap-1.5 cursor-pointer transition disabled:opacity-50"
-                        >
-                          <CalendarPlus className="w-3.5 h-3.5" />
-                          Extend +1 Year
-                        </button>
+                        return (
+                          <div
+                            key={shop.id}
+                            className="bg-slate-900/90 border border-slate-800 rounded-xl p-3 flex flex-col lg:flex-row lg:items-center justify-between gap-3"
+                          >
+                            <div className="space-y-1 min-w-0">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="font-bold text-xs sm:text-sm text-white">
+                                  {shop.branchName || shop.storeName || 'Unnamed Branch'}
+                                </span>
+                                <span className="px-2 py-0.5 rounded-md bg-slate-800 border border-slate-700 text-slate-300 text-[10px] font-semibold">
+                                  {isPrimary ? 'Primary #1 (KSh 500/mo)' : `Branch #${branchIdx + 1} (KSh 250/mo)`}
+                                </span>
+                                <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold uppercase border ${statusPillClass}`}>
+                                  {shop.licensePendingActivation ? 'Pending License' : shop.liveStatus}
+                                </span>
+                                <span className="px-2 py-0.5 rounded-md bg-slate-800 border border-slate-700 text-slate-300 text-[10px] font-semibold uppercase">
+                                  {shop.isMaster ? 'Owner Master' : shop.planType || 'trial'}
+                                </span>
+                                {shop.effectiveReferrals > 0 && (
+                                  <span className="px-2 py-0.5 rounded-md border text-[10px] font-bold inline-flex items-center gap-1 tabular-nums bg-amber-500/15 text-amber-300 border-amber-500/35">
+                                    <Gift className="w-3 h-3" />
+                                    {shop.effectiveReferrals}
+                                  </span>
+                                )}
+                              </div>
 
-                        <button
-                          type="button"
-                          disabled={isBusy}
-                          onClick={() => handleAction(shop, 'suspend')}
-                          className="px-3 py-2 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 text-rose-300 font-bold text-[11px] inline-flex items-center gap-1.5 cursor-pointer transition disabled:opacity-50"
-                        >
-                          <Ban className="w-3.5 h-3.5" />
-                          Suspend Access
-                        </button>
-                      </div>
-                    )}
+                              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-400">
+                                <span>
+                                  Expires:{' '}
+                                  <strong className="text-slate-200 tabular-nums">{formattedExpiry}</strong>
+                                  {unlocked && !shop.isMaster && (
+                                    <span className="text-sky-400 ml-1">
+                                      ({shop.daysRemaining}d left)
+                                    </span>
+                                  )}
+                                </span>
+                                {shop.referralCode && (
+                                  <span>
+                                    Code: <strong className="text-amber-300 font-mono">{shop.referralCode}</strong>
+                                  </span>
+                                )}
+                                {shop.lastPaymentRef && (
+                                  <span>
+                                    Last Ref:{' '}
+                                    <strong className="text-emerald-300 font-mono">{shop.lastPaymentRef}</strong>
+                                    {shop.lastPaymentAmount
+                                      ? ` (KSh ${shop.lastPaymentAmount.toLocaleString()})`
+                                      : ''}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+
+                            {!shop.isMaster && (
+                              <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+                                {!unlocked && (
+                                  <button
+                                    type="button"
+                                    disabled={isBusy}
+                                    onClick={() => handleAction(shop, 'activate', 30)}
+                                    className="px-2.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[11px] inline-flex items-center gap-1 cursor-pointer transition disabled:opacity-50"
+                                  >
+                                    <Check className="w-3.5 h-3.5" />
+                                    Activate
+                                  </button>
+                                )}
+
+                                <button
+                                  type="button"
+                                  disabled={isBusy}
+                                  onClick={() => handleAction(shop, 'extend_30d')}
+                                  className="px-2.5 py-1.5 rounded-xl bg-sky-500/15 hover:bg-sky-500/25 border border-sky-500/30 text-sky-300 font-bold text-[11px] inline-flex items-center gap-1 cursor-pointer transition disabled:opacity-50"
+                                >
+                                  <CalendarPlus className="w-3.5 h-3.5" />
+                                  +30d
+                                </button>
+
+                                <button
+                                  type="button"
+                                  disabled={isBusy}
+                                  onClick={() => handleAction(shop, 'extend_1y')}
+                                  className="px-2.5 py-1.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-300 font-bold text-[11px] inline-flex items-center gap-1 cursor-pointer transition disabled:opacity-50"
+                                >
+                                  <CalendarPlus className="w-3.5 h-3.5" />
+                                  +1y
+                                </button>
+
+                                <div className="inline-flex items-center gap-1 bg-slate-800 border border-slate-700 rounded-xl px-1.5 py-1">
+                                  <input
+                                    type="number"
+                                    min={1}
+                                    max={3650}
+                                    value={branchDaysDraft}
+                                    onChange={(e) =>
+                                      setCustomDaysByTarget((prev) => ({
+                                        ...prev,
+                                        [shop.id]: e.target.value,
+                                      }))
+                                    }
+                                    className="w-10 bg-slate-900 border border-slate-600 rounded px-1 py-0.5 text-center text-[11px] text-white font-mono"
+                                    title="Custom days to add"
+                                  />
+                                  <button
+                                    type="button"
+                                    disabled={isBusy}
+                                    onClick={() =>
+                                      handleAction(shop, 'extend_custom', Number(branchDaysDraft || 30))
+                                    }
+                                    className="px-1.5 py-0.5 rounded bg-indigo-500/25 hover:bg-indigo-500/40 text-indigo-200 font-bold text-[10px] cursor-pointer"
+                                  >
+                                    +Days
+                                  </button>
+                                </div>
+
+                                {shop.liveStatus !== 'suspended' && (
+                                  <button
+                                    type="button"
+                                    disabled={isBusy}
+                                    onClick={() => handleAction(shop, 'suspend')}
+                                    className="px-2.5 py-1.5 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 text-rose-300 font-bold text-[11px] inline-flex items-center gap-1 cursor-pointer transition disabled:opacity-50"
+                                  >
+                                    <Ban className="w-3.5 h-3.5" />
+                                    Suspend
+                                  </button>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
                 );
               })

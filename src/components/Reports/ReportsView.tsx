@@ -27,12 +27,17 @@ import {
   Layers,
   ShoppingCart,
   Lock,
-  Trash2
+  Trash2,
+  GitBranch,
+  RefreshCw,
+  AlertTriangle
 } from 'lucide-react';
-import { Transaction, Product, Customer, Supplier, Expense, PurchaseOrder, User, WorkerSalaryPayout, StaffCommissionPayout, CustomerReturnRecord } from '../../types';
+import { Transaction, Product, Customer, Supplier, Expense, PurchaseOrder, User, WorkerSalaryPayout, StaffCommissionPayout, CustomerReturnRecord, StoreSubscriptionProfile } from '../../types';
 import { KraTotComplianceCenter } from './KraTotComplianceCenter';
 import { DailyOverviewCard } from './DailyOverviewCard';
 import { WorkersWagesCommissionsReport } from '../Attendance/WorkersWagesCommissionsReport';
+import { fetchMultiBranchCombinedAnalytics, MultiBranchCombinedReport } from '../../lib/cloudSync';
+import { getEffectiveBranchStatus } from '../../utils/branchLicensing';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { useTransactionSettings } from '../../utils/transactionSettings';
@@ -58,13 +63,14 @@ interface ReportsViewProps {
   storeKraPin?: string;
   onAddExpense?: (expense: Expense) => void;
   inPhoneFrame?: boolean;
+  groupBranches?: StoreSubscriptionProfile[];
+  onOpenMultiBranch?: () => void;
 }
 
 interface ReportItem {
   id: string;
   title: string;
   category?: string;
-  isPremium?: boolean;
   description: string;
 }
 
@@ -89,6 +95,8 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   storeKraPin,
   onAddExpense,
   inPhoneFrame = false,
+  groupBranches = [],
+  onOpenMultiBranch,
 }) => {
   const [txSettings] = useTransactionSettings(activeStoreId);
   const [searchQuery, setSearchQuery] = useState('');
@@ -98,6 +106,8 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   const [customEndDate, setCustomEndDate] = useState('');
   const [modalSearchQuery, setModalSearchQuery] = useState('');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [multiBranchReport, setMultiBranchReport] = useState<MultiBranchCombinedReport | null>(null);
+  const [isLoadingMultiBranch, setIsLoadingMultiBranch] = useState(false);
 
   // Drill-down Interactive States (z-[60] to sit above z-50 parent modals)
   const [selectedProductAudit, setSelectedProductAudit] = useState<Product | null>(null);
@@ -114,6 +124,34 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 3500);
   };
+
+  const loadMultiBranchReport = async () => {
+    if (!groupBranches || groupBranches.length === 0) return;
+    setIsLoadingMultiBranch(true);
+    try {
+      const report = await fetchMultiBranchCombinedAnalytics(
+        groupBranches,
+        activeStoreId || '',
+        {
+          products,
+          transactions,
+          expenses,
+          users: allUsers,
+          salaryPayouts,
+          commissionPayouts,
+        }
+      );
+      setMultiBranchReport(report);
+    } finally {
+      setIsLoadingMultiBranch(false);
+    }
+  };
+
+  React.useEffect(() => {
+    if (selectedReport?.id === 'multi_branch_combined') {
+      loadMultiBranchReport();
+    }
+  }, [selectedReport?.id, groupBranches.length, activeStoreId]);
 
   // Historical Transaction Edit & PIN-Protected Delete State & Handlers
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
@@ -262,6 +300,16 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
     {
       categoryTitle: 'Core Financial & Sales Reports',
       reports: [
+        ...(groupBranches && groupBranches.length > 0
+          ? [
+              {
+                id: 'multi_branch_combined',
+                title: 'Multi-Branch Group Sales & Profit',
+                description:
+                  'Branch-by-branch performance & combined sales, expenses, wages, net profit, and variance alerts.',
+              },
+            ]
+          : []),
         { id: 'sale_report', title: 'Sale Report', description: 'Comprehensive gross sales, totals, and daily interactive date breakdown.' },
         { id: 'purchase_report', title: 'Purchase Report', description: 'Stock purchases, restocking records, and daily purchase order history.' },
         { id: 'day_book', title: 'Day Book', description: 'Chronological ledger of all cash, M-Pesa, and credit transactions.' },
@@ -288,7 +336,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
       categoryTitle: 'Party reports',
       reports: [
         { id: 'party_statement', title: 'Party Statement', description: 'Detailed account ledger for individual customer or supplier credit balances.' },
-        { id: 'party_wp_loss', title: 'Party Wise Profit & Loss', description: 'Net profitability generated per customer account.', isPremium: true },
+        { id: 'party_wp_loss', title: 'Party Wise Profit & Loss', description: 'Net profitability generated per customer account.' },
         { id: 'all_parties_report', title: 'All Parties Report', description: 'Summary directory of all registered customers and suppliers with badge indicators.' },
         { id: 'party_report_items', title: 'Party Report by Items', description: 'Item purchase history filtered by specific customer or supplier.' },
         { id: 'sale_purchase_party', title: 'Sale/Purchase by Party', description: 'Comparative trade volume analysis per trading partner.' },
@@ -306,7 +354,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
         { id: 'sale_purchase_by_item_category', title: 'Sale/Purchase By Item Category', description: 'Volume and revenue breakdown grouped by product categories (Electronics, Boutique, Accessories).' },
         { id: 'stock_summary_by_item_category', title: 'Stock summary By Item Category', description: 'Inventory stock balance aggregated per category.' },
         { id: 'item_batch_report', title: 'Item Batch Report', description: 'Track expiry dates, batch manufacturing codes, and batch-wise stock levels.' },
-        { id: 'item_serial_report', title: 'Item Serial Report', description: 'Unique IMEI / Serial Number tracking for smartphones, electronics, and warranty claims.', isPremium: true },
+        { id: 'item_serial_report', title: 'Item Serial Report', description: 'Unique IMEI / Serial Number tracking for smartphones, electronics, and warranty claims.' },
         { id: 'item_wise_discount', title: 'Item Wise Discount', description: 'Track total discounts granted per item across all sales transactions.' },
       ],
     },
@@ -346,7 +394,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
         ),
       }))
       .filter((group) => group.reports.length > 0);
-  }, [searchQuery]);
+  }, [searchQuery, groupBranches?.length]);
 
   // Real-time calculations for selected report modal
   const reportData = useMemo(() => {
@@ -626,18 +674,18 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   };
 
   return (
-    <div className={`${inPhoneFrame ? '-m-3 sm:-m-4 min-h-full pb-6' : 'min-h-screen pb-28'} bg-slate-950 text-slate-100 font-sans`}>
+    <div className={`${inPhoneFrame ? '-mx-3 -mt-1.5 sm:-mx-4 sm:-mt-2 min-h-full pb-6' : 'min-h-screen pb-28'} bg-slate-950 text-slate-100 font-sans`}>
       {/* Sticky Header Bar */}
-      <div className="sticky top-0 z-30 bg-slate-900 text-white shadow-md border-b border-slate-800/80 px-3 sm:px-4 py-3 flex items-center justify-between gap-2.5">
+      <div className="sticky top-0 z-30 bg-slate-900 text-white shadow-md border-b border-slate-800/80 px-3 sm:px-4 py-2.5 mb-2.5 flex items-center justify-between gap-2">
         <div className="flex items-center gap-2.5 min-w-0 flex-1">
           {onBack && (
             <button
               type="button"
               onClick={onBack}
-              className="px-2.5 sm:px-3 py-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-100 hover:text-white rounded-xl text-xs font-bold inline-flex items-center gap-1.5 transition active:scale-95 cursor-pointer shrink-0"
+              className="h-9 px-3 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-100 hover:text-white rounded-xl text-xs font-bold inline-flex items-center justify-center gap-1.5 transition active:scale-95 cursor-pointer shrink-0"
               aria-label="Back to previous screen"
             >
-              <ArrowLeft className="w-4 h-4 text-sky-400" />
+              <ArrowLeft className="w-4 h-4 text-sky-400 shrink-0" />
               <span>Back</span>
             </button>
           )}
@@ -702,11 +750,6 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                         <span className="font-bold text-sm text-slate-100 group-hover:text-blue-400 transition">
                           {report.title}
                         </span>
-                        {report.isPremium && (
-                          <span className="bg-amber-950/80 border border-amber-600/50 text-amber-300 text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 shadow-xs">
-                            👑 Premium
-                          </span>
-                        )}
                         <span className="text-[10px] font-bold text-blue-400 opacity-0 group-hover:opacity-100 transition bg-blue-950/80 px-2 py-0.5 rounded-md">
                           Tap to View Specialized View &gt;
                         </span>
@@ -729,7 +772,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
 
       {/* 100% Full-Screen Report Modal Overlay */}
       {selectedReport && reportData && (
-        <div className={`fixed inset-0 w-full h-[100dvh] max-h-[100dvh] z-[60] flex flex-col m-0 p-0 rounded-none overflow-hidden animate-fade-in print-unlock-overflow ${selectedReport.id === 'workers_wages_commissions' ? 'bg-slate-950 print:bg-white' : 'bg-white'}`}>
+        <div className={`fixed inset-0 w-full h-[100dvh] max-h-[100dvh] z-[60] flex flex-col m-0 p-0 rounded-none overflow-hidden animate-fade-in print-unlock-overflow ${selectedReport.id === 'workers_wages_commissions' || selectedReport.id === 'multi_branch_combined' ? 'bg-slate-950 print:bg-white' : 'bg-white'}`}>
           {/* Sticky Full-Width Header */}
           <div className="print:hidden w-full bg-slate-900 text-white px-4 py-3 z-10 flex items-center justify-between shadow-md shrink-0">
             <div className="flex items-center gap-3 min-w-0">
@@ -756,7 +799,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
           {/* Modal Body - 100% Edge-to-Edge */}
           <div className="w-full min-h-0 flex-1 px-3 sm:px-6 py-4 space-y-5 overflow-y-auto text-xs pb-6 print-unlock-overflow">
             {/* Date Filter Presets & Instant Search Bar (hidden for custom self-filtering reports) */}
-            {selectedReport.id !== 'workers_wages_commissions' && (
+            {selectedReport.id !== 'workers_wages_commissions' && selectedReport.id !== 'multi_branch_combined' && (
             <div className="w-full grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-2">
                 <label className="block font-bold text-slate-700">Date Range Filter</label>
@@ -818,6 +861,190 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             )}
 
             {/* DEDICATED & SPECIALIZED LAYOUTS FOR ALL REPORT TYPES */}
+
+            {/* MULTI-BRANCH GROUP SALES & PROFIT REPORT */}
+            {selectedReport.id === 'multi_branch_combined' && (
+              <div className="max-w-6xl mx-auto space-y-4 text-slate-100">
+                <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-900 border border-slate-800 rounded-2xl p-3.5">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-9 h-9 rounded-xl bg-sky-500/15 border border-sky-500/30 text-sky-400 flex items-center justify-center">
+                      <GitBranch className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-bold text-white">
+                        Combined Group Performance ({groupBranches.length} {groupBranches.length === 1 ? 'Branch' : 'Branches'})
+                      </h3>
+                      <p className="text-[11px] text-slate-400">
+                        Isolated shop records aggregated across all licensed branches in your group
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {onOpenMultiBranch && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedReport(null);
+                          onOpenMultiBranch();
+                        }}
+                        className="px-3 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold cursor-pointer"
+                      >
+                        Manage Branches
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={loadMultiBranchReport}
+                      disabled={isLoadingMultiBranch}
+                      className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-60"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${isLoadingMultiBranch ? 'animate-spin' : ''}`} />
+                      <span>Refresh</span>
+                    </button>
+                  </div>
+                </div>
+
+                {isLoadingMultiBranch && !multiBranchReport ? (
+                  <div className="bg-slate-900 border border-slate-800 rounded-2xl p-10 text-center text-slate-400 flex flex-col items-center gap-2">
+                    <RefreshCw className="w-5 h-5 text-sky-400 animate-spin" />
+                    <span>Aggregating sales, expenses, and inventory across branches...</span>
+                  </div>
+                ) : multiBranchReport ? (
+                  <>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3.5">
+                        <p className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Combined Group Sales</p>
+                        <p className="text-base sm:text-lg font-black text-sky-400 font-mono mt-1">
+                          KSh {Math.round(multiBranchReport.totals.salesTotal).toLocaleString()}
+                        </p>
+                        <p className="text-[10px] text-slate-400 mt-0.5">{multiBranchReport.totals.transactionsCount} receipts</p>
+                      </div>
+                      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3.5">
+                        <p className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Expenses &amp; Wages</p>
+                        <p className="text-base sm:text-lg font-black text-amber-400 font-mono mt-1">
+                          KSh {Math.round(multiBranchReport.totals.expensesTotal + multiBranchReport.totals.wagesTotal).toLocaleString()}
+                        </p>
+                        <p className="text-[10px] text-slate-400 mt-0.5">
+                          Exp {Math.round(multiBranchReport.totals.expensesTotal).toLocaleString()} • Wages {Math.round(multiBranchReport.totals.wagesTotal).toLocaleString()}
+                        </p>
+                      </div>
+                      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3.5">
+                        <p className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Combined Net Profit</p>
+                        <p className={`text-base sm:text-lg font-black font-mono mt-1 ${multiBranchReport.totals.netProfit >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                          KSh {Math.round(multiBranchReport.totals.netProfit).toLocaleString()}
+                        </p>
+                        <p className="text-[10px] text-slate-400 mt-0.5">After COGS, expenses &amp; wages</p>
+                      </div>
+                      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3.5">
+                        <p className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Group Stock Valuation</p>
+                        <p className="text-base sm:text-lg font-black text-purple-400 font-mono mt-1">
+                          KSh {Math.round(multiBranchReport.totals.stockValue).toLocaleString()}
+                        </p>
+                        <p className="text-[10px] text-slate-400 mt-0.5">
+                          {multiBranchReport.totals.outlierCount > 0 ? `${multiBranchReport.totals.outlierCount} variance alert(s)` : 'All branches healthy'}
+                        </p>
+                      </div>
+                    </div>
+
+                    {multiBranchReport.totals.outlierCount > 0 && (
+                      <div className="bg-amber-950/50 border border-amber-500/40 rounded-2xl p-3.5 flex items-start gap-2.5 text-amber-100">
+                        <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                        <div className="text-xs">
+                          <span className="font-bold">Variance Alert:</span>{' '}
+                          {multiBranchReport.totals.outlierCount} branch(es) flagged for sales drop, negative profit, or stock variance. Review branch cards below.
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="space-y-3">
+                      <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 px-1">
+                        Branch-by-Branch Comparison
+                      </h4>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        {multiBranchReport.branches.map((branchSummary) => {
+                          const profileMatch = groupBranches.find((b) => b.id === branchSummary.storeId);
+                          const effStatus = profileMatch ? getEffectiveBranchStatus(profileMatch) : 'active';
+                          return (
+                            <div
+                              key={branchSummary.storeId}
+                              className={`bg-slate-900 border rounded-2xl p-4 space-y-3 ${
+                                branchSummary.anomalySeverity === 'alert'
+                                  ? 'border-rose-500/50'
+                                  : branchSummary.anomalySeverity === 'warning'
+                                  ? 'border-amber-500/40'
+                                  : 'border-slate-800'
+                              }`}
+                            >
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="min-w-0">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <span className="font-bold text-sm text-white truncate">{branchSummary.branchName}</span>
+                                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-300">
+                                      {branchSummary.branchCode}
+                                    </span>
+                                    <span
+                                      className={`text-[10px] font-bold px-2 py-0.5 rounded uppercase ${
+                                        effStatus === 'active'
+                                          ? 'bg-emerald-500/15 text-emerald-300'
+                                          : effStatus === 'trial'
+                                          ? 'bg-sky-500/15 text-sky-300'
+                                          : 'bg-rose-500/15 text-rose-300'
+                                      }`}
+                                    >
+                                      {effStatus}
+                                    </span>
+                                  </div>
+                                  <p className="text-[11px] text-slate-400 mt-0.5">
+                                    {branchSummary.branchCity} • {branchSummary.transactionsCount} sales • {branchSummary.productCount} products • {branchSummary.staffCount} staff
+                                  </p>
+                                </div>
+                              </div>
+
+                              <div className="grid grid-cols-3 gap-2 text-center bg-slate-950/80 border border-slate-800/80 rounded-xl p-2.5">
+                                <div>
+                                  <p className="text-[10px] text-slate-400">Sales</p>
+                                  <p className="font-mono font-bold text-sky-400">
+                                    KSh {Math.round(branchSummary.salesTotal).toLocaleString()}
+                                  </p>
+                                </div>
+                                <div>
+                                  <p className="text-[10px] text-slate-400">Exp + Wages</p>
+                                  <p className="font-mono font-bold text-amber-400">
+                                    KSh {Math.round(branchSummary.expensesTotal + branchSummary.wagesTotal).toLocaleString()}
+                                  </p>
+                                </div>
+                                <div>
+                                  <p className="text-[10px] text-slate-400">Net Profit</p>
+                                  <p className={`font-mono font-bold ${branchSummary.netProfit >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                    KSh {Math.round(branchSummary.netProfit).toLocaleString()}
+                                  </p>
+                                </div>
+                              </div>
+
+                              <div className="flex items-center justify-between text-[11px] text-slate-400">
+                                <span>Stock Value: <strong className="text-slate-200 font-mono">KSh {Math.round(branchSummary.stockValue).toLocaleString()}</strong></span>
+                                <span>Low Stock: <strong className={branchSummary.lowStockCount > 0 ? 'text-amber-400' : 'text-slate-300'}>{branchSummary.lowStockCount}</strong> • Out: <strong className={branchSummary.outOfStockCount > 0 ? 'text-rose-400' : 'text-slate-300'}>{branchSummary.outOfStockCount}</strong></span>
+                              </div>
+
+                              {branchSummary.anomalyReasons.length > 0 && (
+                                <div className="space-y-1 pt-1 border-t border-slate-800">
+                                  {branchSummary.anomalyReasons.map((reason, rIdx) => (
+                                    <p key={rIdx} className="text-[11px] text-amber-300 flex items-center gap-1.5">
+                                      <AlertTriangle className="w-3 h-3 shrink-0" />
+                                      <span>{reason}</span>
+                                    </p>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </>
+                ) : null}
+              </div>
+            )}
 
             {/* WORKERS WAGES & COMMISSIONS STATEMENT */}
             {selectedReport.id === 'workers_wages_commissions' && (
@@ -1433,7 +1660,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
           </div>
 
           {/* Docked Bottom Export Bar (always 100% visible inside 100dvh, hidden on print and custom wages view) */}
-          {selectedReport.id !== 'workers_wages_commissions' && (
+          {selectedReport.id !== 'workers_wages_commissions' && selectedReport.id !== 'multi_branch_combined' && (
           <div className="print:hidden w-full bg-white border-t border-slate-200 px-3 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] z-40 shadow-lg shrink-0 flex flex-col gap-2">
             <span className="text-xs font-semibold text-slate-600">Export & Share Options:</span>
             <div className="grid grid-cols-3 gap-2 w-full">

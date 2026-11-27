@@ -7,16 +7,34 @@ service cloud.firestore {
     }
 
     function isSignedIn() {
-      return request.auth != null && request.auth.token.email_verified == true;
+      return request.auth != null
+        && 'email_verified' in request.auth.token
+        && request.auth.token.email_verified == true;
     }
 
     function isSuperAdmin() {
       return isSignedIn()
-        && request.auth.token.email != null
+        && 'email' in request.auth.token
+        && request.auth.token.email is string
         && (
-          request.auth.token.email == 'nivajuma@gmail.com'
-          || request.auth.token.email == 'NivaJuma@gmail.com'
-          || request.auth.token.email.lower() == 'nivajuma@gmail.com'
+          request.auth.token.email.lower() == 'nivajuma@gmail.com'
+          || request.auth.token.email.lower() == 'rofanipos@gmail.com'
+        );
+    }
+
+    function isOwnBranchStorePath(storeId) {
+      return isSignedIn()
+        && storeId is string
+        && storeId.split('_br_').size() > 1
+        && storeId.split('_br_')[0] == request.auth.uid;
+    }
+
+    function canListStoreSubcollection(storeId) {
+      return isSignedIn()
+        && (
+          request.auth.uid == storeId
+          || isSuperAdmin()
+          || isOwnBranchStorePath(storeId)
         );
     }
 
@@ -27,7 +45,13 @@ service cloud.firestore {
     }
 
     function isStoreOwnerOrAdmin(storeId) {
-      return isSignedIn() && (request.auth.uid == storeId || isSuperAdmin() || isBranchStoreOwner(storeId));
+      return isSignedIn()
+        && (
+          request.auth.uid == storeId
+          || isSuperAdmin()
+          || isOwnBranchStorePath(storeId)
+          || isBranchStoreOwner(storeId)
+        );
     }
 
     function isValidDocId(id) {
@@ -252,7 +276,7 @@ service cloud.firestore {
 
       match /referral_rewards/{claimId} {
         allow get: if isStoreOwnerOrAdmin(storeId) && isValidDocId(claimId);
-        allow list: if isStoreOwnerOrAdmin(storeId);
+        allow list: if canListStoreSubcollection(storeId);
         allow create: if isSignedIn()
           && isValidDocId(claimId)
           && claimId == request.auth.uid
@@ -275,72 +299,72 @@ service cloud.firestore {
 
       match /products/{productId} {
         allow get, create, update, delete: if isStoreOwnerOrAdmin(storeId) && isValidDocId(productId);
-        allow list: if isStoreOwnerOrAdmin(storeId);
+        allow list: if canListStoreSubcollection(storeId);
       }
 
       match /transactions/{transactionId} {
         allow get, create, update, delete: if isStoreOwnerOrAdmin(storeId) && isValidDocId(transactionId);
-        allow list: if isStoreOwnerOrAdmin(storeId);
+        allow list: if canListStoreSubcollection(storeId);
       }
 
       match /customers/{customerId} {
         allow get, create, update, delete: if isStoreOwnerOrAdmin(storeId) && isValidDocId(customerId);
-        allow list: if isStoreOwnerOrAdmin(storeId);
+        allow list: if canListStoreSubcollection(storeId);
       }
 
       match /suppliers/{supplierId} {
         allow get, create, update, delete: if isStoreOwnerOrAdmin(storeId) && isValidDocId(supplierId);
-        allow list: if isStoreOwnerOrAdmin(storeId);
+        allow list: if canListStoreSubcollection(storeId);
       }
 
       match /expenses/{expenseId} {
         allow get, create, update, delete: if isStoreOwnerOrAdmin(storeId) && isValidDocId(expenseId);
-        allow list: if isStoreOwnerOrAdmin(storeId);
+        allow list: if canListStoreSubcollection(storeId);
       }
 
       match /users/{userId} {
         allow get, create, update, delete: if isStoreOwnerOrAdmin(storeId) && isValidDocId(userId);
-        allow list: if isStoreOwnerOrAdmin(storeId);
+        allow list: if canListStoreSubcollection(storeId);
       }
 
       match /restock_records/{recordId} {
         allow get, create, update, delete: if isStoreOwnerOrAdmin(storeId) && isValidDocId(recordId);
-        allow list: if isStoreOwnerOrAdmin(storeId);
+        allow list: if canListStoreSubcollection(storeId);
       }
 
       match /sensitive_action_logs/{logId} {
         allow get, create, update, delete: if isStoreOwnerOrAdmin(storeId) && isValidDocId(logId);
-        allow list: if isStoreOwnerOrAdmin(storeId);
+        allow list: if canListStoreSubcollection(storeId);
       }
 
       match /store_settings/{settingId} {
         allow get, create, update, delete: if isStoreOwnerOrAdmin(storeId) && isValidDocId(settingId);
-        allow list: if isStoreOwnerOrAdmin(storeId);
+        allow list: if canListStoreSubcollection(storeId);
       }
 
       match /settings/{settingId} {
         allow get, create, update, delete: if isStoreOwnerOrAdmin(storeId) && isValidDocId(settingId);
-        allow list: if isStoreOwnerOrAdmin(storeId);
+        allow list: if canListStoreSubcollection(storeId);
       }
 
       match /subscription_payments/{paymentId} {
         allow get, create, update, delete: if isStoreOwnerOrAdmin(storeId) && isValidDocId(paymentId);
-        allow list: if isStoreOwnerOrAdmin(storeId);
+        allow list: if canListStoreSubcollection(storeId);
       }
 
       match /customer_deposits/{depositId} {
         allow get, create, update, delete: if isStoreOwnerOrAdmin(storeId) && isValidDocId(depositId);
-        allow list: if isStoreOwnerOrAdmin(storeId);
+        allow list: if canListStoreSubcollection(storeId);
       }
 
       match /customer_complaints/{complaintId} {
         allow get, create, update, delete: if isStoreOwnerOrAdmin(storeId) && isValidDocId(complaintId);
-        allow list: if isStoreOwnerOrAdmin(storeId);
+        allow list: if canListStoreSubcollection(storeId);
       }
 
       match /customer_returns/{returnId} {
         allow get, create, update, delete: if isStoreOwnerOrAdmin(storeId) && isValidDocId(returnId);
-        allow list: if isStoreOwnerOrAdmin(storeId);
+        allow list: if canListStoreSubcollection(storeId);
       }
     }
   }

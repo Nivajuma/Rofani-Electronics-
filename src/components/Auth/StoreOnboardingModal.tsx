@@ -9,10 +9,13 @@ import {
   RefreshCw,
   LogOut,
   Gift,
+  Briefcase,
+  Check,
 } from 'lucide-react';
 import { signOutFromCloud } from '../../lib/firebase';
 import { lookupReferralCode, normalizeReferralCode } from '../../lib/cloudSync';
-import { ReferralCodeLookup } from '../../types';
+import { BusinessTypeId, ReferralCodeLookup } from '../../types';
+import { BUSINESS_TYPES, DEFAULT_BUSINESS_TYPE } from '../../utils/businessTypes';
 
 interface StoreOnboardingModalProps {
   userEmail: string;
@@ -20,6 +23,7 @@ interface StoreOnboardingModalProps {
   initialReferralCode?: string;
   onCreateStore: (data: {
     storeName: string;
+    businessType: BusinessTypeId;
     phone: string;
     kraPin: string;
     mpesaShortcode: string;
@@ -37,6 +41,7 @@ export const StoreOnboardingModal: React.FC<StoreOnboardingModalProps> = ({
   const [storeName, setStoreName] = useState(
     userDisplayName ? `${userDisplayName}'s Shop` : ''
   );
+  const [businessType, setBusinessType] = useState<BusinessTypeId>(DEFAULT_BUSINESS_TYPE);
   const [phone, setPhone] = useState('');
   const [mpesaShortcodeType, setMpesaShortcodeType] = useState<'till' | 'paybill'>('till');
   const [mpesaShortcode, setMpesaShortcode] = useState('');
@@ -99,6 +104,7 @@ export const StoreOnboardingModal: React.FC<StoreOnboardingModalProps> = ({
     try {
       await onCreateStore({
         storeName: storeName.trim(),
+        businessType,
         phone: phone.trim(),
         kraPin: '',
         mpesaShortcode: mpesaShortcode.trim(),
@@ -112,10 +118,11 @@ export const StoreOnboardingModal: React.FC<StoreOnboardingModalProps> = ({
   };
 
   const hasValidReferral = referralCheckStatus === 'valid' && Boolean(matchedReferrer);
+  const selectedBusinessConfig = BUSINESS_TYPES.find((bt) => bt.id === businessType);
 
   return (
     <div className="min-h-screen bg-[#0f172a] text-slate-100 flex items-center justify-center p-4 sm:p-6 font-sans">
-      <div className="w-full max-w-lg bg-[#1e293b] border border-slate-700/80 rounded-3xl p-5 sm:p-7 shadow-2xl space-y-5">
+      <div className="w-full max-w-2xl bg-[#1e293b] border border-slate-700/80 rounded-3xl p-5 sm:p-7 shadow-2xl space-y-5 max-h-[94vh] overflow-y-auto">
         <div className="flex items-start justify-between gap-3 border-b border-slate-700/70 pb-4">
           <div className="flex items-center gap-3">
             <div className="w-11 h-11 rounded-2xl bg-sky-500/15 border border-sky-500/30 flex items-center justify-center text-sky-400 shrink-0">
@@ -175,38 +182,88 @@ export const StoreOnboardingModal: React.FC<StoreOnboardingModalProps> = ({
         )}
 
         <form onSubmit={handleSubmit} className="space-y-4 text-xs">
-          <div>
-            <label className="block text-slate-300 font-semibold mb-1.5">
-              Store / Business Name <span className="text-rose-400">*</span>
-            </label>
-            <div className="relative">
-              <Store className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
-              <input
-                type="text"
-                required
-                value={storeName}
-                onChange={(e) => setStoreName(e.target.value)}
-                placeholder="e.g. Kamau Smart Electronics"
-                className="w-full bg-[#0f172a] border border-slate-700 rounded-xl pl-10 pr-3.5 py-2.5 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-sky-500"
-              />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+            <div>
+              <label className="block text-slate-300 font-semibold mb-1.5">
+                Store / Business Name <span className="text-rose-400">*</span>
+              </label>
+              <div className="relative">
+                <Store className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
+                <input
+                  type="text"
+                  required
+                  value={storeName}
+                  onChange={(e) => setStoreName(e.target.value)}
+                  placeholder="e.g. Kamau Smart Electronics"
+                  className="w-full bg-[#0f172a] border border-slate-700 rounded-xl pl-10 pr-3.5 py-2.5 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-sky-500"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-slate-300 font-semibold mb-1.5">
+                Business Phone Number <span className="text-rose-400">*</span>
+              </label>
+              <div className="relative">
+                <Phone className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
+                <input
+                  type="tel"
+                  required
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                  placeholder="0712 345 678"
+                  className="w-full bg-[#0f172a] border border-slate-700 rounded-xl pl-10 pr-3.5 py-2.5 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-sky-500"
+                />
+              </div>
             </div>
           </div>
 
-          <div>
-            <label className="block text-slate-300 font-semibold mb-1.5">
-              Business Phone Number <span className="text-rose-400">*</span>
-            </label>
-            <div className="relative">
-              <Phone className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
-              <input
-                type="tel"
-                required
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                placeholder="0712 345 678"
-                className="w-full bg-[#0f172a] border border-slate-700 rounded-xl pl-10 pr-3.5 py-2.5 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-sky-500"
-              />
+          {/* Business Type Card Grid Picker */}
+          <div className="bg-[#0f172a]/70 border border-slate-700/70 rounded-2xl p-3.5 space-y-2.5">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <label className="font-semibold text-slate-200 flex items-center gap-1.5">
+                <Briefcase className="w-4 h-4 text-sky-400" />
+                <span>Business Type (Starter Categories &amp; Hints)</span>
+              </label>
+              {selectedBusinessConfig && (
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-sky-500/15 border border-sky-500/30 text-sky-300">
+                  {selectedBusinessConfig.emoji} {selectedBusinessConfig.shortLabel}
+                </span>
+              )}
             </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {BUSINESS_TYPES.map((bt) => {
+                const isSelected = businessType === bt.id;
+                return (
+                  <button
+                    key={bt.id}
+                    type="button"
+                    onClick={() => setBusinessType(bt.id)}
+                    className={`text-left p-2.5 rounded-xl border transition cursor-pointer flex items-start gap-2.5 ${
+                      isSelected
+                        ? 'bg-sky-500/15 border-sky-400 text-white shadow-sm'
+                        : 'bg-[#1e293b]/80 border-slate-700/80 text-slate-300 hover:border-slate-500'
+                    }`}
+                  >
+                    <span className="text-lg leading-none mt-0.5 shrink-0">{bt.emoji}</span>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center justify-between gap-1">
+                        <span className="font-bold text-xs text-white truncate">{bt.label}</span>
+                        {isSelected && <Check className="w-3.5 h-3.5 text-sky-400 shrink-0" />}
+                      </div>
+                      <p className="text-[10px] text-slate-400 mt-0.5 leading-snug">
+                        {bt.subtitle}
+                      </p>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+            {selectedBusinessConfig?.suggestExpiryTracking && (
+              <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl px-3 py-2 text-[11px] text-amber-200">
+                Expiry Date Alerts will be enabled automatically so you get warnings on expiring stock.
+              </div>
+            )}
           </div>
 
           {/* Referral Code (Optional) */}

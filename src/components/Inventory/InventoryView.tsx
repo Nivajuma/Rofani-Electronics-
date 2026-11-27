@@ -61,7 +61,8 @@ import {
   CheckSquare,
   GitMerge
 } from 'lucide-react';
-import { Product, Supplier, BarcodeScanLog, User, Transaction, RestockRecord } from '../../types';
+import { Product, Supplier, BarcodeScanLog, User, Transaction, RestockRecord, BusinessTypeId } from '../../types';
+import { DEFAULT_BUSINESS_TYPE, getBusinessTypeConfig } from '../../utils/businessTypes';
 import { generateAutoBarcode, printBarcodeLabels, printBatchBarcodes } from '../../utils/barcode';
 import { calculateProfitMargin } from '../../utils/margin';
 import { canDeleteInventory, canEditInventory, hasWorkerPermission } from '../../utils/permissions';
@@ -139,6 +140,7 @@ interface InventoryViewProps {
   onOpenItemAuditMiniPage?: (product: Product) => void;
   onOpenCategoryManager?: () => void;
   activeStoreId?: string;
+  businessType?: BusinessTypeId;
 }
 
 export const InventoryView: React.FC<InventoryViewProps> = ({
@@ -175,7 +177,9 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   onOpenItemAuditMiniPage,
   onOpenCategoryManager,
   activeStoreId,
+  businessType = DEFAULT_BUSINESS_TYPE,
 }) => {
+  const businessTypeConfig = getBusinessTypeConfig(businessType);
   const [shopControls] = useShopProtectionSettings(activeStoreId);
   const [showExpiringOnly, setShowExpiringOnly] = useState(false);
 
@@ -2298,7 +2302,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
       profitMargin: 30,
       stockQuantity: '' as any,
       minStockAlert: '' as any,
-      unit: 'pcs',
+      unit: businessTypeConfig.defaultUnit || 'pcs',
       supplierId: defaultSupId,
       supplierName: defaultSupName,
       createdAt: new Date().toISOString(),
@@ -3154,7 +3158,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                   <Gem className="w-3 h-3 text-purple-400" /> High Margin
                 </span>
                 <span className="text-[10px] font-mono font-bold text-purple-400">
-                  Premium
+                  Margin
                 </span>
               </div>
               <div>
@@ -5704,6 +5708,17 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                   )}
                 </div>
 
+                {/* Business-Type Contextual Tip Banner */}
+                <div className="bg-slate-950/90 border border-sky-500/25 rounded-xl px-3.5 py-2.5 flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 text-[11px] text-slate-300">
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-sky-500/15 border border-sky-500/30 text-sky-300 font-bold shrink-0">
+                      <span>{businessTypeConfig.emoji}</span>
+                      <span>{businessTypeConfig.shortLabel}</span>
+                    </span>
+                    <span>{businessTypeConfig.itemHints.helperBanner}</span>
+                  </div>
+                </div>
+
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   {/* Name */}
                   <div className="sm:col-span-2">
@@ -5714,7 +5729,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                       type="text"
                       required
                       autoFocus
-                      placeholder="Enter full item name e.g. Wireless Speaker, Sugar 1kg, Soda 500ml..."
+                      placeholder={businessTypeConfig.itemHints.namePlaceholder}
                       value={editingProduct.name || ''}
                       onChange={(e) =>
                         setEditingProduct((prev) => (prev ? { ...prev, name: e.target.value } : prev))
@@ -5832,7 +5847,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                   {isCustomSubcategoryInput ? (
                     <input
                       type="text"
-                      placeholder="e.g. Cold Drinks, Snacks, Airtime..."
+                      placeholder={businessTypeConfig.itemHints.subcategoryPlaceholder}
                       value={customSubcategoryName}
                       onChange={(e) => {
                         setCustomSubcategoryName(e.target.value);
@@ -5871,14 +5886,15 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                   )}
                 </div>
 
-                {/* Size / Capacity */}
+                {/* Size / Capacity / Business Variant */}
                 <div>
                   <label className="block text-slate-300 font-semibold mb-1">
-                    Size / Capacity / Variant <span className="text-slate-500 font-normal">(Optional)</span>
+                    {businessTypeConfig.itemHints.variantLabel}{' '}
+                    <span className="text-slate-500 font-normal">(Optional)</span>
                   </label>
                   <input
                     type="text"
-                    placeholder="e.g. 500ml, 1kg, XL, 128GB"
+                    placeholder={businessTypeConfig.itemHints.variantPlaceholder}
                     value={editingProduct.sizeCapacity || ''}
                     onChange={(e) =>
                       setEditingProduct((prev) => (prev ? { ...prev, sizeCapacity: e.target.value } : prev))
@@ -6206,20 +6222,28 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
 
                 {/* Unit */}
                 <div>
-                  <label className="block text-slate-300 font-semibold mb-1">Unit of Measure</label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-slate-300 font-semibold">Unit of Measure</label>
+                    <span className="text-[10px] text-slate-400 font-mono">{businessTypeConfig.itemHints.unitHint}</span>
+                  </div>
                   <select
-                    value={editingProduct.unit || 'pcs'}
+                    value={editingProduct.unit || businessTypeConfig.defaultUnit || 'pcs'}
                     onChange={(e) => setEditingProduct({ ...editingProduct, unit: e.target.value })}
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 focus:outline-none focus:border-sky-500"
                   >
                     <option value="pcs">Pieces (pcs)</option>
+                    <option value="bag">Bag (bag)</option>
+                    <option value="m">Meters (m)</option>
+                    <option value="kg">Kilograms (kg)</option>
+                    <option value="liters">Liters (L)</option>
                     <option value="box">Box (box)</option>
                     <option value="pack">Pack (pack)</option>
-                    <option value="kg">Kilograms (kg)</option>
-                    <option value="m">Meters (m)</option>
-                    <option value="liters">Liters (L)</option>
                     <option value="pair">Pair (pair)</option>
                     <option value="bottle">Bottle (bottle)</option>
+                    <option value="roll">Roll (roll)</option>
+                    <option value="sheet">Sheet (sheet)</option>
+                    <option value="tin">Tin (tin)</option>
+                    <option value="service">Service (service)</option>
                     <option value="boxes">Boxes (boxes)</option>
                     <option value="packs">Packs (packs)</option>
                   </select>
@@ -6227,10 +6251,17 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
 
                 {/* Optional Expiry Date for Perishables / Tracked Items */}
                 <div className="sm:col-span-2">
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="text-slate-300 font-semibold flex items-center gap-1.5">
+                  <div className="flex items-center justify-between mb-1 gap-2 flex-wrap">
+                    <label className="text-slate-300 font-semibold flex items-center gap-1.5 flex-wrap">
                       <Calendar className="w-3.5 h-3.5 text-amber-400" />
-                      <span>Expiry Date <span className="text-slate-500 font-normal">(Optional)</span></span>
+                      <span>Expiry Date</span>
+                      {businessTypeConfig.suggestExpiryTracking ? (
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-amber-500/15 border border-amber-500/35 text-amber-300">
+                          Recommended for Pharmacy / Agrovet
+                        </span>
+                      ) : (
+                        <span className="text-slate-500 font-normal">(Optional)</span>
+                      )}
                     </label>
                     {editingProduct.expiryDate && (
                       <button
@@ -6252,8 +6283,17 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                         prev ? { ...prev, expiryDate: e.target.value } : prev
                       )
                     }
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 font-mono focus:outline-none focus:border-amber-500"
+                    className={`w-full bg-slate-950 border rounded-xl px-3 py-2 text-slate-200 font-mono focus:outline-none focus:border-amber-500 ${
+                      businessTypeConfig.suggestExpiryTracking && !editingProduct.expiryDate
+                        ? 'border-amber-500/50'
+                        : 'border-slate-800'
+                    }`}
                   />
+                  {businessTypeConfig.suggestExpiryTracking && !editingProduct.expiryDate && (
+                    <p className="text-[10px] text-amber-300/90 mt-1">
+                      Tip: Enter an expiry date to receive automatic near-expiry and expired batch warnings at checkout and in Inventory.
+                    </p>
+                  )}
                 </div>
 
                 {/* KRA eTIMS Tax Classification Selector */}

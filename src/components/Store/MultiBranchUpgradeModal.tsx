@@ -17,12 +17,26 @@ import {
   MapPin,
   Store,
   TrendingUp,
+  Lock,
 } from 'lucide-react';
 import { StoreSubscriptionProfile, User, Product, Transaction, Expense } from '../../types';
 import {
   MultiBranchCombinedReport,
   fetchMultiBranchCombinedAnalytics,
 } from '../../lib/cloudSync';
+import {
+  EXTRA_BRANCH_ANNUAL_PRICE,
+  EXTRA_BRANCH_MONTHLY_PRICE,
+  PRIMARY_BRANCH_ANNUAL_PRICE,
+  PRIMARY_BRANCH_MONTHLY_PRICE,
+  calculateOwnerBundlePricing,
+  getBranchDaysRemaining,
+  getEffectiveBranchStatus,
+  getOwnerMaxAllowedBranches,
+  isBranchLicenseUnlocked,
+  resolveIsPrimaryBranch,
+} from '../../utils/branchLicensing';
+import { SUPPORT_WHATSAPP_NUMBER } from '../../utils/supportConfig';
 
 interface MultiBranchUpgradeModalProps {
   isOpen: boolean;
@@ -46,10 +60,11 @@ interface MultiBranchUpgradeModalProps {
     branchAddress?: string;
     branchPhone?: string;
     branchManagerName?: string;
-  }) => Promise<void>;
+  }) => Promise<StoreSubscriptionProfile | void>;
   onSwitchBranch: (targetStoreId: string) => Promise<void> | void;
   onSyncCrossBranchStaff: (user: User, targetBranchIds: string[]) => Promise<void>;
-  onOpenPlansPricing?: () => void;
+  onOpenPlansPricing?: (targetBranch?: StoreSubscriptionProfile) => void;
+  isOwnerAccount?: boolean;
 }
 
 type HubTab = 'branches' | 'report' | 'staff';
@@ -73,6 +88,7 @@ export const MultiBranchUpgradeModal: React.FC<MultiBranchUpgradeModalProps> = (
   onSwitchBranch,
   onSyncCrossBranchStaff,
   onOpenPlansPricing,
+  isOwnerAccount = false,
 }) => {
   const isUpgraded = Boolean(primaryProfile?.isMultiBranch || groupBranches.length > 1);
 
@@ -95,6 +111,7 @@ export const MultiBranchUpgradeModal: React.FC<MultiBranchUpgradeModalProps> = (
   const [newBranchManager, setNewBranchManager] = useState('');
   const [isCreatingBranch, setIsCreatingBranch] = useState(false);
   const [branchError, setBranchError] = useState<string | null>(null);
+  const [pendingLicenseBranch, setPendingLicenseBranch] = useState<StoreSubscriptionProfile | null>(null);
 
   // Combined Report state
   const [report, setReport] = useState<MultiBranchCombinedReport | null>(null);
@@ -108,6 +125,7 @@ export const MultiBranchUpgradeModal: React.FC<MultiBranchUpgradeModalProps> = (
       setUpgradeError(null);
       setBranchError(null);
       setStatusNotice(null);
+      setPendingLicenseBranch(null);
       setBusinessGroupName(
         primaryProfile?.businessGroupName ||
           (activeStoreName && activeStoreName !== 'Rofani POS' ? `${activeStoreName} Group` : activeStoreName || 'My Business Group')
@@ -187,7 +205,7 @@ export const MultiBranchUpgradeModal: React.FC<MultiBranchUpgradeModalProps> = (
     setIsCreatingBranch(true);
     setBranchError(null);
     try {
-      await onCreateBranch({
+      const created = await onCreateBranch({
         branchName: newBranchName.trim(),
         branchCode: newBranchCode.trim() || undefined,
         branchCity: newBranchCity.trim() || 'Nairobi',
@@ -195,13 +213,19 @@ export const MultiBranchUpgradeModal: React.FC<MultiBranchUpgradeModalProps> = (
         branchPhone: newBranchPhone.trim() || undefined,
         branchManagerName: newBranchManager.trim() || undefined,
       });
-      notify(`Branch "${newBranchName.trim()}" created with isolated stock & records!`);
+      const createdName = newBranchName.trim();
       setNewBranchName('');
       setNewBranchCode('');
       setNewBranchCity('');
       setNewBranchAddress('');
       setNewBranchManager('');
       setShowAddBranchForm(false);
+      if (created && !isOwnerAccount && (created.licensePendingActivation || !isBranchLicenseUnlocked(created, false))) {
+        setPendingLicenseBranch(created);
+        notify(`Branch "${createdName}" created! Activate its KSh ${EXTRA_BRANCH_MONTHLY_PRICE}/mo license to unlock POS checkout.`);
+      } else {
+        notify(`Branch "${createdName}" created with isolated stock & records!`);
+      }
     } catch (err: any) {
       setBranchError(err?.message || 'Failed to create branch. Please try again.');
     } finally {
@@ -257,7 +281,7 @@ export const MultiBranchUpgradeModal: React.FC<MultiBranchUpgradeModalProps> = (
     {
       icon: Smartphone,
       color: 'text-teal-400 bg-teal-500/15 border-teal-500/30',
-      text: 'Single unified M-Pesa subscription billing across all branches.',
+      text: `Primary shop KSh ${PRIMARY_BRANCH_MONTHLY_PRICE}/mo (KSh ${PRIMARY_BRANCH_ANNUAL_PRICE.toLocaleString()}/yr); each additional branch only KSh ${EXTRA_BRANCH_MONTHLY_PRICE}/mo (KSh ${EXTRA_BRANCH_ANNUAL_PRICE.toLocaleString()}/yr — 50% off).`,
     },
   ];
 
@@ -267,6 +291,19 @@ export const MultiBranchUpgradeModal: React.FC<MultiBranchUpgradeModalProps> = (
       : primaryProfile
       ? [primaryProfile]
       : [];
+
+  const activeBranchesCount = resolvedBranches.filter((b) => isBranchLicenseUnlocked(b, isOwnerAccount)).length;
+  const maxAllowedBranches = getOwnerMaxAllowedBranches(resolvedBranches, primaryProfile);
+  const bundlePricing = calculateOwnerBundlePricing(resolvedBranches.length);
+  const willRequireLicense = !isOwnerAccount && activeBranchesCount >= maxAllowedBranches;
+
+  const waApprovalUrl = pendingLicenseBranch
+    ? `https://wa.me/${SUPPORT_WHATSAPP_NUMBER.replace(/[^0-9]/g, '')}?text=${encodeURIComponent(
+        `Hello Rofani POS, I created branch "${pendingLicenseBranch.storeName}" (${pendingLicenseBranch.id}) under ${
+          primaryProfile?.businessGroupName || activeStoreName
+        } and want to activate the KSh ${EXTRA_BRANCH_MONTHLY_PRICE}/mo extra branch license.`
+      )}`
+    : '';
 
   return (
     <div className="fixed inset-0 z-[220] bg-black/75 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 font-sans">
@@ -285,8 +322,8 @@ export const MultiBranchUpgradeModal: React.FC<MultiBranchUpgradeModalProps> = (
               </h2>
               <p className="text-[11px] text-slate-400 truncate">
                 {isUpgraded
-                  ? `${resolvedBranches.length} branch${resolvedBranches.length === 1 ? '' : 'es'} • Unified M-Pesa subscription & isolated store records`
-                  : 'Upgrade to Multi-Branch Business Group'}
+                  ? `${activeBranchesCount} / ${resolvedBranches.length} Active • Max slots: ${maxAllowedBranches} • Independent per-branch licensing`
+                  : `Branch #1: KSh ${PRIMARY_BRANCH_MONTHLY_PRICE}/mo • Extra Branches: KSh ${EXTRA_BRANCH_MONTHLY_PRICE}/mo (50% off)`}
               </p>
             </div>
           </div>
@@ -314,6 +351,30 @@ export const MultiBranchUpgradeModal: React.FC<MultiBranchUpgradeModalProps> = (
           {!isUpgraded ? (
             /* PRE-UPGRADE ONBOARDING FLOW */
             <form onSubmit={handleUpgradeSubmit} className="space-y-5">
+              {/* Transparent Multi-Branch Pricing Banner */}
+              <div className="bg-sky-950/40 border border-sky-500/35 rounded-2xl p-4 space-y-2 text-xs">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <span className="font-extrabold text-white">Transparent Multi-Branch Pricing</span>
+                  <span className="px-2 py-0.5 rounded-md bg-emerald-500/20 border border-emerald-500/35 text-[10px] font-extrabold text-emerald-300 uppercase">
+                    50% Off Branch #2+
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-[11px]">
+                  <div className="bg-slate-900/80 border border-slate-700/80 rounded-xl p-2.5">
+                    <div className="text-slate-400 font-semibold">Primary Shop (Branch #1)</div>
+                    <div className="font-extrabold text-white mt-0.5">
+                      KSh {PRIMARY_BRANCH_MONTHLY_PRICE}/mo · KSh {PRIMARY_BRANCH_ANNUAL_PRICE.toLocaleString()}/yr
+                    </div>
+                  </div>
+                  <div className="bg-slate-900/80 border border-emerald-500/40 rounded-xl p-2.5">
+                    <div className="text-emerald-300 font-semibold">Each Extra Branch (Branch #2+)</div>
+                    <div className="font-extrabold text-white mt-0.5">
+                      KSh {EXTRA_BRANCH_MONTHLY_PRICE}/mo · KSh {EXTRA_BRANCH_ANNUAL_PRICE.toLocaleString()}/yr
+                    </div>
+                  </div>
+                </div>
+              </div>
+
               <div className="bg-slate-800/80 border border-slate-700/80 rounded-2xl p-4 sm:p-5 space-y-3">
                 <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-sky-400">
                   <Sparkles className="w-4 h-4" />
@@ -440,14 +501,16 @@ export const MultiBranchUpgradeModal: React.FC<MultiBranchUpgradeModalProps> = (
                 </button>
               </div>
 
-              {/* Unified M-Pesa Billing Status Strip */}
+              {/* Per-Branch Licensing & Pricing Strip */}
               <div className="bg-slate-800/80 border border-slate-700/80 rounded-xl px-4 py-3 flex flex-wrap items-center justify-between gap-2 text-xs">
                 <div className="flex items-center gap-2.5 min-w-0">
                   <Smartphone className="w-4 h-4 text-emerald-400 shrink-0" />
                   <div className="min-w-0">
-                    <span className="font-bold text-white">Unified M-Pesa Billing Active</span>
-                    <span className="text-slate-400 block sm:inline sm:ml-2 text-[11px]">
-                      One subscription covers all {resolvedBranches.length} branch{resolvedBranches.length === 1 ? '' : 'es'}
+                    <span className="font-bold text-white">
+                      Per-Branch Licensing ({activeBranchesCount}/{maxAllowedBranches} Licensed)
+                    </span>
+                    <span className="text-slate-400 block text-[11px]">
+                      Branch #1: KSh {PRIMARY_BRANCH_MONTHLY_PRICE}/mo • Extra Branch #2+: KSh {EXTRA_BRANCH_MONTHLY_PRICE}/mo (50% off) · Group Est: KSh {bundlePricing.monthlyTotal.toLocaleString()}/mo
                     </span>
                   </div>
                 </div>
@@ -460,10 +523,63 @@ export const MultiBranchUpgradeModal: React.FC<MultiBranchUpgradeModalProps> = (
                     }}
                     className="px-3 py-1.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/35 text-emerald-300 text-[11px] font-bold transition cursor-pointer"
                   >
-                    Manage Plan
+                    Plans &amp; Pricing
                   </button>
                 )}
               </div>
+
+              {/* Activate Branch License Prompt (Triggered when new branch exceeds maxAllowedBranches) */}
+              {pendingLicenseBranch && (
+                <div className="bg-amber-950/45 border border-amber-500/50 rounded-2xl p-4 space-y-3 text-xs">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-start gap-2.5">
+                      <Lock className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                      <div>
+                        <h4 className="font-extrabold text-white text-sm">
+                          Activate Branch License (KSh {EXTRA_BRANCH_MONTHLY_PRICE}/mo)
+                        </h4>
+                        <p className="text-[11px] text-amber-100/85 mt-0.5 leading-relaxed">
+                          <strong className="text-white">{pendingLicenseBranch.storeName}</strong> was created with isolated storage, and your plan currently includes{' '}
+                          <strong className="text-white">{maxAllowedBranches}</strong> licensed branch slot{maxAllowedBranches === 1 ? '' : 's'}. Activate this branch via M-Pesa (Till <strong className="font-mono text-white">1833804</strong>) at KSh {EXTRA_BRANCH_MONTHLY_PRICE}/mo or KSh {EXTRA_BRANCH_ANNUAL_PRICE.toLocaleString()}/yr (50% off), or request Super Admin approval before unlocking live POS checkout.
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setPendingLicenseBranch(null)}
+                      className="p-1 rounded-lg text-amber-200/70 hover:text-white cursor-pointer"
+                      aria-label="Dismiss prompt"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {onOpenPlansPricing && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const target = pendingLicenseBranch;
+                          setPendingLicenseBranch(null);
+                          onClose();
+                          onOpenPlansPricing(target);
+                        }}
+                        className="px-3.5 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold text-xs inline-flex items-center gap-1.5 cursor-pointer transition"
+                      >
+                        <Smartphone className="w-3.5 h-3.5" />
+                        <span>Pay KSh {EXTRA_BRANCH_MONTHLY_PRICE}/mo via M-Pesa (Till 1833804)</span>
+                      </button>
+                    )}
+                    <a
+                      href={waApprovalUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-200 font-bold text-xs inline-flex items-center gap-1.5"
+                    >
+                      <span>Request Super Admin Approval</span>
+                    </a>
+                  </div>
+                </div>
+              )}
 
               {/* TAB 1: BRANCHES & SWITCHER */}
               {activeTab === 'branches' && (
@@ -492,7 +608,9 @@ export const MultiBranchUpgradeModal: React.FC<MultiBranchUpgradeModalProps> = (
                       className="bg-slate-800 border border-sky-500/40 rounded-2xl p-4 space-y-3"
                     >
                       <div className="flex items-center justify-between">
-                        <span className="text-xs font-extrabold text-sky-300">Create New Branch Shop</span>
+                        <span className="text-xs font-extrabold text-sky-300">
+                          Create New Branch Shop {willRequireLicense ? `(Requires KSh ${EXTRA_BRANCH_MONTHLY_PRICE}/mo License)` : ''}
+                        </span>
                         <button
                           type="button"
                           onClick={() => setShowAddBranchForm(false)}
@@ -501,6 +619,11 @@ export const MultiBranchUpgradeModal: React.FC<MultiBranchUpgradeModalProps> = (
                           Cancel
                         </button>
                       </div>
+                      {willRequireLicense && (
+                        <div className="p-2.5 rounded-xl bg-amber-950/40 border border-amber-500/35 text-[11px] text-amber-200">
+                          Active branches ({activeBranchesCount}) have reached your allowed branch limit ({maxAllowedBranches}). After creating this branch, pay <strong>KSh {EXTRA_BRANCH_MONTHLY_PRICE}/mo</strong> via Till <strong>1833804</strong> (or get Super Admin approval) to unlock live checkout.
+                        </div>
+                      )}
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <div>
                           <label className="block text-[11px] font-semibold text-slate-300 mb-1">Branch Shop Name *</label>
@@ -584,7 +707,19 @@ export const MultiBranchUpgradeModal: React.FC<MultiBranchUpgradeModalProps> = (
                   <div className="space-y-2.5">
                     {resolvedBranches.map((branch, idx) => {
                       const isActive = branch.id === activeBranchStoreId;
-                      const isFirst = idx === 0 || branch.id === primaryStoreId || !branch.isBranchStore;
+                      const isFirst = resolveIsPrimaryBranch(branch, primaryStoreId) && (idx === 0 || branch.id === primaryStoreId);
+                      const branchStatus = getEffectiveBranchStatus(branch, isOwnerAccount);
+                      const daysLeft = getBranchDaysRemaining(branch);
+                      const unlocked = isBranchLicenseUnlocked(branch, isOwnerAccount);
+                      const statusBadgeClass =
+                        branchStatus === 'active'
+                          ? 'bg-emerald-500/15 border-emerald-500/35 text-emerald-300'
+                          : branchStatus === 'trial'
+                          ? 'bg-sky-500/15 border-sky-500/35 text-sky-300'
+                          : branchStatus === 'suspended'
+                          ? 'bg-rose-500/20 border-rose-500/45 text-rose-300'
+                          : 'bg-amber-500/15 border-amber-500/35 text-amber-300';
+
                       return (
                         <div
                           key={branch.id}
@@ -607,16 +742,27 @@ export const MultiBranchUpgradeModal: React.FC<MultiBranchUpgradeModalProps> = (
                             <div className="min-w-0">
                               <div className="flex items-center gap-2 flex-wrap">
                                 <span className="text-sm font-bold text-white truncate">
-                                  {branch.storeName}
+                                  {branch.branchName || branch.storeName}
                                 </span>
                                 <span className="px-2 py-0.5 rounded-md bg-slate-900 border border-slate-700 text-[10px] font-mono text-slate-300">
                                   {branch.branchCode || (isFirst ? 'MAIN-01' : `BR-0${idx + 1}`)}
                                 </span>
-                                {isFirst && (
-                                  <span className="px-2 py-0.5 rounded-md bg-emerald-500/15 border border-emerald-500/30 text-[10px] font-bold text-emerald-300">
-                                    Branch #1
-                                  </span>
-                                )}
+                                <span className="px-2 py-0.5 rounded-md bg-slate-900/90 border border-slate-700 text-[10px] font-bold text-slate-300">
+                                  {isFirst
+                                    ? `Primary · KSh ${PRIMARY_BRANCH_MONTHLY_PRICE}/mo`
+                                    : `Extra · KSh ${EXTRA_BRANCH_MONTHLY_PRICE}/mo`}
+                                </span>
+                                <span className={`px-2 py-0.5 rounded-md border text-[10px] font-bold uppercase ${statusBadgeClass}`}>
+                                  {branch.licensePendingActivation
+                                    ? 'License Pending'
+                                    : branchStatus === 'trial'
+                                    ? `Trial (${daysLeft}d)`
+                                    : branchStatus === 'active'
+                                    ? isOwnerAccount
+                                      ? 'Active'
+                                      : `Active (${daysLeft}d)`
+                                    : branchStatus}
+                                </span>
                                 {isActive && (
                                   <span className="px-2 py-0.5 rounded-md bg-sky-500 text-slate-950 text-[10px] font-extrabold">
                                     ACTIVE NOW
@@ -629,6 +775,11 @@ export const MultiBranchUpgradeModal: React.FC<MultiBranchUpgradeModalProps> = (
                                   {branch.branchCity || 'Main Location'}
                                 </span>
                                 {branch.phone && <span className="font-mono">{branch.phone}</span>}
+                                {branch.expiresAt && !isOwnerAccount && (
+                                  <span>
+                                    Exp: <strong className="text-slate-300">{new Date(branch.expiresAt).toLocaleDateString()}</strong>
+                                  </span>
+                                )}
                                 <span className="font-mono text-[10px] text-slate-500">
                                   stores/{branch.id}
                                 </span>
@@ -636,7 +787,24 @@ export const MultiBranchUpgradeModal: React.FC<MultiBranchUpgradeModalProps> = (
                             </div>
                           </div>
 
-                          <div className="shrink-0">
+                          <div className="flex flex-wrap items-center gap-2 shrink-0">
+                            {!unlocked && onOpenPlansPricing && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  onClose();
+                                  onOpenPlansPricing(branch);
+                                }}
+                                className="px-3 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-extrabold flex items-center gap-1.5 transition cursor-pointer"
+                              >
+                                <Lock className="w-3.5 h-3.5" />
+                                <span>
+                                  {isFirst
+                                    ? `Renew (KSh ${PRIMARY_BRANCH_MONTHLY_PRICE}/mo)`
+                                    : `Activate License (KSh ${EXTRA_BRANCH_MONTHLY_PRICE}/mo)`}
+                                </span>
+                              </button>
+                            )}
                             {isActive ? (
                               <span className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-sky-500/15 border border-sky-500/40 text-sky-300 text-xs font-bold">
                                 <Check className="w-3.5 h-3.5" />
@@ -647,7 +815,7 @@ export const MultiBranchUpgradeModal: React.FC<MultiBranchUpgradeModalProps> = (
                                 type="button"
                                 onClick={async () => {
                                   await onSwitchBranch(branch.id);
-                                  notify(`Switched workspace to ${branch.storeName}.`);
+                                  notify(`Switched workspace to ${branch.branchName || branch.storeName}.`);
                                 }}
                                 className="w-full sm:w-auto px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-sky-600 border border-slate-700 hover:border-sky-500 text-slate-200 hover:text-white text-xs font-bold flex items-center justify-center gap-1.5 transition cursor-pointer"
                               >

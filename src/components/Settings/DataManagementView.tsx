@@ -42,7 +42,8 @@ import {
   Send,
   X
 } from 'lucide-react';
-import { Product, Customer, Supplier, Transaction, Expense, AttendanceRecord, User, StoreLocation } from '../../types';
+import { Product, Customer, Supplier, Transaction, Expense, AttendanceRecord, User, StoreLocation, BusinessTypeId } from '../../types';
+import { BUSINESS_TYPES, DEFAULT_BUSINESS_TYPE, getBusinessTypeConfig } from '../../utils/businessTypes';
 import { detectDuplicateProducts, deduplicateProducts } from '../../utils/deduplicate';
 import { DataSnapshotModal } from './DataSnapshotModal';
 import { DailyEmailBackupModal } from './DailyEmailBackupModal';
@@ -149,6 +150,11 @@ interface DataManagementViewProps {
   biometricUnlockEnabled?: boolean;
   onToggleBiometricUnlock?: (enabled: boolean) => Promise<void> | void;
   onChangePasswordOrPin?: (params: { currentPin: string; newPin: string }) => Promise<void> | void;
+  businessType?: BusinessTypeId;
+  onUpdateBusinessType?: (businessType: BusinessTypeId) => Promise<void> | void;
+  onLoadRecommendedCategories?: (
+    businessType: BusinessTypeId
+  ) => { addedCategoriesCount: number; addedSubcategoriesCount: number } | void;
 }
 
 export const DataManagementView: React.FC<DataManagementViewProps> = ({
@@ -213,6 +219,9 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
   biometricUnlockEnabled = false,
   onToggleBiometricUnlock,
   onChangePasswordOrPin,
+  businessType = DEFAULT_BUSINESS_TYPE,
+  onUpdateBusinessType,
+  onLoadRecommendedCategories,
 }) => {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -972,6 +981,9 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
         biometricUnlockEnabled={biometricUnlockEnabled}
         onToggleBiometricUnlock={onToggleBiometricUnlock}
         onChangePasswordOrPin={onChangePasswordOrPin}
+        businessType={businessType}
+        onUpdateBusinessType={onUpdateBusinessType}
+        onLoadRecommendedCategories={onLoadRecommendedCategories}
       />
 
       <div id="data-management-section" className="p-4 sm:p-6 space-y-6 max-w-7xl mx-auto border-t border-slate-800 pt-8">
@@ -1804,9 +1816,20 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
 
           {/* Business Profile */}
           <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-4">
-            <div className="flex items-center gap-2 border-b border-slate-100 pb-3">
-              <Building2 className="w-5 h-5 text-blue-600" />
-              <h3 className="font-bold text-sm text-slate-800">Business &amp; Optional Tax Profile</h3>
+            <div className="flex items-center justify-between gap-2 border-b border-slate-100 pb-3 flex-wrap">
+              <div className="flex items-center gap-2">
+                <Building2 className="w-5 h-5 text-blue-600" />
+                <h3 className="font-bold text-sm text-slate-800">Business &amp; Optional Tax Profile</h3>
+              </div>
+              {(() => {
+                const bt = getBusinessTypeConfig(businessType);
+                return (
+                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-sky-50 border border-sky-200 text-sky-700 text-[11px] font-bold">
+                    <span>{bt.emoji}</span>
+                    <span>{bt.shortLabel}</span>
+                  </span>
+                );
+              })()}
             </div>
 
           <form onSubmit={handleSaveStoreSettings} className="space-y-3 text-xs">
@@ -1819,6 +1842,26 @@ export const DataManagementView: React.FC<DataManagementViewProps> = ({
                 placeholder="Rofani POS (leave blank for no custom shop name)"
                 className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-900 font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
+            </div>
+
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1">Business Type</label>
+              <select
+                value={businessType}
+                onChange={(e) => {
+                  const nextBt = e.target.value as BusinessTypeId;
+                  onUpdateBusinessType?.(nextBt);
+                  const cfg = getBusinessTypeConfig(nextBt);
+                  triggerNotify(`Business type updated to ${cfg.label}!`);
+                }}
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-900 font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                {BUSINESS_TYPES.map((bt) => (
+                  <option key={bt.id} value={bt.id}>
+                    {bt.emoji} {bt.label}
+                  </option>
+                ))}
+              </select>
             </div>
 
             <div>

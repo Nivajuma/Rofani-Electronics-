@@ -35,9 +35,12 @@ import {
   Mail,
   ArrowRightLeft,
   ChevronDown,
-  AlertCircle
+  AlertCircle,
+  Briefcase,
+  Layers
 } from 'lucide-react';
-import { Product, Customer, Supplier, Transaction, Expense, AttendanceRecord, User, StoreLocation, Role, WorkerPermissions } from '../../types';
+import { Product, Customer, Supplier, Transaction, Expense, AttendanceRecord, User, StoreLocation, Role, WorkerPermissions, BusinessTypeId } from '../../types';
+import { BUSINESS_TYPES, DEFAULT_BUSINESS_TYPE, getBusinessTypeConfig } from '../../utils/businessTypes';
 import { safeGetJSON, safeSetJSON } from '../../utils/safeStorage';
 import { saveUserToCloud, deleteUserFromCloud, isLegacyRofaniStoreBrand } from '../../lib/cloudSync';
 import { getLastBackupMeta, formatLastBackupTimestamp, LastBackupMeta } from '../../utils/storeBackup';
@@ -108,6 +111,11 @@ interface SettingsDashboardViewProps {
   biometricUnlockEnabled?: boolean;
   onToggleBiometricUnlock?: (enabled: boolean) => Promise<void> | void;
   onChangePasswordOrPin?: (params: { currentPin: string; newPin: string }) => Promise<void> | void;
+  businessType?: BusinessTypeId;
+  onUpdateBusinessType?: (businessType: BusinessTypeId) => Promise<void> | void;
+  onLoadRecommendedCategories?: (
+    businessType: BusinessTypeId
+  ) => { addedCategoriesCount: number; addedSubcategoriesCount: number } | void;
 }
 
 type SettingCategoryKey =
@@ -363,6 +371,9 @@ export const SettingsDashboardView: React.FC<SettingsDashboardViewProps> = ({
   biometricUnlockEnabled = false,
   onToggleBiometricUnlock,
   onChangePasswordOrPin,
+  businessType = DEFAULT_BUSINESS_TYPE,
+  onUpdateBusinessType,
+  onLoadRecommendedCategories,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [activeSubPanel, setActiveSubPanel] = useState<SettingCategoryKey | null>(null);
@@ -839,9 +850,20 @@ export const SettingsDashboardView: React.FC<SettingsDashboardViewProps> = ({
             <Settings className="w-6 h-6" />
           </div>
           <div>
-            <h2 className="font-bold text-lg text-slate-100">Store Settings & Preferences</h2>
+            <div className="flex items-center gap-2 flex-wrap">
+              <h2 className="font-bold text-lg text-slate-100">Store Settings &amp; Preferences</h2>
+              {(() => {
+                const activeBt = getBusinessTypeConfig(businessType);
+                return (
+                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-sky-500/15 border border-sky-500/35 text-sky-300 text-[11px] font-bold">
+                    <span>{activeBt.emoji}</span>
+                    <span>{activeBt.label}</span>
+                  </span>
+                );
+              })()}
+            </div>
             <p className="text-xs text-slate-400">
-              Configure Rofani POS executive preferences, tax defaults, and POS terminals
+              Configure Rofani POS executive preferences, business type, tax defaults, and POS terminals
             </p>
           </div>
         </div>
@@ -918,7 +940,7 @@ export const SettingsDashboardView: React.FC<SettingsDashboardViewProps> = ({
               </li>
               <li className="flex items-center gap-2">
                 <Check className="w-3.5 h-3.5 text-sky-400 shrink-0" />
-                <span>Unified M-Pesa billing &amp; cross-branch staff access</span>
+                <span>KSh 250/mo extra branch licensing &amp; cross-branch staff access</span>
               </li>
             </ul>
           </div>
@@ -1215,6 +1237,105 @@ export const SettingsDashboardView: React.FC<SettingsDashboardViewProps> = ({
           )}
         </div>
       </div>
+
+      {/* Business Type & Smart Starter Categories Card */}
+      {(() => {
+        const activeBt = getBusinessTypeConfig(businessType);
+        return (
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-4">
+              <div className="flex items-start gap-3">
+                <div className="w-11 h-11 rounded-xl bg-sky-500/15 border border-sky-500/30 text-sky-400 flex items-center justify-center shrink-0">
+                  <Briefcase className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className="font-bold text-sm text-white">Business Type &amp; Starter Setup</h3>
+                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/35 text-emerald-300 text-[11px] font-bold">
+                      <span>{activeBt.emoji}</span>
+                      <span>{activeBt.label}</span>
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    Tailors item field hints &amp; starter categories without ever removing existing products, sales, or features.
+                  </p>
+                </div>
+              </div>
+
+              {onLoadRecommendedCategories && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const res = onLoadRecommendedCategories(activeBt.id);
+                    if (res && (res.addedCategoriesCount > 0 || res.addedSubcategoriesCount > 0)) {
+                      triggerNotify(
+                        `Added ${res.addedCategoriesCount} starter categories (${res.addedSubcategoriesCount} subcategories) for ${activeBt.label}. Existing products & sales untouched.`
+                      );
+                    } else {
+                      triggerNotify(
+                        `All recommended categories for ${activeBt.label} are already in your store!`
+                      );
+                    }
+                  }}
+                  className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs inline-flex items-center gap-1.5 transition cursor-pointer shrink-0 shadow-lg shadow-emerald-600/20"
+                >
+                  <Layers className="w-4 h-4" />
+                  <span>Load Recommended Categories</span>
+                </button>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
+              {BUSINESS_TYPES.map((bt) => {
+                const isSelected = activeBt.id === bt.id;
+                return (
+                  <button
+                    key={bt.id}
+                    type="button"
+                    onClick={async () => {
+                      if (bt.id === activeBt.id) return;
+                      if (onUpdateBusinessType) {
+                        await onUpdateBusinessType(bt.id);
+                      }
+                      triggerNotify(
+                        `Business type updated to ${bt.label}. Tap "Load Recommended Categories" anytime to add starter categories.`
+                      );
+                    }}
+                    className={`text-left p-3 rounded-xl border transition cursor-pointer flex items-start gap-2.5 ${
+                      isSelected
+                        ? 'bg-sky-500/15 border-sky-400 text-white shadow-sm'
+                        : 'bg-slate-800/70 border-slate-700/80 text-slate-300 hover:border-slate-500 hover:bg-slate-800'
+                    }`}
+                  >
+                    <span className="text-lg leading-none mt-0.5 shrink-0">{bt.emoji}</span>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center justify-between gap-1">
+                        <span className="font-bold text-xs text-white truncate">{bt.label}</span>
+                        {isSelected && <Check className="w-3.5 h-3.5 text-sky-400 shrink-0" />}
+                      </div>
+                      <p className="text-[10px] text-slate-400 mt-0.5 leading-snug">
+                        {bt.subtitle}
+                      </p>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="bg-slate-950/70 border border-slate-800 rounded-xl px-3.5 py-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-[11px]">
+              <span className="text-slate-300">
+                <strong className="text-sky-300">Item Helper Tip:</strong> {activeBt.itemHints.helperBanner}
+              </span>
+              {activeBt.suggestExpiryTracking && (
+                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-amber-500/15 border border-amber-500/35 text-amber-300 font-bold shrink-0">
+                  <Sparkles className="w-3.5 h-3.5" />
+                  Expiry Tracking Recommended
+                </span>
+              )}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Settings Menu List */}
       <div className="bg-slate-900 border border-slate-800 rounded-2xl shadow-xl overflow-hidden divide-y divide-slate-800/80">

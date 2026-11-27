@@ -22,9 +22,14 @@ import {
   OWNER_PRIMARY_STORE_ID,
   OWNER_CLOUD_EMAIL,
   isOwnerCloudUser,
+  isSuperAdminEmail,
 } from './firebase';
 import { getActiveTenantStoreId, getActiveBranchCloudStoreId, resolveTenantStorageKey } from '../utils/tenantScope';
 import { TRANSACTION_SETTINGS_DEFAULT } from '../utils/transactionSettings';
+import {
+  getOwnerMaxAllowedBranches,
+  isBranchLicenseUnlocked,
+} from '../utils/branchLicensing';
 import {
   Product,
   Transaction,
@@ -42,6 +47,7 @@ import {
   CustomerComplaint,
   CustomerReturnRecord,
   EtimsComplianceConfig,
+  BusinessTypeId,
 } from '../types';
 
 const DEFAULT_FIRESTORE_WRITE_TIMEOUT_MS = 18000;
@@ -1518,7 +1524,13 @@ export async function fetchStoreProfile(storeId: string): Promise<StoreSubscript
       3000
     );
     if (!snap.exists()) return null;
-    return { id: snap.id, ...snap.data() } as StoreSubscriptionProfile;
+    const raw = snap.data() as any;
+    const resolvedBusinessType = raw?.businessType || raw?.profile?.businessType;
+    return {
+      id: snap.id,
+      ...raw,
+      ...(resolvedBusinessType ? { businessType: resolvedBusinessType } : {}),
+    } as StoreSubscriptionProfile;
   } catch (error) {
     handleFirestoreError(error, OperationType.GET, path);
     throw error;
@@ -1538,7 +1550,13 @@ export function subscribeToStoreProfile(
       if (!snapshot.exists()) {
         onUpdate(null);
       } else {
-        onUpdate({ id: snapshot.id, ...snapshot.data() } as StoreSubscriptionProfile);
+        const raw = snapshot.data() as any;
+        const resolvedBusinessType = raw?.businessType || raw?.profile?.businessType;
+        onUpdate({
+          id: snapshot.id,
+          ...raw,
+          ...(resolvedBusinessType ? { businessType: resolvedBusinessType } : {}),
+        } as StoreSubscriptionProfile);
       }
     },
     (error) => {
@@ -1713,9 +1731,16 @@ export async function ensureOwnerPrimaryStoreProfile(user: {
     if (existing.subscriptionStatus !== 'active' || existing.planType !== 'annual') {
       const updated: StoreSubscriptionProfile = {
         ...existing,
+        ownerId: existing.ownerId || existing.ownerUid || user.uid,
+        isPrimaryBranch: existing.isPrimaryBranch ?? true,
+        maxAllowedBranches: existing.maxAllowedBranches ?? 10,
         planType: 'annual',
         subscriptionStatus: 'active',
         expiresAt:
+          existing.expiresAt && Date.parse(existing.expiresAt) > Date.now() + 365 * 86400000
+            ? existing.expiresAt
+            : new Date(Date.now() + 10 * 365 * 86400000).toISOString(),
+        expiryDate:
           existing.expiresAt && Date.parse(existing.expiresAt) > Date.now() + 365 * 86400000
             ? existing.expiresAt
             : new Date(Date.now() + 10 * 365 * 86400000).toISOString(),
@@ -1737,13 +1762,18 @@ export async function ensureOwnerPrimaryStoreProfile(user: {
     legacyProfile?.storeName && !isLegacyRofaniStoreBrand(legacyProfile.storeName)
       ? legacyProfile.storeName
       : 'Rofani POS';
+  const masterExpiresAt = new Date(Date.now() + 10 * 365 * 86400000).toISOString();
 
   const profile: StoreSubscriptionProfile = {
     ...(legacyProfile || {}),
     id: targetStoreId,
     ownerUid: user.uid,
+    ownerId: user.uid,
     ownerEmail: (user.email || 'nivajuma@gmail.com').toLowerCase(),
     storeName: resolvedLegacyName,
+    branchName: resolvedLegacyName,
+    isPrimaryBranch: true,
+    maxAllowedBranches: legacyProfile?.maxAllowedBranches ?? 10,
     phone: legacyProfile?.phone || '0700000000',
     kraPin: legacyProfile?.kraPin || '',
     mpesaShortcode: legacyProfile?.mpesaShortcode || '1833804',
@@ -1751,7 +1781,8 @@ export async function ensureOwnerPrimaryStoreProfile(user: {
     mpesaStoreNumber: legacyProfile?.mpesaStoreNumber || '1365369',
     planType: 'annual',
     subscriptionStatus: 'active',
-    expiresAt: new Date(Date.now() + 10 * 365 * 86400000).toISOString(),
+    expiresAt: masterExpiresAt,
+    expiryDate: masterExpiresAt,
     lastPaymentRef: legacyProfile?.lastPaymentRef || 'OWNER-MASTER',
     lastPaymentMethod: 'admin_override',
     referralCode: legacyProfile?.referralCode || generateStoreReferralCode('NIVA', targetStoreId),
@@ -1777,6 +1808,7 @@ export async function createMerchantStoreProfile(params: {
   email: string;
   displayName?: string;
   storeName: string;
+  businessType?: BusinessTypeId;
   phone: string;
   kraPin?: string;
   mpesaShortcode?: string;
@@ -1812,19 +1844,26 @@ export async function createMerchantStoreProfile(params: {
   const profile: StoreSubscriptionProfile = {
     id: storeId,
     ownerUid: params.uid,
+    ownerId: params.uid,
     ownerEmail: params.email.trim().toLowerCase(),
     storeName: params.storeName.trim(),
+    branchName: params.storeName.trim(),
+    businessType: params.businessType || 'general',
     phone: params.phone.trim(),
     kraPin: (params.kraPin || '').trim().toUpperCase(),
     mpesaShortcode: (params.mpesaShortcode || '').trim(),
     mpesaShortcodeType: params.mpesaShortcodeType || 'till',
     planType: 'trial',
-    subscriptionStatus: 'active',
+    subscriptionStatus: 'trial',
     expiresAt: trialExpiresIso,
+    expiryDate: trialExpiresIso,
     lastPaymentMethod: 'free_trial',
     referralCode: ownReferralCode,
     referralCount: 0,
     trialDaysGranted: grantedTrialDays,
+    isPrimaryBranch: true,
+    isBranchStore: false,
+    maxAllowedBranches: 1,
     taxMode: 'none',
     transactionWiseTax: false,
     ...(validReferrer
@@ -2069,6 +2108,7 @@ export async function updateStoreProfileDetails(
     Pick<
       StoreSubscriptionProfile,
       | 'storeName'
+      | 'businessType'
       | 'phone'
       | 'kraPin'
       | 'mpesaShortcode'
@@ -2085,6 +2125,9 @@ export async function updateStoreProfileDetails(
       | 'businessGroupName'
       | 'parentStoreId'
       | 'isBranchStore'
+      | 'isPrimaryBranch'
+      | 'branchName'
+      | 'maxAllowedBranches'
       | 'branchCode'
       | 'branchCity'
       | 'branchAddress'
@@ -2133,10 +2176,13 @@ export async function activateStoreSubscription(
 
   const path = `stores/${storeId}`;
   try {
+    // Each branch keeps its own independent subscription status & expiryDate/expiresAt
     const patch = cleanForFirestore({
       planType: params.planType,
       subscriptionStatus: 'active',
       expiresAt: nextExpiresAt,
+      expiryDate: nextExpiresAt,
+      licensePendingActivation: false,
       lastPaymentRef: cleanRef,
       lastPaymentAmount: params.amount,
       lastPaymentAt: nowIso,
@@ -2147,7 +2193,7 @@ export async function activateStoreSubscription(
 
     await withFirestoreTimeout(
       setDoc(doc(db, 'stores', storeId), patch, { merge: true }),
-      'activating subscription'
+      'activating branch subscription'
     );
 
     const paymentId = `subpay-${nowMs}-${Math.random().toString(36).slice(2, 7)}`;
@@ -2179,40 +2225,33 @@ export async function activateStoreSubscription(
       throw new Error('Could not reload updated store subscription profile.');
     }
 
-    // Propagate unified M-Pesa subscription across all branches in the Multi-Branch Business Group
-    if (updated.ownerUid && updated.isMultiBranch) {
+    // If an additional branch was just licensed via M-Pesa, ensure owner's maxAllowedBranches accommodates all active licensed branches
+    if (updated.ownerUid && (updated.isBranchStore || updated.isPrimaryBranch === false)) {
       try {
         const siblingsSnap = await withFirestoreTimeout(
           getDocs(query(collection(db, 'stores'), where('ownerUid', '==', updated.ownerUid))),
-          'synchronizing unified multi-branch subscription',
+          'updating multi-branch allowance after branch activation',
           4000
         );
-        const batch = writeBatch(db);
-        let hasSiblings = false;
+        const allOwnerBranches: StoreSubscriptionProfile[] = [];
         siblingsSnap.forEach((docSnap) => {
-          if (docSnap.id !== storeId) {
-            hasSiblings = true;
-            batch.set(
-              doc(db, 'stores', docSnap.id),
-              cleanForFirestore({
-                planType: updated.planType,
-                subscriptionStatus: updated.subscriptionStatus,
-                expiresAt: updated.expiresAt,
-                lastPaymentRef: updated.lastPaymentRef,
-                lastPaymentAmount: updated.lastPaymentAmount,
-                lastPaymentAt: updated.lastPaymentAt,
-                lastPaymentMethod: updated.lastPaymentMethod,
-                updatedAt: nowIso,
-              }),
-              { merge: true }
-            );
-          }
+          allOwnerBranches.push({ id: docSnap.id, ...docSnap.data() } as StoreSubscriptionProfile);
         });
-        if (hasSiblings) {
-          await batch.commit().catch(() => {});
+        const activeCount = allOwnerBranches.filter((b) => isBranchLicenseUnlocked(b)).length;
+        const currentMax = getOwnerMaxAllowedBranches(allOwnerBranches, updated);
+        if (activeCount > currentMax) {
+          const primaryTargetId = updated.parentStoreId || updated.ownerUid;
+          await setDoc(
+            doc(db, 'stores', primaryTargetId),
+            cleanForFirestore({
+              maxAllowedBranches: activeCount,
+              updatedAt: nowIso,
+            }),
+            { merge: true }
+          ).catch(() => {});
         }
       } catch {
-        // Non-fatal: primary store license is already updated
+        // Non-fatal: branch license is already active
       }
     }
 
@@ -2262,54 +2301,84 @@ export function subscribeToAllStoresForSuperAdmin(
   );
 }
 
+export type SuperAdminBranchAction =
+  | 'extend_30d'
+  | 'extend_1y'
+  | 'extend_custom'
+  | 'activate'
+  | 'suspend';
+
+function buildSuperAdminBranchPatch(
+  action: SuperAdminBranchAction,
+  currentProfile?: StoreSubscriptionProfile,
+  customDays?: number
+): Record<string, any> {
+  const nowMs = Date.now();
+  const nowIso = new Date(nowMs).toISOString();
+  const existingExpMs = currentProfile?.expiresAt ? Date.parse(currentProfile.expiresAt) : 0;
+  const activeBaseMs = Number.isFinite(existingExpMs) && existingExpMs > nowMs ? existingExpMs : nowMs;
+
+  if (action === 'suspend') {
+    return {
+      subscriptionStatus: 'suspended',
+      updatedAt: nowIso,
+    };
+  }
+
+  if (action === 'activate') {
+    const targetExpIso =
+      Number.isFinite(existingExpMs) && existingExpMs > nowMs
+        ? new Date(existingExpMs).toISOString()
+        : new Date(nowMs + Math.max(1, customDays || 30) * 86400000).toISOString();
+    return {
+      planType: currentProfile?.planType && currentProfile.planType !== 'trial' ? currentProfile.planType : 'monthly',
+      subscriptionStatus: 'active',
+      expiresAt: targetExpIso,
+      expiryDate: targetExpIso,
+      licensePendingActivation: false,
+      lastPaymentMethod: 'admin_override',
+      lastPaymentAt: nowIso,
+      updatedAt: nowIso,
+    };
+  }
+
+  const days =
+    action === 'extend_1y'
+      ? 365
+      : action === 'extend_custom'
+      ? Math.max(1, Math.floor(customDays || 30))
+      : 30;
+  const nextExpIso = new Date(activeBaseMs + days * 24 * 60 * 60 * 1000).toISOString();
+  return {
+    planType: days >= 365 ? 'annual' : currentProfile?.planType && currentProfile.planType !== 'trial' ? currentProfile.planType : 'monthly',
+    subscriptionStatus: 'active',
+    expiresAt: nextExpIso,
+    expiryDate: nextExpIso,
+    licensePendingActivation: false,
+    lastPaymentMethod: 'admin_override',
+    lastPaymentAt: nowIso,
+    updatedAt: nowIso,
+  };
+}
+
 export async function superAdminUpdateStoreSubscription(
   storeId: string,
-  action: 'extend_30d' | 'extend_1y' | 'suspend',
-  currentProfile?: StoreSubscriptionProfile
+  action: SuperAdminBranchAction,
+  currentProfile?: StoreSubscriptionProfile,
+  customDays?: number
 ): Promise<void> {
   if (!isOwnerCloudUser(auth.currentUser)) {
     throw new Error('Only the app owner can modify subscriber access.');
   }
   const isOwnerTarget =
     storeId === OWNER_PRIMARY_STORE_ID ||
-    currentProfile?.ownerEmail?.toLowerCase() === OWNER_CLOUD_EMAIL ||
+    isSuperAdminEmail(currentProfile?.ownerEmail) ||
     (auth.currentUser?.uid && storeId === auth.currentUser.uid);
   if (isOwnerTarget && action === 'suspend') {
     throw new Error('Cannot suspend the primary owner store.');
   }
 
-  const nowMs = Date.now();
-  const nowIso = new Date(nowMs).toISOString();
-  const existingExpMs = currentProfile?.expiresAt ? Date.parse(currentProfile.expiresAt) : 0;
-  const activeBaseMs = Number.isFinite(existingExpMs) && existingExpMs > nowMs ? existingExpMs : nowMs;
-
-  let updatePayload: Record<string, any>;
-  if (action === 'extend_30d') {
-    updatePayload = {
-      planType: 'monthly',
-      subscriptionStatus: 'active',
-      expiresAt: new Date(activeBaseMs + 30 * 24 * 60 * 60 * 1000).toISOString(),
-      lastPaymentMethod: 'admin_override',
-      lastPaymentAt: nowIso,
-      updatedAt: nowIso,
-    };
-  } else if (action === 'extend_1y') {
-    updatePayload = {
-      planType: 'annual',
-      subscriptionStatus: 'active',
-      expiresAt: new Date(activeBaseMs + 365 * 24 * 60 * 60 * 1000).toISOString(),
-      lastPaymentMethod: 'admin_override',
-      lastPaymentAt: nowIso,
-      updatedAt: nowIso,
-    };
-  } else {
-    updatePayload = {
-      subscriptionStatus: 'expired',
-      expiresAt: nowIso,
-      updatedAt: nowIso,
-    };
-  }
-
+  const updatePayload = buildSuperAdminBranchPatch(action, currentProfile, customDays);
   const path = `stores/${storeId}`;
   try {
     await withFirestoreTimeout(
@@ -2320,6 +2389,63 @@ export async function superAdminUpdateStoreSubscription(
     handleFirestoreError(error, OperationType.UPDATE, path);
     throw error;
   }
+}
+
+export async function superAdminBulkUpdateOwnerGroup(
+  ownerBranches: StoreSubscriptionProfile[],
+  action: SuperAdminBranchAction,
+  customDays?: number
+): Promise<number> {
+  if (!isOwnerCloudUser(auth.currentUser)) {
+    throw new Error('Super Admin privileges required.');
+  }
+  const eligible = ownerBranches.filter((b) => {
+    const isMaster = b.id === OWNER_PRIMARY_STORE_ID || isSuperAdminEmail(b.ownerEmail);
+    return !(isMaster && action === 'suspend');
+  });
+  if (eligible.length === 0) return 0;
+
+  const batch = writeBatch(db);
+  eligible.forEach((branch) => {
+    const patch = buildSuperAdminBranchPatch(action, branch, customDays);
+    batch.set(doc(db, 'stores', branch.id), cleanForFirestore(patch), { merge: true });
+  });
+
+  await withFirestoreTimeout(
+    batch.commit(),
+    `bulk updating ${eligible.length} branch(es)`
+  );
+  return eligible.length;
+}
+
+export async function superAdminSetOwnerMaxBranches(
+  ownerBranches: StoreSubscriptionProfile[],
+  maxAllowedBranches: number
+): Promise<number> {
+  if (!isOwnerCloudUser(auth.currentUser)) {
+    throw new Error('Super Admin privileges required.');
+  }
+  const clamped = Math.max(1, Math.min(100, Math.floor(maxAllowedBranches || 1)));
+  if (ownerBranches.length === 0) return clamped;
+
+  const nowIso = new Date().toISOString();
+  const batch = writeBatch(db);
+  ownerBranches.forEach((branch) => {
+    batch.set(
+      doc(db, 'stores', branch.id),
+      cleanForFirestore({
+        maxAllowedBranches: clamped,
+        updatedAt: nowIso,
+      }),
+      { merge: true }
+    );
+  });
+
+  await withFirestoreTimeout(
+    batch.commit(),
+    `setting maxAllowedBranches=${clamped}`
+  );
+  return clamped;
 }
 
 // ---------------- AUTOMATIC ONE-TIME LEGACY DATA BRIDGE (stores/{userId}) ----------------
@@ -2543,27 +2669,38 @@ export async function upgradeStoreToMultiBranchGroup(params: {
   const ownerEmail = (existing?.ownerEmail || params.fallbackOwnerEmail || auth.currentUser?.email || 'owner@rofanipos.app').toLowerCase();
   const branchStoreName = existing?.storeName || params.fallbackStoreName || cleanGroupName;
 
+  const existingMaxBranches = Math.max(1, existing?.maxAllowedBranches ?? 1);
+  const defaultExpIso = new Date(Date.now() + 7 * 86400000).toISOString();
+
   const updatedProfile: StoreSubscriptionProfile = {
     ...(existing || {
       id: params.primaryStoreId,
       ownerUid,
+      ownerId: ownerUid,
       ownerEmail,
       storeName: branchStoreName,
+      branchName: branchStoreName,
       phone: params.fallbackPhone || '',
       planType: 'trial',
-      subscriptionStatus: 'active',
-      expiresAt: new Date(Date.now() + 7 * 86400000).toISOString(),
+      subscriptionStatus: 'trial',
+      expiresAt: defaultExpIso,
+      expiryDate: defaultExpIso,
       createdAt: nowIso,
     }),
     id: params.primaryStoreId,
     ownerUid,
+    ownerId: existing?.ownerId || ownerUid,
     ownerEmail,
     storeName: branchStoreName,
+    branchName: existing?.branchName || branchStoreName,
     isMultiBranch: true,
     businessGroupId: params.primaryStoreId,
     businessGroupName: cleanGroupName,
     parentStoreId: params.primaryStoreId,
     isBranchStore: false,
+    isPrimaryBranch: true,
+    maxAllowedBranches: existingMaxBranches,
+    expiryDate: existing?.expiresAt || defaultExpIso,
     branchCode: existing?.branchCode || 'MAIN-01',
     branchCity: existing?.branchCity || 'Main Branch',
     updatedAt: nowIso,
@@ -2575,11 +2712,15 @@ export async function upgradeStoreToMultiBranchGroup(params: {
         setDoc(
           doc(db, 'stores', params.primaryStoreId),
           cleanForFirestore({
+            ownerId: updatedProfile.ownerId,
+            branchName: updatedProfile.branchName,
             isMultiBranch: true,
             businessGroupId: params.primaryStoreId,
             businessGroupName: cleanGroupName,
             parentStoreId: params.primaryStoreId,
             isBranchStore: false,
+            isPrimaryBranch: true,
+            maxAllowedBranches: existingMaxBranches,
             branchCode: updatedProfile.branchCode,
             branchCity: updatedProfile.branchCity,
             updatedAt: nowIso,
@@ -2617,6 +2758,7 @@ export async function createBranchStoreInGroup(params: {
   branchPhone?: string;
   branchManagerName?: string;
   parentProfile?: StoreSubscriptionProfile | null;
+  existingGroupBranches?: StoreSubscriptionProfile[];
   defaultStaff?: User[];
 }): Promise<StoreSubscriptionProfile> {
   const cleanBranchName = params.branchName.trim().slice(0, 200);
@@ -2633,20 +2775,35 @@ export async function createBranchStoreInGroup(params: {
   const parent = params.parentProfile;
   const cleanGroupName = params.businessGroupName.trim() || parent?.businessGroupName || parent?.storeName || 'Business Group';
 
+  const currentGroup =
+    params.existingGroupBranches && params.existingGroupBranches.length > 0
+      ? params.existingGroupBranches
+      : parent
+      ? [parent]
+      : [];
+  const activeBranchesCount = currentGroup.filter((b) => isBranchLicenseUnlocked(b)).length;
+  const maxAllowedBranches = getOwnerMaxAllowedBranches(currentGroup, parent);
+  const requiresPaidLicense = activeBranchesCount >= maxAllowedBranches;
+  const trialExpIso = new Date(Date.now() + 7 * 86400000).toISOString();
+
   const branchProfile: StoreSubscriptionProfile = {
     id: branchStoreId,
     ownerUid: params.ownerUid,
+    ownerId: params.ownerUid,
     ownerEmail: params.ownerEmail.toLowerCase(),
     storeName: cleanBranchName,
+    branchName: cleanBranchName,
+    businessType: parent?.businessType || 'general',
     phone: (params.branchPhone || parent?.phone || '').trim(),
     kraPin: parent?.kraPin || '',
     mpesaShortcode: parent?.mpesaShortcode || '',
     mpesaShortcodeType: parent?.mpesaShortcodeType || 'till',
-    planType: parent?.planType || 'trial',
-    subscriptionStatus: parent?.subscriptionStatus || 'active',
-    expiresAt: parent?.expiresAt || new Date(Date.now() + 7 * 86400000).toISOString(),
-    lastPaymentRef: parent?.lastPaymentRef,
-    lastPaymentMethod: parent?.lastPaymentMethod || 'free_trial',
+    planType: requiresPaidLicense ? 'monthly' : 'trial',
+    subscriptionStatus: requiresPaidLicense ? 'expired' : 'trial',
+    expiresAt: requiresPaidLicense ? nowIso : trialExpIso,
+    expiryDate: requiresPaidLicense ? nowIso : trialExpIso,
+    licensePendingActivation: requiresPaidLicense,
+    lastPaymentMethod: requiresPaidLicense ? undefined : 'free_trial',
     taxMode: parent?.taxMode || 'none',
     transactionWiseTax: parent?.transactionWiseTax ?? false,
     skipLegacySeed: true,
@@ -2655,6 +2812,8 @@ export async function createBranchStoreInGroup(params: {
     businessGroupName: cleanGroupName,
     parentStoreId: params.primaryStoreId,
     isBranchStore: true,
+    isPrimaryBranch: false,
+    maxAllowedBranches,
     branchCode: (params.branchCode || `BR-${Math.floor(10 + Math.random() * 89)}`).trim().toUpperCase().slice(0, 32),
     branchCity: (params.branchCity || 'Nairobi').trim().slice(0, 120),
     branchAddress: (params.branchAddress || '').trim().slice(0, 200),

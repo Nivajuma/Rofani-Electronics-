@@ -20,6 +20,7 @@ import {
   Download,
   FileText,
   GitBranch,
+  ArrowRightLeft,
 } from 'lucide-react';
 import { StoreSubscriptionProfile, SubscriptionPlanType } from '../../types';
 import {
@@ -33,63 +34,19 @@ import { signOutFromCloud } from '../../lib/firebase';
 import { ROFANI_MASTER_KRA_PIN } from '../../utils/supportConfig';
 import { exportSubscriptionInvoicePDF } from '../../utils/pdfGenerator';
 import { CustomerCareSupportCard } from '../Common/CustomerCareSupportCard';
+import {
+  BranchPlanOption,
+  EXTRA_BRANCH_ANNUAL_PRICE,
+  EXTRA_BRANCH_MONTHLY_PRICE,
+  PRIMARY_BRANCH_ANNUAL_PRICE,
+  PRIMARY_BRANCH_MONTHLY_PRICE,
+  getBranchDaysRemaining,
+  getEffectiveBranchStatus,
+  getPlanOptionsForBranch,
+  resolveIsPrimaryBranch,
+} from '../../utils/branchLicensing';
 
 export type PaidSubscriptionPlanKey = Exclude<SubscriptionPlanType, 'trial'>;
-
-interface PlanOption {
-  id: PaidSubscriptionPlanKey;
-  title: string;
-  name: string;
-  price: number;
-  durationDays: number;
-  subtitle: string;
-  featured?: boolean;
-  badge?: string;
-}
-
-const PLAN_LIST: PlanOption[] = [
-  {
-    id: 'monthly',
-    title: '30 Days',
-    name: '30 Days Unlimited',
-    price: 500,
-    durationDays: 30,
-    subtitle: 'Unlimited Usage',
-  },
-  {
-    id: 'quarterly',
-    title: '3 Months',
-    name: '3 Months Unlimited',
-    price: 1350,
-    durationDays: 90,
-    subtitle: 'Unlimited Usage',
-  },
-  {
-    id: 'biannual',
-    title: '6 Months',
-    name: '6 Months Unlimited',
-    price: 2650,
-    durationDays: 180,
-    subtitle: 'Unlimited Usage',
-    featured: true,
-    badge: 'POPULAR',
-  },
-  {
-    id: 'annual',
-    title: '12 Months',
-    name: '12 Months Unlimited',
-    price: 5000,
-    durationDays: 365,
-    subtitle: 'Unlimited Usage',
-  },
-];
-
-const PLAN_BY_ID: Record<PaidSubscriptionPlanKey, PlanOption> = {
-  monthly: PLAN_LIST[0],
-  quarterly: PLAN_LIST[1],
-  biannual: PLAN_LIST[2],
-  annual: PLAN_LIST[3],
-};
 
 interface SubscriptionPlansModalProps {
   isOpen: boolean;
@@ -100,6 +57,9 @@ interface SubscriptionPlansModalProps {
   isExpiredLock?: boolean;
   onSubscriptionUpdated: (updated: StoreSubscriptionProfile) => void;
   onOpenAiAssistant?: () => void;
+  primaryProfile?: StoreSubscriptionProfile | null;
+  groupBranches?: StoreSubscriptionProfile[];
+  onSwitchBranch?: (targetStoreId: string) => void;
 }
 
 function extractMpesaReceiptCode(raw: string): string {
@@ -121,6 +81,9 @@ export const SubscriptionPlansModal: React.FC<SubscriptionPlansModalProps> = ({
   isExpiredLock = false,
   onSubscriptionUpdated,
   onOpenAiAssistant,
+  primaryProfile,
+  groupBranches = [],
+  onSwitchBranch,
 }) => {
   const [selectedPlan, setSelectedPlan] = useState<PaidSubscriptionPlanKey>('biannual');
   const [mpesaPhone, setMpesaPhone] = useState<string>(storeProfile?.phone || '');
@@ -138,6 +101,14 @@ export const SubscriptionPlansModal: React.FC<SubscriptionPlansModalProps> = ({
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const checkoutRef = useRef<HTMLDivElement | null>(null);
 
+  const isExtraBranch = !resolveIsPrimaryBranch(storeProfile, primaryProfile?.id);
+
+  useEffect(() => {
+    if (isOpen && isExtraBranch && (isExpiredLock || storeProfile?.licensePendingActivation)) {
+      setSelectedPlan('monthly');
+    }
+  }, [isOpen, isExtraBranch, isExpiredLock, storeProfile?.licensePendingActivation]);
+
   useEffect(() => {
     if (storeProfile?.phone && !mpesaPhone) {
       setMpesaPhone(storeProfile.phone);
@@ -154,12 +125,14 @@ export const SubscriptionPlansModal: React.FC<SubscriptionPlansModalProps> = ({
 
   if (!isOpen) return null;
 
-  const plan = PLAN_BY_ID[selectedPlan];
-  const expiresMs = storeProfile?.expiresAt ? Date.parse(storeProfile.expiresAt) : 0;
-  const daysLeft = expiresMs > 0 ? Math.max(0, Math.ceil((expiresMs - Date.now()) / 86400000)) : 0;
+  const planOptions: BranchPlanOption[] = getPlanOptionsForBranch(isExtraBranch);
+  const plan = planOptions.find((p) => p.id === selectedPlan) || planOptions[0];
+  const effectiveStatus = getEffectiveBranchStatus(storeProfile, isOwnerAccount);
+  const daysLeft = getBranchDaysRemaining(storeProfile);
+  const isSuspended = !isOwnerAccount && effectiveStatus === 'suspended';
   const isCurrentlyExpired =
     !isOwnerAccount &&
-    (storeProfile?.subscriptionStatus === 'expired' || (expiresMs > 0 && expiresMs <= Date.now()));
+    (effectiveStatus === 'expired' || effectiveStatus === 'suspended' || Boolean(storeProfile?.licensePendingActivation));
 
   const referralCode =
     storeProfile?.referralCode ||
@@ -242,7 +215,9 @@ export const SubscriptionPlansModal: React.FC<SubscriptionPlansModalProps> = ({
         {
           phoneNumber: normalized,
           amount: plan.price,
-          accountReference: `SAAS-${selectedPlan.toUpperCase()}`,
+          accountReference: isExtraBranch
+            ? `BR-${selectedPlan.toUpperCase()}`
+            : `SAAS-${selectedPlan.toUpperCase()}`,
           transactionDesc: `Rofani POS ${plan.name}`,
           storeName: 'Rofani POS',
         },
@@ -282,7 +257,7 @@ export const SubscriptionPlansModal: React.FC<SubscriptionPlansModalProps> = ({
             setIsSendingStk(false);
             setStkStatusMessage(null);
             setPaymentSuccess(
-              `Payment confirmed (${receiptCode})! ${plan.title} plan is now active.`
+              `Payment confirmed (${receiptCode})! ${plan.title} branch license is now active.`
             );
             onSubscriptionUpdated(updated);
           } else if (
@@ -350,7 +325,7 @@ export const SubscriptionPlansModal: React.FC<SubscriptionPlansModalProps> = ({
       });
       setManualReceiptInput('');
       setPaymentSuccess(
-        `Receipt ${extracted} recorded! ${plan.title} plan activated until ${new Date(
+        `Receipt ${extracted} recorded! ${plan.title} license activated until ${new Date(
           updated.expiresAt
         ).toLocaleDateString()}.`
       );
@@ -387,19 +362,30 @@ export const SubscriptionPlansModal: React.FC<SubscriptionPlansModalProps> = ({
 
   const currentPlanLabel = isOwnerAccount
     ? 'Platform Owner License (Unlimited)'
+    : storeProfile?.licensePendingActivation
+    ? 'Additional Branch License Required (KSh 250/mo)'
     : storeProfile?.planType === 'annual'
-    ? '12 Months Unlimited'
+    ? isExtraBranch
+      ? '12 Months Branch License'
+      : '12 Months Unlimited'
     : storeProfile?.planType === 'biannual'
-    ? '6 Months Unlimited'
+    ? isExtraBranch
+      ? '6 Months Branch License'
+      : '6 Months Unlimited'
     : storeProfile?.planType === 'quarterly'
-    ? '3 Months Unlimited'
+    ? isExtraBranch
+      ? '3 Months Branch License'
+      : '3 Months Unlimited'
     : storeProfile?.planType === 'monthly'
-    ? '30 Days Unlimited'
+    ? isExtraBranch
+      ? '30 Days Branch License'
+      : '30 Days Unlimited'
     : storeProfile?.referredBy || (storeProfile?.trialDaysGranted && storeProfile.trialDaysGranted >= 22)
     ? '22-Day Referral Trial'
     : '7-Day Free Trial';
 
-  const activeStoreTitle = (storeProfile?.storeName || 'Rofani POS').trim();
+  const activeStoreTitle = (storeProfile?.branchName || storeProfile?.storeName || 'Rofani POS').trim();
+  const switchableOtherBranches = groupBranches.filter((b) => b.id !== storeId);
 
   return (
     <div className="fixed inset-0 z-[200] bg-slate-900 text-slate-100 flex flex-col font-sans">
@@ -412,19 +398,34 @@ export const SubscriptionPlansModal: React.FC<SubscriptionPlansModalProps> = ({
               onClick={() => {
                 if (!isExpiredLock && onClose) {
                   onClose();
+                } else if (isExpiredLock && isExtraBranch && switchableOtherBranches.length > 0 && onSwitchBranch) {
+                  onSwitchBranch(switchableOtherBranches[0].id);
                 } else {
                   signOutFromCloud();
                 }
               }}
-              aria-label={isExpiredLock ? 'Sign out' : 'Back'}
+              aria-label={isExpiredLock ? 'Back or Sign out' : 'Back'}
               className="w-11 h-11 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700/80 flex items-center justify-center text-slate-200 transition cursor-pointer shrink-0"
             >
               <ArrowLeft className="w-5 h-5" />
             </button>
             <div className="min-w-0">
-              <h1 className="text-base sm:text-lg font-bold text-white tracking-tight leading-tight">
-                Extend Usage
-              </h1>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h1 className="text-base sm:text-lg font-bold text-white tracking-tight leading-tight">
+                  {isExtraBranch && isCurrentlyExpired
+                    ? 'Activate Branch License (KSh 250/mo)'
+                    : 'Plans & Branch Licensing'}
+                </h1>
+                <span
+                  className={`px-2 py-0.5 rounded-md text-[10px] font-extrabold uppercase tracking-wide ${
+                    isExtraBranch
+                      ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/35'
+                      : 'bg-sky-500/20 text-sky-300 border border-sky-500/35'
+                  }`}
+                >
+                  {isExtraBranch ? 'Branch #2+ · 50% Off' : 'Primary Shop'}
+                </span>
+              </div>
               <p className="text-xs font-medium text-slate-400 uppercase tracking-wider truncate">
                 {activeStoreTitle}
               </p>
@@ -449,7 +450,13 @@ export const SubscriptionPlansModal: React.FC<SubscriptionPlansModalProps> = ({
                     : 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
                 }`}
               >
-                {isOwnerAccount ? 'Owner Active' : isCurrentlyExpired ? 'Expired' : `${daysLeft}d Left`}
+                {isOwnerAccount
+                  ? 'Owner Active'
+                  : isSuspended
+                  ? 'Suspended'
+                  : isCurrentlyExpired
+                  ? 'License Needed'
+                  : `${daysLeft}d Left`}
               </span>
             )}
           </div>
@@ -461,7 +468,7 @@ export const SubscriptionPlansModal: React.FC<SubscriptionPlansModalProps> = ({
         <div className="max-w-2xl mx-auto">
           {/* Compact Current Plan Status Strip */}
           <div
-            className={`rounded-2xl p-3.5 mb-5 border flex flex-wrap items-center justify-between gap-2 text-xs ${
+            className={`rounded-2xl p-3.5 mb-4 border flex flex-wrap items-center justify-between gap-2 text-xs ${
               isOwnerAccount
                 ? 'bg-slate-800 border-sky-500/30 text-sky-200'
                 : isCurrentlyExpired
@@ -483,7 +490,11 @@ export const SubscriptionPlansModal: React.FC<SubscriptionPlansModalProps> = ({
                 <span className="font-bold text-white block truncate">{currentPlanLabel}</span>
                 {!isOwnerAccount && (
                   <p className="text-[11px] text-slate-400">
-                    {isCurrentlyExpired
+                    {isSuspended
+                      ? 'This branch access was suspended. Renew via M-Pesa Till 1833804 or contact Super Admin.'
+                      : storeProfile?.licensePendingActivation
+                      ? `Activate this extra branch at KSh ${EXTRA_BRANCH_MONTHLY_PRICE}/mo (50% multi-branch discount) to unlock live POS checkout.`
+                      : isCurrentlyExpired
                       ? `Expired on ${formattedExpiry}. Choose a plan below to renew.`
                       : `Active until ${formattedExpiry} (${daysLeft} day${daysLeft === 1 ? '' : 's'} remaining)`}
                   </p>
@@ -495,21 +506,59 @@ export const SubscriptionPlansModal: React.FC<SubscriptionPlansModalProps> = ({
             </span>
           </div>
 
-          {storeProfile?.isMultiBranch && (
-            <div className="bg-sky-950/40 border border-sky-500/35 rounded-2xl px-4 py-3 mb-4 flex items-start gap-2.5 text-xs text-sky-100">
-              <GitBranch className="w-4 h-4 text-sky-400 shrink-0 mt-0.5" />
-              <div>
-                <div className="font-bold text-white">Unified Multi-Branch M-Pesa Billing</div>
-                <p className="text-[11px] text-sky-200/85 mt-0.5">
-                  All branches under{' '}
-                  <strong className="text-white">
-                    {storeProfile.businessGroupName || storeProfile.storeName}
-                  </strong>{' '}
-                  share this single M-Pesa subscription.
-                </p>
+          {/* Escape Hatch if locked on an unlicensed/suspended extra branch */}
+          {isExpiredLock && switchableOtherBranches.length > 0 && onSwitchBranch && (
+            <div className="bg-slate-800/90 border border-sky-500/35 rounded-2xl p-3.5 mb-4 flex flex-wrap items-center justify-between gap-2 text-xs">
+              <div className="flex items-center gap-2 text-slate-200 min-w-0">
+                <ArrowRightLeft className="w-4 h-4 text-sky-400 shrink-0" />
+                <span className="truncate">
+                  Want to operate an active branch instead?
+                </span>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {switchableOtherBranches.slice(0, 3).map((br) => (
+                  <button
+                    key={br.id}
+                    type="button"
+                    onClick={() => onSwitchBranch(br.id)}
+                    className="px-3 py-1.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-bold text-[11px] cursor-pointer transition"
+                  >
+                    Switch to {br.branchName || br.storeName}
+                  </button>
+                ))}
               </div>
             </div>
           )}
+
+          {/* Transparent Per-Branch Pricing Summary Card */}
+          <div className="bg-sky-950/35 border border-sky-500/35 rounded-2xl px-4 py-3.5 mb-4 space-y-2 text-xs text-sky-100">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <div className="flex items-center gap-2 font-bold text-white">
+                <GitBranch className="w-4 h-4 text-sky-400 shrink-0" />
+                <span>Multi-Branch Licensing Pricing</span>
+              </div>
+              <span className="px-2 py-0.5 rounded-md bg-emerald-500/20 border border-emerald-500/35 text-[10px] font-extrabold text-emerald-300 uppercase">
+                50% Off Extra Branches
+              </span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px]">
+              <div className={`rounded-xl p-2.5 border ${!isExtraBranch ? 'bg-slate-900/90 border-sky-400/50' : 'bg-slate-900/60 border-slate-700/70'}`}>
+                <div className="text-slate-400 font-semibold">Primary Shop (Branch #1)</div>
+                <div className="font-extrabold text-white mt-0.5">
+                  KSh {PRIMARY_BRANCH_MONTHLY_PRICE.toLocaleString()}/mo · KSh {PRIMARY_BRANCH_ANNUAL_PRICE.toLocaleString()}/yr
+                </div>
+              </div>
+              <div className={`rounded-xl p-2.5 border ${isExtraBranch ? 'bg-slate-900/90 border-emerald-400/60' : 'bg-slate-900/60 border-slate-700/70'}`}>
+                <div className="text-emerald-300 font-semibold">Each Extra Branch (Branch #2+)</div>
+                <div className="font-extrabold text-white mt-0.5">
+                  KSh {EXTRA_BRANCH_MONTHLY_PRICE.toLocaleString()}/mo · KSh {EXTRA_BRANCH_ANNUAL_PRICE.toLocaleString()}/yr
+                </div>
+              </div>
+            </div>
+            <p className="text-[11px] text-sky-200/80">
+              Each branch keeps its own independent subscription expiry and isolated stock, sales, and staff records.
+            </p>
+          </div>
 
           <div className="bg-slate-800/70 border border-slate-700/70 rounded-2xl px-4 py-3 mb-4 text-[11px] text-slate-300 flex flex-wrap items-center gap-x-4 gap-y-1.5">
             <span>• Fast POS Sales</span>
@@ -522,7 +571,7 @@ export const SubscriptionPlansModal: React.FC<SubscriptionPlansModalProps> = ({
 
           {/* Stacked Subscription Plan Cards */}
           <div className="space-y-0">
-            {PLAN_LIST.map((item) => {
+            {planOptions.map((item) => {
               const isSelected = selectedPlan === item.id;
               const isFeatured = Boolean(item.featured);
 
@@ -578,12 +627,19 @@ export const SubscriptionPlansModal: React.FC<SubscriptionPlansModalProps> = ({
                         )}
                       </div>
 
-                      <div
-                        className={`text-base sm:text-lg font-extrabold tabular-nums leading-snug ${
-                          isFeatured ? 'text-white' : 'text-orange-400'
-                        }`}
-                      >
-                        KE {item.price.toLocaleString()}
+                      <div className="flex items-baseline gap-2 flex-wrap">
+                        <span
+                          className={`text-base sm:text-lg font-extrabold tabular-nums leading-snug ${
+                            isFeatured ? 'text-white' : 'text-orange-400'
+                          }`}
+                        >
+                          KE {item.price.toLocaleString()}
+                        </span>
+                        {isExtraBranch && item.regularPrice > item.price && (
+                          <span className={`text-xs line-through tabular-nums ${isFeatured ? 'text-orange-100/75' : 'text-slate-500'}`}>
+                            KE {item.regularPrice.toLocaleString()}
+                          </span>
+                        )}
                       </div>
 
                       <p

@@ -30,6 +30,7 @@ import {
   SlidersHorizontal,
 } from 'lucide-react';
 import { Transaction } from '../../types';
+import { useCurrency } from '../../utils/currency';
 
 export interface DailySalesPerformanceCardProps {
   transactions: Transaction[];
@@ -90,6 +91,7 @@ export const DailySalesPerformanceCard: React.FC<DailySalesPerformanceCardProps>
   rangePreset: propRangePreset,
   onRangeChange,
 }) => {
+  const { symbol, formatMoney } = useCurrency();
   // Today's local date string
   const todayStr = useMemo(() => toDateStr(new Date()), []);
 
@@ -544,7 +546,7 @@ export const DailySalesPerformanceCard: React.FC<DailySalesPerformanceCardProps>
                   : 'text-slate-400 hover:text-slate-200'
               }`}
             >
-              Revenue (KSh)
+              Revenue ({symbol})
             </button>
             <button
               type="button"
@@ -572,13 +574,13 @@ export const DailySalesPerformanceCard: React.FC<DailySalesPerformanceCardProps>
             {isSingleDay ? "Today's Revenue" : `Total Period Revenue (${activeDaysCount}d)`}
           </div>
           <div className="text-xl sm:text-2xl font-black text-sky-400 font-mono mt-1">
-            KSh {totalRevenue.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+            {formatMoney(totalRevenue, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </div>
           <div className="text-[10px] text-slate-500 mt-1 flex items-center gap-1">
             <span>{totalOrders} completed receipts</span>
             {!isSingleDay && (
               <span className="text-slate-400 ml-1">
-                (~KSh {Math.round(totalRevenue / activeDaysCount).toLocaleString()}/day)
+                (~{formatMoney(Math.round(totalRevenue / activeDaysCount))}/day)
               </span>
             )}
           </div>
@@ -609,7 +611,7 @@ export const DailySalesPerformanceCard: React.FC<DailySalesPerformanceCardProps>
             Average Order Value
           </div>
           <div className="text-xl sm:text-2xl font-black text-purple-400 font-mono mt-1">
-            KSh {averageOrderValue.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+            {formatMoney(averageOrderValue, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </div>
           <div className="text-[10px] text-slate-500 mt-1">
             ~{totalOrders > 0 ? (totalItems / totalOrders).toFixed(1) : 0} items per receipt
@@ -633,7 +635,7 @@ export const DailySalesPerformanceCard: React.FC<DailySalesPerformanceCardProps>
           </div>
           <div className="text-[10px] text-amber-400/80 mt-1 truncate">
             {peakRevenueItem && peakRevenueItem.revenue > 0
-              ? `KSh ${peakRevenueItem.revenue.toLocaleString()} (${peakRevenueItem.transactions} orders)`
+              ? `${formatMoney(peakRevenueItem.revenue)} (${peakRevenueItem.transactions} orders)`
               : 'Waiting for orders'}
           </div>
         </div>
@@ -712,7 +714,7 @@ export const DailySalesPerformanceCard: React.FC<DailySalesPerformanceCardProps>
                   <Area
                     type="monotone"
                     dataKey="revenue"
-                    name="Revenue (KSh)"
+                    name={`Revenue (${symbol})`}
                     stroke="#38bdf8"
                     strokeWidth={2.5}
                     fillOpacity={1}
@@ -781,7 +783,7 @@ export const DailySalesPerformanceCard: React.FC<DailySalesPerformanceCardProps>
                     yAxisId="left"
                     type="monotone"
                     dataKey="revenue"
-                    name="Sales Revenue (KSh)"
+                    name={`Sales Revenue (${symbol})`}
                     stroke="#818cf8"
                     strokeWidth={2}
                     fillOpacity={1}
@@ -843,7 +845,7 @@ export const DailySalesPerformanceCard: React.FC<DailySalesPerformanceCardProps>
                     </div>
                     <div className="text-right font-mono">
                       <span className="text-sky-400 font-bold">
-                        KSh {peak.revenue.toLocaleString()}
+                        {formatMoney(peak.revenue)}
                       </span>
                       <span className="text-slate-500 ml-1.5 text-[11px]">
                         ({peak.transactions} orders)
@@ -878,7 +880,7 @@ export const DailySalesPerformanceCard: React.FC<DailySalesPerformanceCardProps>
                         </span>
                       </div>
                       <div className="font-mono text-emerald-400 font-bold">
-                        KSh {amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                        {formatMoney(amount, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </div>
                     </div>
                   );
@@ -894,6 +896,7 @@ export const DailySalesPerformanceCard: React.FC<DailySalesPerformanceCardProps>
 
 // Custom Tooltip component for Recharts
 const CustomSalesTooltip: React.FC<any> = ({ active, payload }) => {
+  const { formatMoney } = useCurrency();
   if (active && payload && payload.length) {
     const data: ChartDataPoint = payload[0].payload;
     const isHourly = data.type === 'hourly';
@@ -924,7 +927,7 @@ const CustomSalesTooltip: React.FC<any> = ({ active, payload }) => {
         <div className="flex justify-between py-0.5 text-slate-300">
           <span className="text-slate-400">Revenue:</span>
           <span className="font-mono font-bold text-sky-400">
-            KSh {data.revenue.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+            {formatMoney(data.revenue, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </span>
         </div>
 
@@ -946,7 +949,7 @@ const CustomSalesTooltip: React.FC<any> = ({ active, payload }) => {
           <div className="flex justify-between py-0.5 text-slate-300 border-t border-slate-800/80 pt-1">
             <span className="text-slate-400">Avg. Order:</span>
             <span className="font-mono font-bold text-purple-400">
-              KSh {data.averageOrder.toLocaleString()}
+              {formatMoney(data.averageOrder)}
             </span>
           </div>
         )}

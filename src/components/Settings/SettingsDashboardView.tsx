@@ -37,10 +37,13 @@ import {
   ChevronDown,
   AlertCircle,
   Briefcase,
-  Layers
+  Layers,
+  Globe
 } from 'lucide-react';
 import { Product, Customer, Supplier, Transaction, Expense, AttendanceRecord, User, StoreLocation, Role, WorkerPermissions, BusinessTypeId } from '../../types';
 import { BUSINESS_TYPES, DEFAULT_BUSINESS_TYPE, getBusinessTypeConfig } from '../../utils/businessTypes';
+import { AppLanguageCode, SUPPORTED_LANGUAGES, useI18n } from '../../utils/i18n';
+import { StoreCurrencyCode, STORE_CURRENCIES, useCurrency } from '../../utils/currency';
 import { safeGetJSON, safeSetJSON } from '../../utils/safeStorage';
 import { saveUserToCloud, deleteUserFromCloud, isLegacyRofaniStoreBrand } from '../../lib/cloudSync';
 import { getLastBackupMeta, formatLastBackupTimestamp, LastBackupMeta } from '../../utils/storeBackup';
@@ -742,11 +745,10 @@ export const SettingsDashboardView: React.FC<SettingsDashboardViewProps> = ({
   );
   useEffect(() => { safeSetJSON('rofani_settings_default_unit', defaultUnitCategory); }, [defaultUnitCategory]);
 
-  // Multi-Currency
-  const [primaryCurrency, setPrimaryCurrency] = useState(() =>
-    safeGetJSON<string>('rofani_settings_currency', 'KES (KSh)')
-  );
-  useEffect(() => { safeSetJSON('rofani_settings_currency', primaryCurrency); }, [primaryCurrency]);
+  const { currency, currencyConfig, symbol, setCurrency, formatMoney } = useCurrency();
+  const primaryCurrency = `${currencyConfig.code} (${currencyConfig.symbol})`;
+
+  const { lang, langConfig, dir, t, setLanguage } = useI18n();
 
   const settingsMenuItems = [
     {
@@ -825,9 +827,9 @@ export const SettingsDashboardView: React.FC<SettingsDashboardViewProps> = ({
       id: 'currency' as SettingCategoryKey,
       icon: Coins,
       color: 'text-yellow-400 bg-yellow-500/10 border-yellow-500/30',
-      title: 'Multi-Currency / Currency',
-      description: 'Primary currency (KSh / KES) and formatting preferences.',
-      keywords: ['currency', 'ksh', 'kes', 'money', 'format']
+      title: 'Store Currency & Formatting',
+      description: `Primary currency (${currency} / ${symbol}) and decimal display rules.`,
+      keywords: ['currency', 'ksh', 'kes', 'usd', 'eur', 'gbp', 'ugx', 'tzs', 'rwf', 'etb', 'ngn', 'zar', 'aed', 'cny', 'inr', 'money', 'format']
     }
   ];
 
@@ -842,7 +844,7 @@ export const SettingsDashboardView: React.FC<SettingsDashboardViewProps> = ({
   });
 
   return (
-    <div className="p-4 sm:p-6 space-y-6 max-w-7xl mx-auto bg-slate-950 text-slate-100 min-h-screen">
+    <div dir={dir} className="p-4 sm:p-6 space-y-6 max-w-7xl mx-auto bg-slate-950 text-slate-100 min-h-screen">
       {/* Top Executive Header */}
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 text-white flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-xl">
         <div className="flex items-center gap-3">
@@ -851,7 +853,7 @@ export const SettingsDashboardView: React.FC<SettingsDashboardViewProps> = ({
           </div>
           <div>
             <div className="flex items-center gap-2 flex-wrap">
-              <h2 className="font-bold text-lg text-slate-100">Store Settings &amp; Preferences</h2>
+              <h2 className="font-bold text-lg text-slate-100">{t('settings.title')}</h2>
               {(() => {
                 const activeBt = getBusinessTypeConfig(businessType);
                 return (
@@ -863,7 +865,7 @@ export const SettingsDashboardView: React.FC<SettingsDashboardViewProps> = ({
               })()}
             </div>
             <p className="text-xs text-slate-400">
-              Configure Rofani POS executive preferences, business type, tax defaults, and POS terminals
+              {t('settings.subtitle')}
             </p>
           </div>
         </div>
@@ -1238,6 +1240,155 @@ export const SettingsDashboardView: React.FC<SettingsDashboardViewProps> = ({
         </div>
       </div>
 
+      {/* Store Language / Lugha Selector Card */}
+      {(!searchQuery.trim() ||
+        'language lugha kiswahili french arabic portuguese spanish german chinese hindi rtl english'.includes(
+          searchQuery.trim().toLowerCase()
+        )) && (
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-4">
+            <div className="flex items-start gap-3">
+              <div className="w-11 h-11 rounded-xl bg-indigo-500/15 border border-indigo-500/30 text-indigo-400 flex items-center justify-center shrink-0">
+                <Globe className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h3 className="font-bold text-sm text-white">{t('settings.languageLabel')}</h3>
+                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-indigo-500/15 border border-indigo-500/35 text-indigo-300 text-[11px] font-bold">
+                    {langConfig.nativeName} ({langConfig.code.toUpperCase()})
+                  </span>
+                  {langConfig.dir === 'rtl' && (
+                    <span className="px-2 py-0.5 rounded-md bg-amber-500/15 border border-amber-500/30 text-amber-300 text-[10px] font-bold">
+                      RTL
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  {t('settings.languageHint')}
+                </p>
+              </div>
+            </div>
+
+            <select
+              aria-label={t('settings.languageLabel')}
+              value={lang}
+              onChange={(e) => {
+                const next = e.target.value as AppLanguageCode;
+                setLanguage(next);
+                triggerNotify(t('settings.savedNotice'));
+              }}
+              className="w-full sm:w-56 bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs font-semibold text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer shrink-0"
+            >
+              {SUPPORTED_LANGUAGES.map((opt) => (
+                <option key={opt.code} value={opt.code}>
+                  {opt.nativeName} ({opt.label})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="grid grid-cols-3 sm:grid-cols-5 lg:grid-cols-9 gap-2">
+            {SUPPORTED_LANGUAGES.map((opt) => {
+              const active = opt.code === lang;
+              return (
+                <button
+                  key={opt.code}
+                  type="button"
+                  onClick={() => {
+                    if (opt.code === lang) return;
+                    setLanguage(opt.code);
+                    triggerNotify(`${opt.nativeName} (${opt.label}) — ${t('settings.savedNotice')}`);
+                  }}
+                  className={`px-2.5 py-2 rounded-xl border text-left transition cursor-pointer flex flex-col gap-0.5 ${
+                    active
+                      ? 'bg-indigo-500/20 border-indigo-400 text-white shadow-sm'
+                      : 'bg-slate-800/70 border-slate-700/80 text-slate-300 hover:border-slate-500 hover:bg-slate-800'
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-1">
+                    <span className="text-xs font-bold text-white truncate">{opt.nativeName}</span>
+                    {active && <Check className="w-3 h-3 text-indigo-300 shrink-0" />}
+                  </div>
+                  <span className="text-[10px] text-slate-400 truncate">{opt.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Store Currency Selector Card */}
+      {(!searchQuery.trim() ||
+        'store currency kes ksh usd eur gbp ugx tzs rwf etb ngn zar aed cny inr money'.includes(
+          searchQuery.trim().toLowerCase()
+        )) && (
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-4">
+            <div className="flex items-start gap-3">
+              <div className="w-11 h-11 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-400 flex items-center justify-center shrink-0">
+                <Coins className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h3 className="font-bold text-sm text-white">Store Currency</h3>
+                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-amber-500/15 border border-amber-500/35 text-amber-300 text-[11px] font-bold font-mono">
+                    {currencyConfig.code} ({currencyConfig.symbol})
+                  </span>
+                </div>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Applies across POS prices, receipts, stock-ins, expenses, payroll &amp; reports (Example: {formatMoney(1500)}). Subscription billing remains in KES.
+                </p>
+              </div>
+            </div>
+
+            <select
+              aria-label="Store Currency"
+              value={currency}
+              onChange={(e) => {
+                const next = e.target.value as StoreCurrencyCode;
+                setCurrency(next);
+                triggerNotify(`Store currency updated to ${next}`);
+              }}
+              className="w-full sm:w-64 bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs font-bold text-amber-300 focus:outline-none focus:ring-2 focus:ring-amber-500 cursor-pointer shrink-0"
+            >
+              {STORE_CURRENCIES.map((c) => (
+                <option key={c.code} value={c.code}>
+                  {c.code} ({c.symbol}) — {c.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
+            {STORE_CURRENCIES.map((c) => {
+              const active = c.code === currency;
+              return (
+                <button
+                  key={c.code}
+                  type="button"
+                  onClick={() => {
+                    if (c.code === currency) return;
+                    setCurrency(c.code);
+                    triggerNotify(`Store currency updated to ${c.code} (${c.symbol})`);
+                  }}
+                  className={`px-2.5 py-2 rounded-xl border text-left transition cursor-pointer flex flex-col gap-0.5 ${
+                    active
+                      ? 'bg-amber-500/20 border-amber-400 text-white shadow-sm'
+                      : 'bg-slate-800/70 border-slate-700/80 text-slate-300 hover:border-slate-500 hover:bg-slate-800'
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-1">
+                    <span className="text-xs font-extrabold font-mono text-amber-300">{c.code} ({c.symbol})</span>
+                    {active && <Check className="w-3 h-3 text-amber-300 shrink-0" />}
+                  </div>
+                  <span className="text-[10px] text-slate-400 truncate">{c.name}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Business Type & Smart Starter Categories Card */}
       {(() => {
         const activeBt = getBusinessTypeConfig(businessType);
@@ -1406,6 +1557,8 @@ export const SettingsDashboardView: React.FC<SettingsDashboardViewProps> = ({
           <ItemSettingsView
             onBack={() => setActiveSubPanel(null)}
             onOpenCategoryManager={onOpenCategoryManager}
+            activeStoreId={activeStoreId}
+            activeStoreName={activeStoreName}
           />
         </div>
       )}
@@ -1677,20 +1830,31 @@ export const SettingsDashboardView: React.FC<SettingsDashboardViewProps> = ({
               {activeSubPanel === 'currency' && (
                 <div className="space-y-4">
                   <div>
-                    <label className="block font-semibold text-slate-200 mb-1">Primary Currency & Formatting</label>
+                    <label className="block font-semibold text-slate-200 mb-1">Store Currency &amp; Formatting</label>
                     <select
-                      value={primaryCurrency}
-                      onChange={(e) => setPrimaryCurrency(e.target.value)}
+                      value={currency}
+                      onChange={(e) => {
+                        const next = e.target.value as StoreCurrencyCode;
+                        setCurrency(next);
+                        triggerNotify(`Store currency switched to ${next}`);
+                      }}
                       className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2.5 text-yellow-400 font-mono font-bold focus:outline-none focus:ring-2 focus:ring-yellow-500"
                     >
-                      <option value="KES (KSh)">KES (KSh) - Kenyan Shilling</option>
-                      <option value="USD ($)">USD ($) - US Dollar</option>
-                      <option value="EUR (€)">EUR (€) - Euro</option>
+                      {STORE_CURRENCIES.map((c) => (
+                        <option key={c.code} value={c.code}>
+                          {c.code} ({c.symbol}) — {c.name}
+                        </option>
+                      ))}
                     </select>
                   </div>
-                  <div className="p-3 bg-slate-950/60 border border-slate-800 rounded-xl">
-                    <p className="text-[11px] text-slate-400">
-                      All POS receipts, totals, and cost reports will format in {primaryCurrency}.
+                  <div className="p-3 bg-slate-950/60 border border-slate-800 rounded-xl space-y-1">
+                    <p className="text-[11px] text-slate-300">
+                      All POS receipts, product prices, expenses, and reports will format in{' '}
+                      <strong className="text-amber-300 font-mono">{primaryCurrency}</strong> (e.g.{' '}
+                      <span className="font-mono text-emerald-300">{formatMoney(1500)}</span>).
+                    </p>
+                    <p className="text-[10px] text-slate-400">
+                      Platform subscription billing (TILL: 1833804) remains in KES.
                     </p>
                   </div>
                 </div>

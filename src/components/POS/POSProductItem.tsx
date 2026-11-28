@@ -2,6 +2,7 @@ import React from 'react';
 import { Package, Plus, Star, AlertTriangle, Zap, Gem } from 'lucide-react';
 import { Product } from '../../types';
 import { ProductPerformanceInfo } from '../../utils/salesPerformance';
+import { useCurrency } from '../../utils/currency';
 
 interface POSProductItemProps {
   product: Product;
@@ -9,6 +10,8 @@ interface POSProductItemProps {
   inCartQty: number;
   isSelected: boolean;
   onAddToCart: (product: Product) => void;
+  showImages?: boolean;
+  showBarcode?: boolean;
 }
 
 const POSProductListRowComponent: React.FC<POSProductItemProps> = ({
@@ -17,7 +20,10 @@ const POSProductListRowComponent: React.FC<POSProductItemProps> = ({
   inCartQty,
   isSelected,
   onAddToCart,
+  showImages = true,
+  showBarcode = true,
 }) => {
+  const { formatMoney } = useCurrency();
   const isLowStock = p.stockQuantity <= p.minStockAlert;
   const isOutOfStock = p.stockQuantity <= 0;
   const isInCart = inCartQty > 0;
@@ -35,7 +41,7 @@ const POSProductListRowComponent: React.FC<POSProductItemProps> = ({
     >
       <td className="p-3">
         <div className="flex items-center gap-2.5">
-          {p.imageUrl ? (
+          {showImages && (p.imageUrl ? (
             <img
               src={p.imageUrl}
               alt={p.name}
@@ -51,7 +57,7 @@ const POSProductListRowComponent: React.FC<POSProductItemProps> = ({
             <div className="w-10 h-10 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-center text-slate-600 shrink-0">
               <Package className="w-5 h-5 text-slate-600" />
             </div>
-          )}
+          ))}
           <div className="space-y-0.5">
             <div className="flex items-center gap-2 flex-wrap">
               <span
@@ -99,7 +105,7 @@ const POSProductListRowComponent: React.FC<POSProductItemProps> = ({
               )}
             </div>
             <div className="text-[10px] text-slate-400 font-mono">
-              SKU: {p.sku} | Barcode: {p.barcode}
+              SKU: {p.sku}{showBarcode && p.barcode ? ` | Barcode: ${p.barcode}` : ''}
             </div>
           </div>
         </div>
@@ -115,7 +121,7 @@ const POSProductListRowComponent: React.FC<POSProductItemProps> = ({
       </td>
 
       <td className="p-3 text-right font-mono font-bold text-white text-sm">
-        KSh {p.sellingPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+        {formatMoney(p.sellingPrice, { showDecimals: true })}
       </td>
 
       <td className="p-3 text-center font-mono">
@@ -157,7 +163,9 @@ const POSProductGridCardComponent: React.FC<POSProductItemProps> = ({
   inCartQty,
   isSelected,
   onAddToCart,
+  showImages = true,
 }) => {
+  const { formatMoney } = useCurrency();
   const isLowStock = p.stockQuantity <= p.minStockAlert;
   const isOutOfStock = p.stockQuantity <= 0;
   const isInCart = inCartQty > 0;
@@ -222,26 +230,28 @@ const POSProductGridCardComponent: React.FC<POSProductItemProps> = ({
           </div>
         )}
 
-        <div className="w-full h-24 mb-2 rounded-xl overflow-hidden bg-slate-950 border border-slate-800 flex items-center justify-center">
-          {p.imageUrl ? (
-            <img
-              src={p.imageUrl}
-              alt={p.name}
-              loading="lazy"
-              decoding="async"
-              referrerPolicy="no-referrer"
-              className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
-              onError={(e) => {
-                e.currentTarget.style.display = 'none';
-              }}
-            />
-          ) : (
-            <div className="flex flex-col items-center justify-center text-slate-600 gap-1">
-              <Package className="w-6 h-6 text-slate-600 group-hover:text-sky-400 transition" />
-              <span className="text-[9px] font-mono text-slate-500">{p.unit}</span>
-            </div>
-          )}
-        </div>
+        {showImages && (
+          <div className="w-full h-24 mb-2 rounded-xl overflow-hidden bg-slate-950 border border-slate-800 flex items-center justify-center">
+            {p.imageUrl ? (
+              <img
+                src={p.imageUrl}
+                alt={p.name}
+                loading="lazy"
+                decoding="async"
+                referrerPolicy="no-referrer"
+                className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
+                onError={(e) => {
+                  e.currentTarget.style.display = 'none';
+                }}
+              />
+            ) : (
+              <div className="flex flex-col items-center justify-center text-slate-600 gap-1">
+                <Package className="w-6 h-6 text-slate-600 group-hover:text-sky-400 transition" />
+                <span className="text-[9px] font-mono text-slate-500">{p.unit}</span>
+              </div>
+            )}
+          </div>
+        )}
 
         <div className="flex items-center justify-between gap-1 mb-1">
           <span className="text-[10px] text-sky-400 font-mono uppercase font-semibold truncate">{p.category}</span>
@@ -261,7 +271,7 @@ const POSProductGridCardComponent: React.FC<POSProductItemProps> = ({
 
       <div className="mt-3 pt-2 border-t border-slate-800/80 flex items-center justify-between">
         <span className="text-sm font-extrabold text-white">
-          KSh {p.sellingPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+          {formatMoney(p.sellingPrice, { showDecimals: true })}
         </span>
 
         <span

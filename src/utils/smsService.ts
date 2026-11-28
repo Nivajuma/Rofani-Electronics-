@@ -2,6 +2,7 @@
 import { Transaction } from '../types';
 import { normalizeKenyanPhone } from './mpesa';
 import { safeGetJSON, safeSetJSON } from './safeStorage';
+import { formatMoney } from './currency';
 
 export interface SmsDeliveryRecord {
   id: string; // e.g. "MSG-AT-984210"
@@ -100,14 +101,14 @@ export const formatTransactionSummarySms = (
     paySummary = methods.join(' + ');
   }
 
-  let text = `${storeName.toUpperCase()}: Jambo ${custName}! Receipt #${tx.receiptNumber}. Total: KSh ${tx.grandTotal.toLocaleString()}. Paid: KSh ${tx.amountPaid.toLocaleString()} via ${paySummary}.`;
+  let text = `${storeName.toUpperCase()}: Jambo ${custName}! Receipt #${tx.receiptNumber}. Total: ${formatMoney(tx.grandTotal)}. Paid: ${formatMoney(tx.amountPaid)} via ${paySummary}.`;
 
   if (itemsSummary) {
     text += ` Items (${itemsCount}): ${itemsSummary}.`;
   }
 
   if (tx.balanceDue > 0) {
-    text += ` Bal Due: KSh ${tx.balanceDue.toLocaleString()}.`;
+    text += ` Bal Due: ${formatMoney(tx.balanceDue)}.`;
   }
 
   if (options?.customNote) {

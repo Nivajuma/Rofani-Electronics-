@@ -5,6 +5,7 @@ import { detectDuplicateExpenses, deduplicateExpenses, processDueRecurringExpens
 import { hasWorkerPermission } from '../../utils/permissions';
 import { safeGetJSON, safeSetJSON } from '../../utils/safeStorage';
 import { MonthlyExpenseCategoryChart, CATEGORY_PALETTE } from './MonthlyExpenseCategoryChart';
+import { useI18n } from '../../utils/i18n';
 
 interface ExpensesViewProps {
   expenses: Expense[];
@@ -27,6 +28,7 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
   allUsers = [],
   activeStoreId,
 }) => {
+  const { dir, t } = useI18n();
   const [showModal, setShowModal] = useState<boolean>(() =>
     safeGetJSON<boolean>('retail_pos_expenses_show_modal', false, (val) => typeof val === 'boolean')
   );
@@ -233,7 +235,7 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
   };
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+    <div dir={dir} className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
       {/* Top Banner */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-slate-900 border border-slate-800 p-4 rounded-2xl shadow-lg">
         <div className="flex items-center gap-3">
@@ -241,9 +243,9 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
             <DollarSign className="w-6 h-6" />
           </div>
           <div>
-            <h2 className="font-bold text-lg text-slate-100">Store Expense Management</h2>
+            <h2 className="font-bold text-lg text-slate-100">{t('expenses.heading')}</h2>
             <p className="text-xs text-slate-400">
-              Log utilities, rent, transport, salaries, and operating overheads for P&L net profit accounting
+              {t('expenses.subtitle')}
             </p>
           </div>
         </div>
@@ -304,7 +306,7 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
                 }}
                 className="bg-sky-600 hover:bg-sky-500 text-white font-bold px-4 py-2.5 rounded-xl text-xs transition flex items-center gap-2 shadow-lg shadow-sky-600/20"
               >
-                <Plus className="w-4 h-4" /> Log Expense
+                <Plus className="w-4 h-4" /> {t('expenses.addExpense')}
               </button>
             </>
           )}

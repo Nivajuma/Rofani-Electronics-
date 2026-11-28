@@ -20,6 +20,7 @@ import {
   Transaction,
 } from '../../types';
 import { HomepageSummaryCardToggles } from '../../utils/shopProtectionSettings';
+import { useCurrency } from '../../utils/currency';
 
 interface HomepageSummaryStripProps {
   toggles: HomepageSummaryCardToggles;
@@ -62,6 +63,7 @@ export const HomepageSummaryStrip: React.FC<HomepageSummaryStripProps> = ({
   cashTransactions = [],
   canViewProfit,
 }) => {
+  const { formatMoney } = useCurrency();
   const [collapsed, setCollapsed] = useState(false);
 
   const metrics = useMemo(() => {
@@ -139,7 +141,7 @@ export const HomepageSummaryStrip: React.FC<HomepageSummaryStripProps> = ({
     toggles.cashInHand && {
       key: 'cashInHand',
       label: 'Cash in Hand',
-      value: `KSh ${metrics.cashInHand.toLocaleString()}`,
+      value: formatMoney(metrics.cashInHand),
       sub: 'Live cash register',
       icon: Wallet,
       accent: 'text-emerald-400',
@@ -148,7 +150,7 @@ export const HomepageSummaryStrip: React.FC<HomepageSummaryStripProps> = ({
     toggles.toReceiveCredit && {
       key: 'toReceiveCredit',
       label: 'To Receive',
-      value: `KSh ${metrics.toReceiveCredit.toLocaleString()}`,
+      value: formatMoney(metrics.toReceiveCredit),
       sub: 'Customer credit',
       icon: CreditCard,
       accent: 'text-amber-400',
@@ -157,7 +159,7 @@ export const HomepageSummaryStrip: React.FC<HomepageSummaryStripProps> = ({
     toggles.todaysSales && {
       key: 'todaysSales',
       label: "Today's Sales",
-      value: `KSh ${metrics.todaysSales.toLocaleString()}`,
+      value: formatMoney(metrics.todaysSales),
       sub: `${metrics.todaysSalesCount} ${metrics.todaysSalesCount === 1 ? 'receipt' : 'receipts'}`,
       icon: TrendingUp,
       accent: 'text-sky-400',
@@ -166,7 +168,7 @@ export const HomepageSummaryStrip: React.FC<HomepageSummaryStripProps> = ({
     toggles.todaysStockIn && {
       key: 'todaysStockIn',
       label: "Today's Stock-In",
-      value: `KSh ${metrics.todaysStockInValue.toLocaleString()}`,
+      value: formatMoney(metrics.todaysStockInValue),
       sub: `${metrics.todaysStockInUnits} units added`,
       icon: PackagePlus,
       accent: 'text-indigo-400',
@@ -175,7 +177,7 @@ export const HomepageSummaryStrip: React.FC<HomepageSummaryStripProps> = ({
     toggles.todaysProfit && canViewProfit && {
       key: 'todaysProfit',
       label: "Today's Profit",
-      value: `KSh ${metrics.todaysProfit.toLocaleString()}`,
+      value: formatMoney(metrics.todaysProfit),
       sub: 'Net est. today',
       icon: DollarSign,
       accent: metrics.todaysProfit >= 0 ? 'text-emerald-400' : 'text-rose-400',
@@ -184,7 +186,7 @@ export const HomepageSummaryStrip: React.FC<HomepageSummaryStripProps> = ({
     toggles.expenses && {
       key: 'expenses',
       label: 'Expenses',
-      value: `KSh ${metrics.todaysExpenses.toLocaleString()}`,
+      value: formatMoney(metrics.todaysExpenses),
       sub: `${metrics.todayExpCount} today`,
       icon: Receipt,
       accent: 'text-rose-400',

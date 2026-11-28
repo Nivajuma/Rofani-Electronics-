@@ -17,6 +17,7 @@ import {
   Activity,
 } from 'lucide-react';
 import { Transaction, Product, Expense } from '../../types';
+import { useCurrency } from '../../utils/currency';
 
 interface DailyOverviewCardProps {
   transactions: Transaction[];
@@ -50,6 +51,7 @@ export const DailyOverviewCard: React.FC<DailyOverviewCardProps> = ({
   products,
   expenses,
 }) => {
+  const { formatMoney } = useCurrency();
   const [trendWindowDays, setTrendWindowDays] = useState<7 | 14 | 30>(14);
 
   const analytics = useMemo(() => {
@@ -251,7 +253,7 @@ export const DailyOverviewCard: React.FC<DailyOverviewCardProps> = ({
                 Total Sales (Today)
               </p>
               <p className="text-lg sm:text-xl font-extrabold text-white tabular-nums mt-0.5">
-                KSh {analytics.todaySales.toLocaleString()}
+                {formatMoney(analytics.todaySales)}
               </p>
             </div>
             <div className="p-2 rounded-lg bg-sky-500/10 border border-sky-500/20 text-sky-400 shrink-0">
@@ -284,7 +286,7 @@ export const DailyOverviewCard: React.FC<DailyOverviewCardProps> = ({
                   }}
                   labelStyle={{ color: '#94a3b8', fontWeight: 600 }}
                   formatter={(value: any) => [
-                    `KSh ${Number(value || 0).toLocaleString()}`,
+                    formatMoney(Number(value || 0)),
                     'Daily Sales',
                   ]}
                 />
@@ -333,8 +335,7 @@ export const DailyOverviewCard: React.FC<DailyOverviewCardProps> = ({
                   profitIsNegative ? 'text-rose-400' : 'text-emerald-400'
                 }`}
               >
-                {profitIsNegative ? '-' : ''}KSh{' '}
-                {Math.abs(Math.round(analytics.todayNetProfit)).toLocaleString()}
+                {profitIsNegative ? '-' : ''}{formatMoney(Math.abs(Math.round(analytics.todayNetProfit)))}
               </p>
             </div>
             <div
@@ -381,7 +382,7 @@ export const DailyOverviewCard: React.FC<DailyOverviewCardProps> = ({
                   }}
                   labelStyle={{ color: '#94a3b8', fontWeight: 600 }}
                   formatter={(value: any) => [
-                    `KSh ${Number(value || 0).toLocaleString()}`,
+                    formatMoney(Number(value || 0)),
                     'Daily Net Profit',
                   ]}
                 />
@@ -486,17 +487,17 @@ export const DailyOverviewCard: React.FC<DailyOverviewCardProps> = ({
               Daily Sales Trend ({trendWindowDays}-Day Sparkline)
             </p>
             <p className="text-[11px] text-slate-400">
-              Avg: <span className="text-slate-200 font-semibold tabular-nums">KSh {Math.round(analytics.periodAvgDailySales).toLocaleString()}/day</span>
+              Avg: <span className="text-slate-200 font-semibold tabular-nums">{formatMoney(Math.round(analytics.periodAvgDailySales))}/day</span>
               {analytics.peakDay && analytics.peakDay.sales > 0 && (
                 <>
                   <span className="text-slate-600 mx-1.5">•</span>
-                  Peak: <span className="text-sky-300 font-semibold tabular-nums">{analytics.peakDay.dateLabel} (KSh {analytics.peakDay.sales.toLocaleString()})</span>
+                  Peak: <span className="text-sky-300 font-semibold tabular-nums">{analytics.peakDay.dateLabel} ({formatMoney(analytics.peakDay.sales)})</span>
                 </>
               )}
             </p>
           </div>
           <span className="text-[11px] font-semibold text-slate-400 tabular-nums">
-            {trendWindowDays}D Total: <span className="text-white">KSh {analytics.periodTotalSales.toLocaleString()}</span>
+            {trendWindowDays}D Total: <span className="text-white">{formatMoney(analytics.periodTotalSales)}</span>
           </span>
         </div>
 
@@ -531,7 +532,7 @@ export const DailyOverviewCard: React.FC<DailyOverviewCardProps> = ({
                 }}
                 labelStyle={{ color: '#94a3b8', fontWeight: 600, marginBottom: '2px' }}
                 formatter={(value: any) => [
-                  `KSh ${Number(value || 0).toLocaleString()}`,
+                  formatMoney(Number(value || 0)),
                   'Daily Sales',
                 ]}
               />

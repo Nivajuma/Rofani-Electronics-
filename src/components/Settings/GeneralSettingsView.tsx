@@ -28,6 +28,8 @@ import { getIsOnline, useAggressiveAutoSync, useNetworkStatus } from '../../util
 import { playButtonSound } from '../../utils/uiFeedback';
 import { getLastBackupMeta, formatLastBackupTimestamp, formatBackupMethodLabel, LastBackupMeta } from '../../utils/storeBackup';
 import { getBackupSettings } from '../../lib/gmailService';
+import { AppLanguageCode, SUPPORTED_LANGUAGES, useI18n } from '../../utils/i18n';
+import { StoreCurrencyCode, STORE_CURRENCIES, useCurrency } from '../../utils/currency';
 
 interface GeneralSettingsViewProps {
   onBack: () => void;
@@ -122,6 +124,8 @@ export const GeneralSettingsView: React.FC<GeneralSettingsViewProps> = ({
   businessGroupName,
   branchCount = 1,
 }) => {
+  const { lang, dir, t, setLanguage } = useI18n();
+  const { currency, setCurrency } = useCurrency();
   const [searchQuery, setSearchQuery] = useState('');
   const [successToast, setSuccessToast] = useState<string | null>(null);
   const [aggressiveAutoSync, setAggressiveAutoSync] = useAggressiveAutoSync();
@@ -193,12 +197,7 @@ export const GeneralSettingsView: React.FC<GeneralSettingsViewProps> = ({
     }
 
     if (key === 'businessCurrency' && typeof value === 'string') {
-      const currencyMap: Record<string, string> = {
-        KSh: 'KES (KSh)',
-        USD: 'USD ($)',
-        EUR: 'EUR (€)',
-      };
-      safeSetJSON('rofani_settings_currency', currencyMap[value] || 'KES (KSh)');
+      setCurrency(value as StoreCurrencyCode);
     }
 
     triggerToast('General settings updated successfully!');
@@ -336,9 +335,9 @@ export const GeneralSettingsView: React.FC<GeneralSettingsViewProps> = ({
     showAppPrefs || showSecurity || showMultifirm || showLogistics || showDataBackup || showDocFeatures;
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 pb-20 font-sans">
+    <div dir={dir} className="min-h-screen bg-slate-950 text-slate-100 pb-20 font-sans">
       {/* 1. Header Navigation */}
-      <div className="sticky top-0 z-30 bg-slate-900 text-white shadow-md px-4 py-3.5 flex items-center justify-between gap-3">
+      <div dir="ltr" className="sticky top-0 z-30 bg-slate-900 text-white shadow-md px-4 py-3.5 flex items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <button
             onClick={onBack}
@@ -412,44 +411,73 @@ export const GeneralSettingsView: React.FC<GeneralSettingsViewProps> = ({
             </div>
             <div className="divide-y divide-slate-800">
               {/* App Language */}
-              {matchesSearch('app language', 'english', 'swahili', 'application preferences') && (
+              {matchesSearch(
+                'app language',
+                'language',
+                'lugha',
+                'english',
+                'swahili',
+                'kiswahili',
+                'french',
+                'arabic',
+                'portuguese',
+                'spanish',
+                'german',
+                'chinese',
+                'hindi',
+                'application preferences'
+              ) && (
                 <div className="p-4 flex items-center justify-between hover:bg-slate-800/60 transition">
                   <div className="space-y-0.5 flex-1 pr-4">
                     <div className="font-bold text-slate-100 flex items-center gap-1.5">
-                      <span>App Language</span>
-                      <span title="Select primary UI display language"><Info className="w-3.5 h-3.5 text-slate-400" /></span>
+                      <span>{t('settings.languageLabel')}</span>
+                      <span title={t('settings.languageHint')}><Info className="w-3.5 h-3.5 text-slate-400" /></span>
                     </div>
-                    <div className="text-[11px] text-slate-400">Choose preferred interface language</div>
+                    <div className="text-[11px] text-slate-400">{t('settings.languageHint')}</div>
                   </div>
                   <select
-                    value={settings.appLanguage}
-                    onChange={(e) => updateSetting('appLanguage', e.target.value)}
-                    className="bg-slate-950 border border-slate-700 rounded-xl px-3 py-1.5 font-semibold text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    value={lang}
+                    onChange={(e) => {
+                      const next = e.target.value as AppLanguageCode;
+                      setLanguage(next);
+                      const chosen = SUPPORTED_LANGUAGES.find((l) => l.code === next);
+                      setSettings((prev) => ({
+                        ...prev,
+                        appLanguage: chosen?.label || 'English',
+                      }));
+                      triggerToast(t('settings.savedNotice'));
+                    }}
+                    className="bg-slate-950 border border-slate-700 rounded-xl px-3 py-1.5 font-semibold text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
                   >
-                    <option value="English">English</option>
-                    <option value="Swahili">Swahili (Kiswahili)</option>
+                    {SUPPORTED_LANGUAGES.map((opt) => (
+                      <option key={opt.code} value={opt.code}>
+                        {opt.nativeName} ({opt.label})
+                      </option>
+                    ))}
                   </select>
                 </div>
               )}
 
-              {/* Business Currency */}
-              {matchesSearch('business currency', 'ksh', 'usd', 'eur', 'application preferences') && (
+              {/* Store Currency */}
+              {matchesSearch('store currency business currency', 'ksh', 'kes', 'usd', 'eur', 'gbp', 'ugx', 'tzs', 'application preferences') && (
                 <div className="p-4 flex items-center justify-between hover:bg-slate-800/60 transition">
                   <div className="space-y-0.5 flex-1 pr-4">
                     <div className="font-bold text-slate-100 flex items-center gap-1.5">
-                      <span>Business Currency</span>
-                      <span title="Set default shop currency for sales and inventory valuation"><Info className="w-3.5 h-3.5 text-slate-400" /></span>
+                      <span>Store Currency</span>
+                      <span title="Set default shop currency for sales, receipts, expenses, and inventory valuation"><Info className="w-3.5 h-3.5 text-slate-400" /></span>
                     </div>
                     <div className="text-[11px] text-slate-400">Primary currency symbol and formatting</div>
                   </div>
                   <select
-                    value={settings.businessCurrency}
+                    value={currency}
                     onChange={(e) => updateSetting('businessCurrency', e.target.value)}
-                    className="bg-slate-950 border border-slate-700 rounded-xl px-3 py-1.5 font-semibold text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="bg-slate-950 border border-slate-700 rounded-xl px-3 py-1.5 font-semibold text-amber-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
-                    <option value="KSh">KSh (Kenyan Shilling)</option>
-                    <option value="USD">USD ($ US Dollar)</option>
-                    <option value="EUR">EUR (€ Euro)</option>
+                    {STORE_CURRENCIES.map((c) => (
+                      <option key={c.code} value={c.code}>
+                        {c.code} ({c.symbol}) — {c.name}
+                      </option>
+                    ))}
                   </select>
                 </div>
               )}

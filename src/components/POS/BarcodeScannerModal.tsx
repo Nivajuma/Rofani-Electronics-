@@ -24,6 +24,7 @@ import {
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
 import { Product } from '../../types';
 import { getSharedAudioContext } from '../../utils/uiFeedback';
+import { useCurrency } from '../../utils/currency';
 
 interface BarcodeScannerModalProps {
   onScan: (barcode: string) => void;
@@ -48,6 +49,7 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
   mode = 'pos',
   defaultContinuous = false,
 }) => {
+  const { formatMoney } = useCurrency();
   const [manualBarcode, setManualBarcode] = useState('');
   const [isScanning, setIsScanning] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
@@ -715,7 +717,7 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
                   </div>
                   <div className="text-right shrink-0">
                     <span className="font-mono font-extrabold text-emerald-400 text-xs">
-                      KSh {scannedProduct.sellingPrice.toLocaleString()}
+                      {formatMoney(scannedProduct.sellingPrice)}
                     </span>
                   </div>
                 </div>

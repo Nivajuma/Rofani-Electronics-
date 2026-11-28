@@ -14,6 +14,7 @@ import {
   Calendar,
   DollarSign,
   AlertCircle,
+  AlertTriangle,
   Edit3,
   Trash2,
   ChevronRight,
@@ -23,6 +24,7 @@ import {
 } from 'lucide-react';
 import { PurchaseOrder, PurchaseOrderItem, Supplier, Product, User } from '../../types';
 import { formatKSh } from '../../utils/currency';
+import { useItemSettings } from '../../utils/itemSettings';
 
 interface PurchasingViewProps {
   purchaseOrders: PurchaseOrder[];
@@ -32,6 +34,7 @@ interface PurchasingViewProps {
   products: Product[];
   setProducts: React.Dispatch<React.SetStateAction<Product[]>>;
   currentUser: User;
+  activeStoreId?: string;
 }
 
 export const PurchasingView: React.FC<PurchasingViewProps> = ({
@@ -42,7 +45,11 @@ export const PurchasingView: React.FC<PurchasingViewProps> = ({
   products,
   setProducts,
   currentUser,
+  activeStoreId,
 }) => {
+  const [itemSettings] = useItemSettings(activeStoreId);
+  const showImageUI = itemSettings.enableProductImages;
+  const autoZeroMargin = itemSettings.autoSetSellingPriceZeroMargin;
   const [subTab, setSubTab] = useState<'pos_list' | 'suppliers'>('pos_list');
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'Pending' | 'Received' | 'Cancelled'>('all');
@@ -235,12 +242,14 @@ export const PurchasingView: React.FC<PurchasingViewProps> = ({
 
         const qtyToAdd = poItem.quantityOrdered; // default received full quantity ordered
         const newStock = (prod.stockQuantity || prod.stock || 0) + qtyToAdd;
+        const applyZeroMarginPrice = autoZeroMargin && poItem.unitCost > 0;
         return {
           ...prod,
           stockQuantity: newStock,
           stock: newStock,
           costPrice: poItem.unitCost,
           buyingPrice: poItem.unitCost,
+          ...(applyZeroMarginPrice ? { sellingPrice: poItem.unitCost, profitMargin: 0 } : {}),
           updatedAt: new Date().toISOString(),
         };
       });
@@ -742,18 +751,27 @@ export const PurchasingView: React.FC<PurchasingViewProps> = ({
                         (p.sku && p.sku.toLowerCase().includes((query || '').toLowerCase()))
                       );
 
+                      const isCostHigherThanSelling = Boolean(
+                        selectedProd &&
+                          Number(selectedProd.sellingPrice) > 0 &&
+                          Number(line.unitCost) > Number(selectedProd.sellingPrice)
+                      );
+
                       return (
                         <div
                           key={idx}
-                          className="flex flex-col sm:flex-row items-center gap-3 bg-slate-950 p-3 rounded-xl border border-slate-800 relative"
+                          className="bg-slate-950 p-3 rounded-xl border border-slate-800 space-y-2 relative"
                         >
-                          <div className="w-10 h-10 rounded-lg bg-slate-900 border border-slate-800 overflow-hidden flex items-center justify-center shrink-0">
-                            {selectedProd?.imageUrl ? (
-                              <img src={selectedProd.imageUrl} alt={selectedProd.name} className="w-full h-full object-cover" />
-                            ) : (
-                              <Package className="w-5 h-5 text-slate-500" />
-                            )}
-                          </div>
+                        <div className="flex flex-col sm:flex-row items-center gap-3 relative">
+                          {showImageUI && (
+                            <div className="w-10 h-10 rounded-lg bg-slate-900 border border-slate-800 overflow-hidden flex items-center justify-center shrink-0">
+                              {selectedProd?.imageUrl ? (
+                                <img src={selectedProd.imageUrl} alt={selectedProd.name} className="w-full h-full object-cover" />
+                              ) : (
+                                <Package className="w-5 h-5 text-slate-500" />
+                              )}
+                            </div>
+                          )}
                           <div className="flex-1 w-full relative">
                             <label className="block text-[10px] text-slate-400 mb-1">Product (Search Name / SKU)</label>
                             <div className="relative">
@@ -846,6 +864,24 @@ export const PurchasingView: React.FC<PurchasingViewProps> = ({
                           >
                             <Trash2 className="w-4 h-4" />
                           </button>
+                        </div>
+                        {autoZeroMargin && Number(line.unitCost) > 0 && selectedProd ? (
+                          <div className="text-[11px] bg-indigo-950/50 border border-indigo-500/40 text-indigo-200 rounded-lg px-2.5 py-1.5 flex items-center gap-1.5">
+                            <AlertCircle className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                            <span>
+                              Auto 0% Margin active: receiving this PO will set Selling Price to{' '}
+                              <strong>{formatKSh(Number(line.unitCost))}</strong>.
+                            </span>
+                          </div>
+                        ) : isCostHigherThanSelling && selectedProd ? (
+                          <div className="text-[11px] bg-amber-950/60 border border-amber-500/50 text-amber-200 rounded-lg px-2.5 py-1.5 flex items-center gap-1.5">
+                            <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                            <span>
+                              Warning: Buying cost ({formatKSh(Number(line.unitCost))}) is higher than current selling price (
+                              {formatKSh(Number(selectedProd.sellingPrice))}) — risk of negative profit.
+                            </span>
+                          </div>
+                        ) : null}
                         </div>
                       );
                     })}
@@ -1034,18 +1070,25 @@ export const PurchasingView: React.FC<PurchasingViewProps> = ({
                         return (
                           <tr key={idx}>
                             <td className="py-2.5 px-3 flex items-center gap-2.5 font-medium text-white">
-                              <div className="w-9 h-9 rounded-lg bg-slate-900 border border-slate-800 overflow-hidden flex items-center justify-center shrink-0">
-                                {img ? (
-                                  <img src={img} alt={item.productName} className="w-full h-full object-cover" />
-                                ) : (
-                                  <Package className="w-4 h-4 text-slate-500" />
-                                )}
-                              </div>
+                              {showImageUI && (
+                                <div className="w-9 h-9 rounded-lg bg-slate-900 border border-slate-800 overflow-hidden flex items-center justify-center shrink-0">
+                                  {img ? (
+                                    <img src={img} alt={item.productName} className="w-full h-full object-cover" />
+                                  ) : (
+                                    <Package className="w-4 h-4 text-slate-500" />
+                                  )}
+                                </div>
+                              )}
                               <div>
                                 {item.productName}
                                 <div className="text-[10px] text-slate-500 font-mono">
                                   SKU: {item.sku}
                                 </div>
+                                {prod && Number(prod.sellingPrice) > 0 && item.unitCost > Number(prod.sellingPrice) && (
+                                  <div className="text-[10px] text-amber-400 font-semibold mt-0.5">
+                                    Cost &gt; Selling ({formatKSh(prod.sellingPrice)})
+                                  </div>
+                                )}
                               </div>
                             </td>
                           <td className="py-2.5 px-3 text-right tabular-nums">

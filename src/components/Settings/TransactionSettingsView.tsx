@@ -32,7 +32,8 @@ import {
   saveTransactionSettingsLocal,
   formatDocumentNumberWithPrefix,
 } from '../../utils/transactionSettings';
-import { saveTransactionSettingsToCloud } from '../../lib/cloudSync';
+import { saveTransactionSettingsToCloud, saveItemSettingsToCloud } from '../../lib/cloudSync';
+import { loadItemSettings, saveItemSettingsLocal } from '../../utils/itemSettings';
 
 interface TransactionSettingsViewProps {
   onBack: () => void;
@@ -126,6 +127,14 @@ export const TransactionSettingsView: React.FC<TransactionSettingsViewProps> = (
     setSettings((prev) => {
       const candidate = typeof updater === 'function' ? updater(prev) : updater;
       const saved = saveTransactionSettingsLocal(candidate, effectiveStoreId);
+      if (candidate.enableBarcodeScanning !== prev.enableBarcodeScanning) {
+        const curItem = loadItemSettings(effectiveStoreId);
+        const nextItem = saveItemSettingsLocal(
+          { ...curItem, barcodeScanning: candidate.enableBarcodeScanning },
+          effectiveStoreId
+        );
+        saveItemSettingsToCloud(nextItem, effectiveStoreId).catch(() => {});
+      }
 
       setSaveStatus('saving');
       if (cloudSaveTimerRef.current) window.clearTimeout(cloudSaveTimerRef.current);

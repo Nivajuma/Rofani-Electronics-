@@ -170,7 +170,16 @@ import {
   isBackupBannerDismissedForDate,
   BackupSettings,
 } from './lib/gmailService';
-import { formatKSh } from './utils/currency';
+import {
+  StoreCurrencyCode,
+  DEFAULT_STORE_CURRENCY,
+  STORE_CURRENCY_EVENT,
+  CurrencyProvider,
+  formatMoney,
+  loadStoreCurrencyLocal,
+  normalizeCurrencyCode,
+  saveStoreCurrencyLocal,
+} from './utils/currency';
 import {
   TabKey,
   hasTabPermission,
@@ -246,6 +255,11 @@ import {
   normalizeReferralCode,
   subscribeToTransactionSettings,
   subscribeToShopProtectionSettings,
+  subscribeToItemSettings,
+  subscribeToStoreLanguage,
+  saveStoreLanguageToCloud,
+  subscribeToStoreCurrency,
+  saveStoreCurrencyToCloud,
   saveShopProtectionSettingsToCloud,
   deleteTransactionFromCloud,
   updateStoreProfileDetails,
@@ -275,11 +289,27 @@ import {
   normalizeShopProtectionSettings,
 } from './utils/shopProtectionSettings';
 import {
+  loadItemSettings,
+  saveItemSettingsLocal,
+  normalizeItemSettings,
+} from './utils/itemSettings';
+import {
   DEFAULT_BUSINESS_TYPE,
   getBusinessTypeConfig,
   isValidBusinessTypeId,
   mergeStarterCategories,
 } from './utils/businessTypes';
+import {
+  AppLanguageCode,
+  DEFAULT_APP_LANGUAGE,
+  LanguageProvider,
+  STORE_LANGUAGE_EVENT,
+  getLanguageConfig,
+  loadStoreLanguageLocal,
+  normalizeLanguageCode,
+  saveStoreLanguageLocal,
+  translate,
+} from './utils/i18n';
 import {
   auth,
   isAuthorizedCloudUser,
@@ -2987,6 +3017,9 @@ export default function App() {
     let isCancelled = false;
     let unsubscribeTx: (() => void) | undefined;
     let unsubscribeControls: (() => void) | undefined;
+    let unsubscribeItem: (() => void) | undefined;
+    let unsubscribeLang: (() => void) | undefined;
+    let unsubscribeCurrency: (() => void) | undefined;
     try {
       unsubscribeTx = subscribeToTransactionSettings(
         (remoteConfig) => {
@@ -3008,18 +3041,138 @@ export default function App() {
         (err) => console.warn('Shop protection settings subscription notice:', err),
         activeUid
       );
+      unsubscribeItem = subscribeToItemSettings(
+        (remoteConfig) => {
+          if (isCancelled) return;
+          if (remoteConfig && typeof remoteConfig === 'object') {
+            saveItemSettingsLocal(normalizeItemSettings(remoteConfig), activeUid);
+          }
+        },
+        (err) => console.warn('Item settings subscription notice:', err),
+        activeUid
+      );
+      unsubscribeLang = subscribeToStoreLanguage(
+        (remoteLang) => {
+          if (isCancelled) return;
+          saveStoreLanguageLocal(remoteLang, activeUid);
+          setActiveLanguage(remoteLang);
+        },
+        (err) => console.warn('Store language subscription notice:', err),
+        activeUid
+      );
+      unsubscribeCurrency = subscribeToStoreCurrency(
+        (remoteCurrency) => {
+          if (isCancelled) return;
+          saveStoreCurrencyLocal(remoteCurrency, activeUid);
+          setActiveCurrency(remoteCurrency);
+        },
+        (err) => console.warn('Store currency subscription notice:', err),
+        activeUid
+      );
     } catch (err) {
-      console.warn('Could not subscribe to transaction/shop settings:', err);
+      console.warn('Could not subscribe to transaction/shop/item settings:', err);
     }
     return () => {
       isCancelled = true;
       if (unsubscribeTx) unsubscribeTx();
       if (unsubscribeControls) unsubscribeControls();
+      if (unsubscribeItem) unsubscribeItem();
+      if (unsubscribeLang) unsubscribeLang();
+      if (unsubscribeCurrency) unsubscribeCurrency();
     };
   }, [isCloudAuthReady, firebaseUser?.uid, effectiveCloudStoreId]);
 
   const resolvedSettingsStoreId = effectiveCloudStoreId || getActiveTenantStoreId();
   const [shopControls] = useShopProtectionSettings(resolvedSettingsStoreId);
+
+  const [activeLanguage, setActiveLanguage] = useState<AppLanguageCode>(() =>
+    loadStoreLanguageLocal(resolvedSettingsStoreId)
+  );
+  const remoteStoreLanguage =
+    activeBranchProfile?.settings?.language || storeProfile?.settings?.language;
+
+  useEffect(() => {
+    if (typeof remoteStoreLanguage === 'string' && remoteStoreLanguage.trim()) {
+      const normalized = normalizeLanguageCode(remoteStoreLanguage);
+      setActiveLanguage(normalized);
+      saveStoreLanguageLocal(normalized, resolvedSettingsStoreId);
+    } else {
+      setActiveLanguage(loadStoreLanguageLocal(resolvedSettingsStoreId));
+    }
+  }, [resolvedSettingsStoreId, remoteStoreLanguage]);
+
+  useEffect(() => {
+    const onLangEvent = (ev: Event) => {
+      const custom = ev as CustomEvent<{ storeId?: string; language?: AppLanguageCode }>;
+      if (custom?.detail?.language) {
+        setActiveLanguage(normalizeLanguageCode(custom.detail.language));
+      } else {
+        setActiveLanguage(loadStoreLanguageLocal(resolvedSettingsStoreId));
+      }
+    };
+    window.addEventListener(STORE_LANGUAGE_EVENT, onLangEvent);
+    return () => window.removeEventListener(STORE_LANGUAGE_EVENT, onLangEvent);
+  }, [resolvedSettingsStoreId]);
+
+  const handlePersistStoreLanguage = React.useCallback(
+    (nextLang: AppLanguageCode) => {
+      setActiveLanguage(nextLang);
+      const targetSid =
+        effectiveCloudStoreId || primaryCloudStoreId || getActiveTenantStoreId();
+      if (isAuthorizedCloudUser(firebaseUser) && !isClientDemoMode) {
+        saveStoreLanguageToCloud(nextLang, targetSid).catch((err) => {
+          console.warn('Could not persist store language to cloud:', err);
+        });
+      }
+    },
+    [effectiveCloudStoreId, primaryCloudStoreId, firebaseUser, isClientDemoMode]
+  );
+
+  const [activeCurrency, setActiveCurrency] = useState<StoreCurrencyCode>(() =>
+    loadStoreCurrencyLocal(resolvedSettingsStoreId)
+  );
+  const remoteStoreCurrency =
+    activeBranchProfile?.settings?.currency || storeProfile?.settings?.currency;
+
+  useEffect(() => {
+    if (typeof remoteStoreCurrency === 'string' && remoteStoreCurrency.trim()) {
+      const normalized = normalizeCurrencyCode(remoteStoreCurrency);
+      setActiveCurrency(normalized);
+      saveStoreCurrencyLocal(normalized, resolvedSettingsStoreId);
+    } else {
+      setActiveCurrency(loadStoreCurrencyLocal(resolvedSettingsStoreId));
+    }
+  }, [resolvedSettingsStoreId, remoteStoreCurrency]);
+
+  useEffect(() => {
+    const onCurrencyEvent = (ev: Event) => {
+      const custom = ev as CustomEvent<{ storeId?: string; currency?: StoreCurrencyCode }>;
+      if (custom?.detail?.currency) {
+        setActiveCurrency(normalizeCurrencyCode(custom.detail.currency));
+      } else {
+        setActiveCurrency(loadStoreCurrencyLocal(resolvedSettingsStoreId));
+      }
+    };
+    window.addEventListener(STORE_CURRENCY_EVENT, onCurrencyEvent);
+    return () => window.removeEventListener(STORE_CURRENCY_EVENT, onCurrencyEvent);
+  }, [resolvedSettingsStoreId]);
+
+  const handlePersistStoreCurrency = React.useCallback(
+    (nextCurrency: StoreCurrencyCode) => {
+      setActiveCurrency(nextCurrency);
+      const targetSid =
+        effectiveCloudStoreId || primaryCloudStoreId || getActiveTenantStoreId();
+      if (isAuthorizedCloudUser(firebaseUser) && !isClientDemoMode) {
+        saveStoreCurrencyToCloud(nextCurrency, targetSid).catch((err) => {
+          console.warn('Could not persist store currency to cloud:', err);
+        });
+      }
+    },
+    [effectiveCloudStoreId, primaryCloudStoreId, firebaseUser, isClientDemoMode]
+  );
+
+  const t = (key: string): string => translate(activeLanguage || DEFAULT_APP_LANGUAGE, key);
+  const appDir = getLanguageConfig(activeLanguage || DEFAULT_APP_LANGUAGE).dir;
 
   const pushActivityAlert = (
     severity: 'info' | 'warning' | 'danger',
@@ -4540,7 +4693,7 @@ export default function App() {
         id: `exp-comm-${Date.now()}`,
         date: payout.startDate || (payout.date.length === 10 ? payout.date : new Date().toISOString().slice(0, 10)),
         category: 'Salaries',
-        description: `Worker Sales Commission: ${payout.employeeName} (${payout.salesCount} sales, base: KSh ${payout.totalSalesAmount.toLocaleString()})`,
+        description: `Worker Sales Commission: ${payout.employeeName} (${payout.salesCount} sales, base: ${formatMoney(payout.totalSalesAmount, { currency: activeCurrency })})`,
         amount: payout.paidAmount,
         paymentMethod: payout.paymentMethod === 'salary_addition' ? 'bank_transfer' : ((payout.paymentMethod as any) || 'mpesa'),
         recordedBy: payout.paidBy || currentUser.name,
@@ -4680,7 +4833,7 @@ export default function App() {
       pushActivityAlert(
         'info',
         'Sale Recorded',
-        `${stampedTx.salesRepName || stampedTx.cashierName || currentUser.name} completed ${stampedTx.receiptNumber} for KSh ${(stampedTx.grandTotal || 0).toLocaleString()}.`
+        `${stampedTx.salesRepName || stampedTx.cashierName || currentUser.name} completed ${stampedTx.receiptNumber} for ${formatMoney(stampedTx.grandTotal || 0, { currency: activeCurrency })}.`
       );
     }
     const soldProductIds = new Set((stampedTx.items || []).map((it) => it.product?.id || (it as any).productId));
@@ -4737,7 +4890,7 @@ export default function App() {
     if (isCurrentlyOffline) {
       addPendingSyncItem({
         type: 'sale',
-        description: `POS Sale #${stampedTx.receiptNumber} (KSh ${stampedTx.grandTotal.toLocaleString()})`,
+        description: `POS Sale #${stampedTx.receiptNumber} (${formatMoney(stampedTx.grandTotal, { currency: activeCurrency })})`,
         data: stampedTx,
       });
       productsToSync.forEach((p) => {
@@ -4765,7 +4918,7 @@ export default function App() {
             status: 'success',
             syncedCount: 1,
             failedCount: 0,
-            summary: `Live synced Sale #${stampedTx.receiptNumber} (KSh ${stampedTx.grandTotal.toLocaleString()})`,
+            summary: `Live synced Sale #${stampedTx.receiptNumber} (${formatMoney(stampedTx.grandTotal, { currency: activeCurrency })})`,
           });
         })
         .catch((err) => {
@@ -4786,7 +4939,7 @@ export default function App() {
         // Graceful offline fallback queue so sale completes smoothly with 0 interruption
         addPendingSyncItem({
           type: 'sale',
-          description: `POS Sale #${stampedTx.receiptNumber} (KSh ${stampedTx.grandTotal.toLocaleString()})`,
+          description: `POS Sale #${stampedTx.receiptNumber} (${formatMoney(stampedTx.grandTotal, { currency: activeCurrency })})`,
           data: stampedTx,
         });
         productsToSync.forEach((p) => {
@@ -5422,7 +5575,7 @@ export default function App() {
       targetId: returnRecord.id,
       targetName: `${customer.name} — ${transaction.receiptNumber}`,
       details: {
-        summary: `Refunded KSh ${totalRefundAmount.toLocaleString()} (${refundMode}). Stock added back: +${restockedTotalUnits} unit(s); Damaged/Quarantined: ${damagedTotalUnits} unit(s).`,
+        summary: `Refunded ${formatMoney(totalRefundAmount, { currency: activeCurrency })} (${refundMode}). Stock added back: +${restockedTotalUnits} unit(s); Damaged/Quarantined: ${damagedTotalUnits} unit(s).`,
         metadata: {
           returnNumber,
           creditNoteNumber,
@@ -5909,7 +6062,7 @@ export default function App() {
           `SKU: ${existing.sku || 'N/A'}`,
           `Barcode: ${existing.barcode || 'N/A'}`,
           `Category: ${existing.category}`,
-          `Selling Price: KSh ${existing.sellingPrice}`,
+          `Selling Price: ${formatMoney(existing.sellingPrice, { currency: activeCurrency })}`,
           `Stock On Hand: ${existing.stockQuantity} units`,
         ] : undefined,
         onConfirm: (selectedRole, reason) => {
@@ -6181,10 +6334,13 @@ export default function App() {
       addPendingSyncItem({ type: 'restock', description: `Restock Batch: ${prod.name}`, data: newRestock });
     }
 
+    const activeItemSettings = loadItemSettings(resolvedSettingsStoreId);
+    const applyZeroMarginPrice = activeItemSettings.autoSetSellingPriceZeroMargin && unitCost > 0;
     const updatedProd: Product = {
       ...prod,
       stockQuantity: prod.stockQuantity + quantityAdded,
       costPrice: unitCost,
+      ...(applyZeroMarginPrice ? { sellingPrice: unitCost, profitMargin: 0 } : {}),
       updatedAt: new Date().toISOString()
     };
 
@@ -6265,7 +6421,7 @@ export default function App() {
         user: currentUser,
         authorizingRole,
         details: {
-          summary: `Reconciled shelf inventory count for ${audit.items.length} products (Net Variance: ${audit.totalVarianceCount} units, Total Cost: KSh ${audit.totalVarianceCost.toLocaleString()})`,
+          summary: `Reconciled shelf inventory count for ${audit.items.length} products (Net Variance: ${audit.totalVarianceCount} units, Total Cost: ${formatMoney(audit.totalVarianceCost, { currency: activeCurrency })})`,
           metadata: {
             auditId: audit.id,
             auditDate: audit.auditDate,
@@ -6290,7 +6446,7 @@ export default function App() {
         diffSummary: [
           `Items Checked: ${audit.items.length}`,
           `Total Unit Variance: ${audit.totalVarianceCount}`,
-          `Total Variance Value: KSh ${audit.totalVarianceCost.toLocaleString()}`,
+          `Total Variance Value: ${formatMoney(audit.totalVarianceCost, { currency: activeCurrency })}`,
         ],
         onConfirm: (selectedRole, reason) => {
           performAdjustment(selectedRole, reason);
@@ -6355,14 +6511,14 @@ export default function App() {
     if (!canAutoSyncCloud()) {
       addPendingSyncItem({
         type: 'expense',
-        description: `Expense: ${stampedExp.category} (KSh ${stampedExp.amount.toLocaleString()})`,
+        description: `Expense: ${stampedExp.category} (${formatMoney(stampedExp.amount, { currency: activeCurrency })})`,
         data: stampedExp,
       });
     } else {
       saveExpenseToCloud(stampedExp).catch(() => {
         addPendingSyncItem({
           type: 'expense',
-          description: `Expense: ${stampedExp.category} (KSh ${stampedExp.amount.toLocaleString()})`,
+          description: `Expense: ${stampedExp.category} (${formatMoney(stampedExp.amount, { currency: activeCurrency })})`,
           data: stampedExp,
         });
       });
@@ -6382,13 +6538,13 @@ export default function App() {
 
       const log = buildSensitiveActionLog({
         actionType: 'DELETE_EXPENSE',
-        actionTitle: `Deleted Expense: ${exp ? exp.category : 'Record'} (${exp ? `KSh ${exp.amount.toLocaleString()}` : ''})`,
+        actionTitle: `Deleted Expense: ${exp ? exp.category : 'Record'} (${exp ? formatMoney(exp.amount, { currency: activeCurrency }) : ''})`,
         user: currentUser,
         authorizingRole,
         targetId: expId,
         targetName: exp ? `${exp.category} - ${exp.description || 'Record'}` : expId,
         details: {
-          summary: `Deleted ${exp?.category || 'expense'} of KSh ${(exp?.amount || 0).toLocaleString()} (${exp?.description || 'No description'})`,
+          summary: `Deleted ${exp?.category || 'expense'} of ${formatMoney(exp?.amount || 0, { currency: activeCurrency })} (${exp?.description || 'No description'})`,
           before: exp || {},
         },
         reason,
@@ -6400,14 +6556,14 @@ export default function App() {
     if (qualifyingRoles.length > 1 || userRoles.length > 1) {
       setRoleAuthRequest({
         actionType: 'DELETE_EXPENSE',
-        actionTitle: `Delete Expense: ${exp ? exp.category : 'Record'} (${exp ? `KSh ${exp.amount.toLocaleString()}` : ''})`,
+        actionTitle: `Delete Expense: ${exp ? exp.category : 'Record'} (${exp ? formatMoney(exp.amount, { currency: activeCurrency }) : ''})`,
         targetId: expId,
         targetName: exp ? `${exp.category} - ${exp.description || 'Record'}` : expId,
         qualifyingRoles: qualifyingRoles.length > 0 ? qualifyingRoles : userRoles,
         user: currentUser,
         diffSummary: exp ? [
           `Category: ${exp.category}`,
-          `Amount: KSh ${exp.amount.toLocaleString()}`,
+          `Amount: ${formatMoney(exp.amount, { currency: activeCurrency })}`,
           `Description: ${exp.description || 'None'}`,
           `Payment Method: ${exp.paymentMethod}`,
           `Recorded By: ${exp.recordedBy}`,
@@ -7613,7 +7769,7 @@ export default function App() {
       pushActivityAlert(
         'warning',
         'Attendant Edited a Sale',
-        `Receipt ${updatedTx.receiptNumber} (KSh ${(updatedTx.grandTotal || 0).toLocaleString()}) was modified by ${currentUser.name}.`
+        `Receipt ${updatedTx.receiptNumber} (${formatMoney(updatedTx.grandTotal || 0, { currency: activeCurrency })}) was modified by ${currentUser.name}.`
       );
     }
   };
@@ -7631,7 +7787,7 @@ export default function App() {
       pushActivityAlert(
         'danger',
         'Attendant Deleted a Sale',
-        `Receipt ${targetTx?.receiptNumber || txId}${targetTx ? ` (KSh ${(targetTx.grandTotal || 0).toLocaleString()})` : ''} was deleted by ${currentUser.name}.`
+        `Receipt ${targetTx?.receiptNumber || txId}${targetTx ? ` (${formatMoney(targetTx.grandTotal || 0, { currency: activeCurrency })})` : ''} was deleted by ${currentUser.name}.`
       );
     }
     if (isCloudAuthReady && (effectiveCloudStoreId || firebaseUser?.uid)) {
@@ -7736,21 +7892,21 @@ export default function App() {
   const fontScaleClass = fontScale === 'large' ? 'text-base' : 'text-sm';
 
   const SUB_PAGE_LABELS: Record<AppTab, string> = {
-    pos: 'Point of Sale',
-    inventory: 'Stock & Inventory',
-    purchasing: 'Purchases & Receiving',
-    stocktake: 'Physical Stock Count',
-    contacts: 'Customers & Suppliers',
-    cashmanagement: 'Cash In & Cash Out Management',
-    expenses: 'Daily Expenses',
-    attendance: 'Staff, Wages & Roles',
-    reports: 'Reports & Analytics',
-    onlinestore: 'Online Storefront',
-    onlineorders: 'Online Orders & Offers',
-    settings: 'Settings & Security',
-    auditlogs: 'Audit Logs',
-    menu: 'All Modules & Menu',
-    about: 'About Rofani POS',
+    pos: t('sidebar.pos'),
+    inventory: t('subpage.inventory'),
+    purchasing: t('subpage.purchasing'),
+    stocktake: t('subpage.stocktake'),
+    contacts: t('subpage.contacts'),
+    cashmanagement: t('subpage.cashmanagement'),
+    expenses: t('subpage.expenses'),
+    attendance: t('subpage.attendance'),
+    reports: t('subpage.reports'),
+    onlinestore: t('sidebar.onlineStore'),
+    onlineorders: t('sidebar.ordersDeals'),
+    settings: t('subpage.settings'),
+    auditlogs: t('subpage.auditlogs'),
+    menu: t('menu.title'),
+    about: t('subpage.about'),
   };
 
   // Helper function to render active tab view content
@@ -7801,7 +7957,7 @@ export default function App() {
                 aria-label="Back to previous screen"
               >
                 <ArrowLeft className="w-4 h-4 text-sky-400 shrink-0" />
-                <span>Back</span>
+                <span>{t('nav.back')}</span>
               </button>
               <span className="text-xs sm:text-sm font-extrabold text-slate-100 truncate px-0.5 leading-tight">
                 {SUB_PAGE_LABELS[activeTab] || 'Rofani POS'}
@@ -7914,6 +8070,7 @@ export default function App() {
           products={products}
           setProducts={setProducts}
           currentUser={currentUser}
+          activeStoreId={resolvedSettingsStoreId}
         />
       )}
 
@@ -8284,56 +8441,79 @@ export default function App() {
 
   if (isAuthorizedCloudUser(firebaseUser) && !isOwnerAccount && !isCheckingStoreProfile && !storeProfile) {
     return (
-      <StoreOnboardingModal
-        userEmail={firebaseUser?.email || ''}
-        userDisplayName={firebaseUser?.displayName || undefined}
-        initialReferralCode={pendingReferralCode}
-        onCreateStore={async (formData) => {
-          if (!firebaseUser?.uid || !firebaseUser?.email) {
-            throw new Error('Verified Google session is required.');
-          }
-          const created = await createMerchantStoreProfile({
-            uid: firebaseUser.uid,
-            email: firebaseUser.email,
-            displayName: firebaseUser.displayName || undefined,
-            storeName: formData.storeName,
-            businessType: formData.businessType,
-            phone: formData.phone,
-            kraPin: formData.kraPin,
-            mpesaShortcode: formData.mpesaShortcode,
-            mpesaShortcodeType: formData.mpesaShortcodeType,
-            referralCode: formData.referralCode || pendingReferralCode,
-          });
-          updatePendingReferralCode('');
-          setStoreProfile(created);
-          safeSetJSON('rofani_pos_store_profile', created);
-          safeSetJSON('rofani_pos_business_type', formData.businessType);
-          safeSetJSON('rofani_settings_tax_mode', created.taxMode || 'none');
-          safeSetJSON('rofani_settings_enable_vat', false);
-          handleLoadRecommendedCategories(formData.businessType, { replaceBlankInitial: true });
-          if (created.referredBy) {
-            setReferralRewardToast({
-              kind: 'welcome',
-              message: `🎁 Welcome Bonus! Referred by ${created.referredByStoreName || 'a fellow merchant'} — 22 Days Free unlocked!`,
-              subtext: `You received +15 extra free trial days on top of the 7-day standard trial.`,
-            });
-          }
-          setStores([
-            {
-              id: 'store-main',
-              name: created.storeName,
-              code: 'MAIN-01',
-              city: 'Nairobi',
-              address: 'Main Branch',
-              phone: created.phone || '',
-              isMainBranch: true,
-              active: true,
-            },
-          ]);
-          setActiveStoreId('store-main');
-          setIsTerminalLocked(false);
+      <LanguageProvider
+        storeId="default"
+        onPersistLanguage={(nextLang) => {
+          setActiveLanguage(nextLang);
         }}
-      />
+      >
+        <CurrencyProvider
+          storeId="default"
+          currency={activeCurrency || DEFAULT_STORE_CURRENCY}
+          onPersistCurrency={(nextCurrency) => {
+            setActiveCurrency(nextCurrency);
+          }}
+        >
+        <StoreOnboardingModal
+          userEmail={firebaseUser?.email || ''}
+          userDisplayName={firebaseUser?.displayName || undefined}
+          initialReferralCode={pendingReferralCode}
+          onCreateStore={async (formData) => {
+            if (!firebaseUser?.uid || !firebaseUser?.email) {
+              throw new Error('Verified Google session is required.');
+            }
+            const chosenLang = normalizeLanguageCode(formData.language || activeLanguage);
+            const chosenCurrency = normalizeCurrencyCode(formData.currency || activeCurrency);
+            const created = await createMerchantStoreProfile({
+              uid: firebaseUser.uid,
+              email: firebaseUser.email,
+              displayName: firebaseUser.displayName || undefined,
+              storeName: formData.storeName,
+              businessType: formData.businessType,
+              language: chosenLang,
+              currency: chosenCurrency,
+              phone: formData.phone,
+              kraPin: formData.kraPin,
+              mpesaShortcode: formData.mpesaShortcode,
+              mpesaShortcodeType: formData.mpesaShortcodeType,
+              referralCode: formData.referralCode || pendingReferralCode,
+            });
+            saveStoreLanguageLocal(chosenLang, created.id);
+            setActiveLanguage(chosenLang);
+            saveStoreCurrencyLocal(chosenCurrency, created.id);
+            setActiveCurrency(chosenCurrency);
+            updatePendingReferralCode('');
+            setStoreProfile(created);
+            safeSetJSON('rofani_pos_store_profile', created);
+            safeSetJSON('rofani_pos_business_type', formData.businessType);
+            safeSetJSON('rofani_settings_tax_mode', created.taxMode || 'none');
+            safeSetJSON('rofani_settings_enable_vat', false);
+            handleLoadRecommendedCategories(formData.businessType, { replaceBlankInitial: true });
+            if (created.referredBy) {
+              setReferralRewardToast({
+                kind: 'welcome',
+                message: `🎁 Welcome Bonus! Referred by ${created.referredByStoreName || 'a fellow merchant'} — 22 Days Free unlocked!`,
+                subtext: `You received +15 extra free trial days on top of the 7-day standard trial.`,
+              });
+            }
+            setStores([
+              {
+                id: 'store-main',
+                name: created.storeName,
+                code: 'MAIN-01',
+                city: 'Nairobi',
+                address: 'Main Branch',
+                phone: created.phone || '',
+                isMainBranch: true,
+                active: true,
+              },
+            ]);
+            setActiveStoreId('store-main');
+            setIsTerminalLocked(false);
+          }}
+        />
+        </CurrencyProvider>
+      </LanguageProvider>
     );
   }
 
@@ -8378,46 +8558,68 @@ export default function App() {
     lockedBranchTarget
   ) {
     return (
-      <div className="min-h-screen bg-[#0f172a]">
-        <SubscriptionPlansModal
-          isOpen={true}
-          isExpiredLock={true}
-          isOwnerAccount={false}
-          storeId={
-            lockedBranchTarget.id || effectiveCloudStoreId || firebaseUser!.uid
-          }
-          storeProfile={lockedBranchTarget}
-          primaryProfile={storeProfile}
-          groupBranches={groupBranches}
-          onSwitchBranch={handleSwitchBranchStore}
-          onSubscriptionUpdated={handleSubscriptionProfileUpdated}
-          onOpenAiAssistant={() => setShowAiAssistantModal(true)}
-        />
-        <AIAssistantModal
-          isOpen={showAiAssistantModal}
-          onClose={() => setShowAiAssistantModal(false)}
-          activeStoreName={
-            stores.find((s) => s.id === activeStoreId)?.name ||
-            lockedBranchTarget?.storeName ||
-            'Rofani POS'
-          }
-          workerRole={currentUser.role}
-          activeTab={activeTab}
-          lowStockCount={lowStockCount}
-          totalProductsCount={products.length}
-          totalSalesToday={todaySales > 0 ? todaySales : totalGrossSales}
-          products={products}
-          transactions={transactions}
-          onOpenPredictiveRestock={() => setActiveTab('inventory')}
-        />
-      </div>
+      <LanguageProvider
+        storeId={resolvedSettingsStoreId}
+        remoteLanguage={remoteStoreLanguage}
+        onPersistLanguage={handlePersistStoreLanguage}
+      >
+        <CurrencyProvider
+          storeId={resolvedSettingsStoreId}
+          currency={activeCurrency}
+          onPersistCurrency={handlePersistStoreCurrency}
+        >
+        <div className="min-h-screen bg-[#0f172a]">
+          <SubscriptionPlansModal
+            isOpen={true}
+            isExpiredLock={true}
+            isOwnerAccount={false}
+            storeId={
+              lockedBranchTarget.id || effectiveCloudStoreId || firebaseUser!.uid
+            }
+            storeProfile={lockedBranchTarget}
+            primaryProfile={storeProfile}
+            groupBranches={groupBranches}
+            onSwitchBranch={handleSwitchBranchStore}
+            onSubscriptionUpdated={handleSubscriptionProfileUpdated}
+            onOpenAiAssistant={() => setShowAiAssistantModal(true)}
+          />
+          <AIAssistantModal
+            isOpen={showAiAssistantModal}
+            onClose={() => setShowAiAssistantModal(false)}
+            activeStoreName={
+              stores.find((s) => s.id === activeStoreId)?.name ||
+              lockedBranchTarget?.storeName ||
+              'Rofani POS'
+            }
+            workerRole={currentUser.role}
+            activeTab={activeTab}
+            lowStockCount={lowStockCount}
+            totalProductsCount={products.length}
+            totalSalesToday={todaySales > 0 ? todaySales : totalGrossSales}
+            products={products}
+            transactions={transactions}
+            onOpenPredictiveRestock={() => setActiveTab('inventory')}
+          />
+        </div>
+        </CurrencyProvider>
+      </LanguageProvider>
     );
   }
 
   // If Mobile Phone Format is active, render PhoneDeviceFrame view
   if (deviceFormat === 'phone') {
     return (
-      <div className="min-h-dvh h-dvh sm:h-auto sm:min-h-dvh bg-slate-900 sm:bg-slate-950 text-slate-100 flex flex-col font-sans print-unlock-overflow">
+      <LanguageProvider
+        storeId={resolvedSettingsStoreId}
+        remoteLanguage={remoteStoreLanguage}
+        onPersistLanguage={handlePersistStoreLanguage}
+      >
+        <CurrencyProvider
+          storeId={resolvedSettingsStoreId}
+          currency={activeCurrency}
+          onPersistCurrency={handlePersistStoreCurrency}
+        >
+        <div className="min-h-dvh h-dvh sm:h-auto sm:min-h-dvh bg-slate-900 sm:bg-slate-950 text-slate-100 flex flex-col font-sans print-unlock-overflow">
         <PhoneDeviceFrame
           activeTab={activeTab}
           onSelectTab={(tab) => {
@@ -8847,10 +9049,22 @@ export default function App() {
         {/* Automatic Camera Authorization on App Launch */}
         <CameraStartupPrompt />
       </div>
+      </CurrencyProvider>
+      </LanguageProvider>
     );
   }
 
   return (
+    <LanguageProvider
+      storeId={resolvedSettingsStoreId}
+      remoteLanguage={remoteStoreLanguage}
+      onPersistLanguage={handlePersistStoreLanguage}
+    >
+      <CurrencyProvider
+        storeId={resolvedSettingsStoreId}
+        currency={activeCurrency}
+        onPersistCurrency={handlePersistStoreCurrency}
+      >
     <div className={`flex min-h-dvh h-dvh w-full overflow-hidden font-sans print-unlock-overflow ${themeContainerClass} ${fontScaleClass}`}>
       {/* Mobile Drawer Overlay Backdrop */}
       {isMobileMenuOpen && (
@@ -8940,7 +9154,7 @@ export default function App() {
                 className="flex-1 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 active:scale-95 text-white font-extrabold rounded-xl shadow-md shadow-emerald-600/25 transition flex items-center justify-center gap-1.5 py-2.5 px-2 text-xs truncate cursor-pointer"
               >
                 <Plus className="w-4 h-4 shrink-0" />
-                <span className="truncate">+ New Sale</span>
+                <span className="truncate">+ {t('header.newSale')}</span>
               </button>
               <button
                 id="btn-sidebar-print-barcodes"
@@ -8968,7 +9182,7 @@ export default function App() {
           >
             <div className="flex items-center gap-3">
               <ShoppingBag className="w-4 h-4 opacity-90 shrink-0" />
-              {!isSidebarCollapsed && <span>Point of Sale</span>}
+              {!isSidebarCollapsed && <span>{t('sidebar.pos')}</span>}
             </div>
             {!isSidebarCollapsed && (
               <span className="text-[10px] bg-slate-800/80 px-1.5 py-0.5 rounded font-mono text-slate-300">
@@ -8991,7 +9205,7 @@ export default function App() {
           >
             <div className="flex items-center gap-3">
               <Package className="w-4 h-4 opacity-90 shrink-0" />
-              {!isSidebarCollapsed && <span>Inventory Control</span>}
+              {!isSidebarCollapsed && <span>{t('sidebar.inventory')}</span>}
             </div>
             {lowStockCount > 0 && (
               <span
@@ -9019,7 +9233,7 @@ export default function App() {
           >
             <div className="flex items-center gap-3">
               <Truck className="w-4 h-4 opacity-90 shrink-0 text-emerald-400" />
-              {!isSidebarCollapsed && <span>Purchasing & POs</span>}
+              {!isSidebarCollapsed && <span>{t('sidebar.purchasing')}</span>}
             </div>
             {!isSidebarCollapsed && purchaseOrders.filter((p) => p.status === 'Pending').length > 0 && (
               <span className="text-[10px] bg-amber-500 text-slate-950 font-bold px-1.5 py-0.5 rounded-full font-mono">
@@ -9039,7 +9253,7 @@ export default function App() {
           >
             <div className="flex items-center gap-3">
               <ClipboardList className="w-4 h-4 opacity-90 shrink-0" />
-              {!isSidebarCollapsed && <span>Physical Audit</span>}
+              {!isSidebarCollapsed && <span>{t('sidebar.stocktake')}</span>}
             </div>
           </button>
 
@@ -9054,7 +9268,7 @@ export default function App() {
           >
             <div className="flex items-center gap-3">
               <Users className="w-4 h-4 opacity-90 shrink-0 text-sky-400" />
-              {!isSidebarCollapsed && <span>Contacts & CRM</span>}
+              {!isSidebarCollapsed && <span>{t('sidebar.contacts')}</span>}
             </div>
             {!isSidebarCollapsed && (
               <div className="flex items-center gap-1">
@@ -9081,7 +9295,7 @@ export default function App() {
           >
             <div className="flex items-center gap-3">
               <Landmark className="w-4 h-4 opacity-90 shrink-0 text-emerald-400" />
-              {!isSidebarCollapsed && <span>Cash In & Out</span>}
+              {!isSidebarCollapsed && <span>{t('sidebar.cashInOut')}</span>}
             </div>
             {!isSidebarCollapsed && (
               <span className="text-[10px] bg-emerald-950/80 text-emerald-300 border border-emerald-800/80 px-1.5 py-0.5 rounded font-mono">
@@ -9101,7 +9315,7 @@ export default function App() {
           >
             <div className="flex items-center gap-3">
               <DollarSign className="w-4 h-4 opacity-90 shrink-0" />
-              {!isSidebarCollapsed && <span>Expense Manager</span>}
+              {!isSidebarCollapsed && <span>{t('sidebar.expenses')}</span>}
             </div>
           </button>
 
@@ -9116,7 +9330,7 @@ export default function App() {
           >
             <div className="flex items-center gap-3">
               <UserCheck className="w-4 h-4 opacity-90 shrink-0 text-emerald-400" />
-              {!isSidebarCollapsed && <span>Workers & Loans</span>}
+              {!isSidebarCollapsed && <span>{t('sidebar.workersLoans')}</span>}
             </div>
             {!isSidebarCollapsed && (
               <span className="text-[10px] bg-emerald-950/80 text-emerald-300 border border-emerald-800/80 px-1.5 py-0.5 rounded font-mono font-bold">
@@ -9136,7 +9350,7 @@ export default function App() {
           >
             <div className="flex items-center gap-3">
               <FileText className="w-4 h-4 opacity-90 shrink-0" />
-              {!isSidebarCollapsed && <span>Reports Central</span>}
+              {!isSidebarCollapsed && <span>{t('sidebar.reports')}</span>}
             </div>
             {!isSidebarCollapsed && (
               <span className="text-[10px] bg-slate-800/80 px-1.5 py-0.5 rounded font-mono text-slate-300">
@@ -9156,7 +9370,7 @@ export default function App() {
           >
             <div className="flex items-center gap-3">
               <ShieldAlert className="w-4 h-4 opacity-90 shrink-0 text-purple-400" />
-              {!isSidebarCollapsed && <span>Audit Trail</span>}
+              {!isSidebarCollapsed && <span>{t('sidebar.auditTrail')}</span>}
             </div>
             {!isSidebarCollapsed && auditLogs.length > 0 && (
               <span className="text-[10px] bg-purple-950/80 text-purple-300 border border-purple-800/80 px-1.5 py-0.5 rounded font-mono font-bold">
@@ -9176,7 +9390,7 @@ export default function App() {
           >
             <div className="flex items-center gap-3">
               <Globe className="w-4 h-4 opacity-90 shrink-0 text-sky-400" />
-              {!isSidebarCollapsed && <span>Online E-Store</span>}
+              {!isSidebarCollapsed && <span>{t('sidebar.onlineStore')}</span>}
             </div>
             {!isSidebarCollapsed && (
               <span className="text-[10px] bg-sky-950/80 text-sky-300 border border-sky-800/80 px-1.5 py-0.5 rounded font-mono">
@@ -9196,7 +9410,7 @@ export default function App() {
           >
             <div className="flex items-center gap-3">
               <Tag className="w-4 h-4 opacity-90 shrink-0 text-amber-400" />
-              {!isSidebarCollapsed && <span>Orders & Deals</span>}
+              {!isSidebarCollapsed && <span>{t('sidebar.ordersDeals')}</span>}
             </div>
             {onlineOrders.filter((o) => o.orderStatus === 'Pending').length > 0 && (
               <span className="bg-amber-500 text-slate-950 text-[10px] font-extrabold px-1.5 py-0.5 rounded-full shadow-sm">
@@ -9212,7 +9426,7 @@ export default function App() {
           >
             <div className="flex items-center gap-3">
               <Building2 className="w-4 h-4 opacity-90 shrink-0 text-indigo-400" />
-              {!isSidebarCollapsed && <span className="font-semibold">Multi-Store Outlets</span>}
+              {!isSidebarCollapsed && <span className="font-semibold">{t('sidebar.multiStore')}</span>}
             </div>
             {!isSidebarCollapsed && (
               <span className="text-[10px] bg-indigo-900/80 text-indigo-200 border border-indigo-700/80 px-1.5 py-0.5 rounded font-mono font-bold">
@@ -9232,7 +9446,7 @@ export default function App() {
           >
             <div className="flex items-center gap-3">
               <Database className="w-4 h-4 opacity-90 shrink-0" />
-              {!isSidebarCollapsed && <span>Data &amp; Store Settings</span>}
+              {!isSidebarCollapsed && <span>{t('sidebar.dataSettings')}</span>}
             </div>
           </button>
 
@@ -9725,7 +9939,7 @@ export default function App() {
 
         {/* Responsive Mobile Top Header for Smartphones & Tablets (hidden on Menu tab which has its own compact header) */}
         {activeTab !== 'menu' && (
-        <div className="print:hidden lg:hidden bg-slate-900 border-b border-slate-800 shrink-0 z-20 text-white">
+        <div dir="ltr" className="print:hidden lg:hidden bg-slate-900 border-b border-slate-800 shrink-0 z-20 text-white">
           {/* Primary Row: Main Menu (left), Brand, and Quick Actions (right) */}
           <div className="px-3 py-2 flex items-center justify-between gap-2 overflow-hidden">
             <div className="flex items-center gap-2 min-w-0 flex-1">
@@ -9826,7 +10040,7 @@ export default function App() {
                   aria-label="Sell — Open POS Register"
                 >
                   <ShoppingBag className="w-3.5 h-3.5 shrink-0" />
-                  <span>Sell</span>
+                  <span>{t('header.sell')}</span>
                 </button>
                 <NetworkStatusBadge onClick={() => setShowCloudSyncModal(true)} />
 
@@ -9904,7 +10118,7 @@ export default function App() {
                 aria-label="Sell — Open POS Register"
               >
                 <ShoppingBag className="w-3.5 h-3.5 shrink-0" />
-                <span>Sell</span>
+                <span>{t('header.sell')}</span>
               </button>
 
               <button
@@ -9951,27 +10165,27 @@ export default function App() {
           <div className="flex items-center gap-4 xl:gap-8 min-w-0">
             <div className="flex flex-col shrink-0">
               <span className="text-[10px] xl:text-[11px] text-slate-500 uppercase tracking-widest font-bold">
-                Today's Sales
+                {t('header.todaysSales')}
               </span>
               <span className="text-lg xl:text-xl font-extrabold text-slate-900 font-mono">
-                {formatKSh(todaySales > 0 ? todaySales : totalGrossSales, { showDecimals: true })}
+                {formatMoney(todaySales > 0 ? todaySales : totalGrossSales, { currency: activeCurrency, showDecimals: true })}
               </span>
             </div>
 
             {canViewGrossProfit(currentUser) && (
               <div className="hidden xl:flex flex-col border-l border-slate-200 pl-4 xl:pl-8 shrink-0">
                 <span className="text-[11px] text-slate-500 uppercase tracking-widest font-bold">
-                  Gross Profit Margin
+                  {t('header.grossProfitMargin')}
                 </span>
                 <span className="text-xl font-extrabold text-emerald-600 font-mono">
-                  +{profitMarginPercent.toFixed(1)}% ({formatKSh(grossProfitAmount, { showDecimals: true })})
+                  +{profitMarginPercent.toFixed(1)}% ({formatMoney(grossProfitAmount, { currency: activeCurrency, showDecimals: true })})
                 </span>
               </div>
             )}
 
             <div className="flex flex-col border-l border-slate-200 pl-4 xl:pl-8 shrink-0">
               <span className="text-[10px] xl:text-[11px] text-slate-500 uppercase tracking-widest font-bold">
-                Low Stock Alert
+                {t('header.lowStockAlert')}
               </span>
               <button
                 onClick={() => {
@@ -10004,7 +10218,7 @@ export default function App() {
               }`}
             >
               <Bell className={`w-4 h-4 ${lowStockCount > 0 ? 'text-amber-600' : 'text-slate-500'}`} />
-              <span>Stock Alerts</span>
+              <span>{t('header.stockAlerts')}</span>
               {lowStockCount > 0 && (
                 <span className="bg-red-600 text-white text-[10px] font-extrabold px-1.5 py-0.2 rounded-full shadow-sm">
                   {lowStockCount}
@@ -10021,7 +10235,7 @@ export default function App() {
             >
               <Plus className="w-4 h-4" />
               <ShoppingBag className="w-3.5 h-3.5" />
-              <span>New Sale</span>
+              <span>{t('header.newSale')}</span>
             </button>
 
             {/* Cloud Sync & Share Across Mobile Phones Button in Top Header */}
@@ -10333,6 +10547,7 @@ export default function App() {
 
         {/* Dynamic Workspace Canvas for Computer Format */}
         <div
+          dir={appDir}
           className={`flex-1 min-h-0 overflow-y-auto print-unlock-overflow ${
             activeTab === 'pos' && isMobileSearchActive ? 'pb-4 lg:pb-0' : 'pb-28 lg:pb-0'
           } ${
@@ -10376,6 +10591,7 @@ export default function App() {
         {/* Fixed 5-Tab Dark Bottom Navigation Bar (Mobile Screens — hidden when POS search keyboard is active) */}
         {!(activeTab === 'pos' && isMobileSearchActive) && (
         <nav
+          dir="ltr"
           aria-label="Mobile Bottom Navigation"
           className="print:hidden lg:hidden fixed bottom-0 left-0 right-0 z-50 min-h-16 bg-slate-900 border-t border-slate-800 px-1 pt-1 pb-safe grid grid-cols-5 items-center"
         >
@@ -10390,7 +10606,7 @@ export default function App() {
             }`}
           >
             <ShoppingBag className="w-5 h-5 mb-0.5" />
-            <span className="text-[9px] font-bold tracking-tight whitespace-nowrap">HOME</span>
+            <span className="text-[9px] font-bold tracking-tight whitespace-nowrap truncate max-w-full px-0.5">{t('nav.home')}</span>
           </button>
 
           <button
@@ -10404,7 +10620,7 @@ export default function App() {
             }`}
           >
             <LayoutDashboard className="w-5 h-5 mb-0.5" />
-            <span className="text-[9px] font-bold tracking-tight whitespace-nowrap">DASHBOARD</span>
+            <span className="text-[9px] font-bold tracking-tight whitespace-nowrap truncate max-w-full px-0.5">{t('nav.dashboard')}</span>
           </button>
 
           <button
@@ -10418,7 +10634,7 @@ export default function App() {
             }`}
           >
             <Package className="w-5 h-5 mb-0.5" />
-            <span className="text-[9px] font-bold tracking-tight whitespace-nowrap">ITEMS</span>
+            <span className="text-[9px] font-bold tracking-tight whitespace-nowrap truncate max-w-full px-0.5">{t('nav.items')}</span>
           </button>
 
           <button
@@ -10432,7 +10648,7 @@ export default function App() {
             }`}
           >
             <Menu className="w-5 h-5 mb-0.5" />
-            <span className="text-[9px] font-bold tracking-tight whitespace-nowrap">MENU</span>
+            <span className="text-[9px] font-bold tracking-tight whitespace-nowrap truncate max-w-full px-0.5">{t('nav.menu')}</span>
           </button>
 
           <button
@@ -10446,7 +10662,7 @@ export default function App() {
             title="Switch to Mobile Phone Version"
           >
             <Smartphone className="w-5 h-5 mb-0.5 text-[#38bdf8]" />
-            <span className="text-[9px] font-bold tracking-tight whitespace-nowrap">MOBILE VIEW</span>
+            <span className="text-[9px] font-bold tracking-tight whitespace-nowrap truncate max-w-full px-0.5">{t('nav.mobileView')}</span>
           </button>
         </nav>
         )}
@@ -10630,6 +10846,7 @@ export default function App() {
           suppliers={suppliers}
           currentUser={currentUser}
           onAddRestock={handleAddRestockRecord}
+          activeStoreId={resolvedSettingsStoreId}
         />
       )}
 
@@ -10663,6 +10880,7 @@ export default function App() {
             }}
             onAddRestock={handleAddRestockRecord}
             onAdjustStockQuantity={handleSingleProductStockAdjust}
+            activeStoreId={resolvedSettingsStoreId}
           />
         </div>
       )}
@@ -10870,5 +11088,7 @@ export default function App() {
       {/* Automatic Camera Authorization on App Launch */}
       <CameraStartupPrompt />
     </div>
+    </CurrencyProvider>
+    </LanguageProvider>
   );
 }

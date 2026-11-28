@@ -30,6 +30,8 @@ import {
   getOwnerMaxAllowedBranches,
   isBranchLicenseUnlocked,
 } from '../utils/branchLicensing';
+import { AppLanguageCode, normalizeLanguageCode } from '../utils/i18n';
+import { StoreCurrencyCode, normalizeCurrencyCode } from '../utils/currency';
 import {
   Product,
   Transaction,
@@ -1398,6 +1400,244 @@ export async function saveShopProtectionSettingsToCloud(
   }
 }
 
+// ---------------- ITEM SETTINGS LIVE SYNC (stores/{storeId}/settings/item) ----------------
+
+export function subscribeToItemSettings(
+  onUpdate: (config: Record<string, any>) => void,
+  onError?: (err: any) => void,
+  storeId?: string
+) {
+  const sid = resolveCloudStoreId(storeId);
+  const path = `${getScopedCollectionPath('settings', sid)}/item`;
+  const docRef = getScopedDocRef('settings', 'item', sid);
+  return onSnapshot(
+    docRef,
+    (snapshot) => {
+      if (snapshot.exists()) {
+        onUpdate(snapshot.data() as Record<string, any>);
+      }
+    },
+    (error) => {
+      handleFirestoreError(error, OperationType.GET, path);
+      if (onError) onError(error);
+    }
+  );
+}
+
+export async function saveItemSettingsToCloud(
+  config: Record<string, any>,
+  storeId?: string
+): Promise<void> {
+  const sid = resolveCloudStoreId(storeId);
+  const scopedColPath = getScopedCollectionPath('settings', sid);
+  const path = `${scopedColPath}/item`;
+  const cleaned = cleanForFirestore({
+    ...config,
+    updatedAt: new Date().toISOString(),
+  });
+  try {
+    const docRef = getScopedDocRef('settings', 'item', sid);
+    await withFirestoreTimeout(setDoc(docRef, cleaned, { merge: true }), 'saving item settings');
+  } catch (error) {
+    if (
+      !isQuotaExceededError(error) &&
+      isTransportStallError(error) &&
+      (typeof navigator === 'undefined' || navigator.onLine)
+    ) {
+      try {
+        await commitChunkViaRest(
+          scopedColPath,
+          [{ ...cleaned, id: 'item' }],
+          (item) => cleanForFirestore(item),
+          'saving item settings'
+        );
+        return;
+      } catch (restError) {
+        handleFirestoreError(restError, OperationType.WRITE, path);
+        throw restError;
+      }
+    }
+    handleFirestoreError(error, OperationType.WRITE, path);
+    throw error;
+  }
+}
+
+// ---------------- STORE LANGUAGE SYNC (stores/{storeId}/settings.language & settings/general) ----------------
+
+export function subscribeToStoreLanguage(
+  onUpdate: (language: AppLanguageCode) => void,
+  onError?: (err: any) => void,
+  storeId?: string
+) {
+  const sid = resolveCloudStoreId(storeId);
+  const path = `${getScopedCollectionPath('settings', sid)}/general`;
+  const docRef = getScopedDocRef('settings', 'general', sid);
+  return onSnapshot(
+    docRef,
+    (snapshot) => {
+      if (snapshot.exists()) {
+        const data = snapshot.data() as Record<string, any>;
+        if (typeof data?.language === 'string' && data.language.trim()) {
+          onUpdate(normalizeLanguageCode(data.language));
+        }
+      }
+    },
+    (error) => {
+      handleFirestoreError(error, OperationType.GET, path);
+      if (onError) onError(error);
+    }
+  );
+}
+
+export async function saveStoreLanguageToCloud(
+  language: AppLanguageCode,
+  storeId?: string
+): Promise<void> {
+  const sid = resolveCloudStoreId(storeId);
+  const normalized = normalizeLanguageCode(language);
+  const nowIso = new Date().toISOString();
+  const scopedColPath = getScopedCollectionPath('settings', sid);
+  const generalPath = `${scopedColPath}/general`;
+
+  const generalPayload = cleanForFirestore({
+    language: normalized,
+    updatedAt: nowIso,
+  });
+
+  const storeProfilePatch = cleanForFirestore({
+    settings: {
+      language: normalized,
+    },
+    updatedAt: nowIso,
+  });
+
+  // 1) Persist directly under stores/{storeId}/settings.language
+  try {
+    await withFirestoreTimeout(
+      setDoc(doc(db, 'stores', sid), storeProfilePatch, { merge: true }),
+      'saving store language preference',
+      5000
+    );
+  } catch (storeErr) {
+    console.warn('Could not update stores/{storeId}/settings.language directly:', storeErr);
+  }
+
+  // 2) Persist in stores/{storeId}/settings/general for instant live settings sync
+  try {
+    const docRef = getScopedDocRef('settings', 'general', sid);
+    await withFirestoreTimeout(setDoc(docRef, generalPayload, { merge: true }), 'saving general language setting');
+  } catch (error) {
+    if (
+      !isQuotaExceededError(error) &&
+      isTransportStallError(error) &&
+      (typeof navigator === 'undefined' || navigator.onLine)
+    ) {
+      try {
+        await commitChunkViaRest(
+          scopedColPath,
+          [{ ...generalPayload, id: 'general' }],
+          (item) => cleanForFirestore(item),
+          'saving general language setting'
+        );
+        return;
+      } catch (restError) {
+        handleFirestoreError(restError, OperationType.WRITE, generalPath);
+        throw restError;
+      }
+    }
+    handleFirestoreError(error, OperationType.WRITE, generalPath);
+    throw error;
+  }
+}
+
+// ---------------- STORE CURRENCY SYNC (stores/{storeId}/settings.currency & settings/general) ----------------
+
+export function subscribeToStoreCurrency(
+  onUpdate: (currency: StoreCurrencyCode) => void,
+  onError?: (err: any) => void,
+  storeId?: string
+) {
+  const sid = resolveCloudStoreId(storeId);
+  const path = `${getScopedCollectionPath('settings', sid)}/general`;
+  const docRef = getScopedDocRef('settings', 'general', sid);
+  return onSnapshot(
+    docRef,
+    (snapshot) => {
+      if (snapshot.exists()) {
+        const data = snapshot.data() as Record<string, any>;
+        if (typeof data?.currency === 'string' && data.currency.trim()) {
+          onUpdate(normalizeCurrencyCode(data.currency));
+        }
+      }
+    },
+    (error) => {
+      handleFirestoreError(error, OperationType.GET, path);
+      if (onError) onError(error);
+    }
+  );
+}
+
+export async function saveStoreCurrencyToCloud(
+  currency: StoreCurrencyCode,
+  storeId?: string
+): Promise<void> {
+  const sid = resolveCloudStoreId(storeId);
+  const normalized = normalizeCurrencyCode(currency);
+  const nowIso = new Date().toISOString();
+  const scopedColPath = getScopedCollectionPath('settings', sid);
+  const generalPath = `${scopedColPath}/general`;
+
+  const generalPayload = cleanForFirestore({
+    currency: normalized,
+    updatedAt: nowIso,
+  });
+
+  const storeProfilePatch = cleanForFirestore({
+    settings: {
+      currency: normalized,
+    },
+    updatedAt: nowIso,
+  });
+
+  // 1) Persist directly under stores/{storeId}/settings.currency
+  try {
+    await withFirestoreTimeout(
+      setDoc(doc(db, 'stores', sid), storeProfilePatch, { merge: true }),
+      'saving store currency preference',
+      5000
+    );
+  } catch (storeErr) {
+    console.warn('Could not update stores/{storeId}/settings.currency directly:', storeErr);
+  }
+
+  // 2) Persist in stores/{storeId}/settings/general for instant live settings sync
+  try {
+    const docRef = getScopedDocRef('settings', 'general', sid);
+    await withFirestoreTimeout(setDoc(docRef, generalPayload, { merge: true }), 'saving general currency setting');
+  } catch (error) {
+    if (
+      !isQuotaExceededError(error) &&
+      isTransportStallError(error) &&
+      (typeof navigator === 'undefined' || navigator.onLine)
+    ) {
+      try {
+        await commitChunkViaRest(
+          scopedColPath,
+          [{ ...generalPayload, id: 'general' }],
+          (item) => cleanForFirestore(item),
+          'saving general currency setting'
+        );
+        return;
+      } catch (restError) {
+        handleFirestoreError(restError, OperationType.WRITE, generalPath);
+        throw restError;
+      }
+    }
+    handleFirestoreError(error, OperationType.WRITE, generalPath);
+    throw error;
+  }
+}
+
 // ---------------- USERS (STAFF & WORKERS) LIVE SYNC ----------------
 
 export function subscribeToUsers(
@@ -1809,6 +2049,8 @@ export async function createMerchantStoreProfile(params: {
   displayName?: string;
   storeName: string;
   businessType?: BusinessTypeId;
+  language?: AppLanguageCode;
+  currency?: StoreCurrencyCode;
   phone: string;
   kraPin?: string;
   mpesaShortcode?: string;
@@ -1866,6 +2108,10 @@ export async function createMerchantStoreProfile(params: {
     maxAllowedBranches: 1,
     taxMode: 'none',
     transactionWiseTax: false,
+    settings: {
+      language: normalizeLanguageCode(params.language),
+      currency: normalizeCurrencyCode(params.currency),
+    },
     ...(validReferrer
       ? {
           referredBy: validReferrer.storeId,

@@ -26,7 +26,8 @@ import {
   Zap,
   Gem,
   ShieldAlert,
-  QrCode
+  QrCode,
+  X
 } from 'lucide-react';
 import { Product, Supplier, Transaction } from '../../types';
 import { generateAutoBarcode, printBarcodeLabels, printBatchBarcodes } from '../../utils/barcode';
@@ -35,6 +36,7 @@ import { ImageGeneratorModal } from './ImageGeneratorModal';
 import { computeProductsPerformance } from '../../utils/salesPerformance';
 import { detectRepeatedItemPhotos, resolveRepeatedCatalogPhotos } from '../../utils/productImages';
 import { safeGetJSON, safeSetJSON } from '../../utils/safeStorage';
+import { useItemSettings } from '../../utils/itemSettings';
 
 interface ExcelSpreadsheetViewProps {
   products: Product[];
@@ -48,6 +50,7 @@ interface ExcelSpreadsheetViewProps {
   showLowStockOnly?: boolean;
   onToggleLowStockOnly?: () => void;
   onViewProductHistory?: (product: Product) => void;
+  activeStoreId?: string;
 }
 
 export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
@@ -62,7 +65,14 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
   showLowStockOnly = false,
   onToggleLowStockOnly,
   onViewProductHistory,
+  activeStoreId,
 }) => {
+  const [itemSettings] = useItemSettings(activeStoreId);
+  const showImageUI = itemSettings.enableProductImages;
+  const showBarcodeUI = itemSettings.barcodeScanning;
+  const autoZeroMargin = itemSettings.autoSetSellingPriceZeroMargin;
+  const canSellBelowCost = itemSettings.canSellBelowBuyingPrice;
+  const [gridError, setGridError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState<string>(() =>
     safeGetJSON<string>('retail_pos_excel_search', '', (val) => typeof val === 'string')
   );
@@ -130,7 +140,7 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
       const matchesSearch =
         p.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
         p.sku.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        p.barcode.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (showBarcodeUI && p.barcode.toLowerCase().includes(searchTerm.toLowerCase())) ||
         p.category.toLowerCase().includes(searchTerm.toLowerCase());
 
       const matchesCat = selectedCategory === 'All' || p.category === selectedCategory;
@@ -169,18 +179,41 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
   // Save Inline Edit
   const handleCellBlur = (p: Product) => {
     if (!editingCell) return;
+    setGridError(null);
 
     const { field } = editingCell;
     let updatedVal: any = editValue;
 
     if (field === 'costPrice' || field === 'sellingPrice' || field === 'stockQuantity' || field === 'minStockAlert') {
       const num = parseFloat(editValue);
-      updatedVal = isNaN(num) ? 0 : num;
+      updatedVal = isNaN(num) ? 0 : Math.max(0, num);
+    }
+
+    const nextCost = field === 'costPrice' ? Number(updatedVal) : Number(p.costPrice || 0);
+    let nextSelling = field === 'sellingPrice' ? Number(updatedVal) : Number(p.sellingPrice || 0);
+    let nextMargin = p.profitMargin;
+
+    if (autoZeroMargin && field === 'costPrice' && nextCost > 0) {
+      nextSelling = nextCost;
+      nextMargin = 0;
+    } else if (field === 'costPrice' || field === 'sellingPrice') {
+      if (nextCost > 0 && nextSelling < nextCost && !canSellBelowCost) {
+        setGridError(
+          `Blocked: Selling price (KSh ${nextSelling.toLocaleString()}) for "${p.name}" cannot be lower than buying price (KSh ${nextCost.toLocaleString()}).`
+        );
+        setEditingCell(null);
+        return;
+      }
+      if (nextCost > 0) {
+        nextMargin = Math.round(((nextSelling - nextCost) / nextCost) * 100);
+      }
     }
 
     const updatedProduct: Product = {
       ...p,
       [field]: updatedVal,
+      sellingPrice: nextSelling,
+      profitMargin: nextMargin,
       updatedAt: new Date().toISOString(),
     };
 
@@ -205,7 +238,8 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
       sizeCapacity: 'Standard',
       description: 'Added via Excel Grid',
       costPrice: 100,
-      sellingPrice: 150,
+      sellingPrice: autoZeroMargin ? 100 : 150,
+      profitMargin: autoZeroMargin ? 0 : 50,
       stockQuantity: 10,
       minStockAlert: 5,
       unit: 'pcs',
@@ -356,18 +390,20 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
               <span>Insert Row</span>
             </button>
 
-            <button
-              onClick={() => {
-                setSelectedProductForImage(null);
-                setShowImageModal(true);
-              }}
-              className="bg-purple-600 hover:bg-purple-500 text-white font-bold px-3 py-1.5 rounded-xl text-xs transition flex items-center gap-1.5 shadow-md shadow-purple-600/20"
-            >
-              <Sparkles className="w-4 h-4" />
-              <span>AI Generate Images</span>
-            </button>
+            {showImageUI && (
+              <button
+                onClick={() => {
+                  setSelectedProductForImage(null);
+                  setShowImageModal(true);
+                }}
+                className="bg-purple-600 hover:bg-purple-500 text-white font-bold px-3 py-1.5 rounded-xl text-xs transition flex items-center gap-1.5 shadow-md shadow-purple-600/20"
+              >
+                <Sparkles className="w-4 h-4" />
+                <span>AI Generate Images</span>
+              </button>
+            )}
 
-            {repeatedPhotoGroups.length > 0 && (
+            {showImageUI && repeatedPhotoGroups.length > 0 && (
               <button
                 onClick={handleFixRepeatedPhotos}
                 className="bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 font-bold px-3 py-1.5 rounded-xl text-xs transition flex items-center gap-1.5 shadow-md"
@@ -386,41 +422,43 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
               <span>Export CSV</span>
             </button>
 
-            <button
-              onClick={() => {
-                const targetProducts =
+            {showBarcodeUI && (
+              <button
+                onClick={() => {
+                  const targetProducts =
+                    selectedRowIds.size > 0
+                      ? filteredProducts.filter((p) => selectedRowIds.has(p.id))
+                      : filteredProducts;
+
+                  const batchData = targetProducts.map((p) => ({
+                    name: p.name,
+                    price: p.sellingPrice,
+                    barcode: p.barcode,
+                    count: 1,
+                  }));
+
+                  const labelTitle =
+                    selectedRowIds.size > 0
+                      ? `Selected Items QR Codes Catalog (${selectedRowIds.size} items)`
+                      : `All Filtered Items QR Codes Catalog (${filteredProducts.length} items)`;
+
+                  printBatchBarcodes(batchData, labelTitle, true);
+                }}
+                className="bg-sky-950 border border-sky-800 text-sky-200 hover:bg-sky-900 font-bold px-3 py-1.5 rounded-xl text-xs transition flex items-center gap-1.5 shadow-md cursor-pointer"
+                title={
                   selectedRowIds.size > 0
-                    ? filteredProducts.filter((p) => selectedRowIds.has(p.id))
-                    : filteredProducts;
-
-                const batchData = targetProducts.map((p) => ({
-                  name: p.name,
-                  price: p.sellingPrice,
-                  barcode: p.barcode,
-                  count: 1,
-                }));
-
-                const labelTitle =
-                  selectedRowIds.size > 0
-                    ? `Selected Items QR Codes Catalog (${selectedRowIds.size} items)`
-                    : `All Filtered Items QR Codes Catalog (${filteredProducts.length} items)`;
-
-                printBatchBarcodes(batchData, labelTitle, true);
-              }}
-              className="bg-sky-950 border border-sky-800 text-sky-200 hover:bg-sky-900 font-bold px-3 py-1.5 rounded-xl text-xs transition flex items-center gap-1.5 shadow-md cursor-pointer"
-              title={
-                selectedRowIds.size > 0
-                  ? `Print QR codes for ${selectedRowIds.size} selected rows`
-                  : `Print QR codes for all ${filteredProducts.length} items`
-              }
-            >
-              <QrCode className="w-4 h-4 text-sky-400" />
-              <span>
-                {selectedRowIds.size > 0
-                  ? `Print Selected QR Codes (${selectedRowIds.size})`
-                  : `Print All QR Codes`}
-              </span>
-            </button>
+                    ? `Print QR codes for ${selectedRowIds.size} selected rows`
+                    : `Print QR codes for all ${filteredProducts.length} items`
+                }
+              >
+                <QrCode className="w-4 h-4 text-sky-400" />
+                <span>
+                  {selectedRowIds.size > 0
+                    ? `Print Selected QR Codes (${selectedRowIds.size})`
+                    : `Print All QR Codes`}
+                </span>
+              </button>
+            )}
 
             {selectedRowIds.size > 0 && (
               <button
@@ -442,7 +480,7 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
               type="text"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Search formula (Name, SKU, Barcode)..."
+              placeholder={showBarcodeUI ? 'Search formula (Name, SKU, Barcode)...' : 'Search formula (Name, SKU, Category)...'}
               className="w-full bg-slate-900 border border-slate-800 text-slate-200 text-xs pl-9 pr-3 py-1.5 rounded-xl focus:outline-none focus:border-emerald-500 font-mono"
             />
           </div>
@@ -484,6 +522,23 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
           </div>
         </div>
 
+        {gridError && (
+          <div className="mx-3 mt-3 px-3.5 py-2.5 rounded-xl bg-rose-950/70 border border-rose-500/60 text-rose-200 text-xs flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+              <span className="font-semibold">{gridError}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setGridError(null)}
+              className="text-rose-300 hover:text-white p-0.5"
+              aria-label="Dismiss error"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
+
         {/* EXCEL GRID TABLE */}
         <div className="overflow-x-auto max-h-[calc(100vh-280px)] overflow-y-auto">
           <table className="w-full text-left text-xs border-collapse">
@@ -505,9 +560,11 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
                 </th>
 
                 {/* Col A: Image */}
-                <th className="p-2.5 w-14 text-center border-r border-slate-800 bg-slate-950">
-                  A [Img]
-                </th>
+                {showImageUI && (
+                  <th className="p-2.5 w-14 text-center border-r border-slate-800 bg-slate-950">
+                    A [Img]
+                  </th>
+                )}
 
                 {/* Col B: Name */}
                 <th
@@ -542,9 +599,11 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
                 </th>
 
                 {/* Col F: Barcode */}
-                <th className="p-2.5 min-w-[130px] border-r border-slate-800 bg-slate-950">
-                  F: Barcode
-                </th>
+                {showBarcodeUI && (
+                  <th className="p-2.5 min-w-[130px] border-r border-slate-800 bg-slate-950">
+                    F: Barcode
+                  </th>
+                )}
 
                 {/* Col G: Cost Price */}
                 <th
@@ -637,46 +696,48 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
                     </td>
 
                     {/* Col A: Image thumbnail & AI Wand button */}
-                    <td className="p-1.5 text-center border-r border-slate-800/80">
-                      <div className="relative group/img inline-block">
-                        {p.imageUrl ? (
-                          <img
-                            src={p.imageUrl}
-                            alt={p.name}
-                            referrerPolicy="no-referrer"
-                            className={`w-7 h-7 rounded-lg object-cover mx-auto border ${
-                              repeatedProductIds.has(p.id)
-                                ? 'border-amber-500 ring-1 ring-amber-500/50'
-                                : 'border-slate-700'
-                            }`}
-                          />
-                        ) : (
-                          <div className="w-7 h-7 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center text-slate-500 mx-auto">
-                            <ImageIcon className="w-3.5 h-3.5" />
-                          </div>
-                        )}
+                    {showImageUI && (
+                      <td className="p-1.5 text-center border-r border-slate-800/80">
+                        <div className="relative group/img inline-block">
+                          {p.imageUrl ? (
+                            <img
+                              src={p.imageUrl}
+                              alt={p.name}
+                              referrerPolicy="no-referrer"
+                              className={`w-7 h-7 rounded-lg object-cover mx-auto border ${
+                                repeatedProductIds.has(p.id)
+                                  ? 'border-amber-500 ring-1 ring-amber-500/50'
+                                  : 'border-slate-700'
+                              }`}
+                            />
+                          ) : (
+                            <div className="w-7 h-7 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center text-slate-500 mx-auto">
+                              <ImageIcon className="w-3.5 h-3.5" />
+                            </div>
+                          )}
 
-                        {repeatedProductIds.has(p.id) && (
-                          <div
-                            title="Repeated Photo: This photo is shared with another item in catalog"
-                            className="absolute -bottom-1 -left-1 bg-amber-600 text-slate-950 p-0.5 rounded-full shadow"
+                          {repeatedProductIds.has(p.id) && (
+                            <div
+                              title="Repeated Photo: This photo is shared with another item in catalog"
+                              className="absolute -bottom-1 -left-1 bg-amber-600 text-slate-950 p-0.5 rounded-full shadow"
+                            >
+                              <ShieldAlert className="w-2.5 h-2.5" />
+                            </div>
+                          )}
+
+                          <button
+                            title="Generate AI Studio Image for this item"
+                            onClick={() => {
+                              setSelectedProductForImage(p);
+                              setShowImageModal(true);
+                            }}
+                            className="absolute -top-1 -right-1 bg-purple-600 text-white p-0.5 rounded-full opacity-0 group-hover/img:opacity-100 transition shadow"
                           >
-                            <ShieldAlert className="w-2.5 h-2.5" />
-                          </div>
-                        )}
-
-                        <button
-                          title="Generate AI Studio Image for this item"
-                          onClick={() => {
-                            setSelectedProductForImage(p);
-                            setShowImageModal(true);
-                          }}
-                          className="absolute -top-1 -right-1 bg-purple-600 text-white p-0.5 rounded-full opacity-0 group-hover/img:opacity-100 transition shadow"
-                        >
-                          <Wand2 className="w-2.5 h-2.5" />
-                        </button>
-                      </div>
-                    </td>
+                            <Wand2 className="w-2.5 h-2.5" />
+                          </button>
+                        </div>
+                      </td>
+                    )}
 
                     {/* Col B: Item Name (Editable) */}
                     <td
@@ -763,24 +824,26 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
                     </td>
 
                     {/* Col F: Barcode (Editable) */}
-                    <td
-                      onClick={() => handleCellClick(p, 'barcode')}
-                      className="p-2.5 text-slate-300 border-r border-slate-800/80 cursor-pointer hover:bg-blue-950/40 transition text-[11px]"
-                    >
-                      {editingCell?.productId === p.id && editingCell.field === 'barcode' ? (
-                        <input
-                          type="text"
-                          autoFocus
-                          value={editValue}
-                          onChange={(e) => setEditValue(e.target.value)}
-                          onBlur={() => handleCellBlur(p)}
-                          onKeyDown={(e) => e.key === 'Enter' && handleCellBlur(p)}
-                          className="w-full bg-blue-950 border border-blue-500 text-white text-xs px-2 py-0.5 rounded focus:outline-none font-mono"
-                        />
-                      ) : (
-                        <span>{p.barcode}</span>
-                      )}
-                    </td>
+                    {showBarcodeUI && (
+                      <td
+                        onClick={() => handleCellClick(p, 'barcode')}
+                        className="p-2.5 text-slate-300 border-r border-slate-800/80 cursor-pointer hover:bg-blue-950/40 transition text-[11px]"
+                      >
+                        {editingCell?.productId === p.id && editingCell.field === 'barcode' ? (
+                          <input
+                            type="text"
+                            autoFocus
+                            value={editValue}
+                            onChange={(e) => setEditValue(e.target.value)}
+                            onBlur={() => handleCellBlur(p)}
+                            onKeyDown={(e) => e.key === 'Enter' && handleCellBlur(p)}
+                            className="w-full bg-blue-950 border border-blue-500 text-white text-xs px-2 py-0.5 rounded focus:outline-none font-mono"
+                          />
+                        ) : (
+                          <span>{p.barcode}</span>
+                        )}
+                      </td>
+                    )}
 
                     {/* Col G: Cost Price (Editable) */}
                     <td
@@ -808,7 +871,9 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
                     {/* Col H: Selling Price (Editable) */}
                     <td
                       onClick={() => handleCellClick(p, 'sellingPrice')}
-                      className="p-2.5 text-right font-bold text-emerald-400 border-r border-slate-800/80 cursor-pointer hover:bg-blue-950/40 transition"
+                      className={`p-2.5 text-right font-bold border-r border-slate-800/80 cursor-pointer hover:bg-blue-950/40 transition ${
+                        p.costPrice > 0 && p.sellingPrice < p.costPrice ? 'text-rose-400' : 'text-emerald-400'
+                      }`}
                     >
                       {editingCell?.productId === p.id && editingCell.field === 'sellingPrice' ? (
                         <input
@@ -824,7 +889,14 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
                           className="w-full bg-blue-950 border border-blue-500 text-white text-xs px-2 py-0.5 rounded focus:outline-none text-right font-mono"
                         />
                       ) : (
-                        <span>{p.sellingPrice % 1 === 0 ? Math.round(p.sellingPrice).toLocaleString() : p.sellingPrice.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</span>
+                        <div className="flex flex-col items-end">
+                          <span>{p.sellingPrice % 1 === 0 ? Math.round(p.sellingPrice).toLocaleString() : p.sellingPrice.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</span>
+                          {p.costPrice > 0 && p.sellingPrice < p.costPrice && (
+                            <span className="text-[9px] font-extrabold text-rose-300 bg-rose-950/80 border border-rose-500/40 px-1.5 rounded">
+                              Below Cost
+                            </span>
+                          )}
+                        </div>
                       )}
                     </td>
 
@@ -940,22 +1012,24 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
       </div>
 
       {/* AI IMAGE GENERATOR MODAL */}
-      <ImageGeneratorModal
-        isOpen={showImageModal}
-        onClose={() => {
-          setShowImageModal(false);
-          setSelectedProductForImage(null);
-        }}
-        product={selectedProductForImage}
-        allProducts={products}
-        onApplyImage={(prodId, imgUrl) => {
-          const target = products.find((p) => p.id === prodId);
-          if (target) {
-            onSaveProduct({ ...target, imageUrl: imgUrl });
-          }
-        }}
-        onBulkApplyImages={handleBulkImagesApplied}
-      />
+      {showImageUI && (
+        <ImageGeneratorModal
+          isOpen={showImageModal}
+          onClose={() => {
+            setShowImageModal(false);
+            setSelectedProductForImage(null);
+          }}
+          product={selectedProductForImage}
+          allProducts={products}
+          onApplyImage={(prodId, imgUrl) => {
+            const target = products.find((p) => p.id === prodId);
+            if (target) {
+              onSaveProduct({ ...target, imageUrl: imgUrl });
+            }
+          }}
+          onBulkApplyImages={handleBulkImagesApplied}
+        />
+      )}
     </div>
   );
 };

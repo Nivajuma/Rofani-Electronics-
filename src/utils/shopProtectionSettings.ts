@@ -226,7 +226,10 @@ export interface ProductExpiryInfo {
   formattedDate: string;
 }
 
-export function evaluateProductExpiry(expiryDate?: string): ProductExpiryInfo {
+export function evaluateProductExpiry(
+  expiryDate?: string,
+  alertDaysThreshold: number = 30
+): ProductExpiryInfo {
   if (!expiryDate || typeof expiryDate !== 'string' || !/^\d{4}-\d{2}-\d{2}/.test(expiryDate.trim())) {
     return { status: 'none', daysRemaining: null, formattedDate: '' };
   }
@@ -235,6 +238,11 @@ export function evaluateProductExpiry(expiryDate?: string): ProductExpiryInfo {
   if (!y || !m || !d) {
     return { status: 'none', daysRemaining: null, formattedDate: '' };
   }
+  const parsedThreshold = Number(alertDaysThreshold);
+  const thresholdDays = Number.isFinite(parsedThreshold)
+    ? Math.max(0, Math.min(365, Math.round(parsedThreshold)))
+    : 30;
+
   const now = new Date();
   const todayMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
   const expiryMidnight = new Date(y, m - 1, d).getTime();
@@ -249,7 +257,7 @@ export function evaluateProductExpiry(expiryDate?: string): ProductExpiryInfo {
   if (diffDays < 0) {
     return { status: 'expired', daysRemaining: diffDays, formattedDate };
   }
-  if (diffDays <= 30) {
+  if (diffDays <= thresholdDays) {
     return { status: 'expiring_soon', daysRemaining: diffDays, formattedDate };
   }
   return { status: 'ok', daysRemaining: diffDays, formattedDate };

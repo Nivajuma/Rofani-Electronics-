@@ -33,6 +33,7 @@ import { formatKSh } from '../../utils/currency';
 import { calculateProfitMargin } from '../../utils/margin';
 import { ProductQrCodeModal } from './ProductQrCodeModal';
 import { exportItemAuditReportPDF } from '../../utils/pdfGenerator';
+import { useItemSettings } from '../../utils/itemSettings';
 import QRCode from 'qrcode';
 import {
   ResponsiveContainer,
@@ -60,6 +61,7 @@ interface ItemAuditMiniPageProps {
     notes: string
   ) => void;
   onAdjustStockQuantity?: (productId: string, newQuantity: number, reason: string) => void;
+  activeStoreId?: string;
 }
 
 export const ItemAuditMiniPage: React.FC<ItemAuditMiniPageProps> = ({
@@ -71,7 +73,12 @@ export const ItemAuditMiniPage: React.FC<ItemAuditMiniPageProps> = ({
   onBack,
   onAddRestock,
   onAdjustStockQuantity,
+  activeStoreId,
 }) => {
+  const [itemSettings] = useItemSettings(activeStoreId);
+  const showImageUI = itemSettings.enableProductImages;
+  const showBarcodeUI = itemSettings.barcodeScanning;
+  const autoZeroMargin = itemSettings.autoSetSellingPriceZeroMargin;
   const [activeTab, setActiveTab] = useState<'overview' | 'batches' | 'history'>('overview');
   const [copiedLink, setCopiedLink] = useState(false);
   const [showQuickRestockForm, setShowQuickRestockForm] = useState(false);
@@ -245,7 +252,7 @@ export const ItemAuditMiniPage: React.FC<ItemAuditMiniPageProps> = ({
     const text = encodeURIComponent(
       `*STOCK AUDIT REPORT - ${storeName}*\n` +
       `Item: *${product.name}*\n` +
-      `SKU: ${product.sku} | Barcode: ${product.barcode}\n` +
+      `SKU: ${product.sku}${showBarcodeUI && product.barcode ? ` | Barcode: ${product.barcode}` : ''}\n` +
       `Current Stock: *${product.stockQuantity} ${product.unit}* (${isOutOfStock ? 'OUT OF STOCK' : isLowStock ? 'LOW STOCK ALERT' : 'IN STOCK'})\n` +
       `Price: ${formatKSh(product.sellingPrice)} (Cost: ${formatKSh(product.costPrice)})\n` +
       `Total Sold: ${totalUnitsSold} ${product.unit} | Batches Restocked: ${productBatches.length}\n` +
@@ -370,13 +377,15 @@ export const ItemAuditMiniPage: React.FC<ItemAuditMiniPageProps> = ({
             )}
             <span>Print Audit Report</span>
           </button>
-          <button
-            onClick={() => setShowQrModal(true)}
-            className="p-2 bg-slate-800 hover:bg-slate-700 text-sky-400 rounded-xl transition cursor-pointer"
-            title="View Shelf QR Tag"
-          >
-            <QrCode className="w-4 h-4" />
-          </button>
+          {showBarcodeUI && (
+            <button
+              onClick={() => setShowQrModal(true)}
+              className="p-2 bg-slate-800 hover:bg-slate-700 text-sky-400 rounded-xl transition cursor-pointer"
+              title="View Shelf QR Tag"
+            >
+              <QrCode className="w-4 h-4" />
+            </button>
+          )}
           <button
             onClick={handlePrintTag}
             className="p-2 bg-slate-800 hover:bg-slate-700 text-emerald-400 rounded-xl transition cursor-pointer"
@@ -425,7 +434,7 @@ export const ItemAuditMiniPage: React.FC<ItemAuditMiniPageProps> = ({
           <div className="flex flex-col sm:flex-row items-start sm:items-center gap-5">
             {/* Product Photo */}
             <div className="relative shrink-0 mx-auto sm:mx-0">
-              {product.imageUrl ? (
+              {showImageUI && product.imageUrl ? (
                 <img
                   src={product.imageUrl}
                   alt={product.name}
@@ -471,9 +480,11 @@ export const ItemAuditMiniPage: React.FC<ItemAuditMiniPageProps> = ({
                 <span className="px-2.5 py-1 rounded-xl bg-slate-950 border border-slate-800 text-slate-300">
                   SKU: <strong className="text-white">{product.sku}</strong>
                 </span>
-                <span className="px-2.5 py-1 rounded-xl bg-slate-950 border border-slate-800 text-slate-300">
-                  Barcode: <strong className="text-sky-300">{product.barcode}</strong>
-                </span>
+                {showBarcodeUI && product.barcode && (
+                  <span className="px-2.5 py-1 rounded-xl bg-slate-950 border border-slate-800 text-slate-300">
+                    Barcode: <strong className="text-sky-300">{product.barcode}</strong>
+                  </span>
+                )}
                 {product.supplierName && (
                   <span className="px-2.5 py-1 rounded-xl bg-slate-950 border border-slate-800 text-slate-300 flex items-center gap-1">
                     <Truck className="w-3 h-3 text-slate-400" />
@@ -1150,6 +1161,33 @@ export const ItemAuditMiniPage: React.FC<ItemAuditMiniPageProps> = ({
                 />
               </div>
 
+              {(() => {
+                const parsedCost = parseFloat(restockCost) || 0;
+                if (parsedCost <= 0) return null;
+                if (autoZeroMargin) {
+                  return (
+                    <div className="p-2.5 bg-indigo-950/60 border border-indigo-500/40 rounded-xl text-[11px] text-indigo-200 flex items-center gap-2">
+                      <TrendingUp className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                      <span>
+                        Auto 0% Margin active: Saving will set Selling Price to{' '}
+                        <strong>{formatKSh(parsedCost)}</strong>.
+                      </span>
+                    </div>
+                  );
+                }
+                if (product.sellingPrice > 0 && parsedCost > product.sellingPrice) {
+                  return (
+                    <div className="p-2.5 bg-amber-950/60 border border-amber-500/50 rounded-xl text-[11px] text-amber-200 flex items-center gap-2">
+                      <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                      <span>
+                        Warning: Unit cost ({formatKSh(parsedCost)}) exceeds current selling price ({formatKSh(product.sellingPrice)}). Update selling price to avoid negative profit.
+                      </span>
+                    </div>
+                  );
+                }
+                return null;
+              })()}
+
               <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 flex items-center justify-between font-mono">
                 <span className="text-slate-400">Total Batch Investment:</span>
                 <strong className="text-emerald-400 text-sm">
@@ -1264,7 +1302,7 @@ export const ItemAuditMiniPage: React.FC<ItemAuditMiniPageProps> = ({
       )}
 
       {/* MODAL: QR CODE DISPLAY & HIGH-RES PNG EXPORT */}
-      {showQrModal && (
+      {showBarcodeUI && showQrModal && (
         <ProductQrCodeModal
           isOpen={showQrModal}
           onClose={() => setShowQrModal(false)}

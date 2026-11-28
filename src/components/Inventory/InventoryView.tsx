@@ -87,6 +87,7 @@ import {
 import { BarcodeScanHistoryModal, BarcodeScanHistoryView } from './BarcodeScanHistoryModal';
 import { computeProductsPerformance, computePerformanceSummary, ProductPerformanceInfo } from '../../utils/salesPerformance';
 import { useShopProtectionSettings, evaluateProductExpiry } from '../../utils/shopProtectionSettings';
+import { useItemSettings } from '../../utils/itemSettings';
 import {
   findConflictingProductWithImage,
   detectRepeatedItemPhotos,
@@ -100,6 +101,7 @@ import { batchSaveProductsToCloud } from '../../lib/cloudSync';
 import { LowStockTrendsCard } from './LowStockTrendsCard';
 import { BulkEditProductsModal } from './BulkEditProductsModal';
 import { InventoryAuditorModal } from './InventoryAuditorModal';
+import { useI18n } from '../../utils/i18n';
 
 interface InventoryViewProps {
   products: Product[];
@@ -179,21 +181,36 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   activeStoreId,
   businessType = DEFAULT_BUSINESS_TYPE,
 }) => {
+  const { dir, t } = useI18n();
   const businessTypeConfig = getBusinessTypeConfig(businessType);
   const [shopControls] = useShopProtectionSettings(activeStoreId);
+  const [itemSettings] = useItemSettings(activeStoreId);
+  const showImageUI = itemSettings.enableProductImages;
+  const showBarcodeUI = itemSettings.barcodeScanning;
+  const showExpiryUI = itemSettings.trackExpiryDate;
+  const expiryAlertDays = itemSettings.expiryAlertDays;
+  const autoZeroMargin = itemSettings.autoSetSellingPriceZeroMargin;
+  const canSellBelowCost = itemSettings.canSellBelowBuyingPrice;
   const [showExpiringOnly, setShowExpiringOnly] = useState(false);
+
+  useEffect(() => {
+    if (!showExpiryUI && showExpiringOnly) {
+      setShowExpiringOnly(false);
+    }
+  }, [showExpiryUI, showExpiringOnly]);
 
   const expiringSummary = React.useMemo(() => {
     let expired = 0;
     let expiringSoon = 0;
+    if (!showExpiryUI) return { expired: 0, expiringSoon: 0, total: 0 };
     products.forEach((p) => {
       if (!p.expiryDate) return;
-      const exp = evaluateProductExpiry(p.expiryDate);
+      const exp = evaluateProductExpiry(p.expiryDate, expiryAlertDays);
       if (exp.status === 'expired') expired++;
       else if (exp.status === 'expiring_soon') expiringSoon++;
     });
     return { expired, expiringSoon, total: expired + expiringSoon };
-  }, [products]);
+  }, [products, showExpiryUI, expiryAlertDays]);
 
   const [searchTerm, setSearchTerm] = useState(() =>
     safeGetJSON<string>('retail_pos_inv_search', '', (val) => typeof val === 'string')
@@ -336,12 +353,25 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     safeSetJSON('retail_pos_inv_show_restock_modal', showPredictiveRestockModal);
   }, [showPredictiveRestockModal]);
 
-  const handleQuickRestockProduct = (productId: string, addedQuantity: number, reason: string = 'Store manager quick restock update') => {
+  const handleQuickRestockProduct = (
+    productId: string,
+    addedQuantity: number,
+    reason: string = 'Store manager quick restock update',
+    updatedUnitCost?: number
+  ) => {
     const existing = products.find((p) => p.id === productId);
     if (!existing) return;
     const currentStock = Number(existing.stockQuantity ?? existing.stock ?? 0);
+    const effectiveUnitCost =
+      updatedUnitCost !== undefined && !isNaN(updatedUnitCost)
+        ? Math.max(0, updatedUnitCost)
+        : Number(existing.costPrice || existing.buyingPrice || 0);
+    const shouldZeroMargin = autoZeroMargin && effectiveUnitCost > 0;
     const updatedProduct: Product = {
       ...existing,
+      costPrice: effectiveUnitCost > 0 ? effectiveUnitCost : existing.costPrice,
+      sellingPrice: shouldZeroMargin ? effectiveUnitCost : existing.sellingPrice,
+      profitMargin: shouldZeroMargin ? 0 : existing.profitMargin,
       stockQuantity: currentStock + addedQuantity,
       stock: currentStock + addedQuantity,
       updatedAt: new Date().toISOString()
@@ -353,7 +383,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
       onAddRestock(
         existing.id,
         addedQuantity,
-        existing.costPrice || existing.buyingPrice || 0,
+        effectiveUnitCost,
         existing.supplierName || 'General Stock Adjustment',
         `BATCH-${Date.now().toString().slice(-6)}`,
         `Reason: ${reason}`
@@ -364,8 +394,19 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   // Interactive Quick Restock Modal States
   const [quickRestockModalProduct, setQuickRestockModalProduct] = useState<Product | null>(null);
   const [quickRestockAddAmount, setQuickRestockAddAmount] = useState<string>('10');
+  const [quickRestockUnitCost, setQuickRestockUnitCost] = useState<string>('');
   const [quickRestockReason, setQuickRestockReason] = useState<string>('Supplier Delivery');
+  const [quickRestockError, setQuickRestockError] = useState<string | null>(null);
   const [quickRestockSuccessToast, setQuickRestockSuccessToast] = useState<string | null>(null);
+  const [productFormError, setProductFormError] = useState<string | null>(null);
+
+  const openQuickRestockModal = (p: Product) => {
+    setQuickRestockModalProduct(p);
+    setQuickRestockAddAmount('10');
+    setQuickRestockUnitCost(String(p.costPrice || p.buyingPrice || ''));
+    setQuickRestockReason('Supplier Delivery');
+    setQuickRestockError(null);
+  };
 
   const handleSaveQuickRestockModal = (e: React.FormEvent) => {
     e.preventDefault();
@@ -373,11 +414,35 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     const addQty = parseInt(quickRestockAddAmount, 10);
     if (isNaN(addQty) || addQty <= 0) return;
 
-    handleQuickRestockProduct(quickRestockModalProduct.id, addQty, quickRestockReason);
-    setQuickRestockSuccessToast(`Successfully adjusted stock by +${addQty} ${quickRestockModalProduct.unit} for "${quickRestockModalProduct.name}" (Reason: ${quickRestockReason}). Logged to audit trail.`);
+    const parsedCost = parseFloat(quickRestockUnitCost);
+    const effectiveCost = !isNaN(parsedCost) && parsedCost >= 0
+      ? parsedCost
+      : Number(quickRestockModalProduct.costPrice || quickRestockModalProduct.buyingPrice || 0);
+
+    if (
+      !autoZeroMargin &&
+      !canSellBelowCost &&
+      effectiveCost > 0 &&
+      quickRestockModalProduct.sellingPrice > 0 &&
+      effectiveCost > quickRestockModalProduct.sellingPrice
+    ) {
+      setQuickRestockError(
+        `Blocked: Buying cost (KSh ${effectiveCost.toLocaleString()}) cannot exceed selling price (KSh ${quickRestockModalProduct.sellingPrice.toLocaleString()}) while "Can Sell Below Buying Price" is OFF.`
+      );
+      return;
+    }
+
+    handleQuickRestockProduct(quickRestockModalProduct.id, addQty, quickRestockReason, effectiveCost);
+    setQuickRestockSuccessToast(
+      `Successfully adjusted stock by +${addQty} ${quickRestockModalProduct.unit} for "${quickRestockModalProduct.name}"${
+        autoZeroMargin && effectiveCost > 0 ? ` (Selling price auto-set to KSh ${effectiveCost.toLocaleString()} at 0% margin)` : ''
+      }.`
+    );
     setTimeout(() => setQuickRestockSuccessToast(null), 5000);
     setQuickRestockModalProduct(null);
     setQuickRestockAddAmount('10');
+    setQuickRestockUnitCost('');
+    setQuickRestockError(null);
     setQuickRestockReason('Supplier Delivery');
   };
 
@@ -1445,11 +1510,18 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     setEditingProduct((prev) => {
       if (!prev) return prev;
       const nextCost = hasCost ? Math.round(parsedCost) : prev.costPrice;
-      const nextSelling = hasSelling ? Math.round(parsedSelling) : prev.sellingPrice;
       const numericCost = Number(nextCost) || 0;
+      const nextSelling =
+        autoZeroMargin && hasCost && numericCost > 0
+          ? numericCost
+          : hasSelling
+          ? Math.round(parsedSelling)
+          : prev.sellingPrice;
       const numericSelling = Number(nextSelling) || 0;
       const nextMargin =
-        numericCost > 0 && numericSelling > 0
+        autoZeroMargin && numericCost > 0
+          ? 0
+          : numericCost > 0 && numericSelling > 0
           ? Math.round(((numericSelling - numericCost) / numericCost) * 100)
           : prev.profitMargin;
 
@@ -1470,7 +1542,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
         profitMargin: nextMargin,
         description: aiModalReview.notes.trim() || prev.description || '',
         imageUrl:
-          aiModalReview.attachThumbnail && aiModalReview.thumbnailDataUrl
+          showImageUI && aiModalReview.attachThumbnail && aiModalReview.thumbnailDataUrl
             ? aiModalReview.thumbnailDataUrl
             : prev.imageUrl,
       };
@@ -2035,7 +2107,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     const trimmed = rawQuery.trim().toLowerCase();
     if (!trimmed) return { matched: true, score: 0 };
 
-    const rawBarcode = (p.barcode || '').toLowerCase();
+    const rawBarcode = showBarcodeUI ? (p.barcode || '').toLowerCase() : '';
     const rawSku = (p.sku || '').toLowerCase();
     const rawName = (p.name || '').toLowerCase();
     const rawCat = (p.category || '').toLowerCase();
@@ -2045,10 +2117,10 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     const rawSupplier = (p.supplierName || '').toLowerCase();
 
     // 1. Exact Barcode or SKU match (Highest priority - instant barcode scanner hit)
-    if (rawBarcode === trimmed || rawSku === trimmed) {
+    if ((showBarcodeUI && rawBarcode === trimmed) || rawSku === trimmed) {
       return { matched: true, score: 1000 };
     }
-    if (rawBarcode.startsWith(trimmed) || rawSku.startsWith(trimmed)) {
+    if ((showBarcodeUI && rawBarcode.startsWith(trimmed)) || rawSku.startsWith(trimmed)) {
       return { matched: true, score: 800 };
     }
 
@@ -2063,7 +2135,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     // 3. Punctuation-agnostic alphanumeric match (e.g. "US001" matches "US-001", "typec" matches "type-c", "256gb" matches "256 gb")
     const normQuery = normalizeSearchText(trimmed);
     if (normQuery.length >= 2) {
-      if (normalizeSearchText(rawBarcode).includes(normQuery) || normalizeSearchText(rawSku).includes(normQuery)) {
+      if ((showBarcodeUI && normalizeSearchText(rawBarcode).includes(normQuery)) || normalizeSearchText(rawSku).includes(normQuery)) {
         return { matched: true, score: 400 };
       }
       if (normalizeSearchText(rawName).includes(normQuery)) {
@@ -2095,7 +2167,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     }
 
     return { matched: false, score: 0 };
-  }, []);
+  }, [showBarcodeUI]);
 
   // Products matching search across ALL categories (to detect if category filter is hiding items)
   const globalSearchMatches = React.useMemo(() => {
@@ -2118,8 +2190,8 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
       const matchesCat = selectedCategory === 'All' || p.category === selectedCategory;
       const matchesSubCat = selectedSubcategory === 'All' || p.subcategory === selectedSubcategory;
       const matchesLowStock = !showLowStockOnly || p.stockQuantity <= p.minStockAlert;
-      const matchesExpiring = !showExpiringOnly || (() => {
-        const exp = evaluateProductExpiry(p.expiryDate);
+      const matchesExpiring = !showExpiryUI || !showExpiringOnly || (() => {
+        const exp = evaluateProductExpiry(p.expiryDate, expiryAlertDays);
         return exp.status === 'expired' || exp.status === 'expiring_soon';
       })();
       const matchesOutOfStockPerm = hasWorkerPermission(currentUser, 'canViewOutOfStock') || p.stockQuantity > 0;
@@ -2186,6 +2258,9 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     selectedCategory,
     selectedSubcategory,
     showLowStockOnly,
+    showExpiringOnly,
+    showExpiryUI,
+    expiryAlertDays,
     currentUser,
     selectedSupplier,
     priceRange,
@@ -2287,6 +2362,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     setAiModalReview(null);
     setAiIdentifyError(null);
     setAiIdentifyResult(null);
+    setProductFormError(null);
 
     setEditingProduct({
       id: `prod-${Date.now()}`,
@@ -2299,7 +2375,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
       description: '',
       costPrice: '' as any,
       sellingPrice: '' as any,
-      profitMargin: 30,
+      profitMargin: autoZeroMargin ? 0 : 30,
       stockQuantity: '' as any,
       minStockAlert: '' as any,
       unit: businessTypeConfig.defaultUnit || 'pcs',
@@ -2330,11 +2406,12 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     setAiModalReview(null);
     setAiIdentifyError(null);
     setAiIdentifyResult(null);
+    setProductFormError(null);
     setEditingProduct({
       ...p,
       costPrice: (p.costPrice === 0 || (p.costPrice as any) === '0' ? '' : p.costPrice) as any,
       sellingPrice: (p.sellingPrice === 0 || (p.sellingPrice as any) === '0' ? '' : p.sellingPrice) as any,
-      profitMargin: p.profitMargin !== undefined ? p.profitMargin : (p.costPrice && p.costPrice > 0 ? Math.round(((p.sellingPrice - p.costPrice) / p.costPrice) * 100) : 30),
+      profitMargin: p.profitMargin !== undefined ? p.profitMargin : (p.costPrice && p.costPrice > 0 ? Math.round(((p.sellingPrice - p.costPrice) / p.costPrice) * 100) : (autoZeroMargin ? 0 : 30)),
       stockQuantity: (p.stockQuantity === 0 || (p.stockQuantity as any) === '0' ? '' : p.stockQuantity) as any,
       minStockAlert: (p.minStockAlert === 0 || (p.minStockAlert as any) === '0' ? '' : p.minStockAlert) as any,
     });
@@ -2409,18 +2486,42 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
       ? `${finalProdName} (${finalCat} - ${finalSub}). Saved to inventory.`
       : cleanProdDesc;
 
+    const finalCost = parseNum(editingProduct.costPrice, 0);
+    const finalSelling =
+      autoZeroMargin && finalCost > 0 && (!editingProduct.sellingPrice || Number(editingProduct.sellingPrice) <= 0)
+        ? finalCost
+        : parseNum(editingProduct.sellingPrice, 0);
+
+    if (!canSellBelowCost && finalCost > 0 && finalSelling > 0 && finalSelling < finalCost) {
+      setProductFormError(
+        `Blocked: Selling price (KSh ${finalSelling.toLocaleString()}) cannot be lower than buying price (KSh ${finalCost.toLocaleString()}) while "Can Sell Below Buying Price" is OFF.`
+      );
+      return;
+    }
+    setProductFormError(null);
+
+    const parsedMarginNum = parseFloat(String(editingProduct.profitMargin));
+    const safeDefaultMargin = autoZeroMargin ? 0 : 30;
+    const computedMargin =
+      finalCost > 0 && finalSelling > 0
+        ? Math.round(((finalSelling - finalCost) / finalCost) * 100)
+        : Number.isFinite(parsedMarginNum)
+        ? parsedMarginNum
+        : safeDefaultMargin;
+
     const nowIso = new Date().toISOString();
     const prodToSave: Product = {
       ...(editingProduct as Product),
+      barcode: (editingProduct.barcode || editingProduct.sku || generateAutoBarcode()),
       name: finalProdName,
       description: finalProdDesc,
       category: finalCat,
       subcategory: finalSub,
       supplierId: finalSupplierId,
       supplierName: finalSupplierName,
-      costPrice: parseNum(editingProduct.costPrice, 0),
-      sellingPrice: parseNum(editingProduct.sellingPrice, 0),
-      profitMargin: parseNum(editingProduct.profitMargin, 30),
+      costPrice: finalCost,
+      sellingPrice: finalSelling,
+      profitMargin: computedMargin,
       stockQuantity: parseIntNum(editingProduct.stockQuantity, 0),
       minStockAlert: parseIntNum(editingProduct.minStockAlert, 0),
       expiryDate: editingProduct.expiryDate ? editingProduct.expiryDate.trim() : undefined,
@@ -2432,6 +2533,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     onSaveProduct(prodToSave);
     setShowModal(false);
     setEditingProduct(null);
+    setProductFormError(null);
     setIsCustomCategoryInput(false);
     setCustomCategoryName('');
     setIsCustomSubcategoryInput(false);
@@ -2451,7 +2553,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   };
 
   return (
-    <div className="max-w-7xl mx-auto w-full px-1 sm:px-6 lg:px-8 py-2 sm:py-6 space-y-4 sm:space-y-6 flex-1 flex flex-col min-h-full pb-2 lg:pb-6">
+    <div dir={dir} className="max-w-7xl mx-auto w-full px-1 sm:px-6 lg:px-8 py-2 sm:py-6 space-y-4 sm:space-y-6 flex-1 flex flex-col min-h-full pb-2 lg:pb-6">
       {/* Top Banner & View Mode Selector */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-slate-900 border border-slate-800 p-4 rounded-2xl shadow-lg">
         <div className="flex items-center gap-3">
@@ -2460,7 +2562,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           </div>
           <div>
             <h2 className="font-bold text-lg text-slate-100 flex items-center gap-2">
-              <span>Stock & Inventory Catalog</span>
+              <span>{t('inventory.heading')}</span>
             </h2>
             <p className="text-xs text-slate-400">
               Manage 300+ items in Excel Grid layout or standard table view with AI Image Generation
@@ -2583,15 +2685,17 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
             </button>
           )}
 
-          <button
-            id="btn-inventory-open-scan-history-modal"
-            onClick={() => setShowScanHistoryModal(true)}
-            className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold px-3.5 py-2 rounded-xl text-xs transition flex items-center gap-1.5 shadow-lg"
-            title="Open Barcode Scanner History & Audit Log Modal"
-          >
-            <Barcode className="w-4 h-4 text-sky-400" />
-            <span>Scan Log ({scanLogs.length})</span>
-          </button>
+          {showBarcodeUI && (
+            <button
+              id="btn-inventory-open-scan-history-modal"
+              onClick={() => setShowScanHistoryModal(true)}
+              className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold px-3.5 py-2 rounded-xl text-xs transition flex items-center gap-1.5 shadow-lg"
+              title="Open Barcode Scanner History & Audit Log Modal"
+            >
+              <Barcode className="w-4 h-4 text-sky-400" />
+              <span>Scan Log ({scanLogs.length})</span>
+            </button>
+          )}
 
           <button
             id="btn-inventory-import-sheet"
@@ -2601,7 +2705,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
             <FileSpreadsheet className="w-4 h-4" /> Import Sheet
           </button>
 
-          {hasWorkerPermission(currentUser, 'canGenerateBarcode') && (
+          {showBarcodeUI && hasWorkerPermission(currentUser, 'canGenerateBarcode') && (
             <button
               id="btn-inventory-print-barcodes"
               onClick={() => {
@@ -2698,7 +2802,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                 onClick={() => handleOpenNewModal()}
                 className="bg-sky-600 hover:bg-sky-500 text-white font-bold px-3.5 py-2 rounded-xl text-xs transition flex items-center gap-1.5 shadow-lg shadow-sky-600/20"
               >
-                <Plus className="w-4 h-4" /> Add Item
+                <Plus className="w-4 h-4" /> {t('inventory.addNewItem')}
               </button>
 
               <button
@@ -2800,21 +2904,23 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                 key={item.id || idx}
                 className="bg-slate-900/90 border border-slate-800 hover:border-slate-700 rounded-xl p-3 flex items-start gap-3 relative group shadow-sm"
               >
-                <div 
-                  onClick={() => {
-                    if (item.imageUrl) {
-                      setPreviewImage({ url: item.imageUrl, title: item.name });
-                    }
-                  }}
-                  className="w-14 h-14 rounded-lg bg-slate-950 border border-slate-800 overflow-hidden shrink-0 flex items-center justify-center cursor-pointer hover:opacity-80 transition"
-                  title="Click to view photo"
-                >
-                  {item.imageUrl ? (
-                    <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover" />
-                  ) : (
-                    <Package className="w-5 h-5 text-slate-600" />
-                  )}
-                </div>
+                {showImageUI && (
+                  <div
+                    onClick={() => {
+                      if (item.imageUrl) {
+                        setPreviewImage({ url: item.imageUrl, title: item.name });
+                      }
+                    }}
+                    className="w-14 h-14 rounded-lg bg-slate-950 border border-slate-800 overflow-hidden shrink-0 flex items-center justify-center cursor-pointer hover:opacity-80 transition"
+                    title="Click to view photo"
+                  >
+                    {item.imageUrl ? (
+                      <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover" />
+                    ) : (
+                      <Package className="w-5 h-5 text-slate-600" />
+                    )}
+                  </div>
+                )}
                 <div className="flex-1 min-w-0 space-y-1">
                   <div>
                     <input
@@ -2911,7 +3017,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
       )}
 
       {/* Repeated Photos Alert Banner */}
-      {totalItemsWithRepeatedPhotos > 0 && (
+      {showImageUI && totalItemsWithRepeatedPhotos > 0 && (
         <div className="bg-gradient-to-r from-purple-950/90 via-slate-900 to-indigo-950/90 border border-purple-500/80 p-4 rounded-2xl shadow-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-purple-200">
           <div className="flex items-center gap-3">
             <div className="p-2.5 bg-purple-500/20 text-purple-400 rounded-xl border border-purple-500/40 shrink-0">
@@ -3010,6 +3116,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           showLowStockOnly={showLowStockOnly}
           onToggleLowStockOnly={() => setShowLowStockOnly(!showLowStockOnly)}
           onViewProductHistory={onViewProductHistory}
+          activeStoreId={activeStoreId}
         />
       ) : inventoryViewMode === 'scan_history' ? (
         <BarcodeScanHistoryView
@@ -3226,7 +3333,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                 <input
                   ref={searchInputRef}
                   type="text"
-                  placeholder="Search by Name, SKU, Barcode, Size, Category... (Press '/')"
+                  placeholder={showBarcodeUI ? "Search by Name, SKU, Barcode, Size, Category... (Press '/')" : "Search by Name, SKU, Size, Category... (Press '/')"}
                   value={searchTerm}
                   onFocus={() => {
                     setIsSearchFocused(true);
@@ -3314,12 +3421,14 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                               }}
                             >
                               <div className="flex items-center gap-2.5 min-w-0">
-                                {p.imageUrl ? (
-                                  <img src={p.imageUrl} alt={p.name} className="w-9 h-9 rounded-lg object-cover bg-slate-950 shrink-0 border border-slate-800" />
-                                ) : (
-                                  <div className="w-9 h-9 rounded-lg bg-slate-950 border border-slate-800 flex items-center justify-center text-slate-500 shrink-0">
-                                    <Package className="w-4 h-4" />
-                                  </div>
+                                {showImageUI && (
+                                  p.imageUrl ? (
+                                    <img src={p.imageUrl} alt={p.name} className="w-9 h-9 rounded-lg object-cover bg-slate-950 shrink-0 border border-slate-800" />
+                                  ) : (
+                                    <div className="w-9 h-9 rounded-lg bg-slate-950 border border-slate-800 flex items-center justify-center text-slate-500 shrink-0">
+                                      <Package className="w-4 h-4" />
+                                    </div>
+                                  )
                                 )}
                                 <div className="min-w-0">
                                   <div className="font-bold text-slate-100 text-xs truncate">{p.name}</div>
@@ -3327,8 +3436,12 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                                     <span>SKU: {p.sku}</span>
                                     <span>•</span>
                                     <span className="text-sky-300">{p.category} {p.sizeCapacity ? `(${p.sizeCapacity})` : ''}</span>
-                                    <span>•</span>
-                                    <span>Barcode: {p.barcode}</span>
+                                    {showBarcodeUI && (
+                                      <>
+                                        <span>•</span>
+                                        <span>Barcode: {p.barcode}</span>
+                                      </>
+                                    )}
                                   </div>
                                 </div>
                               </div>
@@ -3572,7 +3685,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                 All Items ({products.length})
               </button>
 
-              {shopControls.enableExpiryAlerts && expiringSummary.total > 0 && (
+              {showExpiryUI && expiringSummary.total > 0 && (
                 <button
                   type="button"
                   onClick={() => setShowExpiringOnly((prev) => !prev)}
@@ -4164,7 +4277,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                                     )}
                                     <th className="p-2.5">Product & SKU</th>
                                     <th className="p-2.5">Variant / Size</th>
-                                    <th className="p-2.5">Barcode</th>
+                                    {showBarcodeUI && <th className="p-2.5">Barcode</th>}
                                     <th className="p-2.5 text-right">Cost Price</th>
                                     <th className="p-2.5 text-right">Selling Price</th>
                                     <th className="p-2.5 text-center">Margin %</th>
@@ -4196,52 +4309,54 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                                         )}
                                         <td className="p-2.5">
                                           <div className="flex items-center gap-3">
-                                            {p.imageUrl ? (
-                                              <div className="relative group/thumb shrink-0">
-                                                <img
-                                                  src={p.imageUrl}
-                                                  alt={p.name}
-                                                  referrerPolicy="no-referrer"
-                                                  onClick={() => setPreviewImage({ url: p.imageUrl!, title: p.name })}
-                                                  className={`w-10 h-10 rounded-xl object-cover shadow-sm cursor-pointer group-hover/thumb:border-sky-400 transition ${
-                                                    repeatedProductIds.has(p.id)
-                                                      ? 'border-2 border-amber-500 ring-2 ring-amber-500/30'
-                                                      : 'border border-slate-700'
-                                                  }`}
-                                                />
-                                                {repeatedProductIds.has(p.id) && (
-                                                  <div
-                                                    title="Repeated Photo: This photo is shared by multiple items"
-                                                    className="absolute -top-1.5 -left-1.5 bg-amber-500 text-slate-950 p-0.5 rounded-full shadow-md z-10"
+                                            {showImageUI && (
+                                              p.imageUrl ? (
+                                                <div className="relative group/thumb shrink-0">
+                                                  <img
+                                                    src={p.imageUrl}
+                                                    alt={p.name}
+                                                    referrerPolicy="no-referrer"
+                                                    onClick={() => setPreviewImage({ url: p.imageUrl!, title: p.name })}
+                                                    className={`w-10 h-10 rounded-xl object-cover shadow-sm cursor-pointer group-hover/thumb:border-sky-400 transition ${
+                                                      repeatedProductIds.has(p.id)
+                                                        ? 'border-2 border-amber-500 ring-2 ring-amber-500/30'
+                                                        : 'border border-slate-700'
+                                                    }`}
+                                                  />
+                                                  {repeatedProductIds.has(p.id) && (
+                                                    <div
+                                                      title="Repeated Photo: This photo is shared by multiple items"
+                                                      className="absolute -top-1.5 -left-1.5 bg-amber-500 text-slate-950 p-0.5 rounded-full shadow-md z-10"
+                                                    >
+                                                      <ShieldAlert className="w-2.5 h-2.5" />
+                                                    </div>
+                                                  )}
+                                                  <button
+                                                    type="button"
+                                                    onClick={() => setPreviewImage({ url: p.imageUrl!, title: p.name })}
+                                                    className="absolute inset-0 bg-slate-950/40 opacity-0 group-hover/thumb:opacity-100 rounded-xl flex items-center justify-center text-white transition"
+                                                    title="View Photo"
                                                   >
-                                                    <ShieldAlert className="w-2.5 h-2.5" />
-                                                  </div>
-                                                )}
+                                                    <Eye className="w-3.5 h-3.5 text-white drop-shadow" />
+                                                  </button>
+                                                </div>
+                                              ) : (
                                                 <button
                                                   type="button"
-                                                  onClick={() => setPreviewImage({ url: p.imageUrl!, title: p.name })}
-                                                  className="absolute inset-0 bg-slate-950/40 opacity-0 group-hover/thumb:opacity-100 rounded-xl flex items-center justify-center text-white transition"
-                                                  title="View Photo"
+                                                  onClick={() => handleOpenEditModal(p)}
+                                                  title="Add Item Photo"
+                                                  className="w-10 h-10 rounded-xl bg-slate-950 border border-dashed border-slate-800 hover:border-sky-500/60 flex items-center justify-center text-slate-600 hover:text-sky-400 shrink-0 transition cursor-pointer"
                                                 >
-                                                  <Eye className="w-3.5 h-3.5 text-white drop-shadow" />
+                                                  <ImageIcon className="w-4 h-4" />
                                                 </button>
-                                              </div>
-                                            ) : (
-                                              <button
-                                                type="button"
-                                                onClick={() => handleOpenEditModal(p)}
-                                                title="Add Item Photo"
-                                                className="w-10 h-10 rounded-xl bg-slate-950 border border-dashed border-slate-800 hover:border-sky-500/60 flex items-center justify-center text-slate-600 hover:text-sky-400 shrink-0 transition cursor-pointer"
-                                              >
-                                                <ImageIcon className="w-4 h-4" />
-                                              </button>
+                                              )
                                             )}
                                             <div>
                                               <div className="font-bold text-slate-100">{p.name}</div>
                                               <div className="text-[10px] text-slate-400 font-mono flex items-center gap-1.5 flex-wrap">
                                                 <span>SKU: {p.sku} {p.supplierName ? `• ${p.supplierName}` : ''}</span>
-                                                {shopControls.enableExpiryAlerts && p.expiryDate && (() => {
-                                                  const exp = evaluateProductExpiry(p.expiryDate);
+                                                {showExpiryUI && p.expiryDate && (() => {
+                                                  const exp = evaluateProductExpiry(p.expiryDate, expiryAlertDays);
                                                   if (exp.status === 'expired') {
                                                     return (
                                                       <span className="px-1.5 py-0.5 rounded bg-rose-950 text-rose-300 border border-rose-600/50 font-bold">
@@ -4265,14 +4380,23 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                                         <td className="p-2.5 font-mono text-[11px] text-slate-300">
                                           {p.sizeCapacity || '—'}
                                         </td>
-                                        <td className="p-2.5 font-mono text-[11px] text-slate-400">
-                                          {p.barcode}
-                                        </td>
+                                        {showBarcodeUI && (
+                                          <td className="p-2.5 font-mono text-[11px] text-slate-400">
+                                            {p.barcode}
+                                          </td>
+                                        )}
                                         <td className="p-2.5 text-right font-mono text-slate-400">
                                           KSh {p.costPrice % 1 === 0 ? Math.round(p.costPrice).toLocaleString() : p.costPrice.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
                                         </td>
                                         <td className="p-2.5 text-right font-mono font-bold text-sky-400">
-                                          KSh {p.sellingPrice % 1 === 0 ? Math.round(p.sellingPrice).toLocaleString() : p.sellingPrice.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                                          <div>
+                                            KSh {p.sellingPrice % 1 === 0 ? Math.round(p.sellingPrice).toLocaleString() : p.sellingPrice.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                                          </div>
+                                          {p.costPrice > 0 && p.sellingPrice > 0 && p.sellingPrice < p.costPrice && (
+                                            <span className="inline-block mt-0.5 text-[9px] px-1.5 py-0.2 rounded bg-rose-950 text-rose-300 border border-rose-500/40 font-bold">
+                                              Below Cost
+                                            </span>
+                                          )}
                                         </td>
                                         <td className="p-2.5 text-center font-mono font-bold text-[11px]">
                                           <span className={`px-2 py-0.5 rounded border text-[10px] ${marginInfo.badgeBg} ${marginInfo.badgeText} ${marginInfo.badgeBorder}`}>
@@ -4319,13 +4443,15 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                                         </td>
                                         <td className="p-2.5 text-right">
                                           <div className="flex items-center justify-end gap-1">
-                                            <button
-                                              onClick={() => setQrModalProduct(p)}
-                                              title="Generate Manager Audit QR Code (History, Stock & Batches)"
-                                              className="p-1 hover:bg-slate-800 text-sky-400 hover:text-sky-300 rounded transition cursor-pointer"
-                                            >
-                                              <QrCode className="w-3.5 h-3.5" />
-                                            </button>
+                                            {showBarcodeUI && (
+                                              <button
+                                                onClick={() => setQrModalProduct(p)}
+                                                title="Generate Manager Audit QR Code (History, Stock & Batches)"
+                                                className="p-1 hover:bg-slate-800 text-sky-400 hover:text-sky-300 rounded transition cursor-pointer"
+                                              >
+                                                <QrCode className="w-3.5 h-3.5" />
+                                              </button>
+                                            )}
                                             {onViewProductHistory && (
                                               <button
                                                 onClick={() => onViewProductHistory(p)}
@@ -4561,103 +4687,159 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                         : 'border-slate-800 hover:border-slate-700/80'
                     } ${perf ? perf.accentBorderLeft : ''}`}
                   >
-                    {/* Card Top: Image & Status Badges */}
-                    <div className="relative aspect-video sm:aspect-square bg-slate-950 flex items-center justify-center overflow-hidden border-b border-slate-800/80">
-                      {canBulkEditInventory && (
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            toggleProductSelection(p.id);
-                          }}
-                          aria-label={isCardSelected ? `Deselect ${p.name}` : `Select ${p.name}`}
-                          className={`absolute top-2.5 right-2.5 z-30 w-8 h-8 rounded-xl border flex items-center justify-center shadow-lg transition cursor-pointer ${
-                            isCardSelected
-                              ? 'bg-sky-500 border-sky-300 text-slate-950'
-                              : isBulkSelectMode
-                              ? 'bg-slate-900/90 border-slate-500 text-slate-300 hover:border-sky-400'
-                              : 'bg-slate-900/80 border-slate-600/80 text-slate-300 sm:opacity-0 sm:group-hover:opacity-100 hover:border-sky-400'
-                          }`}
-                          title="Select for Bulk Edit"
-                        >
-                          {isCardSelected ? (
-                            <Check className="w-4 h-4 stroke-[3]" />
-                          ) : (
-                            <span className="w-3.5 h-3.5 rounded border-2 border-current" />
-                          )}
-                        </button>
-                      )}
-                      {isNewest && (
-                        <div className={`absolute top-2.5 z-20 ${canBulkEditInventory ? 'right-12' : 'right-2.5'}`}>
-                          <span className="bg-sky-500 text-slate-950 font-black text-[10px] uppercase tracking-wider px-2.5 py-1 rounded-full shadow-lg border border-sky-300 flex items-center gap-1">
-                            <Sparkles className="w-3 h-3 fill-slate-950" /> New Arrival
-                          </span>
-                        </div>
-                      )}
-                      {p.imageUrl ? (
-                        <>
-                          <img
-                            src={p.imageUrl}
-                            alt={p.name}
-                            referrerPolicy="no-referrer"
-                            className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
-                            onError={(e) => {
-                              e.currentTarget.style.display = 'none';
+                    {/* Card Top: Image (when enabled) & Status Badges */}
+                    {showImageUI ? (
+                      <div className="relative aspect-video sm:aspect-square bg-slate-950 flex items-center justify-center overflow-hidden border-b border-slate-800/80">
+                        {canBulkEditInventory && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleProductSelection(p.id);
                             }}
-                          />
-                          <button
-                            type="button"
-                            onClick={() => setPreviewImage({ url: p.imageUrl!, title: p.name })}
-                            className="absolute top-2.5 right-2.5 p-1.5 rounded-lg bg-slate-950/70 hover:bg-slate-900 text-white backdrop-blur-sm opacity-0 group-hover:opacity-100 transition shadow cursor-pointer"
-                            title="Preview Full Image"
+                            aria-label={isCardSelected ? `Deselect ${p.name}` : `Select ${p.name}`}
+                            className={`absolute top-2.5 right-2.5 z-30 w-8 h-8 rounded-xl border flex items-center justify-center shadow-lg transition cursor-pointer ${
+                              isCardSelected
+                                ? 'bg-sky-500 border-sky-300 text-slate-950'
+                                : isBulkSelectMode
+                                ? 'bg-slate-900/90 border-slate-500 text-slate-300 hover:border-sky-400'
+                                : 'bg-slate-900/80 border-slate-600/80 text-slate-300 sm:opacity-0 sm:group-hover:opacity-100 hover:border-sky-400'
+                            }`}
+                            title="Select for Bulk Edit"
                           >
-                            <Eye className="w-4 h-4" />
+                            {isCardSelected ? (
+                              <Check className="w-4 h-4 stroke-[3]" />
+                            ) : (
+                              <span className="w-3.5 h-3.5 rounded border-2 border-current" />
+                            )}
                           </button>
-                        </>
-                      ) : (
-                        <div className="flex flex-col items-center justify-center text-slate-600 group-hover:text-slate-400 transition">
-                          <Package className="w-12 h-12 stroke-[1.5]" />
-                          <button
-                            type="button"
-                            onClick={() => handleOpenEditModal(p)}
-                            className="mt-2 text-[10px] font-bold text-sky-400 hover:underline cursor-pointer"
-                          >
-                            + Add Photo
-                          </button>
-                        </div>
-                      )}
-
-                      {/* Stock Level Badge Overlay */}
-                      <div className="absolute top-2.5 left-2.5 flex flex-col gap-1 items-start">
-                        {isOut ? (
-                          <span className="bg-rose-950/90 text-rose-300 border border-rose-700 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider backdrop-blur-sm shadow">
-                            Out of Stock
-                          </span>
-                        ) : isLow ? (
-                          <span className="bg-amber-950/90 text-amber-300 border border-amber-700 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider backdrop-blur-sm shadow flex items-center gap-1">
-                            <AlertTriangle className="w-3 h-3 text-amber-400" />
-                            Low Stock ({p.stockQuantity} {p.unit})
-                          </span>
+                        )}
+                        {isNewest && (
+                          <div className={`absolute top-2.5 z-20 ${canBulkEditInventory ? 'right-12' : 'right-2.5'}`}>
+                            <span className="bg-sky-500 text-slate-950 font-black text-[10px] uppercase tracking-wider px-2.5 py-1 rounded-full shadow-lg border border-sky-300 flex items-center gap-1">
+                              <Sparkles className="w-3 h-3 fill-slate-950" /> New Arrival
+                            </span>
+                          </div>
+                        )}
+                        {p.imageUrl ? (
+                          <>
+                            <img
+                              src={p.imageUrl}
+                              alt={p.name}
+                              referrerPolicy="no-referrer"
+                              className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
+                              onError={(e) => {
+                                e.currentTarget.style.display = 'none';
+                              }}
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setPreviewImage({ url: p.imageUrl!, title: p.name })}
+                              className="absolute top-2.5 right-2.5 p-1.5 rounded-lg bg-slate-950/70 hover:bg-slate-900 text-white backdrop-blur-sm opacity-0 group-hover:opacity-100 transition shadow cursor-pointer"
+                              title="Preview Full Image"
+                            >
+                              <Eye className="w-4 h-4" />
+                            </button>
+                          </>
                         ) : (
-                          <span className="bg-emerald-950/90 text-emerald-300 border border-emerald-700 px-2.5 py-0.5 rounded-full text-[10px] font-bold backdrop-blur-sm shadow">
-                            {p.stockQuantity} {p.unit} in stock
-                          </span>
+                          <div className="flex flex-col items-center justify-center text-slate-600 group-hover:text-slate-400 transition">
+                            <Package className="w-12 h-12 stroke-[1.5]" />
+                            <button
+                              type="button"
+                              onClick={() => handleOpenEditModal(p)}
+                              className="mt-2 text-[10px] font-bold text-sky-400 hover:underline cursor-pointer"
+                            >
+                              + Add Photo
+                            </button>
+                          </div>
                         )}
 
-                        {perf && perf.tier !== 'unranked_no_sales' && (
-                          <span
-                            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-extrabold border shadow-sm ${perf.badgeBg} ${perf.badgeText} ${perf.badgeBorder}`}
-                            title={perf.description}
+                        {/* Stock Level Badge Overlay */}
+                        <div className="absolute top-2.5 left-2.5 flex flex-col gap-1 items-start">
+                          {isOut ? (
+                            <span className="bg-rose-950/90 text-rose-300 border border-rose-700 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider backdrop-blur-sm shadow">
+                              Out of Stock
+                            </span>
+                          ) : isLow ? (
+                            <span className="bg-amber-950/90 text-amber-300 border border-amber-700 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider backdrop-blur-sm shadow flex items-center gap-1">
+                              <AlertTriangle className="w-3 h-3 text-amber-400" />
+                              Low Stock ({p.stockQuantity} {p.unit})
+                            </span>
+                          ) : (
+                            <span className="bg-emerald-950/90 text-emerald-300 border border-emerald-700 px-2.5 py-0.5 rounded-full text-[10px] font-bold backdrop-blur-sm shadow">
+                              {p.stockQuantity} {p.unit} in stock
+                            </span>
+                          )}
+
+                          {perf && perf.tier !== 'unranked_no_sales' && (
+                            <span
+                              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-extrabold border shadow-sm ${perf.badgeBg} ${perf.badgeText} ${perf.badgeBorder}`}
+                              title={perf.description}
+                            >
+                              {perf.tier === 'high_sales_high_profit' && <Star className="w-3 h-3 fill-emerald-400 text-emerald-400" />}
+                              {perf.tier === 'low_sales_low_profit' && <AlertTriangle className="w-3 h-3 text-amber-400" />}
+                              {perf.tier === 'high_sales_low_profit' && <Zap className="w-3 h-3 text-sky-400" />}
+                              {perf.tier === 'low_sales_high_profit' && <Gem className="w-3 h-3 text-purple-400" />}
+                              <span>{perf.tierShortLabel}</span>
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="p-3 bg-slate-950/60 border-b border-slate-800/80 flex items-center justify-between gap-2 flex-wrap">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          {isOut ? (
+                            <span className="bg-rose-950/90 text-rose-300 border border-rose-700 px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider">
+                              Out of Stock
+                            </span>
+                          ) : isLow ? (
+                            <span className="bg-amber-950/90 text-amber-300 border border-amber-700 px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider flex items-center gap-1">
+                              <AlertTriangle className="w-3 h-3 text-amber-400" />
+                              Low Stock ({p.stockQuantity} {p.unit})
+                            </span>
+                          ) : (
+                            <span className="bg-emerald-950/90 text-emerald-300 border border-emerald-700 px-2 py-0.5 rounded-full text-[10px] font-bold">
+                              {p.stockQuantity} {p.unit} in stock
+                            </span>
+                          )}
+                          {isNewest && (
+                            <span className="bg-sky-500 text-slate-950 font-black text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full flex items-center gap-1">
+                              <Sparkles className="w-3 h-3 fill-slate-950" /> New
+                            </span>
+                          )}
+                          {perf && perf.tier !== 'unranked_no_sales' && (
+                            <span
+                              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-extrabold border ${perf.badgeBg} ${perf.badgeText} ${perf.badgeBorder}`}
+                              title={perf.description}
+                            >
+                              <span>{perf.tierShortLabel}</span>
+                            </span>
+                          )}
+                        </div>
+                        {canBulkEditInventory && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleProductSelection(p.id);
+                            }}
+                            aria-label={isCardSelected ? `Deselect ${p.name}` : `Select ${p.name}`}
+                            className={`w-7 h-7 rounded-lg border flex items-center justify-center transition cursor-pointer shrink-0 ${
+                              isCardSelected
+                                ? 'bg-sky-500 border-sky-300 text-slate-950'
+                                : 'bg-slate-900 border-slate-700 text-slate-300 hover:border-sky-400'
+                            }`}
+                            title="Select for Bulk Edit"
                           >
-                            {perf.tier === 'high_sales_high_profit' && <Star className="w-3 h-3 fill-emerald-400 text-emerald-400" />}
-                            {perf.tier === 'low_sales_low_profit' && <AlertTriangle className="w-3 h-3 text-amber-400" />}
-                            {perf.tier === 'high_sales_low_profit' && <Zap className="w-3 h-3 text-sky-400" />}
-                            {perf.tier === 'low_sales_high_profit' && <Gem className="w-3 h-3 text-purple-400" />}
-                            <span>{perf.tierShortLabel}</span>
-                          </span>
+                            {isCardSelected ? (
+                              <Check className="w-3.5 h-3.5 stroke-[3]" />
+                            ) : (
+                              <span className="w-3 h-3 rounded border-2 border-current" />
+                            )}
+                          </button>
                         )}
                       </div>
-                    </div>
+                    )}
 
                     {/* Card Content */}
                     <div className="p-4 flex-1 flex flex-col justify-between space-y-3">
@@ -4682,10 +4864,14 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                         {/* SKU & Barcode */}
                         <div className="flex items-center gap-2 text-[10px] font-mono text-slate-400 mt-1 flex-wrap">
                           <span className="truncate">SKU: <strong className="text-slate-300">{p.sku}</strong></span>
-                          <span>•</span>
-                          <span className="truncate">Code: <strong className="text-sky-300">{p.barcode}</strong></span>
-                          {shopControls.enableExpiryAlerts && p.expiryDate && (() => {
-                            const exp = evaluateProductExpiry(p.expiryDate);
+                          {showBarcodeUI && (
+                            <>
+                              <span>•</span>
+                              <span className="truncate">Code: <strong className="text-sky-300">{p.barcode}</strong></span>
+                            </>
+                          )}
+                          {showExpiryUI && p.expiryDate && (() => {
+                            const exp = evaluateProductExpiry(p.expiryDate, expiryAlertDays);
                             if (exp.status === 'expired') {
                               return (
                                 <span className="px-1.5 py-0.5 rounded bg-rose-950 text-rose-300 border border-rose-600/50 font-bold">
@@ -4707,11 +4893,16 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
 
                       {/* Pricing & Stock Details */}
                       <div className="bg-slate-950/70 border border-slate-800/80 rounded-xl p-2.5 space-y-1.5">
-                        <div className="flex items-baseline justify-between">
+                        <div className="flex items-baseline justify-between gap-2">
                           <span className="text-[10px] text-slate-400 uppercase font-mono">Retail Price</span>
-                          <span className="text-base font-black text-emerald-400 font-mono">
-                            KSh {p.sellingPrice.toLocaleString()}
-                          </span>
+                          <div className="text-right">
+                            <span className={`text-base font-black font-mono ${p.costPrice > 0 && p.sellingPrice < p.costPrice ? 'text-rose-400' : 'text-emerald-400'}`}>
+                              KSh {p.sellingPrice.toLocaleString()}
+                            </span>
+                            {p.costPrice > 0 && p.sellingPrice > 0 && p.sellingPrice < p.costPrice && (
+                              <div className="text-[9px] font-bold text-rose-300">Below Cost!</div>
+                            )}
+                          </div>
                         </div>
                         <div className="flex items-center justify-between text-[11px] text-slate-400 font-mono">
                           <span>Cost: KSh {p.costPrice.toLocaleString()}</span>
@@ -4727,22 +4918,24 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                       <div className="space-y-2 pt-1">
                         <button
                           type="button"
-                          onClick={() => setQuickRestockModalProduct(p)}
+                          onClick={() => openQuickRestockModal(p)}
                           className="w-full py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center justify-center gap-1.5 transition shadow-sm cursor-pointer"
                           title="Interactive Stock Adjustment / Quick Restock"
                         >
                           <Package className="w-4 h-4" />
                           <span>+ Edit / Add Stock</span>
                         </button>
-                        <button
-                          type="button"
-                          onClick={() => setQrModalProduct(p)}
-                          className="w-full py-2 px-3 rounded-xl bg-sky-500/10 hover:bg-sky-500/20 text-sky-300 hover:text-white border border-sky-500/30 hover:border-sky-400 text-xs font-extrabold flex items-center justify-center gap-2 transition shadow-sm cursor-pointer active:scale-95 group/btn"
-                          title="Generate Store Manager QR Code: Scan to view item history, stock level & recent restock batches"
-                        >
-                          <QrCode className="w-4 h-4 text-sky-400 group-hover/btn:scale-110 transition" />
-                          <span>Generate QR Code</span>
-                        </button>
+                        {showBarcodeUI && (
+                          <button
+                            type="button"
+                            onClick={() => setQrModalProduct(p)}
+                            className="w-full py-2 px-3 rounded-xl bg-sky-500/10 hover:bg-sky-500/20 text-sky-300 hover:text-white border border-sky-500/30 hover:border-sky-400 text-xs font-extrabold flex items-center justify-center gap-2 transition shadow-sm cursor-pointer active:scale-95 group/btn"
+                            title="Generate Store Manager QR Code: Scan to view item history, stock level & recent restock batches"
+                          >
+                            <QrCode className="w-4 h-4 text-sky-400 group-hover/btn:scale-110 transition" />
+                            <span>Generate QR Code</span>
+                          </button>
+                        )}
 
                         <div className="flex items-center justify-between pt-1">
                           <button
@@ -4759,14 +4952,16 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                           </button>
 
                           <div className="flex items-center gap-1">
-                            <button
-                              type="button"
-                              onClick={() => setQrModalProduct(p)}
-                              className="p-1.5 hover:bg-slate-800 text-sky-400 hover:text-sky-300 rounded-lg transition cursor-pointer"
-                              title="Generate & Print QR Code Shelf Tag (QR + Price or QR Only)"
-                            >
-                              <QrCode className="w-3.5 h-3.5" />
-                            </button>
+                            {showBarcodeUI && (
+                              <button
+                                type="button"
+                                onClick={() => setQrModalProduct(p)}
+                                className="p-1.5 hover:bg-slate-800 text-sky-400 hover:text-sky-300 rounded-lg transition cursor-pointer"
+                                title="Generate & Print QR Code Shelf Tag (QR + Price or QR Only)"
+                              >
+                                <QrCode className="w-3.5 h-3.5" />
+                              </button>
+                            )}
                             <button
                               type="button"
                               onClick={() => handleOpenEditModal(p)}
@@ -5098,49 +5293,51 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                         </td>
                       )}
                       {/* Photo Thumbnail */}
-                      <td className="p-3.5 text-center">
-                        {p.imageUrl ? (
-                          <div className="relative group/thumb inline-block">
-                            <img
-                              src={p.imageUrl}
-                              alt={p.name}
-                              referrerPolicy="no-referrer"
-                              onClick={() => setPreviewImage({ url: p.imageUrl!, title: p.name })}
-                              className={`w-11 h-11 rounded-xl object-cover shadow-sm cursor-pointer group-hover/thumb:border-sky-400 group-hover/thumb:scale-105 transition duration-200 ${
-                                repeatedProductIds.has(p.id)
-                                  ? 'border-2 border-amber-500 ring-2 ring-amber-500/30'
-                                  : isNewest ? 'border-2 border-sky-400 ring-2 ring-sky-400/40' : 'border border-slate-700'
-                              }`}
-                            />
-                            {repeatedProductIds.has(p.id) && (
-                              <div
-                                title="Repeated Photo: This photo is shared by multiple items"
-                                className="absolute -top-1.5 -left-1.5 bg-amber-500 text-slate-950 p-0.5 rounded-full shadow-md z-10"
+                      {showImageUI && (
+                        <td className="p-3.5 text-center">
+                          {p.imageUrl ? (
+                            <div className="relative group/thumb inline-block">
+                              <img
+                                src={p.imageUrl}
+                                alt={p.name}
+                                referrerPolicy="no-referrer"
+                                onClick={() => setPreviewImage({ url: p.imageUrl!, title: p.name })}
+                                className={`w-11 h-11 rounded-xl object-cover shadow-sm cursor-pointer group-hover/thumb:border-sky-400 group-hover/thumb:scale-105 transition duration-200 ${
+                                  repeatedProductIds.has(p.id)
+                                    ? 'border-2 border-amber-500 ring-2 ring-amber-500/30'
+                                    : isNewest ? 'border-2 border-sky-400 ring-2 ring-sky-400/40' : 'border border-slate-700'
+                                }`}
+                              />
+                              {repeatedProductIds.has(p.id) && (
+                                <div
+                                  title="Repeated Photo: This photo is shared by multiple items"
+                                  className="absolute -top-1.5 -left-1.5 bg-amber-500 text-slate-950 p-0.5 rounded-full shadow-md z-10"
+                                >
+                                  <ShieldAlert className="w-3 h-3" />
+                                </div>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => setPreviewImage({ url: p.imageUrl!, title: p.name })}
+                                className="absolute inset-0 bg-slate-950/40 opacity-0 group-hover/thumb:opacity-100 rounded-xl flex items-center justify-center text-white transition cursor-pointer"
+                                title="View Full Size Photo"
                               >
-                                <ShieldAlert className="w-3 h-3" />
-                              </div>
-                            )}
+                                <Eye className="w-4 h-4 text-white drop-shadow" />
+                              </button>
+                            </div>
+                          ) : (
                             <button
                               type="button"
-                              onClick={() => setPreviewImage({ url: p.imageUrl!, title: p.name })}
-                              className="absolute inset-0 bg-slate-950/40 opacity-0 group-hover/thumb:opacity-100 rounded-xl flex items-center justify-center text-white transition cursor-pointer"
-                              title="View Full Size Photo"
+                              onClick={() => handleOpenEditModal(p)}
+                              title="Add Item Photo"
+                              className="w-11 h-11 rounded-xl bg-slate-950 border border-dashed border-slate-800 hover:border-sky-500/60 flex flex-col items-center justify-center text-slate-600 hover:text-sky-400 mx-auto transition group/noimg cursor-pointer"
                             >
-                              <Eye className="w-4 h-4 text-white drop-shadow" />
+                              <ImageIcon className="w-4 h-4" />
+                              <span className="text-[8px] mt-0.5 opacity-0 group-hover/noimg:opacity-100 transition font-bold">+Photo</span>
                             </button>
-                          </div>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => handleOpenEditModal(p)}
-                            title="Add Item Photo"
-                            className="w-11 h-11 rounded-xl bg-slate-950 border border-dashed border-slate-800 hover:border-sky-500/60 flex flex-col items-center justify-center text-slate-600 hover:text-sky-400 mx-auto transition group/noimg cursor-pointer"
-                          >
-                            <ImageIcon className="w-4 h-4" />
-                            <span className="text-[8px] mt-0.5 opacity-0 group-hover/noimg:opacity-100 transition font-bold">+Photo</span>
-                          </button>
-                        )}
-                      </td>
+                          )}
+                        </td>
+                      )}
 
                       {/* Name & SKU */}
                       <td className="p-3.5">
@@ -5152,8 +5349,26 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                             </span>
                           )}
                         </div>
-                        <div className="text-[10px] text-slate-400 font-mono">
-                          SKU: {p.sku} {p.supplierName ? `• ${p.supplierName}` : ''}
+                        <div className="text-[10px] text-slate-400 font-mono flex items-center gap-1.5 flex-wrap">
+                          <span>SKU: {p.sku} {p.supplierName ? `• ${p.supplierName}` : ''}</span>
+                          {showExpiryUI && p.expiryDate && (() => {
+                            const exp = evaluateProductExpiry(p.expiryDate, expiryAlertDays);
+                            if (exp.status === 'expired') {
+                              return (
+                                <span className="px-1.5 py-0.5 rounded bg-rose-950 text-rose-300 border border-rose-600/50 font-bold">
+                                  Expired {exp.formattedDate}
+                                </span>
+                              );
+                            }
+                            if (exp.status === 'expiring_soon') {
+                              return (
+                                <span className="px-1.5 py-0.5 rounded bg-amber-950 text-amber-300 border border-amber-600/50 font-bold">
+                                  Exp in {exp.daysRemaining}d ({exp.formattedDate})
+                                </span>
+                              );
+                            }
+                            return null;
+                          })()}
                         </div>
                         {p.description && (
                           <div className="text-[10px] text-slate-500 line-clamp-1 italic mt-0.5">
@@ -5181,20 +5396,22 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                       </td>
 
                       {/* SKU / QR Code & Print Shelf Tag Button */}
-                      <td className="p-3.5 font-mono">
-                        <div className="flex items-center gap-1.5">
-                          <span className="bg-slate-950 border border-slate-800 px-2 py-1 rounded text-slate-200 text-[11px]">
-                            {p.sku || p.barcode}
-                          </span>
-                          <button
-                            onClick={() => setQrModalProduct(p)}
-                            title="Generate & Print QR Code Shelf Tag"
-                            className="p-1 hover:bg-slate-800 text-sky-400 hover:text-sky-300 rounded transition cursor-pointer"
-                          >
-                            <QrCode className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </td>
+                      {showBarcodeUI && (
+                        <td className="p-3.5 font-mono">
+                          <div className="flex items-center gap-1.5">
+                            <span className="bg-slate-950 border border-slate-800 px-2 py-1 rounded text-slate-200 text-[11px]">
+                              {p.sku || p.barcode}
+                            </span>
+                            <button
+                              onClick={() => setQrModalProduct(p)}
+                              title="Generate & Print QR Code Shelf Tag"
+                              className="p-1 hover:bg-slate-800 text-sky-400 hover:text-sky-300 rounded transition cursor-pointer"
+                            >
+                              <QrCode className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </td>
+                      )}
 
                       {/* Cost Price */}
                       <td className="p-3.5 text-right font-mono font-medium text-slate-400">
@@ -5203,7 +5420,14 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
 
                       {/* Selling Price */}
                       <td className="p-3.5 text-right font-mono font-bold text-slate-100 text-sm">
-                        KSh {p.sellingPrice % 1 === 0 ? Math.round(p.sellingPrice).toLocaleString() : p.sellingPrice.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                        <div>
+                          KSh {p.sellingPrice % 1 === 0 ? Math.round(p.sellingPrice).toLocaleString() : p.sellingPrice.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                        </div>
+                        {p.costPrice > 0 && p.sellingPrice > 0 && p.sellingPrice < p.costPrice && (
+                          <span className="inline-block mt-0.5 text-[9px] px-1.5 py-0.2 rounded bg-rose-950 text-rose-300 border border-rose-500/40 font-bold">
+                            Below Cost
+                          </span>
+                        )}
                       </td>
 
                       {/* Sales & Profit Tier Badge */}
@@ -5251,13 +5475,15 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                       {/* Actions */}
                       <td className="p-3.5 text-right">
                         <div className="flex items-center justify-end gap-1">
-                          <button
-                            onClick={() => setQrModalProduct(p)}
-                            title="Generate Product Audit QR Code (Scan for History, Stock & Batches)"
-                            className="p-1.5 hover:bg-slate-800 text-sky-400 hover:text-sky-300 rounded-lg transition cursor-pointer"
-                          >
-                            <QrCode className="w-4 h-4" />
-                          </button>
+                          {showBarcodeUI && (
+                            <button
+                              onClick={() => setQrModalProduct(p)}
+                              title="Generate Product Audit QR Code (Scan for History, Stock & Batches)"
+                              className="p-1.5 hover:bg-slate-800 text-sky-400 hover:text-sky-300 rounded-lg transition cursor-pointer"
+                            >
+                              <QrCode className="w-4 h-4" />
+                            </button>
+                          )}
                           <button
                             onClick={() => {
                               if (onOpenItemAuditMiniPage) onOpenItemAuditMiniPage(p);
@@ -5369,13 +5595,14 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           }}
         >
           <div
+            dir={dir}
             className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-2xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden text-slate-100 my-auto relative z-[2010]"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between p-4 border-b border-slate-800 bg-slate-950/50 shrink-0">
               <div>
                 <h3 className="font-bold text-slate-200 text-base">
-                  {editingProduct.id?.startsWith('prod-') ? 'Add New Inventory Item' : 'Edit Item Details'}
+                  {editingProduct.id?.startsWith('prod-') ? t('inventory.addNewInventoryItem') : t('inventory.editItemDetails')}
                 </h3>
                 <p className="text-[11px] text-slate-400">Use phone camera or enter product details manually</p>
               </div>
@@ -5387,6 +5614,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                     e.stopPropagation();
                     setShowModal(false);
                     setEditingProduct(null);
+                    setProductFormError(null);
                     setAiModalReview(null);
                     setAiIdentifyError(null);
                     setAiIdentifyResult(null);
@@ -5401,6 +5629,21 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
 
             <form onSubmit={handleSubmitProduct} className="flex flex-col flex-1 overflow-hidden min-h-0">
               <div className="flex-1 overflow-y-auto p-5 space-y-4 text-xs">
+                {productFormError && (
+                  <div className="bg-rose-950/90 border border-rose-500/70 rounded-xl px-3.5 py-2.5 text-xs text-rose-200 flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+                      <span className="font-semibold">{productFormError}</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setProductFormError(null)}
+                      className="text-rose-300 hover:text-white p-1 shrink-0 cursor-pointer"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                )}
                 {/* AI Image Scanner Bar & Non-Destructive Review Card */}
                 <div className="bg-slate-950/90 border border-slate-800 rounded-2xl p-3.5 space-y-3">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
@@ -5512,7 +5755,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                             </p>
                           )}
                         </div>
-                        {aiModalReview.thumbnailDataUrl && (
+                        {showImageUI && aiModalReview.thumbnailDataUrl && (
                           <img
                             src={aiModalReview.thumbnailDataUrl}
                             alt="Scanned item thumbnail"
@@ -5671,7 +5914,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                         </div>
                       </div>
 
-                      {aiModalReview.thumbnailDataUrl && (
+                      {showImageUI && aiModalReview.thumbnailDataUrl && (
                         <label className="flex items-center gap-2 text-[11px] text-slate-300 cursor-pointer select-none">
                           <input
                             type="checkbox"
@@ -5917,51 +6160,53 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                 </div>
 
                 {/* Item QR Code Identifier & QR Sheet Printer */}
-                <div className="sm:col-span-2">
-                  <div className="flex justify-between items-center mb-1">
-                    <label className="text-slate-300 font-semibold flex items-center gap-1.5">
-                      <QrCode className="w-3.5 h-3.5 text-sky-400" />
-                      <span>Item QR Code Identifier (SKU / Code)</span>
-                    </label>
-                    {hasWorkerPermission(currentUser, 'canGenerateBarcode') && (
+                {showBarcodeUI && (
+                  <div className="sm:col-span-2">
+                    <div className="flex justify-between items-center mb-1">
+                      <label className="text-slate-300 font-semibold flex items-center gap-1.5">
+                        <QrCode className="w-3.5 h-3.5 text-sky-400" />
+                        <span>Item QR Code Identifier (SKU / Code)</span>
+                      </label>
+                      {hasWorkerPermission(currentUser, 'canGenerateBarcode') && (
+                        <button
+                          type="button"
+                          onClick={handleGenerateBarcodeInForm}
+                          className="text-sky-400 hover:underline flex items-center gap-1 font-semibold text-[11px] cursor-pointer"
+                        >
+                          <Sparkles className="w-3.5 h-3.5" /> Auto-Generate QR Code
+                        </button>
+                      )}
+                    </div>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        required
+                        placeholder="e.g. SKU-88912 or 8901234567891"
+                        value={editingProduct.barcode || ''}
+                        onChange={(e) =>
+                          setEditingProduct((prev) => (prev ? { ...prev, barcode: e.target.value } : prev))
+                        }
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 font-mono text-sm focus:outline-none focus:border-sky-500"
+                      />
                       <button
                         type="button"
-                        onClick={handleGenerateBarcodeInForm}
-                        className="text-sky-400 hover:underline flex items-center gap-1 font-semibold text-[11px] cursor-pointer"
+                        onClick={() =>
+                          printBarcodeLabels(
+                            editingProduct.name || 'Sample Product',
+                            editingProduct.sellingPrice || 0,
+                            editingProduct.barcode || editingProduct.sku || 'ITEM-001',
+                            8,
+                            true
+                          )
+                        }
+                        className="bg-sky-600 hover:bg-sky-500 text-white font-bold px-3 py-2 rounded-xl text-xs flex items-center gap-1.5 whitespace-nowrap shadow-sm cursor-pointer"
+                        title="Print QR Code Stickers with Price"
                       >
-                        <Sparkles className="w-3.5 h-3.5" /> Auto-Generate QR Code
+                        <QrCode className="w-4 h-4" /> Print QR Sheet
                       </button>
-                    )}
+                    </div>
                   </div>
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
-                      required
-                      placeholder="e.g. SKU-88912 or 8901234567891"
-                      value={editingProduct.barcode || ''}
-                      onChange={(e) =>
-                        setEditingProduct((prev) => (prev ? { ...prev, barcode: e.target.value } : prev))
-                      }
-                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 font-mono text-sm focus:outline-none focus:border-sky-500"
-                    />
-                    <button
-                      type="button"
-                      onClick={() =>
-                        printBarcodeLabels(
-                          editingProduct.name || 'Sample Product',
-                          editingProduct.sellingPrice || 0,
-                          editingProduct.barcode || editingProduct.sku || 'ITEM-001',
-                          8,
-                          true
-                        )
-                      }
-                      className="bg-sky-600 hover:bg-sky-500 text-white font-bold px-3 py-2 rounded-xl text-xs flex items-center gap-1.5 whitespace-nowrap shadow-sm cursor-pointer"
-                      title="Print QR Code Stickers with Price"
-                    >
-                      <QrCode className="w-4 h-4" /> Print QR Sheet
-                    </button>
-                  </div>
-                </div>
+                )}
 
                 {/* Cost Price */}
                 <div>
@@ -5981,6 +6226,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                     }
                     onFocus={(e) => e.target.select()}
                     onChange={(e) => {
+                      setProductFormError(null);
                       let val = e.target.value;
                       if (val === '') {
                         setEditingProduct((prev) => (prev ? { ...prev, costPrice: '' as any } : prev));
@@ -5989,11 +6235,21 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                       val = val.replace(/^0+(?=\d)/, '');
                       const costNum = parseFloat(val);
                       const validCost = isNaN(costNum) ? ('' as any) : costNum;
-                      const margin = parseFloat(String(editingProduct.profitMargin)) || 30;
+                      const rawMargin = parseFloat(String(editingProduct.profitMargin));
+                      const margin = autoZeroMargin ? 0 : (Number.isFinite(rawMargin) ? rawMargin : 30);
                       const newSelling = typeof validCost === 'number' && validCost > 0
-                        ? Math.round(validCost * (1 + margin / 100))
+                        ? (autoZeroMargin ? validCost : Math.round(validCost * (1 + margin / 100)))
                         : editingProduct.sellingPrice;
-                      setEditingProduct((prev) => (prev ? { ...prev, costPrice: val as any, sellingPrice: newSelling } : prev));
+                      setEditingProduct((prev) =>
+                        prev
+                          ? {
+                              ...prev,
+                              costPrice: val as any,
+                              sellingPrice: newSelling,
+                              profitMargin: autoZeroMargin ? 0 : prev.profitMargin,
+                            }
+                          : prev
+                      );
                     }}
                     onBlur={(e) => {
                       const val = String(e.target.value).trim();
@@ -6002,12 +6258,20 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                       } else {
                         const parsed = parseFloat(val);
                         const validCost = isNaN(parsed) || parsed === 0 ? ('' as any) : Math.max(0, parsed);
-                        const margin = parseFloat(String(editingProduct.profitMargin)) || 30;
+                        const rawMargin = parseFloat(String(editingProduct.profitMargin));
+                        const margin = autoZeroMargin ? 0 : (Number.isFinite(rawMargin) ? rawMargin : 30);
                         const newSelling = typeof validCost === 'number' && validCost > 0
-                          ? Math.round(validCost * (1 + margin / 100))
+                          ? (autoZeroMargin ? validCost : Math.round(validCost * (1 + margin / 100)))
                           : editingProduct.sellingPrice;
                         setEditingProduct((prev) =>
-                          prev ? { ...prev, costPrice: validCost, sellingPrice: newSelling } : prev
+                          prev
+                            ? {
+                                ...prev,
+                                costPrice: validCost,
+                                sellingPrice: newSelling,
+                                profitMargin: autoZeroMargin ? 0 : prev.profitMargin,
+                              }
+                            : prev
                         );
                       }
                     }}
@@ -6029,6 +6293,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                           key={m}
                           type="button"
                           onClick={() => {
+                            setProductFormError(null);
                             const cost = parseFloat(String(editingProduct.costPrice)) || 0;
                             const newSelling = cost > 0 ? Math.round(cost * (1 + m / 100)) : (editingProduct.sellingPrice || 0);
                             setEditingProduct((prev) =>
@@ -6052,18 +6317,17 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                       <input
                         type="number"
                         step="1"
-                        placeholder="30"
+                        placeholder={autoZeroMargin ? '0' : '30'}
                         value={
                           editingProduct.profitMargin === null ||
                           editingProduct.profitMargin === undefined ||
-                          editingProduct.profitMargin === 0 ||
-                          (editingProduct.profitMargin as any) === '0' ||
                           (editingProduct.profitMargin as any) === ''
                             ? ''
                             : editingProduct.profitMargin
                         }
                         onFocus={(e) => e.target.select()}
                         onChange={(e) => {
+                          setProductFormError(null);
                           const val = e.target.value;
                           const marginNum = val === '' ? 0 : parseFloat(val);
                           const cost = parseFloat(String(editingProduct.costPrice)) || 0;
@@ -6079,7 +6343,15 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                       <label className="text-[11px] font-semibold text-slate-400 block mb-1">Formula Preview</label>
                       <div className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-slate-300 font-mono text-xs flex items-center justify-between">
                         <span>Cost × (1 + Margin%)</span>
-                        <span className="text-emerald-400 font-bold">KSh {(parseFloat(String(editingProduct.costPrice)) || 0).toLocaleString()} + {editingProduct.profitMargin || 30}%</span>
+                        <span className="text-emerald-400 font-bold">
+                          KSh {(parseFloat(String(editingProduct.costPrice)) || 0).toLocaleString()} +{' '}
+                          {editingProduct.profitMargin !== undefined && editingProduct.profitMargin !== null && (editingProduct.profitMargin as any) !== ''
+                            ? editingProduct.profitMargin
+                            : autoZeroMargin
+                            ? 0
+                            : 30}
+                          %
+                        </span>
                       </div>
                     </div>
                   </div>
@@ -6103,6 +6375,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                     }
                     onFocus={(e) => e.target.select()}
                     onChange={(e) => {
+                      setProductFormError(null);
                       let val = e.target.value;
                       if (val === '') {
                         setEditingProduct((prev) => (prev ? { ...prev, sellingPrice: '' as any } : prev));
@@ -6111,7 +6384,9 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                       val = val.replace(/^0+(?=\d)/, '');
                       const sellingNum = parseFloat(val) || 0;
                       const cost = parseFloat(String(editingProduct.costPrice)) || 0;
-                      const newMargin = cost > 0 ? Math.round(((sellingNum - cost) / cost) * 100) : (editingProduct.profitMargin || 30);
+                      const existingMargin = parseFloat(String(editingProduct.profitMargin));
+                      const fallbackMargin = Number.isFinite(existingMargin) ? existingMargin : (autoZeroMargin ? 0 : 30);
+                      const newMargin = cost > 0 ? Math.round(((sellingNum - cost) / cost) * 100) : fallbackMargin;
                       setEditingProduct((prev) => (prev ? { ...prev, sellingPrice: val as any, profitMargin: newMargin } : prev));
                     }}
                     onBlur={(e) => {
@@ -6122,7 +6397,9 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                         const parsed = parseFloat(val);
                         const validSelling = isNaN(parsed) || parsed === 0 ? ('' as any) : Math.max(0, parsed);
                         const cost = parseFloat(String(editingProduct.costPrice)) || 0;
-                        const newMargin = cost > 0 && typeof validSelling === 'number' ? Math.round(((validSelling - cost) / cost) * 100) : (editingProduct.profitMargin || 30);
+                        const existingMargin = parseFloat(String(editingProduct.profitMargin));
+                        const fallbackMargin = Number.isFinite(existingMargin) ? existingMargin : (autoZeroMargin ? 0 : 30);
+                        const newMargin = cost > 0 && typeof validSelling === 'number' ? Math.round(((validSelling - cost) / cost) * 100) : fallbackMargin;
                         setEditingProduct((prev) =>
                           prev ? { ...prev, sellingPrice: validSelling, profitMargin: newMargin } : prev
                         );
@@ -6131,6 +6408,31 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 font-mono font-bold text-sky-400 focus:outline-none focus:border-sky-500"
                   />
                 </div>
+
+                {(() => {
+                  const previewCost = parseFloat(String(editingProduct.costPrice)) || 0;
+                  const previewSell = parseFloat(String(editingProduct.sellingPrice)) || 0;
+                  return (
+                    <>
+                      {previewCost > 0 && previewSell > 0 && previewSell < previewCost && (
+                        <div className="sm:col-span-2 bg-rose-950/75 border border-rose-500/60 rounded-xl px-3 py-2.5 text-xs text-rose-200 flex items-start gap-2">
+                          <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                          <span>
+                            {canSellBelowCost
+                              ? `Warning: Buying cost (KSh ${previewCost.toLocaleString()}) is higher than selling price (KSh ${previewSell.toLocaleString()}). Saving will create a negative profit of -KSh ${(previewCost - previewSell).toLocaleString()} per unit.`
+                              : `Blocked by Item Settings: Buying cost (KSh ${previewCost.toLocaleString()}) is higher than selling price (KSh ${previewSell.toLocaleString()}). Increase selling price or lower buying cost before saving.`}
+                          </span>
+                        </div>
+                      )}
+                      {autoZeroMargin && (
+                        <div className="sm:col-span-2 bg-indigo-950/60 border border-indigo-500/40 rounded-xl px-3 py-2 text-[11px] text-indigo-200 flex items-center gap-2">
+                          <Sparkles className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                          <span>Auto 0% Margin is ON: Changing Cost Price automatically sets Selling Price equal to Buying Price (0% margin).</span>
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
 
                 {/* Stock Quantity */}
                 <div>
@@ -6249,52 +6551,54 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                   </select>
                 </div>
 
-                {/* Optional Expiry Date for Perishables / Tracked Items */}
-                <div className="sm:col-span-2">
-                  <div className="flex items-center justify-between mb-1 gap-2 flex-wrap">
-                    <label className="text-slate-300 font-semibold flex items-center gap-1.5 flex-wrap">
-                      <Calendar className="w-3.5 h-3.5 text-amber-400" />
-                      <span>Expiry Date</span>
-                      {businessTypeConfig.suggestExpiryTracking ? (
-                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-amber-500/15 border border-amber-500/35 text-amber-300">
-                          Recommended for Pharmacy / Agrovet
-                        </span>
-                      ) : (
-                        <span className="text-slate-500 font-normal">(Optional)</span>
+                {/* Optional Expiry Date for Perishables / Tracked Items (shown only when enabled in Item Settings) */}
+                {showExpiryUI && (
+                  <div className="sm:col-span-2">
+                    <div className="flex items-center justify-between mb-1 gap-2 flex-wrap">
+                      <label className="text-slate-300 font-semibold flex items-center gap-1.5 flex-wrap">
+                        <Calendar className="w-3.5 h-3.5 text-amber-400" />
+                        <span>Expiry Date</span>
+                        {businessTypeConfig.suggestExpiryTracking ? (
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-amber-500/15 border border-amber-500/35 text-amber-300">
+                            Recommended for Pharmacy / Agrovet
+                          </span>
+                        ) : (
+                          <span className="text-slate-500 font-normal">(Optional)</span>
+                        )}
+                      </label>
+                      {editingProduct.expiryDate && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setEditingProduct((prev) => (prev ? { ...prev, expiryDate: '' } : prev))
+                          }
+                          className="text-[11px] text-slate-400 hover:text-rose-400 cursor-pointer"
+                        >
+                          Clear Date
+                        </button>
                       )}
-                    </label>
-                    {editingProduct.expiryDate && (
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setEditingProduct((prev) => (prev ? { ...prev, expiryDate: '' } : prev))
-                        }
-                        className="text-[11px] text-slate-400 hover:text-rose-400 cursor-pointer"
-                      >
-                        Clear Date
-                      </button>
+                    </div>
+                    <input
+                      type="date"
+                      value={editingProduct.expiryDate || ''}
+                      onChange={(e) =>
+                        setEditingProduct((prev) =>
+                          prev ? { ...prev, expiryDate: e.target.value } : prev
+                        )
+                      }
+                      className={`w-full bg-slate-950 border rounded-xl px-3 py-2 text-slate-200 font-mono focus:outline-none focus:border-amber-500 ${
+                        businessTypeConfig.suggestExpiryTracking && !editingProduct.expiryDate
+                          ? 'border-amber-500/50'
+                          : 'border-slate-800'
+                      }`}
+                    />
+                    {businessTypeConfig.suggestExpiryTracking && !editingProduct.expiryDate && (
+                      <p className="text-[10px] text-amber-300/90 mt-1">
+                        Tip: Enter an expiry date to receive automatic near-expiry and expired batch warnings at checkout and in Inventory.
+                      </p>
                     )}
                   </div>
-                  <input
-                    type="date"
-                    value={editingProduct.expiryDate || ''}
-                    onChange={(e) =>
-                      setEditingProduct((prev) =>
-                        prev ? { ...prev, expiryDate: e.target.value } : prev
-                      )
-                    }
-                    className={`w-full bg-slate-950 border rounded-xl px-3 py-2 text-slate-200 font-mono focus:outline-none focus:border-amber-500 ${
-                      businessTypeConfig.suggestExpiryTracking && !editingProduct.expiryDate
-                        ? 'border-amber-500/50'
-                        : 'border-slate-800'
-                    }`}
-                  />
-                  {businessTypeConfig.suggestExpiryTracking && !editingProduct.expiryDate && (
-                    <p className="text-[10px] text-amber-300/90 mt-1">
-                      Tip: Enter an expiry date to receive automatic near-expiry and expired batch warnings at checkout and in Inventory.
-                    </p>
-                  )}
-                </div>
+                )}
 
                 {/* KRA eTIMS Tax Classification Selector */}
                 <div className="sm:col-span-2 bg-slate-950/80 border border-slate-800 p-3.5 rounded-2xl space-y-2">
@@ -6429,7 +6733,8 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                 </div>
 
                 {/* Product Image Section with Live Preview, Upload, Camera, AI Studio & Drag-and-Drop */}
-                <div className="sm:col-span-2 space-y-2.5">
+                {showImageUI && (
+                  <div className="sm:col-span-2 space-y-2.5">
                   <div className="flex items-center justify-between">
                     <label className="block text-slate-200 font-bold text-xs">
                       Product Photo
@@ -6688,6 +6993,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                     </div>
                   </div>
                 </div>
+                )}
 
                 {/* Description */}
                 <div className="sm:col-span-2">
@@ -6704,6 +7010,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                 </div>
 
                 {/* Bulk Barcode Image Generator & PDF Label Download Integration */}
+                {showBarcodeUI && (
                 <div className="sm:col-span-2 bg-slate-950/90 border border-sky-900/60 rounded-2xl p-4 space-y-3 shadow-lg">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
@@ -6763,6 +7070,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                     <span>Retail Price: <strong className="text-emerald-400">KSh {editingProduct.sellingPrice || 0}</strong></span>
                   </div>
                 </div>
+                )}
               </div>
             </div>
 
@@ -6804,24 +7112,26 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
       />
 
       {/* MODAL: AI PRODUCT IMAGE STUDIO */}
-      <ImageGeneratorModal
-        isOpen={showImageStudioModal}
-        onClose={() => setShowImageStudioModal(false)}
-        product={editingProduct as Product}
-        allProducts={products}
-        onApplyImage={(_, imgUrl) => {
-          if (editingProduct) {
-            setEditingProduct({ ...editingProduct, imageUrl: imgUrl });
-          }
-        }}
-        onBulkApplyImages={(imageMap) => {
-          products.forEach((p) => {
-            if (imageMap[p.id]) {
-              onSaveProduct({ ...p, imageUrl: imageMap[p.id] });
+      {showImageUI && (
+        <ImageGeneratorModal
+          isOpen={showImageStudioModal}
+          onClose={() => setShowImageStudioModal(false)}
+          product={editingProduct as Product}
+          allProducts={products}
+          onApplyImage={(_, imgUrl) => {
+            if (editingProduct) {
+              setEditingProduct({ ...editingProduct, imageUrl: imgUrl });
             }
-          });
-        }}
-      />
+          }}
+          onBulkApplyImages={(imageMap) => {
+            products.forEach((p) => {
+              if (imageMap[p.id]) {
+                onSaveProduct({ ...p, imageUrl: imageMap[p.id] });
+              }
+            });
+          }}
+        />
+      )}
 
       {/* MODAL: ADD NEW SUPPLIER ON THE FLY */}
       {showAddSupplierModal && (
@@ -8230,20 +8540,22 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
       )}
 
       {/* Product QR Code Generator Modal for Store Managers */}
-      <ProductQrCodeModal
-        isOpen={Boolean(qrModalProduct)}
-        onClose={() => setQrModalProduct(null)}
-        product={qrModalProduct}
-        storeName={storeName}
-        onOpenMiniPage={(p) => {
-          setQrModalProduct(null);
-          if (onOpenItemAuditMiniPage) {
-            onOpenItemAuditMiniPage(p);
-          } else {
-            setLocalAuditProduct(p);
-          }
-        }}
-      />
+      {showBarcodeUI && (
+        <ProductQrCodeModal
+          isOpen={Boolean(qrModalProduct)}
+          onClose={() => setQrModalProduct(null)}
+          product={qrModalProduct}
+          storeName={storeName}
+          onOpenMiniPage={(p) => {
+            setQrModalProduct(null);
+            if (onOpenItemAuditMiniPage) {
+              onOpenItemAuditMiniPage(p);
+            } else {
+              setLocalAuditProduct(p);
+            }
+          }}
+        />
+      )}
 
       {/* Item Audit Mini-Page Terminal (showing history, current stock level, and recent restock batches) */}
       {localAuditProduct && (
@@ -8254,6 +8566,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
             transactions={transactions}
             storeName={storeName}
             currentUser={currentUser}
+            activeStoreId={activeStoreId}
             onBack={() => setLocalAuditProduct(null)}
             onAddRestock={onAddRestock}
             onAdjustStockQuantity={onAdjustStockQuantity}
@@ -8336,6 +8649,53 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
               </div>
 
               <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-300 block">
+                  Buying / Unit Cost (KSh)
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={quickRestockUnitCost}
+                  onFocus={(e) => e.target.select()}
+                  onChange={(e) => {
+                    setQuickRestockUnitCost(e.target.value);
+                    setQuickRestockError(null);
+                  }}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-emerald-500"
+                  placeholder="Optional unit buying cost..."
+                />
+                {(() => {
+                  const parsedCost = parseFloat(quickRestockUnitCost);
+                  const effectiveCost = !isNaN(parsedCost) && parsedCost >= 0
+                    ? parsedCost
+                    : Number(quickRestockModalProduct.costPrice || quickRestockModalProduct.buyingPrice || 0);
+                  const currentSell = Number(quickRestockModalProduct.sellingPrice || 0);
+                  if (autoZeroMargin && effectiveCost > 0) {
+                    return (
+                      <div className="text-[11px] bg-indigo-950/60 border border-indigo-500/40 text-indigo-200 rounded-xl px-3 py-2 flex items-center gap-2">
+                        <Sparkles className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                        <span>Auto 0% Margin is ON: Selling price will update to KSh {effectiveCost.toLocaleString()} (0% margin).</span>
+                      </div>
+                    );
+                  }
+                  if (effectiveCost > 0 && currentSell > 0 && effectiveCost > currentSell) {
+                    return (
+                      <div className="text-[11px] bg-rose-950/75 border border-rose-500/60 text-rose-200 rounded-xl px-3 py-2 flex items-start gap-2">
+                        <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                        <span>
+                          {canSellBelowCost
+                            ? `Warning: Buying cost (KSh ${effectiveCost.toLocaleString()}) is higher than current selling price (KSh ${currentSell.toLocaleString()}).`
+                            : `Blocked: Buying cost (KSh ${effectiveCost.toLocaleString()}) exceeds selling price (KSh ${currentSell.toLocaleString()}) while "Can Sell Below Buying Price" is OFF.`}
+                        </span>
+                      </div>
+                    );
+                  }
+                  return null;
+                })()}
+              </div>
+
+              <div className="space-y-1.5">
                 <label className="text-xs font-bold text-slate-300 block">Reason for Adjustment</label>
                 <select
                   value={quickRestockReason}
@@ -8350,6 +8710,13 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                   <option value="Other">Other Adjustment</option>
                 </select>
               </div>
+
+              {quickRestockError && (
+                <div className="text-xs bg-rose-950/90 border border-rose-500/70 text-rose-200 rounded-xl px-3 py-2 flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+                  <span>{quickRestockError}</span>
+                </div>
+              )}
 
               <div className="flex items-center justify-end gap-2 pt-2">
                 <button
@@ -8377,6 +8744,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
         <BulkEditProductsModal
           selectedProducts={selectedProductsList}
           categories={consolidatedCategories}
+          canSellBelowBuyingPrice={canSellBelowCost}
           onClose={() => setShowBulkEditModal(false)}
           onApplyBatch={handleApplyBulkUpdate}
         />

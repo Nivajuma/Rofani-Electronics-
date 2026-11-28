@@ -8,6 +8,7 @@ import {
   SUPPORT_EMAIL,
   resolveActiveStoreKraPin,
 } from './supportConfig';
+import { formatMoney, getActiveCurrencySymbol } from './currency';
 
 /**
  * Common Header styling for reports
@@ -48,16 +49,16 @@ export const exportSalesReportPDF = (transactions: Transaction[], dateRangeStr: 
     totalPaid += tx.amountPaid;
     totalDue += tx.balanceDue;
 
-    const pm = tx.payments.map((p) => `${p.method.toUpperCase()} (KSh ${p.amount.toLocaleString()})`).join(', ');
+    const pm = tx.payments.map((p) => `${p.method.toUpperCase()} (${formatMoney(p.amount)})`).join(', ');
 
     return [
       tx.receiptNumber,
       new Date(tx.date).toLocaleDateString(),
       tx.customerName || 'Walk-in',
       tx.items.length.toString(),
-      `KSh ${tx.grandTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}`,
-      `KSh ${tx.amountPaid.toLocaleString(undefined, { minimumFractionDigits: 2 })}`,
-      tx.balanceDue > 0 ? `KSh ${tx.balanceDue.toLocaleString(undefined, { minimumFractionDigits: 2 })}` : 'KSh 0.00',
+      formatMoney(tx.grandTotal, { showDecimals: true }),
+      formatMoney(tx.amountPaid, { showDecimals: true }),
+      tx.balanceDue > 0 ? formatMoney(tx.balanceDue, { showDecimals: true }) : formatMoney(0, { showDecimals: true }),
       tx.paymentStatus,
       pm || 'N/A'
     ];
@@ -81,14 +82,14 @@ export const exportSalesReportPDF = (transactions: Transaction[], dateRangeStr: 
   doc.setFontSize(10);
   doc.setFont('helvetica', 'bold');
   doc.text(`Total Transactions: ${transactions.length}`, 20, finalY + 8);
-  doc.text(`Total Gross Sales: KSh ${totalRevenue.toLocaleString(undefined, { minimumFractionDigits: 2 })}`, 20, finalY + 16);
+  doc.text(`Total Gross Sales: ${formatMoney(totalRevenue, { showDecimals: true })}`, 20, finalY + 16);
   doc.setTextColor(217, 119, 6); // Amber tax color
-  doc.text(`KRA Turnover Tax Payable (1.5% TOT): KSh ${kraTaxTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}`, 20, finalY + 24);
+  doc.text(`KRA Turnover Tax Payable (1.5% TOT): ${formatMoney(kraTaxTotal, { showDecimals: true })}`, 20, finalY + 24);
 
   doc.setTextColor(15, 23, 42);
-  doc.text(`Total Collected: KSh ${totalPaid.toLocaleString(undefined, { minimumFractionDigits: 2 })}`, 105, finalY + 8);
+  doc.text(`Total Collected: ${formatMoney(totalPaid, { showDecimals: true })}`, 105, finalY + 8);
   doc.setTextColor(220, 38, 38);
-  doc.text(`Total Credit / Balance Due: KSh ${totalDue.toLocaleString(undefined, { minimumFractionDigits: 2 })}`, 105, finalY + 16);
+  doc.text(`Total Credit / Balance Due: ${formatMoney(totalDue, { showDecimals: true })}`, 105, finalY + 16);
 
   doc.save(`Sales_Report_${new Date().toISOString().slice(0, 10)}.pdf`);
 };
@@ -120,17 +121,17 @@ export const exportProfitReportPDF = (
   const netProfit = grossProfit - totalExpenses - kraTax;
 
   const financialSummary = [
-    ['Gross Sales Revenue', `KSh ${grossSales.toLocaleString(undefined, { minimumFractionDigits: 2 })}`],
-    ['Less: Cost of Goods Sold (COGS)', `-KSh ${cogs.toLocaleString(undefined, { minimumFractionDigits: 2 })}`],
-    ['Gross Operating Profit', `KSh ${grossProfit.toLocaleString(undefined, { minimumFractionDigits: 2 })}`],
-    ['Less: Operating Expenses', `-KSh ${totalExpenses.toLocaleString(undefined, { minimumFractionDigits: 2 })}`],
-    ['Less: KRA Turnover Tax (1.5% of Gross Sales)', `-KSh ${kraTax.toLocaleString(undefined, { minimumFractionDigits: 2 })}`],
-    ['NET PROFIT AFTER TAX', `KSh ${netProfit.toLocaleString(undefined, { minimumFractionDigits: 2 })}`]
+    ['Gross Sales Revenue', formatMoney(grossSales, { showDecimals: true })],
+    ['Less: Cost of Goods Sold (COGS)', `-${formatMoney(cogs, { showDecimals: true })}`],
+    ['Gross Operating Profit', formatMoney(grossProfit, { showDecimals: true })],
+    ['Less: Operating Expenses', `-${formatMoney(totalExpenses, { showDecimals: true })}`],
+    ['Less: KRA Turnover Tax (1.5% of Gross Sales)', `-${formatMoney(kraTax, { showDecimals: true })}`],
+    ['NET PROFIT AFTER TAX', formatMoney(netProfit, { showDecimals: true })]
   ];
 
   autoTable(doc, {
     startY: 35,
-    head: [['Financial Metric', 'Amount (KSh)']],
+    head: [['Financial Metric', `Amount (${getActiveCurrencySymbol()})`]],
     body: financialSummary,
     theme: 'grid',
     headStyles: { fillColor: [15, 23, 42], textColor: [255, 255, 255], fontStyle: 'bold' },
@@ -149,7 +150,7 @@ export const exportProfitReportPDF = (
     exp.category,
     exp.description,
     (exp.paymentMethod || 'cash').toUpperCase(),
-    `KSh ${exp.amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}`
+    formatMoney(exp.amount, { showDecimals: true })
   ]);
 
   autoTable(doc, {
@@ -202,7 +203,7 @@ export const exportItemMovementPDF = (products: Product[], transactions: Transac
     p.sizeCapacity || '-',
     p.stockQuantity.toString(),
     p.qtySold.toString(),
-    `KSh ${p.totalRevenue.toLocaleString(undefined, { minimumFractionDigits: 2 })}`,
+    formatMoney(p.totalRevenue, { showDecimals: true }),
     p.velocity
   ]);
 
@@ -240,8 +241,8 @@ export const exportCustomerReportPDF = (customers: Customer[]) => {
     c.name,
     c.phone,
     c.email || 'N/A',
-    `KSh ${c.totalPurchases.toLocaleString(undefined, { minimumFractionDigits: 2 })}`,
-    `KSh ${c.currentBalanceDue.toLocaleString(undefined, { minimumFractionDigits: 2 })}`,
+    formatMoney(c.totalPurchases, { showDecimals: true }),
+    formatMoney(c.currentBalanceDue, { showDecimals: true }),
     c.currentBalanceDue > 0 ? 'CREDIT OUTSTANDING' : 'CLEAR'
   ]);
 
@@ -270,7 +271,7 @@ export const exportSupplierReportPDF = (suppliers: Supplier[]) => {
     s.phone,
     s.email,
     s.address,
-    `KSh ${s.totalSuppliedValue.toLocaleString(undefined, { minimumFractionDigits: 2 })}`
+    formatMoney(s.totalSuppliedValue, { showDecimals: true })
   ]);
 
   autoTable(doc, {
@@ -316,8 +317,8 @@ export const exportKRATaxReportPDF = (
     ['Applicable Tax Rate', `${rate}% on Gross Sales Turnover`],
     ['Tax Return Period', monthLabel],
     ['Filing & Payment Due Date', `20th of the subsequent month via KRA iTax`],
-    ['Total Gross Sales Turnover', `KSh ${totalSales.toLocaleString(undefined, { minimumFractionDigits: 2 })}`],
-    ['Net KRA Tax Payable', `KSh ${totalTaxPayable.toLocaleString(undefined, { minimumFractionDigits: 2 })}`],
+    ['Total Gross Sales Turnover', formatMoney(totalSales, { showDecimals: true })],
+    ['Net KRA Tax Payable', formatMoney(totalTaxPayable, { showDecimals: true })],
     ['KRA e-Slip / PRN Status', prn ? `PAID / PRN: ${prn}` : 'PENDING PAYMENT REGISTRATION']
   ];
 
@@ -336,8 +337,8 @@ export const exportKRATaxReportPDF = (
     new Date(tx.date).toLocaleDateString(),
     tx.customerName || 'Walk-in',
     tx.isEtimsRequested ? 'e-TIMS Issued' : 'Standard Slip',
-    `KSh ${tx.grandTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}`,
-    `KSh ${(tx.grandTotal * (rate / 100)).toLocaleString(undefined, { minimumFractionDigits: 2 })}`
+    formatMoney(tx.grandTotal, { showDecimals: true }),
+    formatMoney(tx.grandTotal * (rate / 100), { showDecimals: true })
   ]);
 
   let nextY = (doc as any).lastAutoTable.finalY + 10;
@@ -347,7 +348,7 @@ export const exportKRATaxReportPDF = (
 
   autoTable(doc, {
     startY: nextY + 4,
-    head: [['Receipt #', 'Date', 'Customer', 'Invoice Type', 'Gross Sales (KSh)', `TOT Tax (${rate}%)`]],
+    head: [['Receipt #', 'Date', 'Customer', 'Invoice Type', `Gross Sales (${getActiveCurrencySymbol()})`, `TOT Tax (${rate}%)`]],
     body: txRows.length > 0 ? txRows : [['-', '-', 'No transactions recorded in this tax period', '-', '0.00', '0.00']],
     theme: 'striped',
     headStyles: { fillColor: [15, 23, 42], textColor: [255, 255, 255] },
@@ -447,11 +448,11 @@ export const exportReceiptPDF = (
     doc.text(shortName, 6, y);
     const freeTag = it.freeQuantity ? ` +${it.freeQuantity}free` : '';
     if (it.discount > 0) {
-      doc.text(`${it.quantity}${freeTag} x KSh ${(it.unitPrice - it.discount).toLocaleString()}`, 45, y);
+      doc.text(`${it.quantity}${freeTag} x ${formatMoney(it.unitPrice - it.discount)}`, 45, y);
     } else {
-      doc.text(`${it.quantity}${freeTag} x KSh ${it.unitPrice.toLocaleString()}`, 45, y);
+      doc.text(`${it.quantity}${freeTag} x ${formatMoney(it.unitPrice)}`, 45, y);
     }
-    doc.text(`KSh ${it.total.toLocaleString()}`, 74, y, { align: 'right' });
+    doc.text(formatMoney(it.total), 74, y, { align: 'right' });
     y += 5;
   });
 
@@ -460,56 +461,56 @@ export const exportReceiptPDF = (
 
   doc.setFont('helvetica', 'normal');
   doc.text('Subtotal:', 6, y);
-  doc.text(`KSh ${tx.subtotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}`, 74, y, { align: 'right' });
+  doc.text(formatMoney(tx.subtotal, { showDecimals: true }), 74, y, { align: 'right' });
   y += 4;
 
   if (tx.discountTotal > 0) {
     doc.text('Discount:', 6, y);
-    doc.text(`-KSh ${tx.discountTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}`, 74, y, { align: 'right' });
+    doc.text(`-${formatMoney(tx.discountTotal, { showDecimals: true })}`, 74, y, { align: 'right' });
     y += 4;
   }
 
   if ((tx.additionalChargeAmount || 0) > 0) {
     doc.text(`${tx.additionalChargeLabel || 'Additional Charge'}:`, 6, y);
-    doc.text(`+KSh ${Number(tx.additionalChargeAmount).toLocaleString(undefined, { minimumFractionDigits: 2 })}`, 74, y, { align: 'right' });
+    doc.text(`+${formatMoney(Number(tx.additionalChargeAmount), { showDecimals: true })}`, 74, y, { align: 'right' });
     y += 4;
   }
 
   if (tx.roundOffAmount) {
     doc.text('Round Off:', 6, y);
-    doc.text(`${tx.roundOffAmount > 0 ? '+' : ''}KSh ${tx.roundOffAmount.toFixed(2)}`, 74, y, { align: 'right' });
+    doc.text(`${tx.roundOffAmount > 0 ? '+' : ''}${formatMoney(tx.roundOffAmount, { showDecimals: true })}`, 74, y, { align: 'right' });
     y += 4;
   }
 
   if (tx.taxTotal > 0) {
     doc.text('Sales Tax / Levy:', 6, y);
-    doc.text(`KSh ${tx.taxTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}`, 74, y, { align: 'right' });
+    doc.text(formatMoney(tx.taxTotal, { showDecimals: true }), 74, y, { align: 'right' });
     y += 4;
   }
 
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(10);
   doc.text('Grand Total:', 6, y);
-  doc.text(`KSh ${tx.grandTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}`, 74, y, { align: 'right' });
+  doc.text(formatMoney(tx.grandTotal, { showDecimals: true }), 74, y, { align: 'right' });
   y += 5;
 
   if ((tx.depositAppliedAmount || 0) > 0) {
     doc.text('Deposit Credit Applied:', 6, y);
-    doc.text(`KSh ${Number(tx.depositAppliedAmount).toLocaleString(undefined, { minimumFractionDigits: 2 })}`, 74, y, { align: 'right' });
+    doc.text(formatMoney(Number(tx.depositAppliedAmount), { showDecimals: true }), 74, y, { align: 'right' });
     y += 4;
   }
 
   doc.setFontSize(8);
   doc.setFont('helvetica', 'normal');
   doc.text(`Amount Paid:`, 6, y);
-  doc.text(`KSh ${tx.amountPaid.toLocaleString(undefined, { minimumFractionDigits: 2 })}`, 74, y, { align: 'right' });
+  doc.text(formatMoney(tx.amountPaid, { showDecimals: true }), 74, y, { align: 'right' });
   y += 4;
 
   if (tx.balanceDue > 0) {
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(220, 38, 38);
     doc.text(`Balance Due (Credit):`, 6, y);
-    doc.text(`KSh ${tx.balanceDue.toLocaleString(undefined, { minimumFractionDigits: 2 })}`, 74, y, { align: 'right' });
+    doc.text(formatMoney(tx.balanceDue, { showDecimals: true }), 74, y, { align: 'right' });
     doc.setTextColor(0, 0, 0);
     y += 4;
   }
@@ -518,7 +519,7 @@ export const exportReceiptPDF = (
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(180, 83, 9);
     doc.text(`Returned / Credit Note:`, 6, y);
-    doc.text(`-KSh ${Number(tx.returnedAmount).toLocaleString(undefined, { minimumFractionDigits: 2 })}`, 74, y, { align: 'right' });
+    doc.text(`-${formatMoney(Number(tx.returnedAmount), { showDecimals: true })}`, 74, y, { align: 'right' });
     doc.setTextColor(0, 0, 0);
     y += 4;
   }
@@ -527,7 +528,7 @@ export const exportReceiptPDF = (
   doc.text('Payment Methods:', 6, y);
   y += 4;
   tx.payments.forEach((p) => {
-    doc.text(`• ${p.method.toUpperCase()}: KSh ${p.amount.toLocaleString()} ${p.reference ? `(${p.reference})` : ''}`, 8, y);
+    doc.text(`• ${p.method.toUpperCase()}: ${formatMoney(p.amount)} ${p.reference ? `(${p.reference})` : ''}`, 8, y);
     y += 4;
   });
 
@@ -562,15 +563,15 @@ export const exportCustomerAccountStatementPDF = (customer: Customer, customerTr
 
   doc.text(`KRA Tax PIN: ${customer.kraPin || 'N/A'}`, 110, 42);
   doc.text(`Customer Type: ${customer.customerType || 'Individual'}`, 110, 48);
-  doc.text(`Credit Limit: ${customer.creditLimit ? `KSh ${customer.creditLimit.toLocaleString()}` : 'Standard'}`, 110, 54);
+  doc.text(`Credit Limit: ${customer.creditLimit ? formatMoney(customer.creditLimit) : 'Standard'}`, 110, 54);
   
   doc.setFont('helvetica', 'bold');
   if (customer.currentBalanceDue > 0) {
     doc.setTextColor(220, 38, 38);
-    doc.text(`Current Outstanding Balance: KSh ${customer.currentBalanceDue.toLocaleString(undefined, { minimumFractionDigits: 2 })}`, 110, 60);
+    doc.text(`Current Outstanding Balance: ${formatMoney(customer.currentBalanceDue, { showDecimals: true })}`, 110, 60);
   } else {
     doc.setTextColor(22, 163, 74);
-    doc.text(`Current Balance: KSh 0.00 (Account Fully Settled)`, 110, 60);
+    doc.text(`Current Balance: ${formatMoney(0, { showDecimals: true })} (Account Fully Settled)`, 110, 60);
   }
   doc.setTextColor(15, 23, 42);
 
@@ -581,9 +582,9 @@ export const exportCustomerAccountStatementPDF = (customer: Customer, customerTr
       tx.receiptNumber,
       new Date(tx.date).toLocaleDateString(),
       itemsList,
-      `KSh ${tx.grandTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}`,
-      `KSh ${tx.amountPaid.toLocaleString(undefined, { minimumFractionDigits: 2 })}`,
-      `KSh ${tx.balanceDue.toLocaleString(undefined, { minimumFractionDigits: 2 })}`,
+      formatMoney(tx.grandTotal, { showDecimals: true }),
+      formatMoney(tx.amountPaid, { showDecimals: true }),
+      formatMoney(tx.balanceDue, { showDecimals: true }),
       tx.paymentStatus.toUpperCase()
     ];
   });
@@ -632,10 +633,10 @@ export const exportSupplierAccountStatementPDF = (supplier: Supplier, supplierPr
   doc.setFont('helvetica', 'bold');
   if ((supplier.currentBalanceDue || 0) > 0) {
     doc.setTextColor(220, 38, 38);
-    doc.text(`Accounts Payable (Owed): KSh ${(supplier.currentBalanceDue || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`, 110, 60);
+    doc.text(`Accounts Payable (Owed): ${formatMoney(supplier.currentBalanceDue || 0, { showDecimals: true })}`, 110, 60);
   } else {
     doc.setTextColor(22, 163, 74);
-    doc.text(`Payable Balance: KSh 0.00 (All Invoices Paid)`, 110, 60);
+    doc.text(`Payable Balance: ${formatMoney(0, { showDecimals: true })} (All Invoices Paid)`, 110, 60);
   }
   doc.setTextColor(15, 23, 42);
 
@@ -644,8 +645,8 @@ export const exportSupplierAccountStatementPDF = (supplier: Supplier, supplierPr
     p.sku,
     p.name,
     p.category,
-    `KSh ${p.costPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}`,
-    `KSh ${p.sellingPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}`,
+    formatMoney(p.costPrice, { showDecimals: true }),
+    formatMoney(p.sellingPrice, { showDecimals: true }),
     `${p.stockQuantity} ${p.unit}`,
     p.stockQuantity <= p.minStockAlert ? 'LOW STOCK - REORDER' : 'IN STOCK'
   ]);
@@ -663,7 +664,7 @@ export const exportSupplierAccountStatementPDF = (supplier: Supplier, supplierPr
   doc.setFontSize(9);
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(100, 116, 139);
-  doc.text(`Total Lifetime Restock Value from ${supplier.name}: KSh ${supplier.totalSuppliedValue.toLocaleString(undefined, { minimumFractionDigits: 2 })}`, 14, finalY + 10);
+  doc.text(`Total Lifetime Restock Value from ${supplier.name}: ${formatMoney(supplier.totalSuppliedValue, { showDecimals: true })}`, 14, finalY + 10);
 
   doc.save(`Supplier_Statement_${supplier.name.replace(/\s+/g, '_')}_${new Date().toISOString().slice(0, 10)}.pdf`);
 };
@@ -692,11 +693,11 @@ export const exportCommissionStatementPDF = (
   doc.text(`Email: ${worker.email}`, 14, 55);
 
   doc.text(`Commission Model: ${summary.modelName}`, 110, 43);
-  doc.text(`Total Attributed Sales: KSh ${summary.totalSales.toLocaleString(undefined, { minimumFractionDigits: 2 })} (${summary.count} sales)`, 110, 49);
+  doc.text(`Total Attributed Sales: ${formatMoney(summary.totalSales, { showDecimals: true })} (${summary.count} sales)`, 110, 49);
   
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(16, 185, 129);
-  doc.text(`Total Commission Earned: KSh ${summary.commissionEarned.toLocaleString(undefined, { minimumFractionDigits: 2 })}`, 110, 55);
+  doc.text(`Total Commission Earned: ${formatMoney(summary.commissionEarned, { showDecimals: true })}`, 110, 55);
   doc.setTextColor(15, 23, 42);
 
   const rows = transactions.map((tx) => {
@@ -706,9 +707,9 @@ export const exportCommissionStatementPDF = (
       new Date(tx.date).toLocaleDateString() + ' ' + new Date(tx.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       tx.customerName || 'Walk-in',
       tx.items.length.toString(),
-      `KSh ${tx.grandTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}`,
+      formatMoney(tx.grandTotal, { showDecimals: true }),
       tx.commissionModelApplied || `${tx.cashierCommissionRate || 5}%`,
-      `KSh ${commAmt.toLocaleString(undefined, { minimumFractionDigits: 2 })}`,
+      formatMoney(commAmt, { showDecimals: true }),
     ];
   });
 
@@ -735,8 +736,8 @@ export const exportCommissionStatementPDF = (
   doc.text('STATEMENT SUMMARY & AUTHORIZATION', 20, finalY + 14);
 
   doc.setFont('helvetica', 'normal');
-  doc.text(`Total Attributed Revenue: KSh ${summary.totalSales.toLocaleString(undefined, { minimumFractionDigits: 2 })}`, 20, finalY + 22);
-  doc.text(`Net Commission Payable: KSh ${summary.commissionEarned.toLocaleString(undefined, { minimumFractionDigits: 2 })}`, 20, finalY + 28);
+  doc.text(`Total Attributed Revenue: ${formatMoney(summary.totalSales, { showDecimals: true })}`, 20, finalY + 22);
+  doc.text(`Net Commission Payable: ${formatMoney(summary.commissionEarned, { showDecimals: true })}`, 20, finalY + 28);
 
   doc.text('Staff Signature: _______________________', 110, finalY + 22);
   doc.text('Authorized By: ________________________', 110, finalY + 28);
@@ -760,18 +761,18 @@ export const exportCommissionPayoutSlipPDF = (payout: StaffCommissionPayout) => 
   doc.setFont('helvetica', 'normal');
   doc.text(`Employee Name: ${payout.employeeName}`, 14, 43);
   doc.text(`Date / Period: ${payout.date}`, 14, 49);
-  doc.text(`Total Sales Base: KSh ${payout.totalSalesAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })} (${payout.salesCount} orders)`, 14, 55);
+  doc.text(`Total Sales Base: ${formatMoney(payout.totalSalesAmount, { showDecimals: true })} (${payout.salesCount} orders)`, 14, 55);
 
   doc.text(`Payment Method: ${(payout.paymentMethod || 'mpesa').toUpperCase()}`, 110, 43);
   doc.text(`Disbursed By: ${payout.paidBy || 'Admin'}`, 110, 49);
   doc.text(`Reference No: ${payout.referenceNo || 'N/A'}`, 110, 55);
 
   const rows = [
-    ['Gross Attributed Sales', `KSh ${payout.totalSalesAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}`],
+    ['Gross Attributed Sales', formatMoney(payout.totalSalesAmount, { showDecimals: true })],
     ['Effective Commission Rate', `${payout.commissionRate}%`],
-    ['Gross Commission Earned', `KSh ${payout.commissionEarned.toLocaleString(undefined, { minimumFractionDigits: 2 })}`],
-    ['Worker Loan / Advance Deduction', payout.loanDeduction ? `- KSh ${payout.loanDeduction.toLocaleString(undefined, { minimumFractionDigits: 2 })}` : 'KSh 0.00'],
-    ['Net Amount Paid to Worker', `KSh ${payout.paidAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}`],
+    ['Gross Commission Earned', formatMoney(payout.commissionEarned, { showDecimals: true })],
+    ['Worker Loan / Advance Deduction', payout.loanDeduction ? `- ${formatMoney(payout.loanDeduction, { showDecimals: true })}` : formatMoney(0, { showDecimals: true })],
+    ['Net Amount Paid to Worker', formatMoney(payout.paidAmount, { showDecimals: true })],
     ['Disbursement Status', payout.status],
     ['Payment Timestamp', payout.paidAt ? new Date(payout.paidAt).toLocaleString() : new Date().toLocaleString()],
     ['Audit Notes', payout.notes || 'Routine sales commission disbursement'],
@@ -908,13 +909,13 @@ export const exportItemAuditReportPDF = (params: {
   doc.setFontSize(9);
   doc.setTextColor(15, 23, 42);
   doc.setFont('helvetica', 'bold');
-  doc.text(`Selling Price: KSh ${product.sellingPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}`, 108, 42);
+  doc.text(`Selling Price: ${formatMoney(product.sellingPrice, { showDecimals: true })}`, 108, 42);
   doc.setFont('helvetica', 'normal');
-  doc.text(`Unit Cost: KSh ${product.costPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}`, 108, 48);
-  doc.text(`Margin: ${marginPct.toFixed(1)}% (Profit: KSh ${profitPerUnit.toLocaleString()}/unit)`, 108, 54);
-  doc.text(`Shelf Value (at Cost): KSh ${stockValuationCost.toLocaleString(undefined, { minimumFractionDigits: 2 })}`, 108, 60);
-  doc.text(`Shelf Value (at Retail): KSh ${stockValuationRetail.toLocaleString(undefined, { minimumFractionDigits: 2 })}`, 108, 66);
-  doc.text(`Lifetime Units Sold: ${totalUnitsSold} ${product.unit} | Revenue: KSh ${totalRevenue.toLocaleString()}`, 108, 72);
+  doc.text(`Unit Cost: ${formatMoney(product.costPrice, { showDecimals: true })}`, 108, 48);
+  doc.text(`Margin: ${marginPct.toFixed(1)}% (Profit: ${formatMoney(profitPerUnit)}/unit)`, 108, 54);
+  doc.text(`Shelf Value (at Cost): ${formatMoney(stockValuationCost, { showDecimals: true })}`, 108, 60);
+  doc.text(`Shelf Value (at Retail): ${formatMoney(stockValuationRetail, { showDecimals: true })}`, 108, 66);
+  doc.text(`Lifetime Units Sold: ${totalUnitsSold} ${product.unit} | Revenue: ${formatMoney(totalRevenue)}`, 108, 72);
 
   // If QR code is provided, render it on the right side
   if (qrDataUrl) {
@@ -934,8 +935,8 @@ export const exportItemAuditReportPDF = (params: {
     new Date(b.date).toLocaleDateString(),
     b.supplierName || 'Supplier',
     `+${b.quantityAdded} ${product.unit}`,
-    `KSh ${b.unitCost.toLocaleString(undefined, { minimumFractionDigits: 2 })}`,
-    `KSh ${b.totalCost.toLocaleString(undefined, { minimumFractionDigits: 2 })}`,
+    formatMoney(b.unitCost, { showDecimals: true }),
+    formatMoney(b.totalCost, { showDecimals: true }),
     b.receivedBy || 'Staff',
     b.notes || '—',
   ]);
@@ -966,9 +967,9 @@ export const exportItemAuditReportPDF = (params: {
     s.customerName,
     s.cashierName,
     `${s.quantity} ${product.unit}`,
-    `KSh ${s.unitPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}`,
-    `KSh ${s.total.toLocaleString(undefined, { minimumFractionDigits: 2 })}`,
-    `KSh ${s.profit.toLocaleString(undefined, { minimumFractionDigits: 2 })}`,
+    formatMoney(s.unitPrice, { showDecimals: true }),
+    formatMoney(s.total, { showDecimals: true }),
+    formatMoney(s.profit, { showDecimals: true }),
   ]);
 
   autoTable(doc, {
@@ -999,7 +1000,7 @@ export const exportItemAuditReportPDF = (params: {
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(71, 85, 105);
   doc.text(
-    `AUDIT CERTIFICATION: Verified stock count of ${product.stockQuantity} ${product.unit} on shelf for SKU ${product.sku}. Total Batches: ${batches.length} (+${totalRestockedUnits} units received). Total Lifetime Sales: ${totalUnitsSold} units (KSh ${totalRevenue.toLocaleString()} revenue).`,
+    `AUDIT CERTIFICATION: Verified stock count of ${product.stockQuantity} ${product.unit} on shelf for SKU ${product.sku}. Total Batches: ${batches.length} (+${totalRestockedUnits} units received). Total Lifetime Sales: ${totalUnitsSold} units (${formatMoney(totalRevenue)} revenue).`,
     20,
     certY + 7,
     { maxWidth: 170 }
@@ -1053,18 +1054,18 @@ export const exportSalaryPayslipPDF = (payout: WorkerSalaryPayout) => {
       : `${payout.unitsWorked} hr(s)`;
 
   const rows = [
-    [`Base Rate (${payTypeLabel})`, `KSh ${payout.baseRate.toLocaleString(undefined, { minimumFractionDigits: 2 })}`],
+    [`Base Rate (${payTypeLabel})`, formatMoney(payout.baseRate, { showDecimals: true })],
     ['Units / Attendance Worked', unitLabel],
-    ['Base Salary / Wage Earned', `KSh ${payout.basePayEarned.toLocaleString(undefined, { minimumFractionDigits: 2 })}`],
-    ['Fixed Allowances (Transport / Meal / Housing)', `KSh ${payout.allowances.toLocaleString(undefined, { minimumFractionDigits: 2 })}`],
-    ['Overtime / Bonus / Additions', `KSh ${payout.overtimeOrBonus.toLocaleString(undefined, { minimumFractionDigits: 2 })}`],
-    ['GROSS EARNINGS', `KSh ${payout.grossPay.toLocaleString(undefined, { minimumFractionDigits: 2 })}`],
-    ['Salary Advance / Worker Loan Deduction', payout.loanDeduction > 0 ? `- KSh ${payout.loanDeduction.toLocaleString(undefined, { minimumFractionDigits: 2 })}` : 'KSh 0.00'],
+    ['Base Salary / Wage Earned', formatMoney(payout.basePayEarned, { showDecimals: true })],
+    ['Fixed Allowances (Transport / Meal / Housing)', formatMoney(payout.allowances, { showDecimals: true })],
+    ['Overtime / Bonus / Additions', formatMoney(payout.overtimeOrBonus, { showDecimals: true })],
+    ['GROSS EARNINGS', formatMoney(payout.grossPay, { showDecimals: true })],
+    ['Salary Advance / Worker Loan Deduction', payout.loanDeduction > 0 ? `- ${formatMoney(payout.loanDeduction, { showDecimals: true })}` : formatMoney(0, { showDecimals: true })],
     [
       `Other Deductions${payout.otherDeductionReason ? ` (${payout.otherDeductionReason})` : ''}`,
-      payout.otherDeductions > 0 ? `- KSh ${payout.otherDeductions.toLocaleString(undefined, { minimumFractionDigits: 2 })}` : 'KSh 0.00',
+      payout.otherDeductions > 0 ? `- ${formatMoney(payout.otherDeductions, { showDecimals: true })}` : formatMoney(0, { showDecimals: true }),
     ],
-    ['NET SALARY / WAGE PAID', `KSh ${payout.netPayPaid.toLocaleString(undefined, { minimumFractionDigits: 2 })}`],
+    ['NET SALARY / WAGE PAID', formatMoney(payout.netPayPaid, { showDecimals: true })],
     ['Disbursed By', payout.paidBy || 'Admin'],
     ['Payment Timestamp', payout.paidAt ? new Date(payout.paidAt).toLocaleString() : new Date().toLocaleString()],
     ['Payroll Notes', payout.notes || 'Routine salary & wage disbursement'],
@@ -1106,7 +1107,7 @@ export const exportPayrollSummaryPDF = (payouts: WorkerSalaryPayout[], periodLab
   doc.setFontSize(10);
   doc.setFont('helvetica', 'bold');
   doc.text(
-    `Total Payouts: ${payouts.length}   |   Gross Pay: KSh ${totalGross.toLocaleString()}   |   Deductions: KSh ${totalDeductions.toLocaleString()}   |   Net Paid: KSh ${totalNet.toLocaleString()}`,
+    `Total Payouts: ${payouts.length}   |   Gross Pay: ${formatMoney(totalGross)}   |   Deductions: ${formatMoney(totalDeductions)}   |   Net Paid: ${formatMoney(totalNet)}`,
     14,
     36
   );
@@ -1115,10 +1116,10 @@ export const exportPayrollSummaryPDF = (payouts: WorkerSalaryPayout[], periodLab
     p.paidAt ? new Date(p.paidAt).toLocaleDateString() : p.endDate,
     p.employeeName,
     p.payType === 'monthly' ? 'Monthly' : p.payType === 'daily' ? 'Daily' : 'Hourly',
-    `KSh ${p.basePayEarned.toLocaleString()}`,
-    `KSh ${(p.allowances + p.overtimeOrBonus).toLocaleString()}`,
-    `KSh ${(p.loanDeduction + p.otherDeductions).toLocaleString()}`,
-    `KSh ${p.netPayPaid.toLocaleString()}`,
+    formatMoney(p.basePayEarned),
+    formatMoney(p.allowances + p.overtimeOrBonus),
+    formatMoney(p.loanDeduction + p.otherDeductions),
+    formatMoney(p.netPayPaid),
     (p.paymentMethod || 'mpesa').toUpperCase(),
   ]);
 
@@ -1283,7 +1284,7 @@ export const exportCustomerReturnPDF = (
   doc.text(`Refund Mode: ${ret.refundMode.replace(/_/g, ' ').toUpperCase()}`, 110, 57);
   doc.setFont('helvetica', 'bold');
   doc.text(
-    `Total Return Value: KSh ${ret.totalRefundAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}`,
+    `Total Return Value: ${formatMoney(ret.totalRefundAmount, { showDecimals: true })}`,
     110,
     62
   );
@@ -1293,8 +1294,8 @@ export const exportCustomerReturnPDF = (
   const itemRows = ret.items.map((item) => [
     item.productName,
     `${item.quantityReturned} / ${item.quantitySold} ${item.unit || 'pcs'}`,
-    `KSh ${item.unitPrice.toLocaleString()}`,
-    `KSh ${item.refundSubtotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}`,
+    formatMoney(item.unitPrice),
+    formatMoney(item.refundSubtotal, { showDecimals: true }),
     item.addedBackToStock
       ? `RESELLABLE (+${item.quantityReturned} Restocked${
           item.stockAfterReturn !== undefined ? ` -> Stock: ${item.stockAfterReturn}` : ''
@@ -1319,19 +1320,19 @@ export const exportCustomerReturnPDF = (
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(9);
   doc.text(
-    `• Cash / M-Pesa Refund Paid Out: KSh ${ret.cashRefundAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}${
+    `• Cash / M-Pesa Refund Paid Out: ${formatMoney(ret.cashRefundAmount, { showDecimals: true })}${
       ret.cashRefundChannel ? ` (${ret.cashRefundChannel.toUpperCase()}${ret.cashRefundRef ? ` - ${ret.cashRefundRef}` : ''})` : ''
     }`,
     14,
     finalY + 16
   );
   doc.text(
-    `• Debt Balance Offset: KSh ${ret.debtReducedAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}`,
+    `• Debt Balance Offset: ${formatMoney(ret.debtReducedAmount, { showDecimals: true })}`,
     14,
     finalY + 21
   );
   doc.text(
-    `• Store Deposit Credit Issued: KSh ${ret.creditIssuedAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}`,
+    `• Store Deposit Credit Issued: ${formatMoney(ret.creditIssuedAmount, { showDecimals: true })}`,
     14,
     finalY + 26
   );

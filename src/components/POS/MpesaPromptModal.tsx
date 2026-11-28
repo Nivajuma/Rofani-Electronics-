@@ -27,6 +27,7 @@ import {
   queryMpesaStkStatus,
   MpesaConfig
 } from '../../utils/mpesa';
+import { useCurrency } from '../../utils/currency';
 
 interface MpesaPromptModalProps {
   isOpen: boolean;
@@ -51,6 +52,7 @@ export const MpesaPromptModal: React.FC<MpesaPromptModalProps> = ({
   onPaymentSuccess,
   onAutoFinalizeSale,
 }) => {
+  const { formatMoney } = useCurrency();
   const [step, setStep] = useState<Step>('input');
   const [phoneInput, setPhoneInput] = useState(initialPhone && initialPhone !== 'N/A' ? initialPhone : '');
   const [config, setConfig] = useState<MpesaConfig>(loadMpesaConfig());
@@ -236,7 +238,7 @@ export const MpesaPromptModal: React.FC<MpesaPromptModalProps> = ({
     }
 
     if (amount <= 0) {
-      setErrorMsg('Payment amount must be greater than KSh 0.00.');
+      setErrorMsg(`Payment amount must be greater than ${formatMoney(0, { showDecimals: true })}.`);
       return;
     }
 
@@ -558,7 +560,7 @@ export const MpesaPromptModal: React.FC<MpesaPromptModalProps> = ({
                 Total Amount to Collect
               </span>
               <div className="text-3xl font-black text-emerald-400 font-mono tracking-tight">
-                KSh {amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                {formatMoney(amount, { showDecimals: true })}
               </div>
               <div className="text-[11px] text-slate-400 mt-0.5">
                 Payable to: <span className="text-slate-200 font-semibold">{config.storeDisplayName}</span>{' '}
@@ -759,7 +761,7 @@ export const MpesaPromptModal: React.FC<MpesaPromptModalProps> = ({
                   </div>
 
                   <div className="text-xs text-slate-200 font-medium">
-                    Do you want to pay <span className="font-bold text-emerald-400">KSh {amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span> to{' '}
+                    Do you want to pay <span className="font-bold text-emerald-400">{formatMoney(amount, { showDecimals: true })}</span> to{' '}
                     <span className="font-bold text-white">{config.storeDisplayName}</span>?
                   </div>
 
@@ -869,7 +871,7 @@ export const MpesaPromptModal: React.FC<MpesaPromptModalProps> = ({
                 <div className="bg-slate-900 border border-slate-800 p-2.5 rounded-xl font-mono text-xl font-black text-emerald-400 tracking-wider flex items-center justify-between">
                   <span>{activeReceiptCode}</span>
                   <span className="text-xs font-normal text-slate-400 font-sans">
-                    KSh {amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                    {formatMoney(amount, { showDecimals: true })}
                   </span>
                 </div>
 

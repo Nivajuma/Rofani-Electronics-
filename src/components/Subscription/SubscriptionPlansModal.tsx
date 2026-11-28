@@ -34,6 +34,7 @@ import { signOutFromCloud } from '../../lib/firebase';
 import { ROFANI_MASTER_KRA_PIN } from '../../utils/supportConfig';
 import { exportSubscriptionInvoicePDF } from '../../utils/pdfGenerator';
 import { CustomerCareSupportCard } from '../Common/CustomerCareSupportCard';
+import { formatKesBilling, formatMoney, useCurrency } from '../../utils/currency';
 import {
   BranchPlanOption,
   EXTRA_BRANCH_ANNUAL_PRICE,
@@ -101,6 +102,7 @@ export const SubscriptionPlansModal: React.FC<SubscriptionPlansModalProps> = ({
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const checkoutRef = useRef<HTMLDivElement | null>(null);
 
+  const { currency: storeCurrency } = useCurrency();
   const isExtraBranch = !resolveIsPrimaryBranch(storeProfile, primaryProfile?.id);
 
   useEffect(() => {
@@ -557,6 +559,11 @@ export const SubscriptionPlansModal: React.FC<SubscriptionPlansModalProps> = ({
             </div>
             <p className="text-[11px] text-sky-200/80">
               Each branch keeps its own independent subscription expiry and isolated stock, sales, and staff records.
+              {storeCurrency !== 'KES' && (
+                <span className="block mt-1 text-amber-300 font-semibold">
+                  Master Subscription Billing is always charged in KES (M-Pesa Buy Goods Till: 1833804) — Primary {formatKesBilling(PRIMARY_BRANCH_MONTHLY_PRICE)}/mo (~{formatMoney(PRIMARY_BRANCH_MONTHLY_PRICE / 129.5, { currency: 'USD' })}), Extra Branch {formatKesBilling(EXTRA_BRANCH_MONTHLY_PRICE)}/mo (~{formatMoney(EXTRA_BRANCH_MONTHLY_PRICE / 129.5, { currency: 'USD' })}).
+                </span>
+              )}
             </p>
           </div>
 

@@ -23,8 +23,10 @@ import {
   ShopProtectionSettingsState,
   useShopProtectionSettings,
 } from '../../utils/shopProtectionSettings';
-import { saveShopProtectionSettingsToCloud } from '../../lib/cloudSync';
+import { saveShopProtectionSettingsToCloud, saveItemSettingsToCloud } from '../../lib/cloudSync';
 import { auth, isAuthorizedCloudUser } from '../../lib/firebase';
+import { loadItemSettings, saveItemSettingsLocal, useItemSettings } from '../../utils/itemSettings';
+import { useI18n } from '../../utils/i18n';
 
 interface ShopControlsSettingsViewProps {
   onBack: () => void;
@@ -43,7 +45,9 @@ export const ShopControlsSettingsView: React.FC<ShopControlsSettingsViewProps> =
   onOpenShopQrShare,
   onPreview9PmSummary,
 }) => {
+  const { dir } = useI18n();
   const [settings, setSettings] = useShopProtectionSettings(activeStoreId);
+  const [itemSettings] = useItemSettings(activeStoreId);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [openTooltipKey, setOpenTooltipKey] = useState<string | null>(null);
@@ -51,6 +55,22 @@ export const ShopControlsSettingsView: React.FC<ShopControlsSettingsViewProps> =
 
   const persistUpdate = (next: ShopProtectionSettingsState) => {
     setSettings(next);
+    const currentItemSettings = loadItemSettings(activeStoreId);
+    const nextItemSettings = saveItemSettingsLocal(
+      {
+        ...currentItemSettings,
+        canSellBelowBuyingPrice: next.canSellBelowBuyingPrice,
+        enableCacheOnCart: next.enableCacheOnCart,
+        ...(next.enableExpiryAlerts !== settings.enableExpiryAlerts
+          ? {
+              trackExpiryDate: next.enableExpiryAlerts,
+              enableExpiryDate: next.enableExpiryAlerts,
+            }
+          : {}),
+      },
+      activeStoreId
+    );
+
     setSaveNotice('Saved for active shop');
     setTimeout(() => {
       setSaveNotice((c) => (c === 'Saved for active shop' ? null : c));
@@ -59,6 +79,9 @@ export const ShopControlsSettingsView: React.FC<ShopControlsSettingsViewProps> =
     if (activeStoreId && isAuthorizedCloudUser(auth.currentUser)) {
       saveShopProtectionSettingsToCloud(next, activeStoreId).catch((err) =>
         console.warn('Cloud shop controls sync notice:', err)
+      );
+      saveItemSettingsToCloud(nextItemSettings, activeStoreId).catch((err) =>
+        console.warn('Cloud item settings sync notice:', err)
       );
     }
   };
@@ -190,9 +213,9 @@ export const ShopControlsSettingsView: React.FC<ShopControlsSettingsViewProps> =
   const showQrSection = matchesSearch('Shop QR / Share Link', 'QR code store link share invite', 'qr link share');
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 pb-12">
+    <div dir={dir} className="min-h-screen bg-slate-950 text-slate-100 pb-12">
       {/* Top Bar */}
-      <header className="sticky top-0 z-20 bg-slate-900/95 backdrop-blur-md border-b border-slate-800 px-4 py-3.5">
+      <header dir="ltr" className="sticky top-0 z-20 bg-slate-900/95 backdrop-blur-md border-b border-slate-800 px-4 py-3.5">
         <div className="max-w-3xl mx-auto flex items-center justify-between gap-3">
           <div className="flex items-center gap-3 min-w-0">
             <button
@@ -309,8 +332,8 @@ export const ShopControlsSettingsView: React.FC<ShopControlsSettingsViewProps> =
                 renderToggleRow(
                   'enableExpiryAlerts',
                   'Product Expiry Tracking & Alerts',
-                  'Highlight expired or expiring-soon items (within 30 days) across Inventory and POS checkout.',
-                  'Add optional Expiry Dates on any item inside Inventory to get early alerts before stock expires.',
+                  `Highlight expired or expiring-soon items (within ${itemSettings.expiryAlertDays} days) across Inventory and POS checkout.`,
+                  'Add optional Expiry Dates on any item inside Inventory and configure lead days in Item Settings -> Expiry Notifications.',
                   settings.enableExpiryAlerts,
                   () => toggleTopKey('enableExpiryAlerts'),
                   'emerald'

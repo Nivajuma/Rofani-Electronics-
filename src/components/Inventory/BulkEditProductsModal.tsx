@@ -31,6 +31,7 @@ export interface ConsolidatedCategoryOption {
 export interface BulkEditProductsModalProps {
   selectedProducts: Product[];
   categories: ConsolidatedCategoryOption[];
+  canSellBelowBuyingPrice?: boolean;
   onClose: () => void;
   onApplyBatch: (updatedProducts: Product[], summaryLabel: string) => Promise<void> | void;
 }
@@ -48,6 +49,7 @@ function applyRounding(value: number, rule: PriceRoundingRule): number {
 export const BulkEditProductsModal: React.FC<BulkEditProductsModalProps> = ({
   selectedProducts,
   categories,
+  canSellBelowBuyingPrice = false,
   onClose,
   onApplyBatch,
 }) => {
@@ -206,6 +208,12 @@ export const BulkEditProductsModal: React.FC<BulkEditProductsModalProps> = ({
       if (zeroPriceCount > 0) {
         setFormError(
           `${zeroPriceCount} selected item(s) would drop to KSh 0 or below. Adjust your reduction amount.`
+        );
+        return;
+      }
+      if (!canSellBelowBuyingPrice && belowCostCount > 0) {
+        setFormError(
+          `Blocked: ${belowCostCount} item(s) would be priced below buying cost, which is disabled in Item Settings.`
         );
         return;
       }
@@ -616,10 +624,14 @@ export const BulkEditProductsModal: React.FC<BulkEditProductsModalProps> = ({
 
           {/* Warnings if any prices fall below cost */}
           {belowCostCount > 0 && (
-            <div className="bg-amber-950/70 border border-amber-500/50 text-amber-200 rounded-xl p-3 text-xs flex items-start gap-2">
-              <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+            <div className={`${!canSellBelowBuyingPrice ? 'bg-rose-950/70 border-rose-500/60 text-rose-200' : 'bg-amber-950/70 border-amber-500/50 text-amber-200'} border rounded-xl p-3 text-xs flex items-start gap-2`}>
+              <AlertTriangle className={`w-4 h-4 shrink-0 mt-0.5 ${!canSellBelowBuyingPrice ? 'text-rose-400' : 'text-amber-400'}`} />
               <span>
-                <strong>Heads up:</strong> {belowCostCount} item(s) will have a selling price below their cost price after this adjustment. Review the preview below before saving.
+                <strong>{!canSellBelowBuyingPrice ? 'Negative Profit Blocked:' : 'Heads up:'}</strong>{' '}
+                {belowCostCount} item(s) will have a selling price below their buying cost after this adjustment.{' '}
+                {!canSellBelowBuyingPrice
+                  ? 'Selling below buying price is disabled in Item Settings—raise prices above cost or enable that setting first.'
+                  : 'Review the preview below before saving.'}
               </span>
             </div>
           )}

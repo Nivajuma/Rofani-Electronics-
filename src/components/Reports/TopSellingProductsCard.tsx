@@ -23,6 +23,7 @@ import {
   ArrowUpRight,
 } from 'lucide-react';
 import { Transaction, Product } from '../../types';
+import { useCurrency } from '../../utils/currency';
 
 interface TopSellingProductsCardProps {
   transactions: Transaction[];
@@ -87,6 +88,7 @@ export const TopSellingProductsCard: React.FC<TopSellingProductsCardProps> = ({
   endDate,
   presetLabel,
 }) => {
+  const { symbol, formatMoney } = useCurrency();
   const [metricMode, setMetricMode] = useState<'quantity' | 'revenue'>('quantity');
   const [topLimit, setTopLimit] = useState<number>(10);
 
@@ -245,7 +247,7 @@ export const TopSellingProductsCard: React.FC<TopSellingProductsCardProps> = ({
               }`}
             >
               <DollarSign className="w-3.5 h-3.5" />
-              <span>By Revenue (KSh)</span>
+              <span>By Revenue ({symbol})</span>
             </button>
           </div>
 
@@ -298,7 +300,7 @@ export const TopSellingProductsCard: React.FC<TopSellingProductsCardProps> = ({
             Item Sales Revenue
           </div>
           <div className="text-xl sm:text-2xl font-black text-emerald-400 font-mono mt-1">
-            KSh {totalRevenueFromItems.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+            {formatMoney(totalRevenueFromItems, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </div>
           <div className="text-[10px] text-slate-500 mt-1">Gross sales from product items</div>
         </div>
@@ -376,7 +378,7 @@ export const TopSellingProductsCard: React.FC<TopSellingProductsCardProps> = ({
                 <Tooltip content={<CustomProductTooltip metricMode={metricMode} />} />
                 <Bar
                   dataKey={metricMode === 'quantity' ? 'quantitySold' : 'revenue'}
-                  name={metricMode === 'quantity' ? 'Quantity Sold' : 'Revenue (KSh)'}
+                  name={metricMode === 'quantity' ? 'Quantity Sold' : `Revenue (${symbol})`}
                   radius={[0, 6, 6, 0]}
                   barSize={20}
                 >
@@ -438,7 +440,7 @@ export const TopSellingProductsCard: React.FC<TopSellingProductsCardProps> = ({
                   <div className="text-right">
                     <span className="text-[10px] text-slate-400 block">Gross Revenue</span>
                     <span className="font-mono font-bold text-sky-400">
-                      KSh {prod.revenue.toLocaleString()}
+                      {formatMoney(prod.revenue)}
                     </span>
                   </div>
                 </div>
@@ -457,6 +459,7 @@ const CustomProductTooltip: React.FC<{ active?: boolean; payload?: any[]; metric
   payload,
   metricMode,
 }) => {
+  const { formatMoney } = useCurrency();
   if (active && payload && payload.length) {
     const data: ProductSalesAggregate = payload[0].payload;
     return (
@@ -478,7 +481,7 @@ const CustomProductTooltip: React.FC<{ active?: boolean; payload?: any[]; metric
         <div className="flex justify-between py-0.5 text-slate-300">
           <span className="text-slate-400">Gross Revenue:</span>
           <span className="font-mono font-bold text-sky-400">
-            KSh {data.revenue.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+            {formatMoney(data.revenue, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </span>
         </div>
 

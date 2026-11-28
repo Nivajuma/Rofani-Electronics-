@@ -17,6 +17,7 @@ import { getSmsDeliveryLogs, SmsDeliveryRecord } from '../../utils/smsService';
 import { safeGetJSON, safeSetJSON } from '../../utils/safeStorage';
 import { useTransactionSettings } from '../../utils/transactionSettings';
 import { resolveActiveStoreKraPin } from '../../utils/supportConfig';
+import { useCurrency } from '../../utils/currency';
 
 interface ReceiptModalProps {
   transaction: Transaction;
@@ -46,6 +47,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
   storeKraPin,
   onClose,
 }) => {
+  const { formatMoney } = useCurrency();
   const [txSettings] = useTransactionSettings(activeStoreId);
   const [currentTx, setCurrentTx] = useState<Transaction>(transaction);
   const [showSmsModal, setShowSmsModal] = useState(false);
@@ -141,20 +143,20 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
     msg += `\n*Items Purchased:*\n`;
     currentTx.items.forEach((it) => {
       const freeLabel = it.freeQuantity ? ` (+${it.freeQuantity} free)` : '';
-      msg += `• ${it.product.name} x${it.quantity}${freeLabel} - KSh ${it.total.toLocaleString()}\n`;
+      msg += `• ${it.product.name} x${it.quantity}${freeLabel} - ${formatMoney(it.total)}\n`;
     });
     if ((currentTx.additionalChargeAmount || 0) > 0) {
-      msg += `\n${currentTx.additionalChargeLabel || 'Additional Charge'}: +KSh ${Number(
-        currentTx.additionalChargeAmount
-      ).toLocaleString()}\n`;
+      msg += `\n${currentTx.additionalChargeLabel || 'Additional Charge'}: +${formatMoney(
+        Number(currentTx.additionalChargeAmount)
+      )}\n`;
     }
     if (currentTx.roundOffAmount) {
-      msg += `Round Off: ${currentTx.roundOffAmount > 0 ? '+' : ''}KSh ${currentTx.roundOffAmount.toFixed(2)}\n`;
+      msg += `Round Off: ${currentTx.roundOffAmount > 0 ? '+' : ''}${formatMoney(currentTx.roundOffAmount, { showDecimals: true })}\n`;
     }
-    msg += `\n*Total:* KSh ${currentTx.grandTotal.toLocaleString()}\n`;
-    msg += `Paid: KSh ${currentTx.amountPaid.toLocaleString()}\n`;
+    msg += `\n*Total:* ${formatMoney(currentTx.grandTotal)}\n`;
+    msg += `Paid: ${formatMoney(currentTx.amountPaid)}\n`;
     if (currentTx.balanceDue > 0) {
-      msg += `Balance Due: KSh ${currentTx.balanceDue.toLocaleString()}\n`;
+      msg += `Balance Due: ${formatMoney(currentTx.balanceDue)}\n`;
     }
     msg += `Status: ${currentTx.paymentStatus}\n`;
     msg += currentTx.termsAndConditionsText || `Thank you for shopping with us!`;
@@ -192,29 +194,29 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
         '--------------------------------',
         ...currentTx.items.map(
           (it) =>
-            `${it.product.name.slice(0, 18).padEnd(18, ' ')} x${it.quantity} KSh ${it.total.toLocaleString()}`
+            `${it.product.name.slice(0, 18).padEnd(18, ' ')} x${it.quantity} ${formatMoney(it.total)}`
         ),
         '--------------------------------',
-        `Subtotal:   KSh ${currentTx.subtotal.toLocaleString()}`,
+        `Subtotal:   ${formatMoney(currentTx.subtotal)}`,
         ...(currentTx.discountTotal > 0
-          ? [`Discount:  -KSh ${currentTx.discountTotal.toLocaleString()}`]
+          ? [`Discount:  -${formatMoney(currentTx.discountTotal)}`]
           : []),
         ...((currentTx.additionalChargeAmount || 0) > 0
           ? [
-              `${currentTx.additionalChargeLabel || 'Extra'}: +KSh ${Number(
-                currentTx.additionalChargeAmount
-              ).toLocaleString()}`,
+              `${currentTx.additionalChargeLabel || 'Extra'}: +${formatMoney(
+                Number(currentTx.additionalChargeAmount)
+              )}`,
             ]
           : []),
         ...(currentTx.roundOffAmount
           ? [
-              `Round Off: ${currentTx.roundOffAmount > 0 ? '+' : ''}KSh ${currentTx.roundOffAmount.toFixed(2)}`,
+              `Round Off: ${currentTx.roundOffAmount > 0 ? '+' : ''}${formatMoney(currentTx.roundOffAmount, { showDecimals: true })}`,
             ]
           : []),
-        `GRAND TOTAL: KSh ${currentTx.grandTotal.toLocaleString()}`,
-        `Paid:        KSh ${currentTx.amountPaid.toLocaleString()}`,
+        `GRAND TOTAL: ${formatMoney(currentTx.grandTotal)}`,
+        `Paid:        ${formatMoney(currentTx.amountPaid)}`,
         ...(currentTx.balanceDue > 0
-          ? [`Balance Due: KSh ${currentTx.balanceDue.toLocaleString()}`]
+          ? [`Balance Due: ${formatMoney(currentTx.balanceDue)}`]
           : []),
         '--------------------------------',
         currentTx.termsAndConditionsText || 'Thank you for shopping with us!',
@@ -420,8 +422,8 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                     <div className="truncate">{it.product.name}</div>
                     {it.discount > 0 && (
                       <div className="text-[9px] text-emerald-600 font-mono">
-                        (Disc: -KSh {it.discount.toLocaleString()} ea • Saved KSh{' '}
-                        {(it.discount * it.quantity).toLocaleString()})
+                        (Disc: -{formatMoney(it.discount)} ea • Saved{' '}
+                        {formatMoney(it.discount * it.quantity)})
                       </div>
                     )}
                     {(it.freeQuantity || 0) > 0 && (
@@ -439,7 +441,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                   </div>
                   <div className="col-span-2 text-center text-slate-600">{it.quantity}</div>
                   <div className="col-span-4 text-right font-bold text-slate-900">
-                    KSh {it.total.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                    {formatMoney(it.total, { showDecimals: true })}
                   </div>
                 </div>
               ))}
@@ -450,7 +452,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
               <div className="flex justify-between text-slate-600">
                 <span>Subtotal</span>
                 <span>
-                  KSh {currentTx.subtotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  {formatMoney(currentTx.subtotal, { showDecimals: true })}
                 </span>
               </div>
               {currentTx.discountTotal > 0 && (
@@ -464,10 +466,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                     )}
                   </span>
                   <span>
-                    -KSh{' '}
-                    {currentTx.discountTotal.toLocaleString(undefined, {
-                      minimumFractionDigits: 2,
-                    })}
+                    -{formatMoney(currentTx.discountTotal, { showDecimals: true })}
                   </span>
                 </div>
               )}
@@ -475,48 +474,42 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                 <div className="flex justify-between text-slate-700">
                   <span>{currentTx.additionalChargeLabel || 'Additional Charge'}</span>
                   <span>
-                    +KSh{' '}
-                    {Number(currentTx.additionalChargeAmount).toLocaleString(undefined, {
-                      minimumFractionDigits: 2,
-                    })}
+                    +{formatMoney(Number(currentTx.additionalChargeAmount), { showDecimals: true })}
                   </span>
                 </div>
               )}
               <div className="flex justify-between text-slate-600 text-[10px]">
                 <span>KRA Turnover Tax (1.5% TOT)</span>
                 <span>
-                  KSh{' '}
-                  {(currentTx.grandTotal * 0.015).toLocaleString(undefined, {
-                    minimumFractionDigits: 2,
-                  })}
+                  {formatMoney(currentTx.grandTotal * 0.015, { showDecimals: true })}
                 </span>
               </div>
               {currentTx.roundOffAmount !== undefined && currentTx.roundOffAmount !== 0 && (
                 <div className="flex justify-between text-slate-600 text-[10px]">
                   <span>Round Off</span>
                   <span>
-                    {currentTx.roundOffAmount > 0 ? '+' : ''}KSh{' '}
-                    {currentTx.roundOffAmount.toFixed(2)}
+                    {currentTx.roundOffAmount > 0 ? '+' : ''}
+                    {formatMoney(currentTx.roundOffAmount, { showDecimals: true })}
                   </span>
                 </div>
               )}
               <div className="flex justify-between text-sm font-extrabold text-slate-900 pt-1 border-t border-slate-300">
                 <span>Grand Total</span>
                 <span>
-                  KSh {currentTx.grandTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  {formatMoney(currentTx.grandTotal, { showDecimals: true })}
                 </span>
               </div>
               <div className="flex justify-between text-slate-700">
                 <span>Amount Paid</span>
                 <span>
-                  KSh {currentTx.amountPaid.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  {formatMoney(currentTx.amountPaid, { showDecimals: true })}
                 </span>
               </div>
               {currentTx.balanceDue > 0 && (
                 <div className="flex justify-between text-red-600 font-bold bg-red-50 p-1.5 rounded">
                   <span>Credit / Balance Due</span>
                   <span>
-                    KSh {currentTx.balanceDue.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                    {formatMoney(currentTx.balanceDue, { showDecimals: true })}
                   </span>
                 </div>
               )}
@@ -530,7 +523,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                   <span className="capitalize">
                     • {p.method} {p.reference ? `(${p.reference})` : ''}
                   </span>
-                  <span>KSh {p.amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                  <span>{formatMoney(p.amount, { showDecimals: true })}</span>
                 </div>
               ))}
             </div>

@@ -12,11 +12,13 @@ import {
   Layers,
   Check,
   Tag,
-  ShoppingBag
+  ShoppingBag,
+  AlertTriangle
 } from 'lucide-react';
 import { Product, RestockRecord, Transaction, Supplier, User } from '../../types';
 import { calculateProfitMargin } from '../../utils/margin';
 import { safeGetJSON, safeSetJSON } from '../../utils/safeStorage';
+import { useItemSettings } from '../../utils/itemSettings';
 
 interface ItemHistoryModalProps {
   isOpen: boolean;
@@ -34,6 +36,7 @@ interface ItemHistoryModalProps {
     batchNo: string,
     notes: string
   ) => void;
+  activeStoreId?: string;
 }
 
 export const ItemHistoryModal: React.FC<ItemHistoryModalProps> = ({
@@ -45,7 +48,9 @@ export const ItemHistoryModal: React.FC<ItemHistoryModalProps> = ({
   suppliers,
   currentUser,
   onAddRestock,
+  activeStoreId,
 }) => {
+  const [itemSettings] = useItemSettings(activeStoreId);
   const [activeTab, setActiveTab] = useState<'restock' | 'sales'>(() =>
     safeGetJSON<'restock' | 'sales'>('retail_pos_item_hist_tab', 'restock', (val) => val === 'restock' || val === 'sales')
   );
@@ -174,7 +179,7 @@ export const ItemHistoryModal: React.FC<ItemHistoryModalProps> = ({
         {/* Header Bar */}
         <div className="p-5 border-b border-slate-800 bg-slate-950/80 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
           <div className="flex items-center gap-3">
-            {product.imageUrl ? (
+            {itemSettings.enableProductImages && product.imageUrl ? (
               <img
                 src={product.imageUrl}
                 alt={product.name}
@@ -346,6 +351,33 @@ export const ItemHistoryModal: React.FC<ItemHistoryModalProps> = ({
                   </select>
                 </div>
               </div>
+
+              {(() => {
+                const parsedRestockCost = parseFloat(unitCost);
+                if (!Number.isFinite(parsedRestockCost) || parsedRestockCost <= 0) return null;
+                if (itemSettings.autoSetSellingPriceZeroMargin) {
+                  return (
+                    <div className="bg-indigo-950/60 border border-indigo-500/40 text-indigo-200 rounded-xl p-2.5 text-[11px] flex items-center gap-2">
+                      <Tag className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                      <span>
+                        Auto 0% Margin enabled: Saving this restock will also set Selling Price to{' '}
+                        <strong>KSh {parsedRestockCost.toLocaleString()}</strong>.
+                      </span>
+                    </div>
+                  );
+                }
+                if (product.sellingPrice > 0 && parsedRestockCost > product.sellingPrice) {
+                  return (
+                    <div className="bg-amber-950/60 border border-amber-500/50 text-amber-200 rounded-xl p-2.5 text-[11px] flex items-center gap-2">
+                      <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                      <span>
+                        Warning: Unit buying cost (KSh {parsedRestockCost.toLocaleString()}) is higher than current selling price (KSh {product.sellingPrice.toLocaleString()}) — update Selling Price to avoid negative profit.
+                      </span>
+                    </div>
+                  );
+                }
+                return null;
+              })()}
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>

@@ -22,6 +22,7 @@ import {
   getSmsDeliveryLogs
 } from '../../utils/smsService';
 import { normalizeKenyanPhone } from '../../utils/mpesa';
+import { useCurrency } from '../../utils/currency';
 
 interface TransactionSmsModalProps {
   isOpen: boolean;
@@ -38,6 +39,7 @@ export const TransactionSmsModal: React.FC<TransactionSmsModalProps> = ({
   storeName = 'Rofani POS',
   onSmsSent,
 }) => {
+  const { formatMoney } = useCurrency();
   const initialPhone = transaction.customerPhone && transaction.customerPhone !== 'N/A'
     ? transaction.customerPhone
     : '';
@@ -142,7 +144,7 @@ export const TransactionSmsModal: React.FC<TransactionSmsModalProps> = ({
                 </span>
               </div>
               <p className="text-xs text-indigo-100 font-medium">
-                Receipt #{transaction.receiptNumber} • KSh {transaction.grandTotal.toLocaleString()}
+                Receipt #{transaction.receiptNumber} • {formatMoney(transaction.grandTotal)}
               </p>
             </div>
           </div>

@@ -858,6 +858,10 @@ export interface StoreSubscriptionProfile {
   storeName: string;
   branchName?: string;
   businessType?: BusinessTypeId;
+  settings?: {
+    language?: string;
+    currency?: string;
+  };
   phone: string;
   kraPin?: string;
   mpesaShortcode?: string;

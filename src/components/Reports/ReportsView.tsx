@@ -41,6 +41,7 @@ import { getEffectiveBranchStatus } from '../../utils/branchLicensing';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { useTransactionSettings } from '../../utils/transactionSettings';
+import { useI18n } from '../../utils/i18n';
 
 interface ReportsViewProps {
   transactions: Transaction[];
@@ -98,6 +99,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   groupBranches = [],
   onOpenMultiBranch,
 }) => {
+  const { dir, t } = useI18n();
   const [txSettings] = useTransactionSettings(activeStoreId);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedReport, setSelectedReport] = useState<ReportItem | null>(null);
@@ -311,7 +313,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             ]
           : []),
         { id: 'sale_report', title: 'Sale Report', description: 'Comprehensive gross sales, totals, and daily interactive date breakdown.' },
-        { id: 'purchase_report', title: 'Purchase Report', description: 'Stock purchases, restocking records, and daily purchase order history.' },
+        { id: 'purchase_report', title: t('reports.purchaseReport'), description: 'Stock purchases, restocking records, and daily purchase order history.' },
         { id: 'day_book', title: 'Day Book', description: 'Chronological ledger of all cash, M-Pesa, and credit transactions.' },
         { id: 'all_transactions', title: 'All Transactions', description: 'Complete itemized receipt archive with payment mode details.' },
         { id: 'bill_wise_profit', title: 'Bill Wise Profit', description: 'Gross profit margins and COGS calculated per individual sales receipt.' },
@@ -394,7 +396,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
         ),
       }))
       .filter((group) => group.reports.length > 0);
-  }, [searchQuery, groupBranches?.length]);
+  }, [searchQuery, groupBranches?.length, t]);
 
   // Real-time calculations for selected report modal
   const reportData = useMemo(() => {
@@ -676,7 +678,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   return (
     <div className={`${inPhoneFrame ? '-mx-3 -mt-1.5 sm:-mx-4 sm:-mt-2 min-h-full pb-6' : 'min-h-screen pb-28'} bg-slate-950 text-slate-100 font-sans`}>
       {/* Sticky Header Bar */}
-      <div className="sticky top-0 z-30 bg-slate-900 text-white shadow-md border-b border-slate-800/80 px-3 sm:px-4 py-2.5 mb-2.5 flex items-center justify-between gap-2">
+      <div dir="ltr" className="sticky top-0 z-30 bg-slate-900 text-white shadow-md border-b border-slate-800/80 px-3 sm:px-4 py-2.5 mb-2.5 flex items-center justify-between gap-2">
         <div className="flex items-center gap-2.5 min-w-0 flex-1">
           {onBack && (
             <button
@@ -686,12 +688,12 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
               aria-label="Back to previous screen"
             >
               <ArrowLeft className="w-4 h-4 text-sky-400 shrink-0" />
-              <span>Back</span>
+              <span>{t('nav.back')}</span>
             </button>
           )}
           <div className="min-w-0 flex-1">
-            <h1 className="font-bold text-sm sm:text-lg tracking-tight truncate">Reports & Business Analytics</h1>
-            <p className="text-[10px] text-slate-400 truncate">Rofani POS • Tap any report to view specialized views</p>
+            <h1 className="font-bold text-sm sm:text-lg tracking-tight truncate">{t('reports.heading')}</h1>
+            <p className="text-[10px] text-slate-400 truncate">{t('reports.subtitle')}</p>
           </div>
         </div>
 
@@ -717,7 +719,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
       )}
 
       {/* Main Content: Daily Overview & Grouped Cards */}
-      <div className={`max-w-4xl mx-auto ${inPhoneFrame ? 'px-3 mt-3 pb-4 space-y-4' : 'px-4 mt-3 sm:mt-6 pb-6 space-y-6'} mb-12`}>
+      <div dir={dir} className={`max-w-4xl mx-auto ${inPhoneFrame ? 'px-3 mt-3 pb-4 space-y-4' : 'px-4 mt-3 sm:mt-6 pb-6 space-y-6'} mb-12`}>
         <DailyOverviewCard
           transactions={transactions}
           products={products}
@@ -774,7 +776,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
       {selectedReport && reportData && (
         <div className={`fixed inset-0 w-full h-[100dvh] max-h-[100dvh] z-[60] flex flex-col m-0 p-0 rounded-none overflow-hidden animate-fade-in print-unlock-overflow ${selectedReport.id === 'workers_wages_commissions' || selectedReport.id === 'multi_branch_combined' ? 'bg-slate-950 print:bg-white' : 'bg-white'}`}>
           {/* Sticky Full-Width Header */}
-          <div className="print:hidden w-full bg-slate-900 text-white px-4 py-3 z-10 flex items-center justify-between shadow-md shrink-0">
+          <div dir="ltr" className="print:hidden w-full bg-slate-900 text-white px-4 py-3 z-10 flex items-center justify-between shadow-md shrink-0">
             <div className="flex items-center gap-3 min-w-0">
               <button
                 onClick={() => setSelectedReport(null)}
@@ -797,7 +799,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
           </div>
 
           {/* Modal Body - 100% Edge-to-Edge */}
-          <div className="w-full min-h-0 flex-1 px-3 sm:px-6 py-4 space-y-5 overflow-y-auto text-xs pb-6 print-unlock-overflow">
+          <div dir={dir} className="w-full min-h-0 flex-1 px-3 sm:px-6 py-4 space-y-5 overflow-y-auto text-xs pb-6 print-unlock-overflow">
             {/* Date Filter Presets & Instant Search Bar (hidden for custom self-filtering reports) */}
             {selectedReport.id !== 'workers_wages_commissions' && selectedReport.id !== 'multi_branch_combined' && (
             <div className="w-full grid grid-cols-1 sm:grid-cols-2 gap-4">

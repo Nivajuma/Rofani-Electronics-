@@ -20,6 +20,7 @@ import { OfflineSyncBanner } from './Network/OfflineSyncBanner';
 import { SyncRetryResult } from '../utils/offlineSync';
 import { isLegacyRofaniStoreBrand } from '../lib/cloudSync';
 import { getEffectiveBranchStatus } from '../utils/branchLicensing';
+import { useI18n } from '../utils/i18n';
 
 interface PhoneDeviceFrameProps {
   children: React.ReactNode;
@@ -80,6 +81,7 @@ export const PhoneDeviceFrame: React.FC<PhoneDeviceFrameProps> = ({
   onSwitchBranch,
   onOpenMultiBranch,
 }) => {
+  const { dir, t } = useI18n();
   const [showBranchMenu, setShowBranchMenu] = React.useState(false);
   const isLandscape = phoneOrientation === 'landscape';
 
@@ -141,7 +143,7 @@ export const PhoneDeviceFrame: React.FC<PhoneDeviceFrameProps> = ({
         }}
       >
         {/* SINGLE COMPACT STICKY MOBILE HEADER */}
-        <header className="print:hidden sticky top-0 bg-slate-900 border-b border-slate-800 flex items-center justify-between gap-2 px-3 py-2 shrink-0 z-30">
+        <header dir="ltr" className="print:hidden sticky top-0 bg-slate-900 border-b border-slate-800 flex items-center justify-between gap-2 px-3 py-2 shrink-0 z-30">
           <div className="flex items-center gap-2 min-w-0">
             <div className="w-6 h-6 sm:w-7 sm:h-7 rounded-full bg-slate-800 border border-slate-700/80 flex items-center justify-center text-sky-400 shrink-0">
               <Store className="w-3.5 h-3.5" />
@@ -230,7 +232,7 @@ export const PhoneDeviceFrame: React.FC<PhoneDeviceFrameProps> = ({
               aria-label="Sell — Open POS Register"
             >
               <ShoppingBag className="w-3.5 h-3.5 shrink-0" />
-              <span>Sell</span>
+              <span>{t('header.sell')}</span>
             </button>
 
             {onOpenCloudSync && (
@@ -322,6 +324,7 @@ export const PhoneDeviceFrame: React.FC<PhoneDeviceFrameProps> = ({
 
         {/* MOBILE MAIN VIEWPORT CONTENT CONTAINER */}
         <div
+          dir={dir}
           className={`flex-1 min-h-0 overflow-y-auto bg-[#0f172a] text-slate-100 px-3 pt-1.5 sm:px-4 sm:pt-2 scrollbar-thin scrollbar-thumb-slate-800 print-unlock-overflow ${
             hideBottomNav ? 'pb-6' : 'pb-28'
           }`}
@@ -338,6 +341,7 @@ export const PhoneDeviceFrame: React.FC<PhoneDeviceFrameProps> = ({
         {/* TOUCH-OPTIMIZED 5-TAB DARK MOBILE BOTTOM NAVIGATION BAR */}
         {!hideBottomNav && (
         <nav
+          dir="ltr"
           aria-label="Mobile Bottom Navigation"
           className="print:hidden absolute bottom-0 left-0 right-0 z-50 min-h-16 bg-slate-900/95 backdrop-blur-md border-t border-slate-800 px-1 pt-1 pb-safe grid grid-cols-5 items-center shrink-0"
         >
@@ -349,7 +353,7 @@ export const PhoneDeviceFrame: React.FC<PhoneDeviceFrameProps> = ({
             }`}
           >
             <ShoppingBag className="w-5 h-5 mb-0.5" />
-            <span className="text-[9px] font-bold tracking-tight whitespace-nowrap">HOME</span>
+            <span className="text-[9px] font-bold tracking-tight whitespace-nowrap truncate max-w-full px-0.5">{t('nav.home')}</span>
           </button>
 
           <button
@@ -360,7 +364,7 @@ export const PhoneDeviceFrame: React.FC<PhoneDeviceFrameProps> = ({
             }`}
           >
             <LayoutDashboard className="w-5 h-5 mb-0.5" />
-            <span className="text-[9px] font-bold tracking-tight whitespace-nowrap">DASHBOARD</span>
+            <span className="text-[9px] font-bold tracking-tight whitespace-nowrap truncate max-w-full px-0.5">{t('nav.dashboard')}</span>
           </button>
 
           <button
@@ -371,7 +375,7 @@ export const PhoneDeviceFrame: React.FC<PhoneDeviceFrameProps> = ({
             }`}
           >
             <Package className="w-5 h-5 mb-0.5" />
-            <span className="text-[9px] font-bold tracking-tight whitespace-nowrap">ITEMS</span>
+            <span className="text-[9px] font-bold tracking-tight whitespace-nowrap truncate max-w-full px-0.5">{t('nav.items')}</span>
           </button>
 
           <button
@@ -382,7 +386,7 @@ export const PhoneDeviceFrame: React.FC<PhoneDeviceFrameProps> = ({
             }`}
           >
             <Menu className="w-5 h-5 mb-0.5" />
-            <span className="text-[9px] font-bold tracking-tight whitespace-nowrap">MENU</span>
+            <span className="text-[9px] font-bold tracking-tight whitespace-nowrap truncate max-w-full px-0.5">{t('nav.menu')}</span>
           </button>
 
           <button
@@ -393,7 +397,7 @@ export const PhoneDeviceFrame: React.FC<PhoneDeviceFrameProps> = ({
             title="Switch to Desktop / Wide Layout"
           >
             <Monitor className="w-5 h-5 mb-0.5 text-[#38bdf8]" />
-            <span className="text-[9px] font-bold tracking-tight whitespace-nowrap">DESKTOP VIEW</span>
+            <span className="text-[9px] font-bold tracking-tight whitespace-nowrap truncate max-w-full px-0.5">{t('nav.desktopView')}</span>
           </button>
         </nav>
         )}

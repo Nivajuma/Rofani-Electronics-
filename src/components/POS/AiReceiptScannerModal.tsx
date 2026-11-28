@@ -32,6 +32,7 @@ import {
   RATE_LIMIT_SCANNER_MESSAGE,
 } from '../../utils/aiErrorHandling';
 import { getSharedAudioContext } from '../../utils/uiFeedback';
+import { useCurrency } from '../../utils/currency';
 
 export interface ScannedNewItem {
   id: string;
@@ -77,6 +78,7 @@ export const AiReceiptScannerModal: React.FC<AiReceiptScannerModalProps> = ({
   onBatchAddNewProducts,
   onClose,
 }) => {
+  const { symbol, formatMoney } = useCurrency();
   const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment');
   const [cameraActive, setCameraActive] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
@@ -922,7 +924,7 @@ export const AiReceiptScannerModal: React.FC<AiReceiptScannerModalProps> = ({
 
                       <div className="grid grid-cols-2 gap-1.5">
                         <div>
-                          <label className="text-[10px] text-slate-400 block mb-0.5">Sell Price (KSh)</label>
+                          <label className="text-[10px] text-slate-400 block mb-0.5">Sell Price ({symbol})</label>
                           <input
                             type="number"
                             min="1"
@@ -932,7 +934,7 @@ export const AiReceiptScannerModal: React.FC<AiReceiptScannerModalProps> = ({
                           />
                         </div>
                         <div>
-                          <label className="text-[10px] text-slate-400 block mb-0.5">Cost Price (KSh)</label>
+                          <label className="text-[10px] text-slate-400 block mb-0.5">Cost Price ({symbol})</label>
                           <input
                             type="number"
                             min="0"
@@ -1057,10 +1059,10 @@ export const AiReceiptScannerModal: React.FC<AiReceiptScannerModalProps> = ({
 
                                   <div className="flex items-center gap-2 mt-1 text-[11px] text-slate-400 font-mono flex-wrap">
                                     <span className="text-emerald-400 font-bold">
-                                      Sell: KSh {item.suggestedPriceKSh.toLocaleString()}
+                                      Sell: {formatMoney(item.suggestedPriceKSh)}
                                     </span>
                                     <span>•</span>
-                                    <span>Cost: KSh {item.suggestedCostKSh.toLocaleString()}</span>
+                                    <span>Cost: {formatMoney(item.suggestedCostKSh)}</span>
                                     <span>•</span>
                                     <span className="text-amber-300 font-sans text-[10px]">
                                       {profitMargin}% margin
@@ -1187,7 +1189,7 @@ export const AiReceiptScannerModal: React.FC<AiReceiptScannerModalProps> = ({
 
                                 <div className="grid grid-cols-2 gap-1.5">
                                   <div>
-                                    <label className="text-[10px] text-slate-400 block mb-0.5">Sell Price (KSh)</label>
+                                    <label className="text-[10px] text-slate-400 block mb-0.5">Sell Price ({symbol})</label>
                                     <input
                                       type="number"
                                       min="1"
@@ -1201,7 +1203,7 @@ export const AiReceiptScannerModal: React.FC<AiReceiptScannerModalProps> = ({
                                     />
                                   </div>
                                   <div>
-                                    <label className="text-[10px] text-slate-400 block mb-0.5">Cost Price (KSh)</label>
+                                    <label className="text-[10px] text-slate-400 block mb-0.5">Cost Price ({symbol})</label>
                                     <input
                                       type="number"
                                       min="0"
@@ -1304,7 +1306,7 @@ export const AiReceiptScannerModal: React.FC<AiReceiptScannerModalProps> = ({
                     <Tag className="w-3.5 h-3.5 text-purple-400" />
                     <span>Existing Catalog Matches ({detectedItems.length})</span>
                   </span>
-                  <span>Total: KSh {totalAmountMatchedSelected.toLocaleString()}</span>
+                  <span>Total: {formatMoney(totalAmountMatchedSelected)}</span>
                 </div>
 
                 {detectedItems.length === 0 ? (
@@ -1334,7 +1336,7 @@ export const AiReceiptScannerModal: React.FC<AiReceiptScannerModalProps> = ({
                           <div className="min-w-0">
                             <p className="font-bold text-xs truncate">{item.product.name}</p>
                             <p className="text-[10px] text-slate-400 font-mono">
-                              KSh {item.product.sellingPrice.toLocaleString()} • {item.product.category}
+                              {formatMoney(item.product.sellingPrice)} • {item.product.category}
                             </p>
                           </div>
                         </div>

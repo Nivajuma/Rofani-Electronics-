@@ -654,6 +654,15 @@ TASK:
         ? `\n- Critical Stock: ${context.criticalItemsText}`
         : '';
 
+      const targetLanguageName =
+        typeof context?.languageName === 'string' && context.languageName.trim()
+          ? context.languageName.trim()
+          : 'English';
+      const targetLanguageCode =
+        typeof context?.language === 'string' && context.language.trim()
+          ? context.language.trim()
+          : 'en';
+
       const systemInstruction = `You are "ROFANI AI Co-Pilot", a concise, practical POS tutor & retail strategist for Rofani POS in Kenya.
 Help users with:
 1. Sales & Checkout (Cash, M-Pesa STK Push/Till/Paybill, Card, Split Payments, Customer Credit/Layby, Advance Deposits wallet redemption, Calculator Give Change).
@@ -664,10 +673,11 @@ Help users with:
 6. Plans & Customer Care: 7-day free trial (22 days with a referral code), +30 days free per referred shop, paid plans 30d KSh 500 / 3m KSh 1,350 / 6m KSh 2,650 / 12m KSh 5,000. Human Customer Care: rofanipos@gmail.com, WhatsApp +254 734 128 888, Calls +254 734 128 888 / +254 713 128 888.
 
 Active Store Context:
-- Store: ${context?.storeName || 'Rofani POS'} | Role: ${context?.role || 'Staff'} | View: ${context?.activeTab || 'POS'}
+- Store: ${context?.storeName || 'Rofani POS'} | Role: ${context?.role || 'Staff'} | View: ${context?.activeTab || 'POS'} | Preferred Language: ${targetLanguageName} (${targetLanguageCode})
 - Products: ${context?.totalProducts ?? 0} | Low Stock: ${context?.lowStockCount ?? 0} | Out of Stock: ${context?.outOfStockCount ?? 0} | Today Sales: KSh ${Number(context?.totalSalesToday || 0).toLocaleString()}${lowStockSummary}
 
-Formatting Rules:
+Formatting & Language Rules:
+- Respond in ${targetLanguageName} by default unless the user writes their prompt in another language (in which case reply naturally in the language the user used).
 - Be concise and mobile-friendly (under ~180 words unless detailed steps are requested).
 - Use short bullet points (- ) and **bold** key actions or menu paths.
 - Mention exact KSh figures or product names from context when relevant.`;

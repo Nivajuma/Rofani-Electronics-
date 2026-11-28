@@ -17,6 +17,7 @@ import {
   Coins,
 } from 'lucide-react';
 import { safeGetJSON, safeSetJSON } from '../../utils/safeStorage';
+import { STORE_CURRENCIES, useCurrency, formatMoney } from '../../utils/currency';
 
 interface CalculatorConverterSuiteModalProps {
   isOpen: boolean;
@@ -49,22 +50,7 @@ interface CalcTapeEntry {
   timestamp: string;
 }
 
-interface CurrencyMeta {
-  code: string;
-  symbol: string;
-  name: string;
-  defaultRatePerUSD: number;
-}
-
-const SUPPORTED_CURRENCIES: CurrencyMeta[] = [
-  { code: 'KES', symbol: 'KSh', name: 'Kenyan Shilling', defaultRatePerUSD: 129.5 },
-  { code: 'USD', symbol: '$', name: 'US Dollar', defaultRatePerUSD: 1.0 },
-  { code: 'EUR', symbol: '€', name: 'Euro', defaultRatePerUSD: 0.92 },
-  { code: 'GBP', symbol: '£', name: 'British Pound', defaultRatePerUSD: 0.78 },
-  { code: 'UGX', symbol: 'USh', name: 'Ugandan Shilling', defaultRatePerUSD: 3680 },
-  { code: 'TZS', symbol: 'TSh', name: 'Tanzanian Shilling', defaultRatePerUSD: 2650 },
-  { code: 'CNY', symbol: '¥', name: 'Chinese Yuan (RMB)', defaultRatePerUSD: 7.24 },
-];
+const SUPPORTED_CURRENCIES = STORE_CURRENCIES;
 
 const DEFAULT_RATES_PER_USD: Record<string, number> = SUPPORTED_CURRENCIES.reduce(
   (acc, c) => ({ ...acc, [c.code]: c.defaultRatePerUSD }),
@@ -228,14 +214,31 @@ export const CalculatorConverterSuiteModal: React.FC<CalculatorConverterSuiteMod
     safeSetJSON('rofani_calc_tape', calcTape.slice(0, 20));
   }, [calcTape]);
 
+  const { currency: storeCurrency, symbol: storeSymbol } = useCurrency();
+
   // --- TAB 2: CURRENCY CONVERTER STATE ---
-  const [ratesPerUSD, setRatesPerUSD] = useState<Record<string, number>>(() =>
-    safeGetJSON<Record<string, number>>('rofani_currency_rates_usd', DEFAULT_RATES_PER_USD)
-  );
-  const [fromCurrency, setFromCurrency] = useState<string>('USD');
-  const [toCurrency, setToCurrency] = useState<string>('KES');
+  const [ratesPerUSD, setRatesPerUSD] = useState<Record<string, number>>(() => ({
+    ...DEFAULT_RATES_PER_USD,
+    ...safeGetJSON<Record<string, number>>('rofani_currency_rates_usd', DEFAULT_RATES_PER_USD),
+  }));
+  const [fromCurrency, setFromCurrency] = useState<string>(storeCurrency || 'KES');
+  const [toCurrency, setToCurrency] = useState<string>(storeCurrency === 'USD' ? 'KES' : 'USD');
   const [currencyAmount, setCurrencyAmount] = useState<string>('100');
   const [customPairOverride, setCustomPairOverride] = useState<string>('');
+
+  // Connect store's active currency as default "From" currency when store currency updates or modal opens
+  useEffect(() => {
+    if (storeCurrency) {
+      setFromCurrency(storeCurrency);
+      setToCurrency((prevTo) => {
+        if (prevTo === storeCurrency) {
+          return storeCurrency === 'USD' ? 'KES' : 'USD';
+        }
+        return prevTo;
+      });
+      setCustomPairOverride('');
+    }
+  }, [storeCurrency, isOpen]);
 
   useEffect(() => {
     safeSetJSON('rofani_currency_rates_usd', ratesPerUSD);
@@ -662,7 +665,7 @@ export const CalculatorConverterSuiteModal: React.FC<CalculatorConverterSuiteMod
                     <div className="grid grid-cols-2 gap-2.5">
                       <div>
                         <label className="text-[10px] uppercase tracking-wider text-slate-400 block mb-1">
-                          Buying / Cost (KSh)
+                          Buying / Cost ({storeSymbol})
                         </label>
                         <input
                           type="number"
@@ -675,7 +678,7 @@ export const CalculatorConverterSuiteModal: React.FC<CalculatorConverterSuiteMod
                       </div>
                       <div>
                         <label className="text-[10px] uppercase tracking-wider text-slate-400 block mb-1">
-                          Selling Price (KSh)
+                          Selling Price ({storeSymbol})
                         </label>
                         <input
                           type="number"
@@ -736,7 +739,7 @@ export const CalculatorConverterSuiteModal: React.FC<CalculatorConverterSuiteMod
                   <div className="space-y-1.5">
                     <div className="flex items-center justify-between gap-2 flex-wrap">
                       <label className="text-[11px] font-bold uppercase tracking-wider text-slate-300">
-                        Bill Total (KSh)
+                        Bill Total ({storeSymbol})
                       </label>
                       <div className="flex items-center gap-1.5 flex-wrap">
                         {cartGrandTotal > 0 && (
@@ -745,7 +748,7 @@ export const CalculatorConverterSuiteModal: React.FC<CalculatorConverterSuiteMod
                             onClick={() => setBillTotalInput(String(cartGrandTotal))}
                             className="px-2 py-0.5 rounded-lg bg-sky-600/20 hover:bg-sky-600/35 border border-sky-500/40 text-sky-300 text-[10px] font-bold cursor-pointer"
                           >
-                            Use Cart: KSh {cartGrandTotal.toLocaleString()}
+                            Use Cart: {formatMoney(cartGrandTotal)}
                           </button>
                         )}
                         {!Number.isNaN(calcResultVal) && calcResultVal > 0 && (
@@ -775,7 +778,7 @@ export const CalculatorConverterSuiteModal: React.FC<CalculatorConverterSuiteMod
                   <div className="space-y-2">
                     <div className="flex items-center justify-between">
                       <label className="text-[11px] font-bold uppercase tracking-wider text-slate-300">
-                        Cash Received / Customer Gave (KSh)
+                        Cash Received / Customer Gave ({storeSymbol})
                       </label>
                       <div className="flex items-center gap-1.5">
                         {billVal > 0 && (
@@ -858,11 +861,8 @@ export const CalculatorConverterSuiteModal: React.FC<CalculatorConverterSuiteMod
                       </div>
                       <div className="text-3xl font-black font-mono tabular-nums mt-0.5">
                         {!hasBill || !hasTendered
-                          ? 'KSh 0.00'
-                          : `KSh ${Math.abs(changeDelta).toLocaleString(undefined, {
-                              minimumFractionDigits: 2,
-                              maximumFractionDigits: 2,
-                            })}`}
+                          ? formatMoney(0, { showDecimals: true })
+                          : formatMoney(Math.abs(changeDelta), { showDecimals: true })}
                       </div>
                     </div>
 
@@ -875,7 +875,7 @@ export const CalculatorConverterSuiteModal: React.FC<CalculatorConverterSuiteMod
                             try {
                               navigator.clipboard?.writeText(formatted);
                             } catch {}
-                            flashNotice(`Copied change KSh ${formatted}`);
+                            flashNotice(`Copied change ${formatMoney(changeDelta, { showDecimals: true })}`);
                           }}
                           className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[11px] inline-flex items-center gap-1 cursor-pointer"
                         >
@@ -912,7 +912,7 @@ export const CalculatorConverterSuiteModal: React.FC<CalculatorConverterSuiteMod
                             key={item.denom}
                             className="px-2.5 py-1 rounded-xl bg-slate-950/80 border border-emerald-500/35 text-xs font-mono font-bold text-emerald-200"
                           >
-                            {item.count} × KSh {item.denom}
+                            {item.count} × {storeSymbol} {item.denom}
                           </span>
                         ))}
                       </div>

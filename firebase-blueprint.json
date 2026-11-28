@@ -12,6 +12,7 @@
         "storeName": { "type": "string", "maxLength": 200 },
         "branchName": { "type": "string", "maxLength": 200 },
         "businessType": { "type": "string", "enum": ["boutique", "salon", "hardware", "hospitality", "general", "electronics", "pharmacy"] },
+        "settings": { "type": "object", "description": "Per-store preferences including settings.language and settings.currency ('KES', 'USD', 'EUR', 'GBP', 'UGX', 'TZS', 'RWF', 'ETB', 'NGN', 'ZAR', 'AED', 'CNY', 'INR')" },
         "phone": { "type": "string", "maxLength": 64 },
         "kraPin": { "type": "string", "maxLength": 64 },
         "mpesaShortcode": { "type": "string", "maxLength": 64 },
@@ -125,6 +126,7 @@
         "stockQuantity": { "type": "number" },
         "minStockAlert": { "type": "number" },
         "unit": { "type": "string", "maxLength": 64 },
+        "expiryDate": { "type": "string", "maxLength": 32 },
         "updatedAt": { "type": "string", "maxLength": 64 }
       },
       "required": ["id", "name"]
@@ -288,6 +290,11 @@
       "description": "Store security and payment configuration document",
       "type": "object",
       "properties": {
+        "language": { "type": "string", "maxLength": 16 },
+        "currency": { "type": "string", "maxLength": 16 },
+        "trackExpiryDate": { "type": "boolean" },
+        "enableExpiryDate": { "type": "boolean" },
+        "expiryAlertDays": { "type": "number" },
         "updatedAt": { "type": "string", "maxLength": 64 }
       }
     },
